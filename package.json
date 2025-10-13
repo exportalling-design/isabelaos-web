@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview --host"
   },
   "dependencies": {
     "framer-motion": "^12.23.24",
@@ -28,9 +28,9 @@
     "globals": "^16.4.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "^5.4.10"
   },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14"
+  "engines": {
+    "node": ">=18.17 <23"
   }
 }
