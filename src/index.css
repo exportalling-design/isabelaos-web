@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Fuente y base */
+:root { color-scheme: dark; --font-sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; }
+html, body, #root { height: 100%; }
+body { background: #06070B; font-family: var(--font-sans); }
+h1, h2, h3, h4 { letter-spacing: -0.02em; }
+
+/* Brillo CTA */
+.neon-shadow {
+  box-shadow: 0 10px 40px rgba(0,229,255,.22), 0 10px 40px rgba(255,23,229,.18);
+}
