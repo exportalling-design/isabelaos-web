@@ -1,0 +1,9 @@
+﻿{
+  "functions": {
+    "api/**/*.js": { "runtime": "edge" }
+  },
+  "routes": [
+    { "src": "/api/generate$", "dest": "api/generate.js" },
+    { "src": "/api/generate-(.*)$", "dest": "api/generate-[id].js" }
+  ]
+}
