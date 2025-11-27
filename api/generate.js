@@ -1,4 +1,9 @@
-﻿export default async function handler(req, res) {
+export default async function handler(req, res) {
+  // Permitir GET solo para prueba rápida en navegador (opcional)
+  if (req.method === 'GET') {
+    return res.status(200).json({ status: 'ok', msg: 'API /api/generate viva' });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -98,6 +103,7 @@
         });
       }
 
+      // Esperar 2s entre checks
       await new Promise((r) => setTimeout(r, 2000));
     }
 
