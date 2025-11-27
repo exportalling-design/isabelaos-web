@@ -1,4 +1,4 @@
-﻿export default async function handler(req) {
+export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
