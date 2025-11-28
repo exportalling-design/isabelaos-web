@@ -1,16 +1,18 @@
-﻿export default async function handler(req) {
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
-
+﻿// api/generate.js
+export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
     "access-control-allow-headers": "content-type",
   };
 
+  // Preflight CORS
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: cors });
+  }
+
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: cors });
   }
 
   try {
@@ -24,6 +26,8 @@
     }
 
     const base = `https://api.runpod.ai/v2/${process.env.RP_ENDPOINT}`;
+
+    // 1) Lanzar job en RunPod (solo /run, sin hacer polling aquí)
     const rp = await fetch(`${base}/run`, {
       method: "POST",
       headers: {
@@ -50,6 +54,8 @@
     }
 
     const data = await rp.json();
+
+    // JobId puede venir en diferentes campos
     const jobId = data.id || data.requestId || data.data?.id;
 
     if (!jobId) {
@@ -59,51 +65,9 @@
       );
     }
 
-    let statusData;
-    const start = Date.now();
-    const TIMEOUT = 60000;
-
-    while (true) {
-      const st = await fetch(`${base}/status/${jobId}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${process.env.RP_API_KEY}` },
-      });
-
-      statusData = await st.json();
-
-      if (!st.ok) {
-        return new Response(
-          JSON.stringify({
-            error: "RunPod status error",
-            statusData,
-          }),
-          { status: st.status, headers: cors }
-        );
-      }
-
-      const status = statusData.status;
-
-      if (status === "COMPLETED") break;
-
-      if (status === "FAILED" || status === "CANCELLED") {
-        return new Response(
-          JSON.stringify({ error: "Job falló", statusData }),
-          { status: 500, headers: cors }
-        );
-      }
-
-      if (Date.now() - start > TIMEOUT) {
-        return new Response(
-          JSON.stringify({ error: "Timeout", statusData }),
-          { status: 504, headers: cors }
-        );
-      }
-
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-
+    // Devolvemos rápido el ID, sin esperar al resultado
     return new Response(
-      JSON.stringify({ ok: true, output: statusData.output || {} }),
+      JSON.stringify({ ok: true, jobId }),
       { status: 200, headers: cors }
     );
   } catch (e) {
