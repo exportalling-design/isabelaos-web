@@ -1,6 +1,9 @@
-// api/status.js  --- Consulta el estado de un job de RunPod
-
+// api/status.js
 export default async function handler(req) {
+  if (req.method !== "GET") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, OPTIONS",
@@ -11,45 +14,47 @@ export default async function handler(req) {
     return new Response(null, { headers: cors });
   }
 
-  if (req.method !== "GET") {
-    return new Response("Method Not Allowed", { status: 405, headers: cors });
-  }
-
   try {
-    const url = new URL(req.url);
-    const jobId = url.searchParams.get("id");
+    const { searchParams } = new URL(req.url);
+    const jobId = searchParams.get("id");
 
     if (!jobId) {
       return new Response(
-        JSON.stringify({ error: "Missing id parameter" }),
+        JSON.stringify({ error: "Missing job id" }),
         { status: 400, headers: cors }
       );
     }
 
     const base = `https://api.runpod.ai/v2/${process.env.RP_ENDPOINT}`;
-
-    const st = await fetch(`${base}/status/${jobId}`, {
+    const rp = await fetch(`${base}/status/${jobId}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${process.env.RP_API_KEY}`,
+        "Content-Type": "application/json",
       },
     });
 
-    const statusData = await st.json();
+    const data = await rp.json();
 
-    if (!st.ok) {
+    if (!rp.ok) {
       return new Response(
-        JSON.stringify({ error: "RunPod status error", statusData }),
-        { status: st.status, headers: cors }
+        JSON.stringify({ error: "RunPod status error", data }),
+        { status: rp.status, headers: cors }
       );
     }
+
+    const status = data.status;
+    const outputUrl =
+      data.output?.image_path ||
+      data.output?.imageUrl ||
+      null;
 
     return new Response(
       JSON.stringify({
         ok: true,
-        runpodStatus: statusData.status,
-        output: statusData.output || null,
-        raw: statusData,
+        runpodStatus: status,   // 👈 ESTA es la propiedad del estado
+        outputUrl,              // 👈 aquí viene la imagen
+        raw: data,
       }),
       { status: 200, headers: cors }
     );
@@ -60,8 +65,4 @@ export default async function handler(req) {
     );
   }
 }
-
-export const config = {
-  runtime: "edge",
-};
 
