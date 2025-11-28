@@ -1,24 +1,27 @@
-﻿// api/generate.js
+﻿// api/generate.js  --- SOLO lanza el job en RunPod y devuelve jobId
+
 export default async function handler(req) {
+  // CORS básico
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
     "access-control-allow-headers": "content-type",
   };
 
-  // Preflight CORS
+  // Preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: cors });
   }
 
+  // Solo aceptamos POST
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405, headers: cors });
   }
 
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
 
-    if (!body?.prompt) {
+    if (!body || !body.prompt) {
       return new Response(
         JSON.stringify({ error: "Missing prompt" }),
         { status: 400, headers: cors }
@@ -27,7 +30,6 @@ export default async function handler(req) {
 
     const base = `https://api.runpod.ai/v2/${process.env.RP_ENDPOINT}`;
 
-    // 1) Lanzar job en RunPod (solo /run, sin hacer polling aquí)
     const rp = await fetch(`${base}/run`, {
       method: "POST",
       headers: {
@@ -55,8 +57,8 @@ export default async function handler(req) {
 
     const data = await rp.json();
 
-    // JobId puede venir en diferentes campos
-    const jobId = data.id || data.requestId || data.data?.id;
+    // Distintos nombres posibles para el ID
+    const jobId = data.id || data.requestId || data.jobId || data.data?.id;
 
     if (!jobId) {
       return new Response(
@@ -65,7 +67,7 @@ export default async function handler(req) {
       );
     }
 
-    // Devolvemos rápido el ID, sin esperar al resultado
+    // AQUÍ ya no hacemos polling, solo devolvemos el ID
     return new Response(
       JSON.stringify({ ok: true, jobId }),
       { status: 200, headers: cors }

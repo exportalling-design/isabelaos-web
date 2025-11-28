@@ -1,4 +1,5 @@
-// api/status.js
+// api/status.js  --- Consulta el estado de un job de RunPod
+
 export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
@@ -6,7 +7,6 @@ export default async function handler(req) {
     "access-control-allow-headers": "content-type",
   };
 
-  // Preflight CORS
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: cors });
   }
@@ -17,18 +17,18 @@ export default async function handler(req) {
 
   try {
     const url = new URL(req.url);
-    const id = url.searchParams.get("id");
+    const jobId = url.searchParams.get("id");
 
-    if (!id) {
+    if (!jobId) {
       return new Response(
-        JSON.stringify({ error: "Missing job id" }),
+        JSON.stringify({ error: "Missing id parameter" }),
         { status: 400, headers: cors }
       );
     }
 
     const base = `https://api.runpod.ai/v2/${process.env.RP_ENDPOINT}`;
 
-    const st = await fetch(`${base}/status/${id}`, {
+    const st = await fetch(`${base}/status/${jobId}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${process.env.RP_API_KEY}`,
@@ -44,9 +44,13 @@ export default async function handler(req) {
       );
     }
 
-    // Devolvemos el estado tal cual
     return new Response(
-      JSON.stringify({ ok: true, statusData }),
+      JSON.stringify({
+        ok: true,
+        runpodStatus: statusData.status,
+        output: statusData.output || null,
+        raw: statusData,
+      }),
       { status: 200, headers: cors }
     );
   } catch (e) {
@@ -60,3 +64,4 @@ export default async function handler(req) {
 export const config = {
   runtime: "edge",
 };
+
