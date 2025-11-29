@@ -52,6 +52,8 @@ const Card = ({ className = "", children }) => (
   </div>
 );
 
+/* ---------------- MODAL DE REGISTRO ---------------- */
+
 function SignUpModal({ open, onClose }) {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -106,7 +108,9 @@ function SignUpModal({ open, onClose }) {
               />
             </label>
           </div>
-          <NeonButton onClick={() => alert(`(DEMO) Registrado: ${username || email}`)}>
+          <NeonButton
+            onClick={() => alert(`(DEMO) Registrado: ${username || email}`)}
+          >
             <UserPlus className="h-5 w-5" /> Crear cuenta{" "}
             <ArrowRight className="h-4 w-4 opacity-80" />
           </NeonButton>
@@ -115,13 +119,22 @@ function SignUpModal({ open, onClose }) {
           </button>
         </div>
         <p className="mt-4 text-xs text-neutral-500">
-          Al registrarte aceptas los <a className="underline decoration-dotted" href="#">Términos</a> y la{" "}
-          <a className="underline decoration-dotted" href="#">Privacidad</a>.
+          Al registrarte aceptas los{" "}
+          <a className="underline decoration-dotted" href="#">
+            Términos
+          </a>{" "}
+          y la{" "}
+          <a className="underline decoration-dotted" href="#">
+            Privacidad
+          </a>
+          .
         </p>
       </Card>
     </div>
   );
 }
+
+/* ---------------- HERO ---------------- */
 
 function Hero({ onSignup }) {
   return (
@@ -140,8 +153,9 @@ function Hero({ onSignup }) {
             </span>
           </motion.h1>
           <p className="mt-5 max-w-xl text-lg text-neutral-300">
-            isabelaOs crea imágenes y videos con calidad de estudio. Flujos de trabajo
-            inteligentes, branding consistente y performance empresarial.
+            isabelaOs crea imágenes y videos con calidad de estudio. Flujos de
+            trabajo inteligentes, branding consistente y performance
+            empresarial.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-4">
             <NeonButton onClick={onSignup}>
@@ -156,7 +170,8 @@ function Hero({ onSignup }) {
           </div>
           <div className="mt-6 flex items-center gap-6 text-sm text-neutral-400">
             <span className="inline-flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-lime-300" /> Seguridad enterprise
+              <ShieldCheck className="h-4 w-4 text-lime-300" /> Seguridad
+              enterprise
             </span>
             <span className="inline-flex items-center gap-2">
               <Zap className="h-4 w-4 text-cyan-300" /> Render ultra-rápido
@@ -178,6 +193,8 @@ function Hero({ onSignup }) {
   );
 }
 
+/* ---------------- LOGOS ---------------- */
+
 function Logos() {
   return (
     <Section className="py-8">
@@ -192,17 +209,33 @@ function Logos() {
   );
 }
 
+/* ---------------- FEATURES ---------------- */
+
 function Features() {
   const list = [
-    { title: "Edición con IA", desc: "Guiones, escenas y assets generados automáticamente.", icon: <Sparkles className="h-5 w-5" /> },
-    { title: "Plantillas Pro", desc: "Diseños de alto impacto con estética futurista.", icon: <Check className="h-5 w-5" /> },
-    { title: "Exportación rápida", desc: "Entrega en múltiples formatos y resoluciones.", icon: <Zap className="h-5 w-5" /> },
+    {
+      title: "Edición con IA",
+      desc: "Guiones, escenas y assets generados automáticamente.",
+      icon: <Sparkles className="h-5 w-5" />,
+    },
+    {
+      title: "Plantillas Pro",
+      desc: "Diseños de alto impacto con estética futurista.",
+      icon: <Check className="h-5 w-5" />,
+    },
+    {
+      title: "Exportación rápida",
+      desc: "Entrega en múltiples formatos y resoluciones.",
+      icon: <Zap className="h-5 w-5" />,
+    },
   ];
   return (
     <Section id="features" className="py-10">
       <div className="mb-6">
         <h3 className="text-2xl font-semibold text-white">Lo que obtienes</h3>
-        <p className="mt-2 text-neutral-400">Herramientas profesionales listas para producir.</p>
+        <p className="mt-2 text-neutral-400">
+          Herramientas profesionales listas para producir.
+        </p>
       </div>
       <div className="grid gap-6 md:grid-cols-3">
         {list.map((f, i) => (
@@ -223,28 +256,238 @@ function Features() {
   );
 }
 
+/* ---------------- DEMO GENERATOR (NUEVO) ---------------- */
+
+function DemoGenerator() {
+  const [prompt, setPrompt] = useState(
+    "a beautiful cinematic portrait, high detail"
+  );
+  const [imageUrl, setImageUrl] = useState(null);
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleGenerate() {
+    setLoading(true);
+    setError("");
+    setImageUrl(null);
+    setStatus("Lanzando job en RunPod...");
+
+    try {
+      // 1) Llamar al endpoint /api/generate
+      const resGen = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          width: 512,
+          height: 512,
+          steps: 22,
+        }),
+      });
+
+      const dataGen = await resGen.json();
+      console.log("generate response:", dataGen);
+
+      if (!resGen.ok || dataGen.error || dataGen.ok === false) {
+        throw new Error(dataGen.error || "Error en /api/generate");
+      }
+
+      const jobId =
+        dataGen.jobId || dataGen.id || dataGen.requestId || dataGen.data?.id;
+
+      if (!jobId) {
+        throw new Error("No vino jobId en la respuesta de /api/generate");
+      }
+
+      setStatus(`Job enviado: ${jobId}. Consultando estado...`);
+
+      // 2) Polling a /api/status
+      const TIMEOUT_MS = 60_000;
+      const start = Date.now();
+      let statusData = null;
+
+      while (true) {
+        const resStatus = await fetch(`/api/status?id=${jobId}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        statusData = await resStatus.json();
+        console.log("status response:", statusData);
+
+        if (!resStatus.ok || statusData.error || statusData.ok === false) {
+          throw new Error(statusData.error || "Error en /api/status");
+        }
+
+        const st = statusData.status;
+        setStatus(`Estado actual: ${st}`);
+
+        if (st === "COMPLETED") break;
+        if (st === "FAILED" || st === "CANCELLED") {
+          throw new Error(`Job falló en RunPod. Estado: ${st}`);
+        }
+        if (Date.now() - start > TIMEOUT_MS) {
+          throw new Error("Timeout esperando respuesta de RunPod");
+        }
+
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      // 3) Extraer el base64 y mostrar imagen
+      const output = statusData.output || {};
+      const b64 = output.image_b64;
+
+      if (!b64) {
+        throw new Error("RunPod no devolvió image_b64 en output");
+      }
+
+      const url = `data:image/png;base64,${b64}`;
+      setImageUrl(url);
+      setStatus("COMPLETED ✅ Imagen generada");
+    } catch (e) {
+      console.error(e);
+      setError(String(e.message || e));
+      setStatus("Error ❌");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Section id="demo" className="py-12">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start">
+        <div>
+          <h3 className="text-2xl font-semibold text-white">
+            Prueba la demo en vivo
+          </h3>
+          <p className="mt-2 text-neutral-400 max-w-xl">
+            Escribe un prompt y deja que isabelaOs Studio genere una imagen
+            usando nuestro pipeline real en RunPod.
+          </p>
+
+          <Card className="mt-6">
+            <label className="block">
+              <span className="text-sm text-neutral-300">
+                Prompt para la IA
+              </span>
+              <textarea
+                rows={3}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </label>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <NeonButton onClick={handleGenerate} className="min-w-[160px]">
+                {loading ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Generando...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-5 w-5" />
+                    Generar imagen
+                  </>
+                )}
+              </NeonButton>
+              {status && (
+                <p className="text-sm text-neutral-300">
+                  <strong>Estado:</strong> {status}
+                </p>
+              )}
+            </div>
+
+            {error && (
+              <p className="mt-3 text-sm text-red-300">
+                {error} (revisa logs si persiste)
+              </p>
+            )}
+          </Card>
+        </div>
+
+        <Card className="mt-2 flex flex-col items-center justify-center">
+          {imageUrl ? (
+            <>
+              <img
+                src={imageUrl}
+                alt="Resultado IA"
+                className="h-64 w-64 rounded-2xl object-cover"
+              />
+              <p className="mt-3 text-xs text-neutral-400">
+                Imagen generada con isabelaOs Studio + RunPod
+              </p>
+            </>
+          ) : (
+            <div className="flex h-64 w-full flex-col items-center justify-center text-center text-neutral-400">
+              <Sparkles className="mb-3 h-8 w-8 text-cyan-300" />
+              <p className="text-sm">
+                Aquí verás el resultado en cuanto se complete el render.
+              </p>
+            </div>
+          )}
+        </Card>
+      </div>
+    </Section>
+  );
+}
+
+/* ---------------- SHOWCASE ---------------- */
+
 function Showcase() {
   return (
     <Section id="showcase" className="py-12">
       <div className="mb-6 flex items-end justify-between">
-        <h3 className="text-2xl font-semibold text-white">Galería de la plataforma</h3>
+        <h3 className="text-2xl font-semibold text-white">
+          Galería de la plataforma
+        </h3>
         <a href="#" className="text-sm text-cyan-300 hover:text-cyan-200">
           Ver todo
         </a>
       </div>
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          { type: "video", src: "https://cdn.coverr.co/videos/coverr-typing-on-a-computer-7657/1080p.mp4", caption: "Generación de escenas" },
-          { type: "image", src: "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop", caption: "Panel de control" },
-          { type: "image", src: "https://images.unsplash.com/photo-1554386690-89dd3aefca87?q=80&w=1200&auto=format&fit=crop", caption: "Librería de assets" },
+          {
+            type: "video",
+            src: "https://cdn.coverr.co/videos/coverr-typing-on-a-computer-7657/1080p.mp4",
+            caption: "Generación de escenas",
+          },
+          {
+            type: "image",
+            src: "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop",
+            caption: "Panel de control",
+          },
+          {
+            type: "image",
+            src: "https://images.unsplash.com/photo-1554386690-89dd3aefca87?q=80&w=1200&auto=format&fit=crop",
+            caption: "Librería de assets",
+          },
         ].map((m, i) => (
-          <div key={i} className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+          <div
+            key={i}
+            className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/40"
+          >
             {m.type === "video" ? (
-              <video src={m.src} autoPlay loop muted playsInline className="h-56 w-full object-cover" />
+              <video
+                src={m.src}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="h-56 w-full object-cover"
+              />
             ) : (
-              <img src={m.src} alt={m.caption} className="h-56 w-full object-cover transition duration-500 group-hover:scale-105" />
+              <img
+                src={m.src}
+                alt={m.caption}
+                className="h-56 w-full object-cover transition duration-500 group-hover:scale-105"
+              />
             )}
-            <div className="absolute bottom-3 left-3 text-sm text-white/90 drop-shadow">{m.caption}</div>
+            <div className="absolute bottom-3 left-3 text-sm text-white/90 drop-shadow">
+              {m.caption}
+            </div>
           </div>
         ))}
       </div>
@@ -252,17 +495,38 @@ function Showcase() {
   );
 }
 
+/* ---------------- PRICING ---------------- */
+
 function Pricing({ onSignup }) {
   const plans = [
-    { name: "Free", price: "$0", perks: ["Probar editor", "5 renders/mes", "Marca de agua"], cta: "Empieza ahora" },
-    { name: "Pro", price: "$19", perks: ["Renders ilimitados", "Plantillas premium", "Soporte prioritario"], cta: "Elegir Pro" },
-    { name: "Enterprise", price: "Contacta", perks: ["SSO/SAML", "Seguridad avanzada", "SLA dedicado"], cta: "Hablar con ventas" },
+    {
+      name: "Free",
+      price: "$0",
+      perks: ["Probar editor", "5 renders/mes", "Marca de agua"],
+      cta: "Empieza ahora",
+    },
+    {
+      name: "Pro",
+      price: "$19",
+      perks: ["Renders ilimitados", "Plantillas premium", "Soporte prioritario"],
+      cta: "Elegir Pro",
+    },
+    {
+      name: "Enterprise",
+      price: "Contacta",
+      perks: ["SSO/SAML", "Seguridad avanzada", "SLA dedicado"],
+      cta: "Hablar con ventas",
+    },
   ];
   return (
     <Section id="pricing" className="py-12">
       <div className="mb-8 text-center">
-        <h3 className="text-2xl font-semibold text-white">Planes que crecen contigo</h3>
-        <p className="mt-2 text-neutral-400">Comienza gratis, escala cuando lo necesites.</p>
+        <h3 className="text-2xl font-semibold text-white">
+          Planes que crecen contigo
+        </h3>
+        <p className="mt-2 text-neutral-400">
+          Comienza gratis, escala cuando lo necesites.
+        </p>
       </div>
       <div className="grid gap-6 md:grid-cols-3">
         {plans.map((p, i) => (
@@ -271,7 +535,9 @@ function Pricing({ onSignup }) {
               <h4 className="text-white">{p.name}</h4>
               <div className="text-lg font-semibold text-white">
                 {p.price}
-                <span className="text-sm font-normal text-neutral-400">/mes</span>
+                <span className="text-sm font-normal text-neutral-400">
+                  /mes
+                </span>
               </div>
             </div>
             <ul className="mt-4 space-y-2 text-sm text-neutral-300">
@@ -291,7 +557,9 @@ function Pricing({ onSignup }) {
   );
 }
 
-function Footer({ onSignup }) {
+/* ---------------- FOOTER ---------------- */
+
+function Footer({ onSignup, onGoDemo }) {
   return (
     <Section className="pb-16">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
@@ -299,9 +567,14 @@ function Footer({ onSignup }) {
           <div>
             <h4 className="text-white">
               ¿Listo para crear algo{" "}
-              <span className="bg-gradient-to-r from-cyan-400 to-fuchsia-400 bg-clip-text text-transparent">increíble</span>?
+              <span className="bg-gradient-to-r from-cyan-400 to-fuchsia-400 bg-clip-text text-transparent">
+                increíble
+              </span>
+              ?
             </h4>
-            <p className="mt-2 text-sm text-neutral-400">Únete hoy y obtén herramientas con IA.</p>
+            <p className="mt-2 text-sm text-neutral-400">
+              Únete hoy y obtén herramientas con IA.
+            </p>
           </div>
           <div className="flex items-center gap-3 md:justify-end">
             <button
@@ -310,11 +583,14 @@ function Footer({ onSignup }) {
             >
               <Mail className="h-4 w-4" /> Registrarme con correo
             </button>
-            <NeonButton>Ver demo</NeonButton>
+            <NeonButton onClick={onGoDemo}>Ver demo</NeonButton>
           </div>
         </div>
         <div className="mt-6 flex items-center justify-between text-xs text-neutral-500">
-          <span>© {new Date().getFullYear()} isabelaOs AI. Todos los derechos reservados.</span>
+          <span>
+            © {new Date().getFullYear()} isabelaOs AI. Todos los derechos
+            reservados.
+          </span>
           <div className="flex gap-4">
             <a href="#">Privacidad</a>
             <a href="#">Términos</a>
@@ -326,12 +602,19 @@ function Footer({ onSignup }) {
   );
 }
 
+/* ---------------- APP ROOT ---------------- */
+
 export default function App() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.style.background = "#06070B";
   }, []);
+
+  const goToDemo = () => {
+    const el = document.getElementById("demo");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <div
@@ -344,15 +627,25 @@ export default function App() {
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="isabelaOs AI" className="h-9 w-9 rounded-xl" />
+            <img
+              src="/logo.svg"
+              alt="isabelaOs AI"
+              className="h-9 w-9 rounded-xl"
+            />
             <span className="text-lg font-semibold text-white">
               isabelaOs <span className="text-neutral-400">AI</span>
             </span>
           </div>
           <nav className="hidden gap-6 text-sm text-neutral-300 md:flex">
-            <a href="#features" className="hover:text-white">Funciones</a>
-            <a href="#showcase" className="hover:text-white">Galería</a>
-            <a href="#pricing" className="hover:text-white">Planes</a>
+            <a href="#features" className="hover:text-white">
+              Funciones
+            </a>
+            <a href="#showcase" className="hover:text-white">
+              Galería
+            </a>
+            <a href="#pricing" className="hover:text-white">
+              Planes
+            </a>
           </nav>
           <div className="flex items-center gap-3">
             <button
@@ -361,7 +654,12 @@ export default function App() {
             >
               Registrarse
             </button>
-            <NeonButton className="hidden md:inline-flex">Probar demo</NeonButton>
+            <NeonButton
+              className="hidden md:inline-flex"
+              onClick={goToDemo}
+            >
+              Probar demo
+            </NeonButton>
           </div>
         </div>
       </header>
@@ -369,12 +667,20 @@ export default function App() {
       <Hero onSignup={() => setOpen(true)} />
       <Logos />
       <Features />
+
+      {/* NUEVA SECCIÓN DE DEMO */}
+      <DemoGenerator />
+
       <Showcase />
       <Pricing onSignup={() => setOpen(true)} />
-      <Footer onSignup={() => setOpen(true)} />
+      <Footer
+        onSignup={() => setOpen(true)}
+        onGoDemo={goToDemo}
+      />
 
       <SignUpModal open={open} onClose={() => setOpen(false)} />
     </div>
   );
 }
+
 
