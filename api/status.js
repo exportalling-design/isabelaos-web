@@ -1,51 +1,89 @@
 // api/status.js
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+export const config = {
+  runtime: "edge",
+};
+
+export default async function handler(req) {
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
-  const { id } = req.query;
-  if (!id) {
-    return res.status(400).json({ error: 'Missing id' });
+  if (req.method !== "GET") {
+    return new Response("Method Not Allowed", { status: 405, headers: cors });
   }
-
-  const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
-  const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID;
-
-  if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
-    return res
-      .status(500)
-      .json({ error: 'RunPod env vars not configured' });
-  }
-
-  const base = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}`;
 
   try {
-    const rp = await fetch(`${base}/status/${id}`, {
-      method: 'GET',
+    const url = new URL(req.url);
+    const jobId = url.searchParams.get("id");
+
+    if (!jobId) {
+      return new Response(
+        JSON.stringify({ error: "Missing id" }),
+        { status: 400, headers: cors }
+      );
+    }
+
+    // 🔴 IMPORTANTE: usar los mismos nombres que /api/generate
+    const RP_API_KEY = process.env.RP_API_KEY;
+    const RP_ENDPOINT = process.env.RP_ENDPOINT;
+
+    if (!RP_API_KEY || !RP_ENDPOINT) {
+      return new Response(
+        JSON.stringify({ error: "RunPod env vars not configured" }),
+        { status: 500, headers: cors }
+      );
+    }
+
+    const base = `https://api.runpod.ai/v2/${RP_ENDPOINT}`;
+
+    const rp = await fetch(`${base}/status/${jobId}`, {
+      method: "GET",
       headers: {
-        Authorization: `Bearer ${RUNPOD_API_KEY}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${RP_API_KEY}`,
       },
     });
 
-    const statusData = await rp.json();
+    const data = await rp.json();
 
     if (!rp.ok) {
-      return res.status(500).json({
-        error: 'RunPod status error',
-        statusData,
-      });
+      return new Response(
+        JSON.stringify({
+          error: "RunPod status error",
+          statusData: data,
+        }),
+        { status: rp.status, headers: cors }
+      );
     }
 
-    // Devolvemos EXACTAMENTE lo que diga RunPod
-    return res.status(200).json(statusData);
+    // Normalizamos un poco la respuesta para el cliente
+    const status = data.status || "UNKNOWN";
+    const output = data.output || {};
+    const outputUrl =
+      output.image_url || output.url || output.outputUrl || null;
+
+    return new Response(
+      JSON.stringify({
+        status,
+        outputUrl,
+        raw: data,
+      }),
+      { status: 200, headers: cors }
+    );
   } catch (e) {
-    console.error('Error en /api/status:', e);
-    return res.status(500).json({
-      error: 'Server error',
-      details: String(e),
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Server error in /api/status",
+        details: String(e),
+      }),
+      { status: 500, headers: cors }
+    );
   }
 }
 
