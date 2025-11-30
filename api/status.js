@@ -1,5 +1,5 @@
 // api/status.js
-// Devuelve el estado de un job de RunPod (solo imágenes)
+// Consulta el estado de un job en RunPod y devuelve la info tal como la usabas antes.
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -7,68 +7,64 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id } = req.query;
-  if (!id) {
-    res.status(400).json({ ok: false, error: "Missing id" });
-    return;
-  }
-
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-  const apiKey = process.env.RUNPOD_API_KEY;
-
-  if (!endpointId || !apiKey) {
-    res.status(500).json({
-      ok: false,
-      error: "RunPod env vars not configured",
-    });
-    return;
-  }
-
   try {
-    // Endpoint clásico de status de RunPod v2
-    const url = `https://api.runpod.ai/v2/${endpointId}/status/${id}`;
+    const { id } = req.query || {};
+    const jobId = Array.isArray(id) ? id[0] : id;
 
-    const rpRes = await fetch(url, {
-      method: "GET",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
-    });
+    if (!jobId) {
+      res.status(400).json({ ok: false, error: "Missing job id" });
+      return;
+    }
 
-    const text = await rpRes.text();
+    const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
+    const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID;
 
-    if (!rpRes.ok) {
-      console.error("[STATUS] RunPod error:", rpRes.status, text);
+    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
+      // 👀 mensaje distinto para saber que este archivo nuevo sí se desplegó
       res.status(500).json({
         ok: false,
-        error: "RunPod status failed",
-        statusCode: rpRes.status,
-        body: text,
+        error: "RunPod config missing in isabelaos-web (status.js)",
       });
       return;
     }
 
-    const data = JSON.parse(text || "{}");
+    const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`;
 
-    // data.status: IN_QUEUE | IN_PROGRESS | COMPLETED | FAILED
-    // data.output: { image_b64: "..." } cuando COMPLETED
-    const status = data.status || "UNKNOWN";
-    const output = data.output || null;
+    const rpRes = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${RUNPOD_API_KEY}`,
+      },
+    });
 
+    const rpJson = await rpRes.json();
+
+    if (!rpRes.ok) {
+      res.status(500).json({
+        ok: false,
+        error: "RunPod status error",
+        raw: rpJson,
+      });
+      return;
+    }
+
+    const runpodStatus = rpJson.status || rpJson.jobStatus || "UNKNOWN";
+    const output = rpJson.output || null;
+
+    // Forma parecida a lo que veías en PowerShell:
+    // ok  runpodStatus  output  raw
     res.status(200).json({
       ok: true,
-      status,
-      output,   // mantiene el formato que ya usábamos: { image_b64: ... }
-      raw: data,
+      runpodStatus,
+      output,
+      raw: rpJson,
     });
   } catch (err) {
-    console.error("[STATUS] Exception:", err);
     res.status(500).json({
       ok: false,
-      error: "Status handler exception",
-      message: String(err),
+      error: `Exception in status: ${err.message}`,
     });
   }
 }
+
 
