@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 
 const cn = (...c) => c.filter(Boolean).join(" ");
+
 const Section = ({ id, className = "", children }) => (
   <section id={id} className={cn("mx-auto max-w-7xl px-4", className)}>
     {children}
@@ -52,12 +54,14 @@ const Card = ({ className = "", children }) => (
   </div>
 );
 
-/* ---------------- MODAL DE REGISTRO ---------------- */
+/* ---------------- MODAL DE REGISTRO (DEMO) ---------------- */
 
 function SignUpModal({ open, onClose }) {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
+
   if (!open) return null;
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm p-4">
       <Card className="w-full max-w-xl p-8">
@@ -109,7 +113,9 @@ function SignUpModal({ open, onClose }) {
             </label>
           </div>
           <NeonButton
-            onClick={() => alert(`(DEMO) Registrado: ${username || email}`)}
+            onClick={() =>
+              alert(`(DEMO) Registrado: ${username || email || "usuario_demo"}`)
+            }
           >
             <UserPlus className="h-5 w-5" /> Crear cuenta{" "}
             <ArrowRight className="h-4 w-4 opacity-80" />
@@ -134,7 +140,7 @@ function SignUpModal({ open, onClose }) {
   );
 }
 
-/* ---------------- HERO ---------------- */
+/* ---------------- HERO (CABECERA) ---------------- */
 
 function Hero({ onSignup }) {
   return (
@@ -154,8 +160,7 @@ function Hero({ onSignup }) {
           </motion.h1>
           <p className="mt-5 max-w-xl text-lg text-neutral-300">
             isabelaOs crea imágenes y videos con calidad de estudio. Flujos de
-            trabajo inteligentes, branding consistente y performance
-            empresarial.
+            trabajo inteligentes, branding consistente y performance empresarial.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-4">
             <NeonButton onClick={onSignup}>
@@ -170,8 +175,7 @@ function Hero({ onSignup }) {
           </div>
           <div className="mt-6 flex items-center gap-6 text-sm text-neutral-400">
             <span className="inline-flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-lime-300" /> Seguridad
-              enterprise
+              <ShieldCheck className="h-4 w-4 text-lime-300" /> Seguridad enterprise
             </span>
             <span className="inline-flex items-center gap-2">
               <Zap className="h-4 w-4 text-cyan-300" /> Render ultra-rápido
@@ -193,7 +197,7 @@ function Hero({ onSignup }) {
   );
 }
 
-/* ---------------- LOGOS ---------------- */
+/* ---------------- SECCIONES SECUNDARIAS ---------------- */
 
 function Logos() {
   return (
@@ -208,8 +212,6 @@ function Logos() {
     </Section>
   );
 }
-
-/* ---------------- FEATURES ---------------- */
 
 function Features() {
   const list = [
@@ -256,193 +258,11 @@ function Features() {
   );
 }
 
-/* ---------------- DEMO GENERATOR (NUEVO) ---------------- */
-
-function DemoGenerator() {
-  const [prompt, setPrompt] = useState(
-    "a beautiful cinematic portrait, high detail"
-  );
-  const [imageUrl, setImageUrl] = useState(null);
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleGenerate() {
-    setLoading(true);
-    setError("");
-    setImageUrl(null);
-    setStatus("Lanzando job en RunPod...");
-
-    try {
-      // 1) Llamar al endpoint /api/generate
-      const resGen = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          width: 512,
-          height: 512,
-          steps: 22,
-        }),
-      });
-
-      const dataGen = await resGen.json();
-      console.log("generate response:", dataGen);
-
-      if (!resGen.ok || dataGen.error || dataGen.ok === false) {
-        throw new Error(dataGen.error || "Error en /api/generate");
-      }
-
-      const jobId =
-        dataGen.jobId || dataGen.id || dataGen.requestId || dataGen.data?.id;
-
-      if (!jobId) {
-        throw new Error("No vino jobId en la respuesta de /api/generate");
-      }
-
-      setStatus(`Job enviado: ${jobId}. Consultando estado...`);
-
-      // 2) Polling a /api/status
-      const TIMEOUT_MS = 60_000;
-      const start = Date.now();
-      let statusData = null;
-
-      while (true) {
-        const resStatus = await fetch(`/api/status?id=${jobId}`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        statusData = await resStatus.json();
-        console.log("status response:", statusData);
-
-        if (!resStatus.ok || statusData.error || statusData.ok === false) {
-          throw new Error(statusData.error || "Error en /api/status");
-        }
-
-        const st = statusData.status;
-        setStatus(`Estado actual: ${st}`);
-
-        if (st === "COMPLETED") break;
-        if (st === "FAILED" || st === "CANCELLED") {
-          throw new Error(`Job falló en RunPod. Estado: ${st}`);
-        }
-        if (Date.now() - start > TIMEOUT_MS) {
-          throw new Error("Timeout esperando respuesta de RunPod");
-        }
-
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-
-      // 3) Extraer el base64 y mostrar imagen
-      const output = statusData.output || {};
-      const b64 = output.image_b64;
-
-      if (!b64) {
-        throw new Error("RunPod no devolvió image_b64 en output");
-      }
-
-      const url = `data:image/png;base64,${b64}`;
-      setImageUrl(url);
-      setStatus("COMPLETED ✅ Imagen generada");
-    } catch (e) {
-      console.error(e);
-      setError(String(e.message || e));
-      setStatus("Error ❌");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Section id="demo" className="py-12">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start">
-        <div>
-          <h3 className="text-2xl font-semibold text-white">
-            Prueba la demo en vivo
-          </h3>
-          <p className="mt-2 text-neutral-400 max-w-xl">
-            Escribe un prompt y deja que isabelaOs Studio genere una imagen
-            usando nuestro pipeline real en RunPod.
-          </p>
-
-          <Card className="mt-6">
-            <label className="block">
-              <span className="text-sm text-neutral-300">
-                Prompt para la IA
-              </span>
-              <textarea
-                rows={3}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </label>
-
-            <div className="mt-4 flex flex-wrap items-center gap-4">
-              <NeonButton onClick={handleGenerate} className="min-w-[160px]">
-                {loading ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                    Generando...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-5 w-5" />
-                    Generar imagen
-                  </>
-                )}
-              </NeonButton>
-              {status && (
-                <p className="text-sm text-neutral-300">
-                  <strong>Estado:</strong> {status}
-                </p>
-              )}
-            </div>
-
-            {error && (
-              <p className="mt-3 text-sm text-red-300">
-                {error} (revisa logs si persiste)
-              </p>
-            )}
-          </Card>
-        </div>
-
-        <Card className="mt-2 flex flex-col items-center justify-center">
-          {imageUrl ? (
-            <>
-              <img
-                src={imageUrl}
-                alt="Resultado IA"
-                className="h-64 w-64 rounded-2xl object-cover"
-              />
-              <p className="mt-3 text-xs text-neutral-400">
-                Imagen generada con isabelaOs Studio + RunPod
-              </p>
-            </>
-          ) : (
-            <div className="flex h-64 w-full flex-col items-center justify-center text-center text-neutral-400">
-              <Sparkles className="mb-3 h-8 w-8 text-cyan-300" />
-              <p className="text-sm">
-                Aquí verás el resultado en cuanto se complete el render.
-              </p>
-            </div>
-          )}
-        </Card>
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- SHOWCASE ---------------- */
-
 function Showcase() {
   return (
     <Section id="showcase" className="py-12">
       <div className="mb-6 flex items-end justify-between">
-        <h3 className="text-2xl font-semibold text-white">
-          Galería de la plataforma
-        </h3>
+        <h3 className="text-2xl font-semibold text-white">Galería de la plataforma</h3>
         <a href="#" className="text-sm text-cyan-300 hover:text-cyan-200">
           Ver todo
         </a>
@@ -495,21 +315,23 @@ function Showcase() {
   );
 }
 
-/* ---------------- PRICING ---------------- */
-
 function Pricing({ onSignup }) {
   const plans = [
     {
-      name: "Free",
-      price: "$0",
-      perks: ["Probar editor", "5 renders/mes", "Marca de agua"],
-      cta: "Empieza ahora",
+      name: "Imagenes",
+      price: "$5",
+      perks: [
+        "Generación ilimitada de imágenes",
+        "Resolución estándar",
+        "Uso personal y comercial básico",
+      ],
+      cta: "Elegir plan",
     },
     {
-      name: "Pro",
+      name: "Pro (próximamente)",
       price: "$19",
-      perks: ["Renders ilimitados", "Plantillas premium", "Soporte prioritario"],
-      cta: "Elegir Pro",
+      perks: ["Video IA", "Cámaras virtuales CineCam", "Soporte prioritario"],
+      cta: "Unirme a la lista",
     },
     {
       name: "Enterprise",
@@ -522,10 +344,11 @@ function Pricing({ onSignup }) {
     <Section id="pricing" className="py-12">
       <div className="mb-8 text-center">
         <h3 className="text-2xl font-semibold text-white">
-          Planes que crecen contigo
+          Plan simple para creadores
         </h3>
         <p className="mt-2 text-neutral-400">
-          Comienza gratis, escala cuando lo necesites.
+          Lanza ya con generación de imágenes. Video y módulos avanzados se irán
+          activando sobre la misma cuenta.
         </p>
       </div>
       <div className="grid gap-6 md:grid-cols-3">
@@ -535,9 +358,11 @@ function Pricing({ onSignup }) {
               <h4 className="text-white">{p.name}</h4>
               <div className="text-lg font-semibold text-white">
                 {p.price}
-                <span className="text-sm font-normal text-neutral-400">
-                  /mes
-                </span>
+                {p.price.startsWith("$") && (
+                  <span className="text-sm font-normal text-neutral-400">
+                    /mes
+                  </span>
+                )}
               </div>
             </div>
             <ul className="mt-4 space-y-2 text-sm text-neutral-300">
@@ -557,9 +382,7 @@ function Pricing({ onSignup }) {
   );
 }
 
-/* ---------------- FOOTER ---------------- */
-
-function Footer({ onSignup, onGoDemo }) {
+function Footer({ onSignup }) {
   return (
     <Section className="pb-16">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
@@ -583,7 +406,7 @@ function Footer({ onSignup, onGoDemo }) {
             >
               <Mail className="h-4 w-4" /> Registrarme con correo
             </button>
-            <NeonButton onClick={onGoDemo}>Ver demo</NeonButton>
+            <NeonButton>Ver demo</NeonButton>
           </div>
         </div>
         <div className="mt-6 flex items-center justify-between text-xs text-neutral-500">
@@ -602,28 +425,103 @@ function Footer({ onSignup, onGoDemo }) {
   );
 }
 
-/* ---------------- APP ROOT ---------------- */
+/* ---------------- APP PRINCIPAL ---------------- */
 
 export default function App() {
   const [open, setOpen] = useState(false);
+
+  // Estado de la DEMO EN VIVO
+  const [prompt, setPrompt] = useState(
+    "a beautiful cinematic portrait, high detail"
+  );
+  const [status, setStatus] = useState("IDLE");
+  const [error, setError] = useState("");
+  const [imageUrl, setImageUrl] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     document.documentElement.style.background = "#06070B";
   }, []);
 
-  const goToDemo = () => {
-    const el = document.getElementById("demo");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Lógica para llamar /api/generate y /api/status
+  const handleGenerate = async () => {
+    try {
+      setError("");
+      setImageUrl(null);
+      setIsLoading(true);
+      setStatus("CREATING_JOB");
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setIsLoading(false);
+        setStatus("ERROR");
+        setError(data.error || "Error al crear el job en RunPod.");
+        return;
+      }
+
+      const jobId = data.jobId;
+      setStatus("IN_QUEUE");
+
+      // Polling de estado
+      while (true) {
+        const sRes = await fetch(`/api/status?id=${jobId}`);
+        const sData = await sRes.json();
+
+        if (!sRes.ok || sData.error) {
+          setStatus("ERROR");
+          setError(
+            sData.error ||
+              "RunPod config missing en isabelaos-web (status.js). Revisa logs."
+          );
+          break;
+        }
+
+        const st = sData.status;
+        setStatus(st);
+
+        if (st === "COMPLETED") {
+          // En nuestro worker, la imagen viene en output.image_b64
+          const imgB64 = sData.output?.image_b64;
+          if (imgB64) {
+            setImageUrl(`data:image/png;base64,${imgB64}`);
+          }
+          break;
+        }
+
+        if (st === "FAILED" || st === "CANCELLED") {
+          setStatus(st);
+          setError("El job no se completó correctamente.");
+          break;
+        }
+
+        // Esperar 3s antes del siguiente chequeo
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } catch (e) {
+      console.error(e);
+      setStatus("ERROR");
+      setError(String(e));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div
-      className="min-h-screen w-full"
+      className="min-h-screen w-full text-white"
       style={{
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
       }}
     >
+      {/* HEADER */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
@@ -654,33 +552,107 @@ export default function App() {
             >
               Registrarse
             </button>
-            <NeonButton
-              className="hidden md:inline-flex"
-              onClick={goToDemo}
-            >
+            <NeonButton className="hidden md:inline-flex">
               Probar demo
             </NeonButton>
           </div>
         </div>
       </header>
 
+      {/* HERO */}
       <Hero onSignup={() => setOpen(true)} />
+
+      {/* DEMO EN VIVO (LA PARTE QUE HABLAMOS) */}
+      <Section className="py-12">
+        <h2 className="mb-6 text-2xl font-semibold text-white">
+          Prueba la demo en vivo
+        </h2>
+        <div className="grid gap-8 lg:grid-cols-2">
+          {/* LADO IZQUIERDO: PROMPT + BOTÓN + ESTADO */}
+          <Card className="bg-black/50">
+            <p className="text-sm text-neutral-400">
+              Escribe un prompt y deja que isabelaOs Studio genere una imagen
+              usando nuestro pipeline real en RunPod.
+            </p>
+
+            <div className="mt-6">
+              <p className="mb-2 text-sm font-medium text-neutral-200">
+                Prompt para la IA
+              </p>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-2xl bg-black/70 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <NeonButton
+                onClick={handleGenerate}
+                className={cn(
+                  "px-5 py-2.5 text-sm",
+                  isLoading && "opacity-70 cursor-wait"
+                )}
+                disabled={isLoading}
+              >
+                {isLoading ? "Generando..." : "Generar imagen"}
+              </NeonButton>
+              <div className="text-xs text-neutral-400">
+                <span className="font-semibold text-neutral-300">
+                  Estado:
+                </span>{" "}
+                <span>{status}</span>
+                {status === "COMPLETED" && (
+                  <span className="ml-2 text-emerald-400">
+                    ✓ Imagen generada
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {error && (
+              <p className="mt-3 text-xs text-rose-400">
+                {error} (revisa logs si persiste)
+              </p>
+            )}
+          </Card>
+
+          {/* LADO DERECHO: PREVIEW DE LA IMAGEN */}
+          <Card className="flex min-h-[260px] items-center justify-center bg-black/60">
+            {imageUrl ? (
+              <div className="w-full">
+                <img
+                  src={imageUrl}
+                  alt="Imagen generada"
+                  className="mx-auto h-auto max-h-[320px] w-auto max-w-full rounded-2xl object-contain"
+                />
+                <p className="mt-3 text-center text-xs text-neutral-400">
+                  Imagen generada con isabelaOs Studio + RunPod
+                </p>
+              </div>
+            ) : (
+              <div className="text-center text-neutral-400">
+                <div className="mb-3 text-4xl">✨</div>
+                <p className="text-sm">
+                  Aquí verás el resultado en cuanto se complete el render.
+                </p>
+              </div>
+            )}
+          </Card>
+        </div>
+      </Section>
+
+      {/* RESTO DE LA LANDING */}
       <Logos />
       <Features />
-
-      {/* NUEVA SECCIÓN DE DEMO */}
-      <DemoGenerator />
-
       <Showcase />
       <Pricing onSignup={() => setOpen(true)} />
-      <Footer
-        onSignup={() => setOpen(true)}
-        onGoDemo={goToDemo}
-      />
+      <Footer onSignup={() => setOpen(true)} />
 
+      {/* MODAL DE SIGNUP (DEMO) */}
       <SignUpModal open={open} onClose={() => setOpen(false)} />
     </div>
   );
 }
-
 
