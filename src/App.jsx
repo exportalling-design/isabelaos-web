@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Zap,
   PlayCircle,
+  Image as ImageIcon,
 } from "lucide-react";
 
 const cn = (...c) => c.filter(Boolean).join(" ");
@@ -53,13 +54,21 @@ const Card = ({ className = "", children }) => (
   </div>
 );
 
-// ---------------- MODAL DE REGISTRO ----------------
+/* ---------------- MODAL DE REGISTRO ---------------- */
 
-function SignUpModal({ open, onClose }) {
+function SignUpModal({ open, onClose, onComplete }) {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
 
   if (!open) return null;
+
+  const handleCreate = () => {
+    // Aquí luego conectaremos registro real.
+    // Por ahora, solo entra al Panel.
+    if (typeof onComplete === "function") {
+      onComplete({ email, username });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm p-4">
@@ -81,8 +90,8 @@ function SignUpModal({ open, onClose }) {
 
         <p className="mt-2 text-sm text-neutral-400">
           Regístrate para usar el <strong>generador de imágenes</strong> por{" "}
-          <strong>5 USD/mes</strong>. Más adelante podrás actualizar a
-          funciones de video y módulos avanzados.
+          <strong>5 USD/mes</strong>. Más adelante podrás actualizar a video y
+          módulos avanzados.
         </p>
 
         <div className="mt-6 grid gap-4">
@@ -118,16 +127,8 @@ function SignUpModal({ open, onClose }) {
             </label>
           </div>
 
-          <NeonButton
-            onClick={() =>
-              alert(
-                `(DEMO) Cuenta creada: ${
-                  username || email || "sin nombre"
-                }. Más adelante conectamos el registro real.`
-              )
-            }
-          >
-            <UserPlus className="h-5 w-5" /> Crear cuenta{" "}
+          <NeonButton onClick={handleCreate}>
+            <UserPlus className="h-5 w-5" /> Crear cuenta y entrar al panel{" "}
             <ArrowRight className="h-4 w-4 opacity-80" />
           </NeonButton>
 
@@ -152,7 +153,7 @@ function SignUpModal({ open, onClose }) {
   );
 }
 
-// ---------------- HERO PRINCIPAL ----------------
+/* ---------------- HERO (LANDING) ---------------- */
 
 function Hero({ onSignup }) {
   return (
@@ -174,7 +175,7 @@ function Hero({ onSignup }) {
 
           <p className="mt-5 max-w-xl text-lg text-neutral-300">
             IsabelaOS Studio genera imágenes con estética profesional usando tu
-            propio pipeline en RunPod. Sin límites raros ni créditos ocultos.
+            pipeline en RunPod. Sin límites raros ni créditos escondidos.
           </p>
 
           <div className="mt-7 flex flex-wrap items-center gap-4">
@@ -185,7 +186,7 @@ function Hero({ onSignup }) {
               href="#demo"
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-6 py-3 text-white hover:bg-white/10"
             >
-              <PlayCircle className="h-5 w-5" /> Probar demo en vivo
+              <PlayCircle className="h-5 w-5" /> Ver panel de demo
             </a>
           </div>
 
@@ -215,7 +216,7 @@ function Hero({ onSignup }) {
   );
 }
 
-// ---------------- LOGOS (FAKE) ----------------
+/* ---------------- LOGOS ---------------- */
 
 function Logos() {
   return (
@@ -233,7 +234,7 @@ function Logos() {
   );
 }
 
-// ---------------- FEATURES ----------------
+/* ---------------- FEATURES ---------------- */
 
 function Features() {
   const list = [
@@ -249,7 +250,7 @@ function Features() {
     },
     {
       title: "Pensado para crecer",
-      desc: "Después podrás agregar video, BodySync y más módulos sin cambiar de plataforma.",
+      desc: "Luego podrás agregar video, BodySync y más módulos sin cambiar de plataforma.",
       icon: <Zap className="h-5 w-5" />,
     },
   ];
@@ -282,7 +283,7 @@ function Features() {
   );
 }
 
-// ---------------- GALERÍA / SHOWCASE ----------------
+/* ---------------- SHOWCASE ---------------- */
 
 function Showcase() {
   return (
@@ -332,15 +333,15 @@ function Showcase() {
   );
 }
 
-// ---------------- PRICING ÚNICO 5 USD ----------------
+/* ---------------- PRICING 5 USD ---------------- */
 
 function Pricing({ onSignup }) {
   const plan = {
     name: "Creador de imágenes",
     price: "$5",
     perks: [
-      "Generación de imágenes ilimitada (según tu nodo RunPod)",
-      "Uso comercial permitido de lo que generes",
+      "Generación de imágenes (según capacidad de tu nodo RunPod)",
+      "Uso comercial de tus imágenes",
       "Acceso a presets y estilos guardados",
       "Actualizaciones futuras del módulo de imágenes",
     ],
@@ -406,7 +407,199 @@ function Pricing({ onSignup }) {
   );
 }
 
-// ---------------- FOOTER ----------------
+/* ---------------- DASHBOARD (PANEL CON GENERADOR) ---------------- */
+
+function Dashboard({ onBack }) {
+  const [prompt, setPrompt] = useState(
+    "Cinematic portrait, ultra detailed, soft light, 8k"
+  );
+  const [negative, setNegative] = useState(
+    "blurry, low quality, deformed, watermark, text"
+  );
+  const [steps, setSteps] = useState(22);
+  const [width, setWidth] = useState(512);
+  const [height, setHeight] = useState(512);
+  const [loading, setLoading] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
+  const [error, setError] = useState("");
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError("");
+    setImageUrl("");
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          negative_prompt: negative,
+          width,
+          height,
+          steps,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data?.error || "Error al generar la imagen desde el servidor."
+        );
+      }
+
+      const output = data.output || {};
+      const imgB64 = output.image_b64 || output.imageBase64 || null;
+
+      if (!imgB64) {
+        throw new Error("No llegó la imagen en la respuesta.");
+      }
+
+      setImageUrl(`data:image/png;base64,${imgB64}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Section id="demo" className="py-12">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-white flex items-center gap-2">
+            <ImageIcon className="h-6 w-6 text-cyan-300" />
+            Panel de generación de imágenes
+          </h2>
+          <p className="mt-2 text-sm text-neutral-400 max-w-xl">
+            Escribe un prompt, ajusta los parámetros y genera imágenes usando tu
+            endpoint de RunPod conectado a IsabelaOS Studio.
+          </p>
+        </div>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="rounded-xl border border-white/15 px-4 py-2 text-sm text-neutral-200 hover:bg-white/10"
+          >
+            ← Volver a la página principal
+          </button>
+        )}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm text-neutral-300">Prompt</label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={4}
+                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-neutral-300">
+                Negative prompt
+              </label>
+              <textarea
+                value={negative}
+                onChange={(e) => setNegative(e.target.value)}
+                rows={2}
+                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-neutral-300">Steps</label>
+                <input
+                  type="number"
+                  value={steps}
+                  onChange={(e) => setSteps(Number(e.target.value || 1))}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-300">Width</label>
+                <input
+                  type="number"
+                  value={width}
+                  onChange={(e) => setWidth(Number(e.target.value || 64))}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-300">Height</label>
+                <input
+                  type="number"
+                  value={height}
+                  onChange={(e) => setHeight(Number(e.target.value || 64))}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="rounded-2xl border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {error}
+              </div>
+            )}
+
+            <NeonButton onClick={handleGenerate} className="w-full">
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Generando imagen...
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-5 w-5" />
+                  Generar imagen desde prompt
+                </>
+              )}
+            </NeonButton>
+          </div>
+        </Card>
+
+        <Card className="flex items-center justify-center">
+          {loading && (
+            <div className="flex flex-col items-center gap-3 text-neutral-300">
+              <span className="h-10 w-10 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              <span>Generando imagen en tu nodo de RunPod...</span>
+            </div>
+          )}
+
+          {!loading && imageUrl && (
+            <div className="w-full">
+              <p className="mb-2 text-sm text-neutral-300">
+                Resultado de la última generación:
+              </p>
+              <img
+                src={imageUrl}
+                alt="Resultado IA"
+                className="w-full rounded-2xl border border-white/15 object-cover"
+              />
+            </div>
+          )}
+
+          {!loading && !imageUrl && !error && (
+            <div className="text-center text-sm text-neutral-400">
+              Aquí aparecerán tus imágenes generadas.{" "}
+              <span className="text-neutral-200">
+                Escribe un prompt y genera tu primera imagen.
+              </span>
+            </div>
+          )}
+        </Card>
+      </div>
+    </Section>
+  );
+}
+
+/* ---------------- FOOTER ---------------- */
 
 function Footer({ onSignup }) {
   return (
@@ -453,14 +646,24 @@ function Footer({ onSignup }) {
   );
 }
 
-// ---------------- APP PRINCIPAL ----------------
+/* ---------------- APP PRINCIPAL ---------------- */
 
 export default function App() {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState("landing"); // "landing" | "dashboard"
 
   useEffect(() => {
     document.documentElement.style.background = "#06070B";
   }, []);
+
+  const goToDashboard = () => {
+    setOpen(false);
+    setMode("dashboard");
+  };
+
+  const goToLanding = () => {
+    setMode("landing");
+  };
 
   return (
     <div
@@ -484,44 +687,78 @@ export default function App() {
             </span>
           </div>
 
-          <nav className="hidden gap-6 text-sm text-neutral-300 md:flex">
-            <a href="#features" className="hover:text-white">
-              Funciones
-            </a>
-            <a href="#showcase" className="hover:text-white">
-              Galería
-            </a>
-            <a href="#pricing" className="hover:text-white">
-              Plan 5 USD
-            </a>
-          </nav>
+          {mode === "landing" ? (
+            <nav className="hidden gap-6 text-sm text-neutral-300 md:flex">
+              <a href="#features" className="hover:text-white">
+                Funciones
+              </a>
+              <a href="#showcase" className="hover:text-white">
+                Galería
+              </a>
+              <a href="#pricing" className="hover:text-white">
+                Plan 5 USD
+              </a>
+            </nav>
+          ) : (
+            <div className="hidden gap-6 text-sm text-neutral-300 md:flex">
+              <button
+                onClick={goToLanding}
+                className="hover:text-white text-neutral-300"
+              >
+                Volver a landing
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setOpen(true)}
-              className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/10"
-            >
-              Registrarse
-            </button>
-            <NeonButton className="hidden md:inline-flex">
-              Probar demo
-            </NeonButton>
+            {mode === "dashboard" ? (
+              <button
+                onClick={goToLanding}
+                className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/10"
+              >
+                Cerrar panel
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setOpen(true)}
+                  className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/10"
+                >
+                  Registrarse
+                </button>
+                <NeonButton
+                  className="hidden md:inline-flex"
+                  onClick={goToDashboard}
+                >
+                  Probar demo
+                </NeonButton>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* CONTENIDO */}
-      <Hero onSignup={() => setOpen(true)} />
-      <Logos />
-      <Features />
-      <Showcase />
-      <Pricing onSignup={() => setOpen(true)} />
-      <Footer onSignup={() => setOpen(true)} />
+      {/* CONTENIDO PRINCIPAL */}
+      {mode === "landing" ? (
+        <>
+          <Hero onSignup={() => setOpen(true)} />
+          <Logos />
+          <Features />
+          <Showcase />
+          <Pricing onSignup={() => setOpen(true)} />
+          <Footer onSignup={() => setOpen(true)} />
+        </>
+      ) : (
+        <Dashboard onBack={goToLanding} />
+      )}
 
       {/* MODAL REGISTRO */}
-      <SignUpModal open={open} onClose={() => setOpen(false)} />
+      <SignUpModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onComplete={goToDashboard}
+      />
     </div>
   );
 }
-
 
