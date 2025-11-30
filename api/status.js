@@ -1,70 +1,61 @@
+
 // api/status.js
-// Consulta el estado de un job en RunPod y devuelve la info tal como la usabas antes.
+// Consulta el estado de un job en RunPod y devuelve un JSON simple para el frontend.
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.status(405).json({ ok: false, error: "Method not allowed" });
-    return;
-  }
-
   try {
-    const { id } = req.query || {};
-    const jobId = Array.isArray(id) ? id[0] : id;
+    const { id: jobId } = req.query;
 
     if (!jobId) {
-      res.status(400).json({ ok: false, error: "Missing job id" });
-      return;
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing jobId parameter" });
     }
 
     const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
-    const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID;
+    const RUNPOD_ENDPOINT = process.env.RUNPOD_ENDPOINT; // mismo nombre que usa generate.js
 
-    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
-      // 👀 mensaje distinto para saber que este archivo nuevo sí se desplegó
-      res.status(500).json({
+    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT) {
+      console.error(
+        "[status] RunPod env vars not configured (RUNPOD_API_KEY / RUNPOD_ENDPOINT)"
+      );
+      return res.status(500).json({
         ok: false,
-        error: "RunPod config missing in isabelaos-web (status.js)",
+        error: "RunPod env vars not configured",
       });
-      return;
     }
 
-    const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`;
+    const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/status/${jobId}`;
 
     const rpRes = await fetch(url, {
       method: "GET",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${RUNPOD_API_KEY}`,
       },
     });
 
-    const rpJson = await rpRes.json();
+    const data = await rpRes.json();
 
-    if (!rpRes.ok) {
-      res.status(500).json({
-        ok: false,
-        error: "RunPod status error",
-        raw: rpJson,
-      });
-      return;
-    }
+    // Log útil para depurar
+    console.log("[status] RunPod response:", {
+      status: data.status,
+      id: data.id,
+    });
 
-    const runpodStatus = rpJson.status || rpJson.jobStatus || "UNKNOWN";
-    const output = rpJson.output || null;
-
-    // Forma parecida a lo que veías en PowerShell:
-    // ok  runpodStatus  output  raw
-    res.status(200).json({
+    // Respuesta simplificada para el frontend
+    return res.status(200).json({
       ok: true,
-      runpodStatus,
-      output,
-      raw: rpJson,
+      status: data.status, // IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED...
+      output: data.output ?? null,
+      raw: data,
     });
   } catch (err) {
-    res.status(500).json({
+    console.error("[status] Error:", err);
+    return res.status(500).json({
       ok: false,
-      error: `Exception in status: ${err.message}`,
+      error: String(err),
     });
   }
 }
-
 
