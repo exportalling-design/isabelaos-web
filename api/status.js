@@ -1,61 +1,84 @@
 
-// api/status.js
-// Consulta el estado de un job en RunPod y devuelve un JSON simple para el frontend.
+export const config = {
+  runtime: "edge",
+};
 
-export default async function handler(req, res) {
+export default async function handler(req) {
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
+  }
+
+  if (req.method !== "GET") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: cors,
+    });
+  }
+
   try {
-    const { id: jobId } = req.query;
+    // Sacar el id de la query: /api/status?id=XXXX
+    const { searchParams } = new URL(req.url);
+    const jobId = searchParams.get("id");
 
     if (!jobId) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Missing jobId parameter" });
-    }
-
-    const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
-    const RUNPOD_ENDPOINT = process.env.RUNPOD_ENDPOINT; // mismo nombre que usa generate.js
-
-    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT) {
-      console.error(
-        "[status] RunPod env vars not configured (RUNPOD_API_KEY / RUNPOD_ENDPOINT)"
+      return new Response(
+        JSON.stringify({ error: "Missing id" }),
+        { status: 400, headers: cors }
       );
-      return res.status(500).json({
-        ok: false,
-        error: "RunPod env vars not configured",
-      });
     }
 
-    const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/status/${jobId}`;
+    const RUNPOD_API_KEY = process.env.RP_API_KEY;
+    const RUNPOD_ENDPOINT_ID = process.env.RP_ENDPOINT;
 
-    const rpRes = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RUNPOD_API_KEY}`,
-      },
-    });
+    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
+      return new Response(
+        JSON.stringify({ error: "RunPod env vars not configured" }),
+        { status: 500, headers: cors }
+      );
+    }
+
+    // 👇 SIN new URL, URL completa directa
+    const rpRes = await fetch(
+      `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${RUNPOD_API_KEY}`,
+        },
+      }
+    );
 
     const data = await rpRes.json();
 
-    // Log útil para depurar
-    console.log("[status] RunPod response:", {
-      status: data.status,
-      id: data.id,
-    });
+    if (!rpRes.ok) {
+      return new Response(
+        JSON.stringify({ error: "RunPod status error", raw: data }),
+        { status: rpRes.status, headers: cors }
+      );
+    }
 
-    // Respuesta simplificada para el frontend
-    return res.status(200).json({
-      ok: true,
-      status: data.status, // IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED...
-      output: data.output ?? null,
-      raw: data,
-    });
-  } catch (err) {
-    console.error("[status] Error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: String(err),
-    });
+    // data viene directo de RunPod
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        status: data.status,
+        output: data.output ?? null,
+        raw: data,
+      }),
+      { status: 200, headers: cors }
+    );
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ error: "Server error", details: String(e) }),
+      { status: 500, headers: cors }
+    );
   }
 }
 
