@@ -29,7 +29,6 @@ function LoginModal({ isOpen, onClose }) {
         await loginWithEmail(email, password);
       }
 
-      // Si todo sale bien, cerramos el modal
       onClose();
     } catch (err) {
       console.error('Error en handleSubmit:', err);
