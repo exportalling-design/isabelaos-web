@@ -424,7 +424,7 @@ function CreatorPanel() {
                     alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items=end p-2">
+                  <div className="absolute inset-0 flex items-end bg-black/40 p-2 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
                     <span className="line-clamp-2">{item.prompt}</span>
                   </div>
                 </button>
@@ -480,7 +480,8 @@ function DashboardView() {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+                isabelaOs{" "}
+                <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
                 Panel del creador · Beta
@@ -563,6 +564,7 @@ function LandingView({ onOpenAuth }) {
 
       {/* Hero / landing */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        {/* HERO */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
@@ -571,22 +573,27 @@ function LandingView({ onOpenAuth }) {
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               isabelaOs Studio{" "}
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                generación de imágenes con IA en la nube
+                la nueva generación de imágenes con IA
               </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Crea imágenes con calidad de estudio conectadas a nuestro
-              pipeline real en RunPod. Versión inicial enfocada solo en{" "}
-              <span className="font-medium text-cyan-300">
-                generación de imagen
-              </span>
-              , mientras terminamos los módulos de video y BodySync.
+              Primer sistema de generación visual con IA desarrollado en
+              Guatemala. isabelaOs Studio fue construido desde Latinoamérica
+              para creadores, estudios y agencias que necesitan renders con
+              calidad cinematográfica sin instalar nada en su computadora.
+            </p>
+
+            <p className="mt-3 text-xs text-cyan-300/90">
+              Conectado a infraestructura de alto rendimiento en RunPod y listo
+              para integrar <span className="font-semibold">BodySync v1</span>,
+              nuestro motor propio de movimiento y expresión entrenado por
+              Stalling Technologic.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
                 Probar generador en vivo
               </button>
@@ -602,12 +609,14 @@ function LandingView({ onOpenAuth }) {
               Plan actual:{" "}
               <span className="font-semibold text-white">$5/mes</span> ·
               Generación ilimitada de imágenes mientras esté en beta. Tu cuenta
-              se podrá migrar a los planes completos cuando activemos video.
+              se podrá migrar a los planes completos cuando activemos video y
+              los módulos avanzados (BodySync, CineCam, etc.).
             </p>
           </div>
 
+          {/* Tarjeta de vista previa del panel */}
           <div className="relative">
-            <div className="h-full w-full rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <div className="h-full w-full rounded-3xl border border-white/10 bg-black/60 p-5 text-xs text-neutral-300">
               <h3 className="text-sm font-semibold text-white">
                 Vista previa del panel
               </h3>
@@ -615,20 +624,110 @@ function LandingView({ onOpenAuth }) {
                 Interfaz simple para escribir un prompt, ajustar resolución y
                 ver el resultado generado por el motor conectado a RunPod.
               </p>
-              <div className="mt-4 h-52 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/80 border border-white/10 flex items-center justify-center text-[11px] text-neutral-300">
-                Panel real de isabelaOs Studio funcionando con tu endpoint
-                serverless.
+
+              {/* Reemplazable por una captura real de tu panel */}
+              <div className="mt-4 flex h-52 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-fuchsia-500/10 to-black/80 text-[11px] text-neutral-200">
+                Aquí irá la captura real del panel del creador de isabelaOs
+                Studio.
               </div>
+
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
-                IA desarrollado desde Latinoamérica pensado para creadores,
-                estudios y agencias de modelos virtuales.
+                IA desarrollado en Guatemala, pensado para creadores, estudios y
+                agencias de modelos virtuales.
               </p>
             </div>
           </div>
         </section>
 
-        {/* Panel del creador “demo” (solo mensaje si no hay usuario) */}
+        {/* GALERÍA DE IMÁGENES GENERADAS */}
+        <section className="mt-16 space-y-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">
+                Imágenes generadas con isabelaOs Studio
+              </h2>
+              <p className="mt-1 max-w-xl text-xs text-neutral-400">
+                Ejemplos creados con el pipeline real: retratos, escenas
+                cinematográficas y composición lista para redes o campañas.
+              </p>
+            </div>
+          </div>
+
+          {/* Cambia estos bloques por <img src="..."> con tus renders reales */}
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <div className="aspect-[4/5] bg-gradient-to-br from-neutral-600 via-neutral-800 to-black" />
+              <div className="px-3 py-2 text-[11px] text-neutral-300">
+                Retratos con luz suave y detalle natural en piel.
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <div className="aspect-[4/5] bg-gradient-to-br from-fuchsia-600/60 via-purple-700/60 to-black" />
+              <div className="px-3 py-2 text-[11px] text-neutral-300">
+                Escenas estilizadas con look cinematográfico.
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <div className="aspect-[4/5] bg-gradient-to-br from-cyan-500/50 via-sky-700/60 to-black" />
+              <div className="px-3 py-2 text-[11px] text-neutral-300">
+                Profundidad de campo y composición cuidada.
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <div className="aspect-[4/5] bg-gradient-to-br from-amber-500/60 via-orange-700/60 to-black" />
+              <div className="px-3 py-2 text-[11px] text-neutral-300">
+                Ideal para portadas, branding y contenido social.
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-2 text-[10px] text-neutral-500">
+            Más adelante podrás sustituir estos bloques por las imágenes
+            oficiales generadas desde el panel.
+          </p>
+        </section>
+
+        {/* SECCIÓN: Hecho en Guatemala / BodySync */}
+        <section className="mt-16 grid gap-8 lg:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-6">
+            <h2 className="text-lg font-semibold text-white">
+              Hecho en Guatemala, para creadores de todo el mundo
+            </h2>
+            <p className="mt-3 text-sm text-neutral-300">
+              isabelaOs Studio es un proyecto de inteligencia artificial
+              desarrollado completamente en Guatemala por Stalling Technologic.
+              Nació como una herramienta para creadores latinoamericanos, pero
+              está diseñado para competir a nivel global.
+            </p>
+            <p className="mt-3 text-xs text-neutral-400">
+              Nuestro objetivo es que cualquier persona pueda generar contenido
+              profesional conectado a la nube, sin depender de grandes estudios
+              ni equipos costosos.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-6">
+            <h3 className="text-sm font-semibold text-white">
+              BodySync v1 · motor propio de movimiento
+            </h3>
+            <p className="mt-3 text-sm text-neutral-300">
+              Estamos preparando <span className="font-semibold">
+                BodySync v1
+              </span>
+              , un motor entrenado por nosotros para interpretar movimiento y
+              expresión corporal en video. Permitirá que tus personajes IA se
+              muevan, reaccionen y actúen con una sensación mucho más humana.
+            </p>
+            <p className="mt-3 text-xs text-neutral-400">
+              BodySync v1 será parte del módulo premium de video de isabelaOs
+              Studio. Los usuarios que ya estén en la beta tendrán prioridad
+              para probarlo en cuanto lo liberemos.
+            </p>
+          </div>
+        </section>
+
+        {/* Panel del creador (sección anclada) */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
@@ -649,10 +748,11 @@ function LandingView({ onOpenAuth }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               © {new Date().getFullYear()} isabelaOs Studio · Desarrollado por
-              Stalling Technologic.
+              Stalling Technologic desde Guatemala.
             </span>
             <span>
-              Versión beta · Módulos futuros: video, BodySync AI, CineCam y más.
+              Versión beta · Próximamente: video, BodySync AI, CineCam y más
+              módulos avanzados.
             </span>
           </div>
         </footer>
@@ -677,7 +777,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center bg-black text-white">
+      <div className="grid min-h-screen place-items-center bg-black text-white">
         <p className="text-sm text-neutral-400">Cargando sesión...</p>
       </div>
     );
@@ -685,11 +785,7 @@ export default function App() {
 
   return (
     <>
-      {user ? (
-        <DashboardView />
-      ) : (
-        <LandingView onOpenAuth={openAuth} />
-      )}
+      {user ? <DashboardView /> : <LandingView onOpenAuth={openAuth} />}
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
