@@ -2,9 +2,9 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "./context/AuthContext";
 
-// ------------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------------
+// ---------------------------------------------------------
+// Helper para scroll suave
+// ---------------------------------------------------------
 function scrollToId(id) {
   const el = document.getElementById(id);
   if (el) {
@@ -12,9 +12,9 @@ function scrollToId(id) {
   }
 }
 
-// ------------------------------------------------------------------
+// ---------------------------------------------------------
 // Modal de autenticación (correo + password + Google)
-// ------------------------------------------------------------------
+// ---------------------------------------------------------
 function AuthModal({ open, onClose }) {
   const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
   const [mode, setMode] = useState("login"); // 'login' | 'register'
@@ -40,13 +40,7 @@ function AuthModal({ open, onClose }) {
       }
       onClose();
     } catch (err) {
-      console.error("[AuthModal] handleSubmit error:", err);
-      let msg = err?.message || String(err);
-      if (msg === "a is not a function" || msg === "i is not a function") {
-        msg =
-          "⚠️ Error interno de autenticación. Revisa la consola de Vercel/Supabase.";
-      }
-      setError(msg);
+      setError(err.message || String(err));
     } finally {
       setLocalLoading(false);
     }
@@ -57,15 +51,9 @@ function AuthModal({ open, onClose }) {
     setLocalLoading(true);
     try {
       await signInWithGoogle();
-      // Supabase redirige a Google y luego vuelve al sitio
+      // Supabase redirige automáticamente
     } catch (err) {
-      console.error("[AuthModal] handleGoogle error:", err);
-      let msg = err?.message || String(err);
-      if (msg === "a is not a function" || msg === "i is not a function") {
-        msg =
-          "⚠️ Error interno de autenticación con Google. Revisa configuración en Supabase.";
-      }
-      setError(msg);
+      setError(err.message || String(err));
       setLocalLoading(false);
     }
   };
@@ -166,9 +154,9 @@ function AuthModal({ open, onClose }) {
   );
 }
 
-// ------------------------------------------------------------------
-// Panel del creador: generador de imágenes desde prompt
-// ------------------------------------------------------------------
+// ---------------------------------------------------------
+// Panel del creador (RunPod)
+// ---------------------------------------------------------
 function CreatorPanel() {
   const { user } = useAuth();
 
@@ -182,11 +170,10 @@ function CreatorPanel() {
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  const [status, setStatus] = useState("IDLE"); // IDLE | IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [imageB64, setImageB64] = useState(null);
   const [history, setHistory] = useState([]);
-
   const [error, setError] = useState("");
 
   const handleGenerate = async () => {
@@ -218,7 +205,6 @@ function CreatorPanel() {
       const jobId = data.jobId;
       setStatusText(`Job enviado. ID: ${jobId}. Consultando estado...`);
 
-      // Polling simple a /api/status
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
@@ -236,9 +222,7 @@ function CreatorPanel() {
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (st === "IN_QUEUE" || st === "IN_PROGRESS") {
-          continue;
-        }
+        if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
 
         finished = true;
 
@@ -283,7 +267,7 @@ function CreatorPanel() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Lado izquierdo: formulario */}
+      {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
           Generador desde prompt
@@ -365,7 +349,7 @@ function CreatorPanel() {
           </button>
         </div>
 
-        {/* Biblioteca de esta sesión */}
+        {/* Biblioteca sesión */}
         <div className="mt-6 border-t border-white/10 pt-4">
           <h3 className="text-sm font-semibold text-white">
             Biblioteca de esta sesión
@@ -401,7 +385,7 @@ function CreatorPanel() {
         </div>
       </div>
 
-      {/* Lado derecho: resultado */}
+      {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
@@ -420,21 +404,75 @@ function CreatorPanel() {
   );
 }
 
-// ------------------------------------------------------------------
-// App principal
-// ------------------------------------------------------------------
-export default function App() {
-  const { user, isAdmin, loading, signOut } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
+// ---------------------------------------------------------
+// Vista de Dashboard (solo para usuarios logueados)
+// ---------------------------------------------------------
+function DashboardView() {
+  const { user, isAdmin, signOut } = useAuth();
 
-  useEffect(() => {
-    // Fondo base
-    document.documentElement.style.background = "#06070B";
-  }, []);
+  return (
+    <div
+      className="min-h-screen w-full text-white"
+      style={{
+        background:
+          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
+      }}
+    >
+      {/* Header compacto */}
+      <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
+              io
+            </div>
+            <div>
+              <div className="text-sm font-semibold leading-tight">
+                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                Panel del creador · Beta
+              </div>
+            </div>
+          </div>
 
-  const openAuth = () => setShowAuthModal(true);
-  const closeAuth = () => setShowAuthModal(false);
+          <div className="flex items-center gap-3 text-xs">
+            <span className="hidden sm:inline text-neutral-300">
+              {user?.email} {isAdmin && "· admin"}
+            </span>
+            <button
+              onClick={signOut}
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </header>
 
+      {/* Solo el panel */}
+      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        <section className="space-y-6">
+          <div>
+            <h1 className="text-xl font-semibold text-white">
+              Panel del creador
+            </h1>
+            <p className="mt-1 text-xs text-neutral-400">
+              Genera imágenes directamente desde tu cuenta conectada al
+              pipeline real en RunPod.
+            </p>
+          </div>
+
+          <CreatorPanel />
+        </section>
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// Vista Landing (para visitantes sin sesión)
+// ---------------------------------------------------------
+function LandingView({ onOpenAuth }) {
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -461,31 +499,12 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs">
-            {!loading && user && (
-              <span className="hidden sm:inline text-neutral-300">
-                {user.email} {isAdmin && "· admin"}
-              </span>
-            )}
-
-            {!loading && !user && (
-              <button
-                onClick={openAuth}
-                className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-              >
-                Iniciar sesión
-              </button>
-            )}
-
-            {!loading && user && (
-              <button
-                onClick={signOut}
-                className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-              >
-                Cerrar sesión
-              </button>
-            )}
-          </div>
+          <button
+            onClick={onOpenAuth}
+            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+          >
+            Iniciar sesión
+          </button>
         </div>
       </header>
 
@@ -513,15 +532,13 @@ export default function App() {
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={() => {
-                  scrollToId("panel-creador");
-                }}
+                onClick={() => scrollToId("panel-creador")}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
                 Probar generador en vivo
               </button>
               <button
-                onClick={openAuth}
+                onClick={onOpenAuth}
                 className="rounded-2xl border border-white/20 px-5 py-2 text-xs text-white hover:bg-white/10"
               >
                 Iniciar sesión / registrarse
@@ -558,7 +575,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* Panel del creador */}
+        {/* Panel del creador “demo” (solo mensaje si no hay usuario) */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
@@ -570,18 +587,11 @@ export default function App() {
                 usando nuestro pipeline real en RunPod.
               </p>
             </div>
-            <button
-              onClick={() => scrollToId("top")}
-              className="hidden text-[11px] text-neutral-400 hover:text-neutral-200 md:inline-flex"
-            >
-              Volver a la página principal
-            </button>
           </div>
 
           <CreatorPanel />
         </section>
 
-        {/* Footer simple */}
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
@@ -594,10 +604,41 @@ export default function App() {
           </div>
         </footer>
       </main>
-
-      <AuthModal open={showAuthModal} onClose={closeAuth} />
     </div>
   );
 }
 
+// ---------------------------------------------------------
+// App principal
+// ---------------------------------------------------------
+export default function App() {
+  const { user, loading } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.style.background = "#06070B";
+  }, []);
+
+  const openAuth = () => setShowAuthModal(true);
+  const closeAuth = () => setShowAuthModal(false);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-black text-white">
+        <p className="text-sm text-neutral-400">Cargando sesión...</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {user ? (
+        <DashboardView />
+      ) : (
+        <LandingView onOpenAuth={openAuth} />
+      )}
+      <AuthModal open={showAuthModal} onClose={closeAuth} />
+    </>
+  );
+}
 
