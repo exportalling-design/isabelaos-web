@@ -1,21 +1,17 @@
-
-export const config = {
-  runtime: "edge",
-};
+// api/status.js  --- Consulta el estado real del job en RunPod
 
 export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type",
   };
 
-  // CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: cors });
   }
 
-  if (req.method !== "GET") {
+  if (req.method !== "GET" && req.method !== "POST") {
     return new Response("Method Not Allowed", {
       status: 405,
       headers: cors,
@@ -23,48 +19,59 @@ export default async function handler(req) {
   }
 
   try {
-    // Sacar el id de la query: /api/status?id=XXXX
-    const { searchParams } = new URL(req.url);
-    const jobId = searchParams.get("id");
+    let jobId = null;
+
+    if (req.method === "GET") {
+      const url = new URL(req.url);
+      jobId = url.searchParams.get("id");
+    } else {
+      const body = await req.json().catch(() => null);
+      jobId = body?.jobId;
+    }
 
     if (!jobId) {
       return new Response(
-        JSON.stringify({ error: "Missing id" }),
+        JSON.stringify({ error: "Missing jobId" }),
         { status: 400, headers: cors }
       );
     }
 
-    const RUNPOD_API_KEY = process.env.RP_API_KEY;
-    const RUNPOD_ENDPOINT_ID = process.env.RP_ENDPOINT;
+    // ✅ Igual que en generate: prioridad a RUNPOD_ENDPOINT_ID
+    const endpointId =
+      process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
 
-    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
+    const apiKey = process.env.RP_API_KEY;
+
+    if (!apiKey || !endpointId) {
       return new Response(
-        JSON.stringify({ error: "RunPod env vars not configured" }),
+        JSON.stringify({
+          error:
+            "Missing RP_API_KEY or endpointId (RUNPOD_ENDPOINT_ID / RP_ENDPOINT)",
+        }),
         { status: 500, headers: cors }
       );
     }
 
-    // 👇 SIN new URL, URL completa directa
-    const rpRes = await fetch(
-      `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${RUNPOD_API_KEY}`,
-        },
-      }
-    );
+    const statusUrl = `https://api.runpod.ai/v2/${endpointId}/status/${jobId}`;
 
-    const data = await rpRes.json();
+    const rp = await fetch(statusUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-    if (!rpRes.ok) {
+    if (!rp.ok) {
+      const txt = await rp.text();
       return new Response(
-        JSON.stringify({ error: "RunPod status error", raw: data }),
-        { status: rpRes.status, headers: cors }
+        JSON.stringify({ error: "RunPod status error", details: txt }),
+        { status: rp.status, headers: cors }
       );
     }
 
-    // data viene directo de RunPod
+    const data = await rp.json();
+
     return new Response(
       JSON.stringify({
         ok: true,
@@ -81,4 +88,8 @@ export default async function handler(req) {
     );
   }
 }
+
+export const config = {
+  runtime: "edge",
+};
 
