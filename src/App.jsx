@@ -1,32 +1,21 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import {
-  ArrowRight,
-  Check,
-  Mail,
-  UserPlus,
-  Sparkles,
-  ShieldCheck,
-  Zap,
-  PlayCircle,
-  Image as ImageIcon,
-} from "lucide-react";
+import "./App.css";
 
+// Pequeño helper para clases
 const cn = (...c) => c.filter(Boolean).join(" ");
-const Section = ({ id, className = "", children }) => (
-  <section id={id} className={cn("mx-auto max-w-7xl px-4", className)}>
-    {children}
-  </section>
-);
 
-const NeonButton = ({ children, className = "", onClick }) => (
+// ----------------------
+// Componentes genéricos
+// ----------------------
+
+const NeonButton = ({ children, className = "", ...props }) => (
   <button
-    onClick={onClick}
+    {...props}
     className={cn(
-      "group inline-flex items-center gap-2 rounded-2xl px-6 py-3 font-medium text-white",
-      "bg-gradient-to-r from-cyan-500 to-fuchsia-500 neon-shadow",
-      "hover:from-cyan-400 hover:to-fuchsia-400",
+      "group inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-medium text-white",
+      "bg-gradient-to-r from-cyan-500 to-fuchsia-500 shadow-[0_0_25px_rgba(56,189,248,0.4)]",
+      "hover:from-cyan-400 hover:to-fuchsia-400 hover:shadow-[0_0_35px_rgba(244,114,182,0.6)]",
+      "transition-all duration-200",
       className
     )}
   >
@@ -34,731 +23,404 @@ const NeonButton = ({ children, className = "", onClick }) => (
   </button>
 );
 
-const Card = ({ className = "", children }) => (
-  <div
-    className={cn(
-      "relative rounded-3xl border border-white/10 bg-white/5 p-6",
-      "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_20px_60px_-20px_rgba(0,0,0,0.45)]",
-      className
-    )}
-    style={{ backdropFilter: "blur(10px)" }}
-  >
-    <div className="relative z-10">{children}</div>
-    <div
-      className="pointer-events-none absolute inset-0 rounded-3xl"
-      style={{
-        background:
-          "radial-gradient(80%_60%_at_20%_0%,rgba(0,229,255,0.08),transparent),radial-gradient(70%_60%_at_100%_30%,rgba(255,23,229,0.06),transparent)",
-      }}
-    />
-  </div>
+const Section = ({ className = "", children }) => (
+  <section className={cn("mx-auto max-w-6xl px-4", className)}>{children}</section>
 );
 
-/* ---------------- MODAL DE REGISTRO ---------------- */
+// ----------------------
+// Landing pública simple
+// ----------------------
 
-function SignUpModal({ open, onClose, onComplete }) {
-  const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
-
-  if (!open) return null;
-
-  const handleCreate = () => {
-    // Aquí luego conectaremos registro real.
-    // Por ahora, solo entra al Panel.
-    if (typeof onComplete === "function") {
-      onComplete({ email, username });
-    }
-  };
-
+function Landing({ onOpenPanel }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-xl p-8">
-        <div className="flex items-start justify-between">
-          <h3 className="text-2xl font-semibold text-white">
-            Crea tu cuenta en{" "}
-            <span className="bg-gradient-to-r from-cyan-400 to-fuchsia-400 bg-clip-text text-transparent">
-              IsabelaOS Studio
+    <div className="pt-20 pb-16">
+      <Section className="grid gap-10 lg:grid-cols-[3fr,2fr] items-center">
+        <div>
+          <h1 className="text-4xl md:text-5xl font-semibold text-white leading-tight">
+            isabelaOs Studio •
+            <span className="ml-2 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+              generación de imágenes con IA en la nube
             </span>
-          </h3>
-          <button
-            onClick={onClose}
-            className="rounded-xl px-3 py-1 text-neutral-300 hover:bg-white/10"
-          >
-            ✕
-          </button>
-        </div>
+          </h1>
+          <p className="mt-5 text-lg text-neutral-300 max-w-xl">
+            Crea imágenes con calidad de estudio conectadas a nuestro pipeline real en
+            RunPod. Versión inicial:{" "}
+            <span className="font-semibold text-cyan-300">solo generación de imagen</span>.
+          </p>
 
-        <p className="mt-2 text-sm text-neutral-400">
-          Regístrate para usar el <strong>generador de imágenes</strong> por{" "}
-          <strong>5 USD/mes</strong>. Más adelante podrás actualizar a video y
-          módulos avanzados.
-        </p>
-
-        <div className="mt-6 grid gap-4">
-          <label className="block">
-            <span className="text-sm text-neutral-300">Usuario</span>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="tu_usuario"
-              className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            />
-          </label>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm text-neutral-300">Correo</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@email.com"
-                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm text-neutral-300">Contraseña</span>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </label>
+          <div className="mt-7 flex flex-wrap gap-4 items-center">
+            <NeonButton onClick={onOpenPanel}>Probar generador en vivo</NeonButton>
+            <button
+              className="rounded-2xl border border-white/15 px-5 py-3 text-sm text-neutral-200 hover:bg-white/5"
+              onClick={onOpenPanel}
+            >
+              Iniciar sesión (demo)
+            </button>
           </div>
 
-          <NeonButton onClick={handleCreate}>
-            <UserPlus className="h-5 w-5" /> Crear cuenta y entrar al panel{" "}
-            <ArrowRight className="h-4 w-4 opacity-80" />
-          </NeonButton>
-
-          <button className="rounded-2xl border border-white/15 px-5 py-3 text-sm text-neutral-300 hover:bg-white/10">
-            Continuar con Google (demo)
-          </button>
+          <p className="mt-4 text-sm text-neutral-500">
+            Plan actual: <span className="font-semibold text-white">$5/mes</span> •
+            Generación ilimitada de imágenes (mientras esté en beta).
+          </p>
         </div>
 
-        <p className="mt-4 text-xs text-neutral-500">
-          Al registrarte aceptas los{" "}
-          <a className="underline decoration-dotted" href="#">
-            Términos
-          </a>{" "}
-          y la{" "}
-          <a className="underline decoration-dotted" href="#">
-            Política de privacidad
-          </a>
-          .
-        </p>
-      </Card>
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl shadow-[0_25px_80px_rgba(0,0,0,0.7)]">
+          <div className="text-sm text-neutral-300 mb-3">Vista previa del panel</div>
+          <div className="aspect-video rounded-2xl bg-gradient-to-br from-cyan-500/20 via-fuchsia-500/15 to-slate-900/90 flex items-center justify-center">
+            <span className="text-neutral-200 text-sm">
+              Aquí verás el panel de generación cuando entres
+            </span>
+          </div>
+        </div>
+      </Section>
     </div>
   );
 }
 
-/* ---------------- HERO (LANDING) ---------------- */
+// ----------------------
+// Panel privado (demo)
+// ----------------------
 
-function Hero({ onSignup }) {
-  return (
-    <Section className="pt-16">
-      <div className="grid items-center gap-12 lg:grid-cols-2">
-        <div>
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-balance text-5xl font-semibold leading-tight text-white md:text-6xl"
-          >
-            El primer{" "}
-            <span className="bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-              estudio de imágenes con IA
-            </span>{" "}
-            creado en Latinoamérica.
-          </motion.h1>
+function Panel({ onBackToLanding }) {
+  const [activeTab, setActiveTab] = useState("generate"); // "generate" | "library"
 
-          <p className="mt-5 max-w-xl text-lg text-neutral-300">
-            IsabelaOS Studio genera imágenes con estética profesional usando tu
-            pipeline en RunPod. Sin límites raros ni créditos escondidos.
-          </p>
-
-          <div className="mt-7 flex flex-wrap items-center gap-4">
-            <NeonButton onClick={onSignup}>
-              <UserPlus className="h-5 w-5" /> Crear cuenta (5 USD/mes)
-            </NeonButton>
-            <a
-              href="#demo"
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-6 py-3 text-white hover:bg-white/10"
-            >
-              <PlayCircle className="h-5 w-5" /> Ver panel de demo
-            </a>
-          </div>
-
-          <div className="mt-6 flex flex-wrap items-center gap-6 text-sm text-neutral-400">
-            <span className="inline-flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-lime-300" /> Seguridad de
-              nivel estudio
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <Zap className="h-4 w-4 text-cyan-300" /> Render rápido vía RunPod
-            </span>
-          </div>
-        </div>
-
-        <Card className="p-0 overflow-hidden">
-          <div className="relative aspect-[4/3] w-full">
-            <img
-              src="https://images.unsplash.com/photo-1603366615917-1fa6dad5c4fa?q=80&w=1200&auto=format&fit=crop"
-              alt="Mujer mitad humana mitad robot"
-              className="h-full w-full object-cover"
-            />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_40%_at_30%_0%,rgba(0,229,255,0.25),transparent),radial-gradient(60%_40%_at_100%_40%,rgba(255,23,229,0.22),transparent)] mix-blend-screen" />
-          </div>
-        </Card>
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- LOGOS ---------------- */
-
-function Logos() {
-  return (
-    <Section className="py-8">
-      <div className="flex flex-wrap items-center justify-center gap-8 opacity-70">
-        {["RunPod", "Diffusers", "Stable Diffusion", "Latam Creators"].map(
-          (l) => (
-            <div key={l} className="text-sm text-neutral-400">
-              {l}
-            </div>
-          )
-        )}
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- FEATURES ---------------- */
-
-function Features() {
-  const list = [
-    {
-      title: "IA enfocada en imágenes",
-      desc: "Solo pagas por lo que usas: generación de imágenes en alta calidad.",
-      icon: <Sparkles className="h-5 w-5" />,
-    },
-    {
-      title: "Flujos de trabajo listos",
-      desc: "Presets de estilo, luces y encuadres para repetir resultados.",
-      icon: <Check className="h-5 w-5" />,
-    },
-    {
-      title: "Pensado para crecer",
-      desc: "Luego podrás agregar video, BodySync y más módulos sin cambiar de plataforma.",
-      icon: <Zap className="h-5 w-5" />,
-    },
-  ];
-
-  return (
-    <Section id="features" className="py-10">
-      <div className="mb-6">
-        <h3 className="text-2xl font-semibold text-white">Lo que obtienes</h3>
-        <p className="mt-2 text-neutral-400">
-          Empezamos con el módulo de imágenes. El resto se irá activando como
-          upgrades.
-        </p>
-      </div>
-      <div className="grid gap-6 md:grid-cols-3">
-        {list.map((f, i) => (
-          <Card key={i}>
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-cyan-400/30 to-fuchsia-400/30 text-white">
-                {f.icon}
-              </div>
-              <div>
-                <h4 className="text-white">{f.title}</h4>
-                <p className="mt-1 text-sm text-neutral-400">{f.desc}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- SHOWCASE ---------------- */
-
-function Showcase() {
-  return (
-    <Section id="showcase" className="py-12">
-      <div className="mb-6 flex items-end justify-between">
-        <h3 className="text-2xl font-semibold text-white">
-          Galería de la plataforma
-        </h3>
-        <a href="#" className="text-sm text-cyan-300 hover:text-cyan-200">
-          Ver todo
-        </a>
-      </div>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {[
-          {
-            type: "image",
-            src: "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop",
-            caption: "Panel de control",
-          },
-          {
-            type: "image",
-            src: "https://images.unsplash.com/photo-1554386690-89dd3aefca87?q=80&w=1200&auto=format&fit=crop",
-            caption: "Librería de assets",
-          },
-          {
-            type: "image",
-            src: "https://images.unsplash.com/photo-1526481280695-3c687fd543c0?q=80&w=1200&auto=format&fit=crop",
-            caption: "Escenas generadas con IA",
-          },
-        ].map((m, i) => (
-          <div
-            key={i}
-            className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/40"
-          >
-            <img
-              src={m.src}
-              alt={m.caption}
-              className="h-56 w-full object-cover transition duration-500 group-hover:scale-105"
-            />
-            <div className="absolute bottom-3 left-3 text-sm text-white/90 drop-shadow">
-              {m.caption}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- PRICING 5 USD ---------------- */
-
-function Pricing({ onSignup }) {
-  const plan = {
-    name: "Creador de imágenes",
-    price: "$5",
-    perks: [
-      "Generación de imágenes (según capacidad de tu nodo RunPod)",
-      "Uso comercial de tus imágenes",
-      "Acceso a presets y estilos guardados",
-      "Actualizaciones futuras del módulo de imágenes",
-    ],
-  };
-
-  return (
-    <Section id="pricing" className="py-12">
-      <div className="mb-8 text-center">
-        <h3 className="text-2xl font-semibold text-white">
-          Un solo plan. Simple.
-        </h3>
-        <p className="mt-2 text-neutral-400">
-          Paga <strong>5 USD/mes</strong> y usa IsabelaOS Studio como tu
-          generador central de imágenes con IA.
-        </p>
-      </div>
-
-      <div className="mx-auto max-w-xl">
-        <Card className="relative overflow-hidden">
-          <div className="absolute right-4 top-4 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-black">
-            Lanzamiento
-          </div>
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h4 className="text-lg font-semibold text-white">{plan.name}</h4>
-              <p className="mt-1 text-sm text-neutral-400">
-                Ideal para creadores que necesitan solo imágenes por ahora.
-              </p>
-            </div>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-white">
-                {plan.price}
-                <span className="text-sm font-normal text-neutral-400">
-                  /mes
-                </span>
-              </div>
-              <div className="text-xs text-neutral-500">
-                Sin contratos, puedes cancelar cuando quieras.
-              </div>
-            </div>
-          </div>
-
-          <ul className="mt-5 space-y-2 text-sm text-neutral-300">
-            {plan.perks.map((k) => (
-              <li key={k} className="flex items-center gap-2">
-                <Check className="h-4 w-4 text-lime-300" /> {k}
-              </li>
-            ))}
-          </ul>
-
-          <NeonButton className="mt-6 w-full" onClick={onSignup}>
-            Empezar por 5 USD/mes
-          </NeonButton>
-
-          <p className="mt-3 text-center text-xs text-neutral-500">
-            Más adelante podrás desbloquear módulos de video, BodySync y
-            CineCam como upgrades adicionales.
-          </p>
-        </Card>
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- DASHBOARD (PANEL CON GENERADOR) ---------------- */
-
-function Dashboard({ onBack }) {
   const [prompt, setPrompt] = useState(
     "Cinematic portrait, ultra detailed, soft light, 8k"
   );
-  const [negative, setNegative] = useState(
+  const [negativePrompt, setNegativePrompt] = useState(
     "blurry, low quality, deformed, watermark, text"
   );
   const [steps, setSteps] = useState(22);
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
-  const [loading, setLoading] = useState(false);
-  const [imageUrl, setImageUrl] = useState("");
-  const [error, setError] = useState("");
+
+  const [status, setStatus] = useState("idle"); // idle | pending | completed | error
+  const [statusMessage, setStatusMessage] = useState("");
+  const [generatedImage, setGeneratedImage] = useState(null);
+
+  // Biblioteca local: [{ id, url, prompt, createdAt }]
+  const [library, setLibrary] = useState([]);
 
   const handleGenerate = async () => {
-    setLoading(true);
-    setError("");
-    setImageUrl("");
-
     try {
+      setStatus("pending");
+      setStatusMessage("Enviando job a RunPod...");
+      setGeneratedImage(null);
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          negative_prompt: negative,
-          width,
-          height,
-          steps,
+          negative_prompt: negativePrompt,
+          width: Number(width),
+          height: Number(height),
+          steps: Number(steps),
         }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok || !data.ok) {
-        throw new Error(
-          data?.error || "Error al generar la imagen desde el servidor."
-        );
+      const json = await res.json();
+      if (!res.ok || !json.ok || !json.jobId) {
+        throw new Error(json.error || "Error al crear el job.");
       }
 
-      const output = data.output || {};
-      const imgB64 = output.image_b64 || output.imageBase64 || null;
+      const jobId = json.jobId;
+      setStatusMessage("Job creado. Esperando resultado...");
 
-      if (!imgB64) {
-        throw new Error("No llegó la imagen en la respuesta.");
+      // Polling a /api/status hasta que esté COMPLETED o FAILED
+      let done = false;
+      let data = null;
+
+      while (!done) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const sRes = await fetch(`/api/status?id=${jobId}`);
+        const sJson = await sRes.json();
+
+        if (!sRes.ok || sJson.error) {
+          throw new Error(sJson.error || "Error al consultar el status.");
+        }
+
+        if (sJson.status === "IN_QUEUE" || sJson.status === "IN_PROGRESS") {
+          setStatusMessage(`Estado actual: ${sJson.status}...`);
+          continue;
+        }
+
+        // COMPLETED o FAILED
+        done = true;
+        data = sJson;
       }
 
-      setImageUrl(`data:image/png;base64,${imgB64}`);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+      if (!data || data.status !== "COMPLETED") {
+        setStatus("error");
+        setStatusMessage(`Job no completado. Estado: ${data?.status || "?"}`);
+        return;
+      }
+
+      if (!data.output || !data.output.image_b64) {
+        setStatus("error");
+        setStatusMessage("Error: No llegó la imagen en la respuesta.");
+        return;
+      }
+
+      const imageUrl = `data:image/png;base64,${data.output.image_b64}`;
+      setGeneratedImage(imageUrl);
+      setStatus("completed");
+      setStatusMessage("Imagen generada correctamente.");
+
+      // Guardar en biblioteca local
+      setLibrary((prev) => [
+        {
+          id: Date.now(),
+          url: imageUrl,
+          prompt,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      // Cambiamos a la pestaña Biblioteca automáticamente si quieres:
+      // setActiveTab("library");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+      setStatusMessage(String(err.message || err));
     }
   };
 
   return (
-    <Section id="demo" className="py-12">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <ImageIcon className="h-6 w-6 text-cyan-300" />
-            Panel de generación de imágenes
-          </h2>
-          <p className="mt-2 text-sm text-neutral-400 max-w-xl">
-            Escribe un prompt, ajusta los parámetros y genera imágenes usando tu
-            endpoint de RunPod conectado a IsabelaOS Studio.
-          </p>
-        </div>
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="rounded-xl border border-white/15 px-4 py-2 text-sm text-neutral-200 hover:bg-white/10"
-          >
-            ← Volver a la página principal
-          </button>
-        )}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm text-neutral-300">Prompt</label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={4}
-                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm text-neutral-300">
-                Negative prompt
-              </label>
-              <textarea
-                value={negative}
-                onChange={(e) => setNegative(e.target.value)}
-                rows={2}
-                className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-neutral-300">Steps</label>
-                <input
-                  type="number"
-                  value={steps}
-                  onChange={(e) => setSteps(Number(e.target.value || 1))}
-                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-300">Width</label>
-                <input
-                  type="number"
-                  value={width}
-                  onChange={(e) => setWidth(Number(e.target.value || 64))}
-                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-neutral-300">Height</label>
-                <input
-                  type="number"
-                  value={height}
-                  onChange={(e) => setHeight(Number(e.target.value || 64))}
-                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                />
-              </div>
-            </div>
-
-            {error && (
-              <div className="rounded-2xl border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {error}
-              </div>
-            )}
-
-            <NeonButton onClick={handleGenerate} className="w-full">
-              {loading ? (
-                <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Generando imagen...
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="h-5 w-5" />
-                  Generar imagen desde prompt
-                </>
-              )}
-            </NeonButton>
-          </div>
-        </Card>
-
-        <Card className="flex items-center justify-center">
-          {loading && (
-            <div className="flex flex-col items-center gap-3 text-neutral-300">
-              <span className="h-10 w-10 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              <span>Generando imagen en tu nodo de RunPod...</span>
-            </div>
-          )}
-
-          {!loading && imageUrl && (
-            <div className="w-full">
-              <p className="mb-2 text-sm text-neutral-300">
-                Resultado de la última generación:
-              </p>
-              <img
-                src={imageUrl}
-                alt="Resultado IA"
-                className="w-full rounded-2xl border border-white/15 object-cover"
-              />
-            </div>
-          )}
-
-          {!loading && !imageUrl && !error && (
-            <div className="text-center text-sm text-neutral-400">
-              Aquí aparecerán tus imágenes generadas.{" "}
-              <span className="text-neutral-200">
-                Escribe un prompt y genera tu primera imagen.
+    <div className="min-h-screen pb-16">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-400 via-fuchsia-400 to-violet-500 shadow-lg" />
+            <div className="flex flex-col">
+              <span className="text-sm text-neutral-400">Panel del creador</span>
+              <span className="text-lg font-semibold text-white">
+                isabelaOs <span className="text-neutral-400">Studio</span>
               </span>
             </div>
-          )}
-        </Card>
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- FOOTER ---------------- */
-
-function Footer({ onSignup }) {
-  return (
-    <Section className="pb-16">
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <div className="grid gap-6 md:grid-cols-2">
-          <div>
-            <h4 className="text-white">
-              ¿Listo para crear algo{" "}
-              <span className="bg-gradient-to-r from-cyan-400 to-fuchsia-400 bg-clip-text text-transparent">
-                increíble
-              </span>
-              ?
-            </h4>
-            <p className="mt-2 text-sm text-neutral-400">
-              Lanza tu propio estudio de imágenes con IA por solo 5 USD/mes.
-            </p>
           </div>
-          <div className="flex items-center gap-3 md:justify-end">
+          <div className="flex items-center gap-3">
             <button
-              onClick={onSignup}
-              className="flex items-center gap-2 rounded-2xl border border-white/15 px-5 py-3 text-white hover:bg-white/10"
+              className="rounded-xl border border-white/15 px-3 py-1 text-xs text-neutral-200 hover:bg-white/10"
+              onClick={onBackToLanding}
             >
-              <Mail className="h-4 w-4" /> Registrarme con correo
+              Volver a la página principal
             </button>
-            <NeonButton>
-              <PlayCircle className="h-4 w-4" /> Ver demo
-            </NeonButton>
-          </div>
-        </div>
-        <div className="mt-6 flex items-center justify-between text-xs text-neutral-500">
-          <span>
-            © {new Date().getFullYear()} IsabelaOS Studio. Todos los derechos
-            reservados.
-          </span>
-          <div className="flex gap-4">
-            <a href="#">Privacidad</a>
-            <a href="#">Términos</a>
-            <a href="#">Soporte</a>
-          </div>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-/* ---------------- APP PRINCIPAL ---------------- */
-
-export default function App() {
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState("landing"); // "landing" | "dashboard"
-
-  useEffect(() => {
-    document.documentElement.style.background = "#06070B";
-  }, []);
-
-  const goToDashboard = () => {
-    setOpen(false);
-    setMode("dashboard");
-  };
-
-  const goToLanding = () => {
-    setMode("landing");
-  };
-
-  return (
-    <div
-      className="min-h-screen w-full"
-      style={{
-        background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
-      }}
-    >
-      {/* HEADER */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo.svg"
-              alt="IsabelaOS Studio"
-              className="h-9 w-9 rounded-xl"
-            />
-            <span className="text-lg font-semibold text-white">
-              IsabelaOS <span className="text-neutral-400">Studio</span>
-            </span>
-          </div>
-
-          {mode === "landing" ? (
-            <nav className="hidden gap-6 text-sm text-neutral-300 md:flex">
-              <a href="#features" className="hover:text-white">
-                Funciones
-              </a>
-              <a href="#showcase" className="hover:text-white">
-                Galería
-              </a>
-              <a href="#pricing" className="hover:text-white">
-                Plan 5 USD
-              </a>
-            </nav>
-          ) : (
-            <div className="hidden gap-6 text-sm text-neutral-300 md:flex">
-              <button
-                onClick={goToLanding}
-                className="hover:text-white text-neutral-300"
-              >
-                Volver a landing
-              </button>
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
-            {mode === "dashboard" ? (
-              <button
-                onClick={goToLanding}
-                className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/10"
-              >
-                Cerrar panel
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => setOpen(true)}
-                  className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white hover:bg-white/10"
-                >
-                  Registrarse
-                </button>
-                <NeonButton
-                  className="hidden md:inline-flex"
-                  onClick={goToDashboard}
-                >
-                  Probar demo
-                </NeonButton>
-              </>
-            )}
           </div>
         </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL */}
-      {mode === "landing" ? (
-        <>
-          <Hero onSignup={() => setOpen(true)} />
-          <Logos />
-          <Features />
-          <Showcase />
-          <Pricing onSignup={() => setOpen(true)} />
-          <Footer onSignup={() => setOpen(true)} />
-        </>
-      ) : (
-        <Dashboard onBack={goToLanding} />
-      )}
+      <Section className="pt-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-xl md:text-2xl font-semibold text-white">
+            Panel de generación de imágenes
+          </h2>
+          <div className="inline-flex rounded-2xl border border-white/10 bg-black/40 p-1 text-sm">
+            <button
+              onClick={() => setActiveTab("generate")}
+              className={cn(
+                "px-4 py-1.5 rounded-2xl transition",
+                activeTab === "generate"
+                  ? "bg-white/10 text-white"
+                  : "text-neutral-400 hover:text-white"
+              )}
+            >
+              Generar
+            </button>
+            <button
+              onClick={() => setActiveTab("library")}
+              className={cn(
+                "px-4 py-1.5 rounded-2xl transition",
+                activeTab === "library"
+                  ? "bg-white/10 text-white"
+                  : "text-neutral-400 hover:text-white"
+              )}
+            >
+              Biblioteca
+            </button>
+          </div>
+        </div>
 
-      {/* MODAL REGISTRO */}
-      <SignUpModal
-        open={open}
-        onClose={() => setOpen(false)}
-        onComplete={goToDashboard}
-      />
+        {/* Contenido de pestañas */}
+        {activeTab === "generate" ? (
+          <div className="mt-8 grid gap-8 lg:grid-cols-2">
+            {/* Formulario */}
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-200">
+                    Prompt
+                  </label>
+                  <textarea
+                    className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400 min-h-[96px]"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-neutral-200">
+                    Negative prompt
+                  </label>
+                  <textarea
+                    className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400 min-h-[80px]"
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <label className="block text-neutral-200">Steps</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                      value={steps}
+                      onChange={(e) => setSteps(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-neutral-200">Width</label>
+                    <input
+                      type="number"
+                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                      value={width}
+                      onChange={(e) => setWidth(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-neutral-200">Height</label>
+                    <input
+                      type="number"
+                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                      value={height}
+                      onChange={(e) => setHeight(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Mensaje de estado */}
+                {status !== "idle" && (
+                  <div
+                    className={cn(
+                      "mt-2 rounded-2xl px-4 py-2 text-xs",
+                      status === "pending" && "bg-blue-500/10 text-blue-200",
+                      status === "completed" && "bg-emerald-500/10 text-emerald-200",
+                      status === "error" && "bg-red-500/10 text-red-200"
+                    )}
+                  >
+                    {statusMessage}
+                  </div>
+                )}
+
+                <NeonButton
+                  className="mt-4 w-full"
+                  onClick={handleGenerate}
+                  disabled={status === "pending"}
+                >
+                  {status === "pending" ? "Generando..." : "Generar imagen desde prompt"}
+                </NeonButton>
+              </div>
+            </div>
+
+            {/* Vista previa */}
+            <div className="rounded-3xl border border-white/10 bg-black/60 p-4 flex items-center justify-center min-h-[320px]">
+              {generatedImage ? (
+                <img
+                  src={generatedImage}
+                  alt="Resultado IA"
+                  className="max-h-[420px] max-w-full rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.9)]"
+                />
+              ) : (
+                <div className="text-sm text-neutral-500 text-center px-6">
+                  Aquí verás el resultado en cuanto se complete el render.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          // ---------------- Biblioteca ----------------
+          <div className="mt-8">
+            {library.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-white/15 bg-black/40 p-6 text-center text-sm text-neutral-400">
+                Aún no tienes imágenes guardadas en esta sesión. Genera una imagen desde
+                la pestaña <span className="text-white">Generar</span> y aparecerá aquí.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-neutral-400">
+                  Biblioteca local de esta sesión ({library.length} imagen
+                  {library.length > 1 ? "es" : ""}). Haz clic en{" "}
+                  <span className="font-medium text-white">Descargar</span> para guardar
+                  el archivo.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {library.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-3 flex flex-col"
+                    >
+                      <div className="aspect-square overflow-hidden rounded-xl bg-black/80 mb-3">
+                        <img
+                          src={item.url}
+                          alt={item.prompt}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      <p className="text-xs text-neutral-300 line-clamp-2">
+                        {item.prompt}
+                      </p>
+                      <p className="mt-1 text-[11px] text-neutral-500">
+                        {new Date(item.createdAt).toLocaleString()}
+                      </p>
+                      <a
+                        href={item.url}
+                        download={`isabelaos-image-${item.id}.png`}
+                        className="mt-3 inline-flex items-center justify-center rounded-xl bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20"
+                      >
+                        Descargar PNG
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
+
+// ----------------------
+// App principal
+// ----------------------
+
+export default function App() {
+  const [view, setView] = useState("landing"); // "landing" | "panel"
+
+  useEffect(() => {
+    document.documentElement.style.backgroundColor = "#020617";
+  }, []);
+
+  return (
+    <div
+      className="min-h-screen text-white"
+      style={{
+        background:
+          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#020617",
+      }}
+    >
+      {view === "landing" ? (
+        <Landing onOpenPanel={() => setView("panel")} />
+      ) : (
+        <Panel onBackToLanding={() => setView("landing")} />
+      )}
+    </div>
+  );
+}
+
 
