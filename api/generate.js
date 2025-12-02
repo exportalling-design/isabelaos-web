@@ -28,7 +28,21 @@ export default async function handler(req) {
       );
     }
 
-    const base = `https://api.runpod.ai/v2/${process.env.RP_ENDPOINT}`;
+    // 🔹 CAMBIO: elegimos endpoint desde RP_ENDPOINT o RUNPOD_ENDPOINT_ID
+    const endpointId =
+      process.env.RP_ENDPOINT || process.env.RUNPOD_ENDPOINT_ID;
+
+    if (!process.env.RP_API_KEY || !endpointId) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Missing RP_API_KEY or endpointId (RP_ENDPOINT / RUNPOD_ENDPOINT_ID)",
+        }),
+        { status: 500, headers: cors }
+      );
+    }
+
+    const base = `https://api.runpod.ai/v2/${endpointId}`;
 
     const rp = await fetch(`${base}/run`, {
       method: "POST",
