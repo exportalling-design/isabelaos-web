@@ -1,14 +1,10 @@
 // src/components/LoginModal.jsx
 import { useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 function LoginModal({ isOpen, onClose }) {
-  const {
-    registerWithEmail,
-    loginWithEmail,
-    loginWithGoogle
-  } = useAuth();
-
+  const { user } = useAuth() || {};
   const [mode, setMode] = useState('register'); // 'register' | 'login'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,15 +20,46 @@ function LoginModal({ isOpen, onClose }) {
 
     try {
       if (mode === 'register') {
-        await registerWithEmail(email, password);
+        console.log('[LoginModal] signUp con', email);
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+
+        if (error) {
+          console.error('[LoginModal] Error signUp:', error);
+          throw error;
+        }
+
+        console.log('[LoginModal] signUp OK:', data);
       } else {
-        await loginWithEmail(email, password);
+        console.log('[LoginModal] signInWithPassword con', email);
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) {
+          console.error('[LoginModal] Error signInWithPassword:', error);
+          throw error;
+        }
+
+        console.log('[LoginModal] signIn OK:', data);
       }
 
+      // Supabase ya tiene sesión; AuthContext la detecta con onAuthStateChange
       onClose();
     } catch (err) {
-      console.error('Error en handleSubmit:', err);
-      setErrorMsg(err?.message || 'Ocurrió un error al procesar tu solicitud.');
+      console.error('[LoginModal] EXCEPCIÓN en handleSubmit:', err);
+      let msg = err?.message || 'Ocurrió un error al procesar tu solicitud.';
+
+      // Si viene el mensaje raro minificado:
+      if (msg === 'i is not a function' || msg === 'a is not a function') {
+        msg =
+          'Error interno de autenticación. Intenta recargar la página o vuelve a intentarlo en unos minutos.';
+      }
+
+      setErrorMsg(msg);
     } finally {
       setLoading(false);
     }
@@ -43,11 +70,25 @@ function LoginModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
-      await loginWithGoogle();
-      // Supabase redirige automáticamente
+      console.log('[LoginModal] Login con Google');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+      });
+
+      if (error) {
+        console.error('[LoginModal] Error signInWithOAuth:', error);
+        throw error;
+      }
+
+      console.log('[LoginModal] signInWithOAuth redirigiendo...', data);
+      // Supabase redirige, y al volver onAuthStateChange actualiza el user.
     } catch (err) {
-      console.error('Error en login con Google:', err);
-      setErrorMsg(err?.message || 'Error al iniciar sesión con Google');
+      console.error('[LoginModal] EXCEPCIÓN en handleGoogle:', err);
+      let msg = err?.message || 'Error al iniciar sesión con Google.';
+      if (msg === 'i is not a function' || msg === 'a is not a function') {
+        msg = 'Error interno de autenticación con Google.';
+      }
+      setErrorMsg(msg);
       setLoading(false);
     }
   };
@@ -64,12 +105,8 @@ function LoginModal({ isOpen, onClose }) {
           ✕
         </button>
 
-        <h2>
-          {mode === 'register' ? 'Crea tu cuenta' : 'Inicia sesión'}
-        </h2>
-        <p>
-          Usa tu correo o entra con Google para usar isabelaOs Studio.
-        </p>
+        <h2>{mode === 'register' ? 'Crea tu cuenta' : 'Inicia sesión'}</h2>
+        <p>Usa tu correo o entra con Google para usar isabelaOs Studio.</p>
 
         <form onSubmit={handleSubmit}>
           <label>
@@ -94,9 +131,7 @@ function LoginModal({ isOpen, onClose }) {
           </label>
 
           {errorMsg && (
-            <p style={{ color: 'red', marginTop: '8px' }}>
-              {errorMsg}
-            </p>
+            <p style={{ color: 'red', marginTop: '8px' }}>{errorMsg}</p>
           )}
 
           <button type="submit" disabled={loading} className="primary-btn">
@@ -104,7 +139,7 @@ function LoginModal({ isOpen, onClose }) {
               ? 'Procesando...'
               : mode === 'register'
               ? 'Registrarme'
-              : 'Iniciar sesión'}
+              : 'Entrar'}
           </button>
         </form>
 
