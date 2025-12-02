@@ -1,426 +1,498 @@
-import { useState, useEffect } from "react";
-import "./App.css";
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  Image as ImageIcon,
+  LogIn,
+  Download,
+  Sparkles,
+  ShieldCheck,
+} from "lucide-react";
 
-// Pequeño helper para clases
+// -------------------- Componentes base --------------------
+
 const cn = (...c) => c.filter(Boolean).join(" ");
-
-// ----------------------
-// Componentes genéricos
-// ----------------------
-
-const NeonButton = ({ children, className = "", ...props }) => (
-  <button
-    {...props}
-    className={cn(
-      "group inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-medium text-white",
-      "bg-gradient-to-r from-cyan-500 to-fuchsia-500 shadow-[0_0_25px_rgba(56,189,248,0.4)]",
-      "hover:from-cyan-400 hover:to-fuchsia-400 hover:shadow-[0_0_35px_rgba(244,114,182,0.6)]",
-      "transition-all duration-200",
-      className
-    )}
-  >
-    {children}
-  </button>
-);
 
 const Section = ({ className = "", children }) => (
   <section className={cn("mx-auto max-w-6xl px-4", className)}>{children}</section>
 );
 
-// ----------------------
-// Landing pública simple
-// ----------------------
+// -------------------- LANDING --------------------
 
 function Landing({ onOpenPanel }) {
   return (
-    <div className="pt-20 pb-16">
-      <Section className="grid gap-10 lg:grid-cols-[3fr,2fr] items-center">
-        <div>
-          <h1 className="text-4xl md:text-5xl font-semibold text-white leading-tight">
-            isabelaOs Studio •
-            <span className="ml-2 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-              generación de imágenes con IA en la nube
-            </span>
-          </h1>
-          <p className="mt-5 text-lg text-neutral-300 max-w-xl">
-            Crea imágenes con calidad de estudio conectadas a nuestro pipeline real en
-            RunPod. Versión inicial:{" "}
-            <span className="font-semibold text-cyan-300">solo generación de imagen</span>.
-          </p>
+    <div className="min-h-screen w-full bg-[#05060b] text-white">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          {/* Logo + nombre */}
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-tr from-cyan-500 to-fuchsia-500 text-lg font-bold">
+              iO
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm text-neutral-400">Stalling Technologic</div>
+              <div className="text-lg font-semibold">
+                isabelaOs <span className="text-neutral-400">Studio</span>
+              </div>
+            </div>
+          </div>
 
-          <div className="mt-7 flex flex-wrap gap-4 items-center">
-            <NeonButton onClick={onOpenPanel}>Probar generador en vivo</NeonButton>
+          <nav className="hidden gap-6 text-sm text-neutral-300 md:flex">
+            <a href="#como-funciona" className="hover:text-white">
+              Cómo funciona
+            </a>
+            <a href="#galeria" className="hover:text-white">
+              Galería
+            </a>
+            <a href="#planes" className="hover:text-white">
+              Planes
+            </a>
+          </nav>
+
+          <div className="flex items-center gap-3">
             <button
-              className="rounded-2xl border border-white/15 px-5 py-3 text-sm text-neutral-200 hover:bg-white/5"
               onClick={onOpenPanel}
+              className="hidden rounded-xl border border-white/20 px-4 py-2 text-sm text-white hover:bg-white/10 md:inline-flex items-center gap-2"
             >
+              <LogIn className="h-4 w-4" />
               Iniciar sesión (demo)
             </button>
+            <button
+              onClick={onOpenPanel}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-fuchsia-500/30"
+            >
+              Probar generador en vivo
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
-
-          <p className="mt-4 text-sm text-neutral-500">
-            Plan actual: <span className="font-semibold text-white">$5/mes</span> •
-            Generación ilimitada de imágenes (mientras esté en beta).
-          </p>
         </div>
+      </header>
 
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl shadow-[0_25px_80px_rgba(0,0,0,0.7)]">
-          <div className="text-sm text-neutral-300 mb-3">Vista previa del panel</div>
-          <div className="aspect-video rounded-2xl bg-gradient-to-br from-cyan-500/20 via-fuchsia-500/15 to-slate-900/90 flex items-center justify-center">
-            <span className="text-neutral-200 text-sm">
-              Aquí verás el panel de generación cuando entres
+      {/* Hero principal */}
+      <main className="pb-20">
+        <Section className="pt-14">
+          <div className="grid gap-10 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-center">
+            <div>
+              <motion.h1
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="text-balance text-4xl font-semibold leading-tight md:text-5xl"
+              >
+                isabelaOs Studio •{" "}
+                <span className="bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+                  generación de imágenes con IA
+                </span>{" "}
+                en la nube
+              </motion.h1>
+              <p className="mt-5 text-base text-neutral-300 md:text-lg">
+                Plataforma creada en Guatemala, pensada para creadores de Latinoamérica.
+                Conecta directamente con nuestro pipeline real en RunPod para generar
+                imágenes con calidad de estudio.
+              </p>
+              <p className="mt-2 text-sm text-neutral-400">
+                Versión inicial: <strong>solo generación de imagen</strong>. Más adelante
+                añadiremos video, BodySync y CineCam.
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center gap-4">
+                <button
+                  onClick={onOpenPanel}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-fuchsia-500/30"
+                >
+                  Probar en vivo
+                  <ImageIcon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={onOpenPanel}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-5 py-3 text-sm text-neutral-200 hover:bg-white/10"
+                >
+                  Iniciar sesión (demo)
+                  <LogIn className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-neutral-400">
+                <span className="inline-flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-lime-300" />
+                  Pipeline real conectado a RunPod
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-cyan-300" />
+                  Primer enfoque: creadores de contenido en LATAM
+                </span>
+              </div>
+
+              <div className="mt-4 text-sm text-neutral-400">
+                Plan beta actual:{" "}
+                <span className="font-semibold text-white">$5/mes</span> • Generación
+                ilimitada de imágenes mientras dure la beta.
+              </div>
+            </div>
+
+            {/* Vista previa del panel */}
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-4 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.7)]">
+              <p className="text-sm text-neutral-300 mb-3">Vista previa del panel</p>
+              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/60 p-4">
+                <div className="h-full w-full rounded-2xl border border-white/15 bg-black/60" />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* Cómo funciona */}
+        <Section id="como-funciona" className="mt-16">
+          <h2 className="text-xl font-semibold">Cómo funciona</h2>
+          <p className="mt-2 text-sm text-neutral-400">
+            1) Escribes un prompt. 2) Nuestro backend manda el job a RunPod. 3) Cuando el
+            render termina, ves la imagen en tu panel y puedes descargarla.
+          </p>
+        </Section>
+
+        {/* Galería simple (estática por ahora) */}
+        <Section id="galeria" className="mt-14">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Galería de ejemplo</h2>
+            <span className="text-xs text-neutral-500">
+              Imágenes de muestra (no finales)
             </span>
           </div>
-        </div>
-      </Section>
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+            {[
+              "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=900&auto=format&fit=crop",
+              "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?q=80&w=900&auto=format&fit=crop",
+              "https://images.unsplash.com/photo-1554386690-89dd3aefca87?q=80&w=900&auto=format&fit=crop",
+            ].map((src) => (
+              <div
+                key={src}
+                className="overflow-hidden rounded-2xl border border-white/10 bg-black/40"
+              >
+                <img src={src} className="h-44 w-full object-cover" />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Planes */}
+        <Section id="planes" className="mt-16">
+          <h2 className="text-xl font-semibold">Planes (fase imagen)</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
+              <h3 className="text-lg font-semibold">Plan Beta Creadores</h3>
+              <p className="mt-2 text-sm text-neutral-300">
+                Acceso al generador conectado a RunPod, pensado para creadores que quieren
+                probar isabelaOs Studio desde ya.
+              </p>
+              <p className="mt-3 text-2xl font-bold">
+                $5<span className="text-base font-normal text-neutral-400">/mes</span>
+              </p>
+              <ul className="mt-3 space-y-1 text-sm text-neutral-300">
+                <li>• Generación ilimitada de imágenes (uso justo)</li>
+                <li>• Panel de control en la nube</li>
+                <li>• Actualizaciones de la fase imagen sin costo extra</li>
+              </ul>
+            </div>
+            <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-neutral-400">
+              <p>
+                Más adelante agregaremos planes con{" "}
+                <strong>video, BodySync, CineCam</strong> y otros módulos. Por ahora
+                estamos enfocándonos solo en que la generación de imágenes sea estable y
+                profesional.
+              </p>
+            </div>
+          </div>
+        </Section>
+      </main>
     </div>
   );
 }
 
-// ----------------------
-// Panel privado (demo)
-// ----------------------
+// -------------------- PANEL + BIBLIOTECA --------------------
 
-function Panel({ onBackToLanding }) {
-  const [activeTab, setActiveTab] = useState("generate"); // "generate" | "library"
-
+function CreatorPanel({ onBackToLanding, images, onNewImage }) {
   const [prompt, setPrompt] = useState(
     "Cinematic portrait, ultra detailed, soft light, 8k"
   );
-  const [negativePrompt, setNegativePrompt] = useState(
+  const [negative, setNegative] = useState(
     "blurry, low quality, deformed, watermark, text"
   );
   const [steps, setSteps] = useState(22);
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
 
-  const [status, setStatus] = useState("idle"); // idle | pending | completed | error
-  const [statusMessage, setStatusMessage] = useState("");
-  const [generatedImage, setGeneratedImage] = useState(null);
+  const [statusText, setStatusText] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [currentImage, setCurrentImage] = useState("");
 
-  // Biblioteca local: [{ id, url, prompt, createdAt }]
-  const [library, setLibrary] = useState([]);
+  async function handleGenerate(e) {
+    e.preventDefault();
+    setError("");
+    setStatusText("Enviando job a RunPod...");
+    setCurrentImage("");
+    setLoading(true);
 
-  const handleGenerate = async () => {
     try {
-      setStatus("pending");
-      setStatusMessage("Enviando job a RunPod...");
-      setGeneratedImage(null);
-
-      const res = await fetch("/api/generate", {
+      // 1) Crear job
+      const genRes = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           prompt,
-          negative_prompt: negativePrompt,
+          negative_prompt: negative,
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
         }),
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.ok || !json.jobId) {
-        throw new Error(json.error || "Error al crear el job.");
+      const genJson = await genRes.json();
+      if (!genRes.ok || !genJson.ok) {
+        throw new Error(genJson.error || "Error al crear el job");
       }
 
-      const jobId = json.jobId;
-      setStatusMessage("Job creado. Esperando resultado...");
+      const jobId = genJson.jobId;
+      setStatusText(`Job enviado: ${jobId}`);
 
-      // Polling a /api/status hasta que esté COMPLETED o FAILED
-      let done = false;
-      let data = null;
+      // 2) Polling de estado
+      let finished = false;
+      while (!finished) {
+        const stRes = await fetch(`/api/status?id=${jobId}`);
+        const stJson = await stRes.json();
 
-      while (!done) {
-        await new Promise((r) => setTimeout(r, 2500));
-        const sRes = await fetch(`/api/status?id=${jobId}`);
-        const sJson = await sRes.json();
-
-        if (!sRes.ok || sJson.error) {
-          throw new Error(sJson.error || "Error al consultar el status.");
+        if (!stRes.ok || !stJson.ok) {
+          throw new Error(stJson.error || "Error al leer el estado");
         }
 
-        if (sJson.status === "IN_QUEUE" || sJson.status === "IN_PROGRESS") {
-          setStatusMessage(`Estado actual: ${sJson.status}...`);
-          continue;
+        const s = stJson.status;
+        setStatusText(`Estado actual: ${s}...`);
+
+        if (s === "IN_QUEUE" || s === "IN_PROGRESS") {
+          await new Promise((r) => setTimeout(r, 3000));
+        } else if (s === "COMPLETED") {
+          const b64 = stJson.output?.image_b64;
+          if (!b64) {
+            throw new Error("No llegó la imagen en la respuesta");
+          }
+          const url = `data:image/png;base64,${b64}`;
+          setCurrentImage(url);
+          onNewImage(url);
+          finished = true;
+        } else {
+          throw new Error(`Job terminado con estado ${s}`);
         }
-
-        // COMPLETED o FAILED
-        done = true;
-        data = sJson;
       }
 
-      if (!data || data.status !== "COMPLETED") {
-        setStatus("error");
-        setStatusMessage(`Job no completado. Estado: ${data?.status || "?"}`);
-        return;
-      }
-
-      if (!data.output || !data.output.image_b64) {
-        setStatus("error");
-        setStatusMessage("Error: No llegó la imagen en la respuesta.");
-        return;
-      }
-
-      const imageUrl = `data:image/png;base64,${data.output.image_b64}`;
-      setGeneratedImage(imageUrl);
-      setStatus("completed");
-      setStatusMessage("Imagen generada correctamente.");
-
-      // Guardar en biblioteca local
-      setLibrary((prev) => [
-        {
-          id: Date.now(),
-          url: imageUrl,
-          prompt,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-
-      // Cambiamos a la pestaña Biblioteca automáticamente si quieres:
-      // setActiveTab("library");
+      setStatusText("Render completado ✅");
     } catch (err) {
-      console.error(err);
-      setStatus("error");
-      setStatusMessage(String(err.message || err));
+      setError(String(err.message || err));
+      setStatusText("");
+    } finally {
+      setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen pb-16">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur-md">
+    <div className="min-h-screen w-full bg-[#05060b] text-white">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-400 via-fuchsia-400 to-violet-500 shadow-lg" />
-            <div className="flex flex-col">
-              <span className="text-sm text-neutral-400">Panel del creador</span>
-              <span className="text-lg font-semibold text-white">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-tr from-cyan-500 to-fuchsia-500 text-lg font-bold">
+              iO
+            </div>
+            <div className="leading-tight">
+              <div className="text-xs text-neutral-400">Panel del creador</div>
+              <div className="text-lg font-semibold">
                 isabelaOs <span className="text-neutral-400">Studio</span>
-              </span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-xl border border-white/15 px-3 py-1 text-xs text-neutral-200 hover:bg-white/10"
-              onClick={onBackToLanding}
-            >
-              Volver a la página principal
-            </button>
-          </div>
+
+          <button
+            onClick={onBackToLanding}
+            className="rounded-xl border border-white/20 px-4 py-2 text-xs text-neutral-200 hover:bg-white/10"
+          >
+            Volver a la página principal
+          </button>
         </div>
       </header>
 
-      <Section className="pt-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-xl md:text-2xl font-semibold text-white">
-            Panel de generación de imágenes
-          </h2>
-          <div className="inline-flex rounded-2xl border border-white/10 bg-black/40 p-1 text-sm">
-            <button
-              onClick={() => setActiveTab("generate")}
-              className={cn(
-                "px-4 py-1.5 rounded-2xl transition",
-                activeTab === "generate"
-                  ? "bg-white/10 text-white"
-                  : "text-neutral-400 hover:text-white"
+      <main className="mx-auto max-w-6xl px-4 py-8 pb-16">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          {/* Formulario */}
+          <div className="rounded-3xl border border-white/15 bg-white/5 p-6">
+            <h2 className="text-lg font-semibold mb-4">Generador desde prompt</h2>
+            <form onSubmit={handleGenerate} className="space-y-4">
+              <label className="block text-sm">
+                Prompt
+                <textarea
+                  className="mt-1 w-full rounded-2xl bg-black/70 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                  rows={3}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                />
+              </label>
+
+              <label className="block text-sm">
+                Negative prompt
+                <textarea
+                  className="mt-1 w-full rounded-2xl bg-black/70 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                  rows={2}
+                  value={negative}
+                  onChange={(e) => setNegative(e.target.value)}
+                />
+              </label>
+
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <label className="block">
+                  Steps
+                  <input
+                    type="number"
+                    min={5}
+                    max={50}
+                    value={steps}
+                    onChange={(e) => setSteps(e.target.value)}
+                    className="mt-1 w-full rounded-2xl bg-black/70 px-3 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                  />
+                </label>
+                <label className="block">
+                  Width
+                  <input
+                    type="number"
+                    value={width}
+                    onChange={(e) => setWidth(e.target.value)}
+                    className="mt-1 w-full rounded-2xl bg-black/70 px-3 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                  />
+                </label>
+                <label className="block">
+                  Height
+                  <input
+                    type="number"
+                    value={height}
+                    onChange={(e) => setHeight(e.target.value)}
+                    className="mt-1 w-full rounded-2xl bg-black/70 px-3 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                  />
+                </label>
+              </div>
+
+              {statusText && (
+                <div className="rounded-2xl bg-black/60 px-3 py-2 text-xs text-cyan-300">
+                  {statusText}
+                </div>
               )}
-            >
-              Generar
-            </button>
-            <button
-              onClick={() => setActiveTab("library")}
-              className={cn(
-                "px-4 py-1.5 rounded-2xl transition",
-                activeTab === "library"
-                  ? "bg-white/10 text-white"
-                  : "text-neutral-400 hover:text-white"
+              {error && (
+                <div className="rounded-2xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {error}
+                </div>
               )}
-            >
-              Biblioteca
-            </button>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={cn(
+                  "mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-fuchsia-500/30",
+                  loading && "opacity-70"
+                )}
+              >
+                {loading ? "Generando..." : "Generar imagen desde prompt"}
+              </button>
+            </form>
+          </div>
+
+          {/* Resultado actual */}
+          <div className="rounded-3xl border border-white/15 bg-white/5 p-6">
+            <h2 className="text-lg font-semibold mb-4">Resultado</h2>
+            <div className="flex h-[340px] items-center justify-center rounded-2xl bg-black/70">
+              {currentImage ? (
+                <img
+                  src={currentImage}
+                  alt="Resultado"
+                  className="max-h-full max-w-full rounded-2xl object-contain"
+                />
+              ) : (
+                <p className="text-sm text-neutral-400 text-center px-4">
+                  Aquí verás el resultado en cuanto se complete el render.
+                </p>
+              )}
+            </div>
+            {currentImage && (
+              <a
+                href={currentImage}
+                download="isabelaos_image.png"
+                className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/20 px-4 py-2 text-xs text-neutral-100 hover:bg-white/10"
+              >
+                <Download className="h-4 w-4" />
+                Descargar imagen
+              </a>
+            )}
           </div>
         </div>
 
-        {/* Contenido de pestañas */}
-        {activeTab === "generate" ? (
-          <div className="mt-8 grid gap-8 lg:grid-cols-2">
-            {/* Formulario */}
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200">
-                    Prompt
-                  </label>
-                  <textarea
-                    className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400 min-h-[96px]"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200">
-                    Negative prompt
-                  </label>
-                  <textarea
-                    className="mt-2 w-full rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400 min-h-[80px]"
-                    value={negativePrompt}
-                    onChange={(e) => setNegativePrompt(e.target.value)}
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <label className="block text-neutral-200">Steps</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                      value={steps}
-                      onChange={(e) => setSteps(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-neutral-200">Width</label>
-                    <input
-                      type="number"
-                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                      value={width}
-                      onChange={(e) => setWidth(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-neutral-200">Height</label>
-                    <input
-                      type="number"
-                      className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                      value={height}
-                      onChange={(e) => setHeight(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {/* Mensaje de estado */}
-                {status !== "idle" && (
-                  <div
-                    className={cn(
-                      "mt-2 rounded-2xl px-4 py-2 text-xs",
-                      status === "pending" && "bg-blue-500/10 text-blue-200",
-                      status === "completed" && "bg-emerald-500/10 text-emerald-200",
-                      status === "error" && "bg-red-500/10 text-red-200"
-                    )}
-                  >
-                    {statusMessage}
-                  </div>
-                )}
-
-                <NeonButton
-                  className="mt-4 w-full"
-                  onClick={handleGenerate}
-                  disabled={status === "pending"}
+        {/* Biblioteca de imágenes renderizadas en esta sesión */}
+        <section className="mt-10">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-neutral-100">
+              Biblioteca de esta sesión
+            </h3>
+            <span className="text-xs text-neutral-500">
+              Se guarda solo en tu navegador por ahora.
+            </span>
+          </div>
+          {images.length === 0 ? (
+            <p className="text-xs text-neutral-500">
+              Aún no has generado imágenes en esta sesión.
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {images.map((src, i) => (
+                <div
+                  key={i}
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-black/60"
                 >
-                  {status === "pending" ? "Generando..." : "Generar imagen desde prompt"}
-                </NeonButton>
-              </div>
-            </div>
-
-            {/* Vista previa */}
-            <div className="rounded-3xl border border-white/10 bg-black/60 p-4 flex items-center justify-center min-h-[320px]">
-              {generatedImage ? (
-                <img
-                  src={generatedImage}
-                  alt="Resultado IA"
-                  className="max-h-[420px] max-w-full rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.9)]"
-                />
-              ) : (
-                <div className="text-sm text-neutral-500 text-center px-6">
-                  Aquí verás el resultado en cuanto se complete el render.
+                  <img src={src} className="h-32 w-full object-cover" />
+                  <a
+                    href={src}
+                    download={`isabelaos_${i + 1}.png`}
+                    className="flex items-center justify-center gap-1 border-t border-white/10 px-2 py-1.5 text-[11px] text-neutral-200 hover:bg-white/10"
+                  >
+                    <Download className="h-3 w-3" />
+                    Descargar
+                  </a>
                 </div>
-              )}
+              ))}
             </div>
-          </div>
-        ) : (
-          // ---------------- Biblioteca ----------------
-          <div className="mt-8">
-            {library.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-white/15 bg-black/40 p-6 text-center text-sm text-neutral-400">
-                Aún no tienes imágenes guardadas en esta sesión. Genera una imagen desde
-                la pestaña <span className="text-white">Generar</span> y aparecerá aquí.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-neutral-400">
-                  Biblioteca local de esta sesión ({library.length} imagen
-                  {library.length > 1 ? "es" : ""}). Haz clic en{" "}
-                  <span className="font-medium text-white">Descargar</span> para guardar
-                  el archivo.
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {library.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-3 flex flex-col"
-                    >
-                      <div className="aspect-square overflow-hidden rounded-xl bg-black/80 mb-3">
-                        <img
-                          src={item.url}
-                          alt={item.prompt}
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                      <p className="text-xs text-neutral-300 line-clamp-2">
-                        {item.prompt}
-                      </p>
-                      <p className="mt-1 text-[11px] text-neutral-500">
-                        {new Date(item.createdAt).toLocaleString()}
-                      </p>
-                      <a
-                        href={item.url}
-                        download={`isabelaos-image-${item.id}.png`}
-                        className="mt-3 inline-flex items-center justify-center rounded-xl bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20"
-                      >
-                        Descargar PNG
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Section>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
 
-// ----------------------
-// App principal
-// ----------------------
+// -------------------- APP PRINCIPAL --------------------
 
 export default function App() {
-  const [view, setView] = useState("landing"); // "landing" | "panel"
+  const [view, setView] = useState("landing"); // 'landing' | 'panel'
+  const [images, setImages] = useState([]);
 
   useEffect(() => {
-    document.documentElement.style.backgroundColor = "#020617";
+    document.documentElement.style.background = "#05060b";
   }, []);
 
-  return (
-    <div
-      className="min-h-screen text-white"
-      style={{
-        background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#020617",
-      }}
-    >
-      {view === "landing" ? (
-        <Landing onOpenPanel={() => setView("panel")} />
-      ) : (
-        <Panel onBackToLanding={() => setView("landing")} />
-      )}
-    </div>
-  );
+  function handleNewImage(url) {
+    setImages((prev) => [url, ...prev].slice(0, 20)); // guardamos hasta 20
+  }
+
+  if (view === "panel") {
+    return (
+      <CreatorPanel
+        onBackToLanding={() => setView("landing")}
+        images={images}
+        onNewImage={handleNewImage}
+      />
+    );
+  }
+
+  return <Landing onOpenPanel={() => setView("panel")} />;
 }
 
 
