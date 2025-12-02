@@ -180,7 +180,7 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // 🔹 NUEVO: cargar historial desde Supabase cuando haya usuario
+  // 🔹 Cargar historial desde Supabase cuando haya usuario
   useEffect(() => {
     if (!user) {
       setHistory([]);
@@ -189,19 +189,24 @@ function CreatorPanel() {
 
     (async () => {
       const rows = await loadGenerationsForUser(user.id);
+
       const mapped = rows.map((row) => {
-        let b64 = row.image_url || "";
-        if (b64.startsWith("data:image")) {
-          const parts = b64.split(",");
+        let b64 = "";
+
+        // asumimos que guardamos un data URL en image_url
+        if (row.image_url && row.image_url.startsWith("data:image")) {
+          const parts = row.image_url.split(",");
           b64 = parts[1] || "";
         }
+
         return {
           id: row.id,
-          prompt: row.prompt || "",
+          prompt: "", // no usamos el prompt guardado
           createdAt: row.created_at,
           image_b64: b64,
         };
       });
+
       setHistory(mapped);
     })();
   }, [user]);
@@ -271,21 +276,19 @@ function CreatorPanel() {
           setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
 
-          // 🔹 NUEVO: guardar también en Supabase (si hay usuario)
+          // 🔹 Guardar también en Supabase (si hay usuario)
           if (user?.id) {
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
-              imageDataUrl: dataUrl,
-              prompt,
-              negativePrompt: negative,
+              imageUrl: dataUrl,
+              prompt: "", // no guardamos prompt
+              negativePrompt: "",
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
-            }).then((saved) => {
-              if (saved) {
-                // opcional: podríamos actualizar el id con el de la BD
-              }
+            }).catch((e) => {
+              console.error("Error guardando en Supabase:", e);
             });
           }
         } else {
@@ -421,7 +424,7 @@ function CreatorPanel() {
                     alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items-end p-2">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items=end p-2">
                     <span className="line-clamp-2">{item.prompt}</span>
                   </div>
                 </button>
@@ -583,7 +586,7 @@ function LandingView({ onOpenAuth }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
               >
                 Probar generador en vivo
               </button>
@@ -691,4 +694,3 @@ export default function App() {
     </>
   );
 }
-
