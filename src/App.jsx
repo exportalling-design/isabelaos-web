@@ -40,7 +40,13 @@ function AuthModal({ open, onClose }) {
       }
       onClose();
     } catch (err) {
-      setError(err.message || String(err));
+      console.error("[AuthModal] handleSubmit error:", err);
+      let msg = err?.message || String(err);
+      if (msg === "a is not a function" || msg === "i is not a function") {
+        msg =
+          "⚠️ Error interno de autenticación. Revisa la consola de Vercel/Supabase.";
+      }
+      setError(msg);
     } finally {
       setLocalLoading(false);
     }
@@ -51,9 +57,15 @@ function AuthModal({ open, onClose }) {
     setLocalLoading(true);
     try {
       await signInWithGoogle();
-      // Redirige a Google, luego vuelve al sitio
+      // Supabase redirige a Google y luego vuelve al sitio
     } catch (err) {
-      setError(err.message || String(err));
+      console.error("[AuthModal] handleGoogle error:", err);
+      let msg = err?.message || String(err);
+      if (msg === "a is not a function" || msg === "i is not a function") {
+        msg =
+          "⚠️ Error interno de autenticación con Google. Revisa configuración en Supabase.";
+      }
+      setError(msg);
       setLocalLoading(false);
     }
   };
@@ -100,9 +112,7 @@ function AuthModal({ open, onClose }) {
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">
-              {error}
-            </p>
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
           )}
 
           <button
