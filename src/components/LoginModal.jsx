@@ -20,7 +20,7 @@ function LoginModal({ isOpen, onClose }) {
 
     try {
       if (mode === 'register') {
-        console.log('[LoginModal] signUp con', email);
+        console.log('[LoginModal] REGISTRO con', email);
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -33,7 +33,7 @@ function LoginModal({ isOpen, onClose }) {
 
         console.log('[LoginModal] signUp OK:', data);
       } else {
-        console.log('[LoginModal] signInWithPassword con', email);
+        console.log('[LoginModal] LOGIN con', email);
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -47,16 +47,15 @@ function LoginModal({ isOpen, onClose }) {
         console.log('[LoginModal] signIn OK:', data);
       }
 
-      // Supabase ya tiene sesión; AuthContext la detecta con onAuthStateChange
       onClose();
     } catch (err) {
-      console.error('[LoginModal] EXCEPCIÓN en handleSubmit:', err);
+      console.error('[LoginModal] EXCEPCIÓN handleSubmit:', err);
       let msg = err?.message || 'Ocurrió un error al procesar tu solicitud.';
 
-      // Si viene el mensaje raro minificado:
+      // Forzamos a NO mostrar "i is not a function"
       if (msg === 'i is not a function' || msg === 'a is not a function') {
         msg =
-          'Error interno de autenticación. Intenta recargar la página o vuelve a intentarlo en unos minutos.';
+          '⚠️ Error interno de autenticación. Intenta recargar la página y probar de nuevo.';
       }
 
       setErrorMsg(msg);
@@ -70,7 +69,7 @@ function LoginModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
-      console.log('[LoginModal] Login con Google');
+      console.log('[LoginModal] LOGIN GOOGLE');
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
       });
@@ -80,13 +79,13 @@ function LoginModal({ isOpen, onClose }) {
         throw error;
       }
 
-      console.log('[LoginModal] signInWithOAuth redirigiendo...', data);
-      // Supabase redirige, y al volver onAuthStateChange actualiza el user.
+      console.log('[LoginModal] signInWithOAuth OK, redirigiendo...', data);
+      // Supabase redirige; al volver, AuthContext actualiza user.
     } catch (err) {
-      console.error('[LoginModal] EXCEPCIÓN en handleGoogle:', err);
+      console.error('[LoginModal] EXCEPCIÓN handleGoogle:', err);
       let msg = err?.message || 'Error al iniciar sesión con Google.';
       if (msg === 'i is not a function' || msg === 'a is not a function') {
-        msg = 'Error interno de autenticación con Google.';
+        msg = '⚠️ Error interno de autenticación con Google.';
       }
       setErrorMsg(msg);
       setLoading(false);
@@ -105,7 +104,12 @@ function LoginModal({ isOpen, onClose }) {
           ✕
         </button>
 
-        <h2>{mode === 'register' ? 'Crea tu cuenta' : 'Inicia sesión'}</h2>
+        <h2>
+          {mode === 'register'
+            ? 'Crea tu cuenta (NUEVO MODAL)'
+            : 'Inicia sesión (NUEVO MODAL)'}
+        </h2>
+
         <p>Usa tu correo o entra con Google para usar isabelaOs Studio.</p>
 
         <form onSubmit={handleSubmit}>
@@ -138,8 +142,8 @@ function LoginModal({ isOpen, onClose }) {
             {loading
               ? 'Procesando...'
               : mode === 'register'
-              ? 'Registrarme'
-              : 'Entrar'}
+              ? '🚀 Crear cuenta'
+              : '✅ Entrar'}
           </button>
         </form>
 
@@ -149,7 +153,7 @@ function LoginModal({ isOpen, onClose }) {
           disabled={loading}
           className="secondary-btn"
         >
-          Continuar con Google
+          Continuar con Google (NUEVO)
         </button>
 
         <p style={{ marginTop: '12px' }}>
@@ -172,3 +176,4 @@ function LoginModal({ isOpen, onClose }) {
 }
 
 export default LoginModal;
+
