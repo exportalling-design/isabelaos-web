@@ -1,6 +1,10 @@
 // src/App.jsx
 import { useState, useEffect } from "react";
 import { useAuth } from "./context/AuthContext";
+import {
+  saveGenerationInSupabase,
+  loadGenerationsForUser,
+} from "./lib/generations";
 
 // ---------------------------------------------------------
 // Helper para scroll suave
@@ -176,6 +180,32 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
+  // 🔹 NUEVO: cargar historial desde Supabase cuando haya usuario
+  useEffect(() => {
+    if (!user) {
+      setHistory([]);
+      return;
+    }
+
+    (async () => {
+      const rows = await loadGenerationsForUser(user.id);
+      const mapped = rows.map((row) => {
+        let b64 = row.image_url || "";
+        if (b64.startsWith("data:image")) {
+          const parts = b64.split(",");
+          b64 = parts[1] || "";
+        }
+        return {
+          id: row.id,
+          prompt: row.prompt || "",
+          createdAt: row.created_at,
+          image_b64: b64,
+        };
+      });
+      setHistory(mapped);
+    })();
+  }, [user]);
+
   const handleGenerate = async () => {
     setError("");
     setImageB64(null);
@@ -229,16 +259,35 @@ function CreatorPanel() {
         if (st === "COMPLETED" && statusData.output?.image_b64) {
           const b64 = statusData.output.image_b64;
           setImageB64(b64);
-          setHistory((prev) => [
-            {
-              id: jobId,
-              prompt,
-              createdAt: new Date().toISOString(),
-              image_b64: b64,
-            },
-            ...prev,
-          ]);
+
+          const newItem = {
+            id: jobId,
+            prompt,
+            createdAt: new Date().toISOString(),
+            image_b64: b64,
+          };
+
+          // historial local (como antes)
+          setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
+
+          // 🔹 NUEVO: guardar también en Supabase (si hay usuario)
+          if (user?.id) {
+            const dataUrl = `data:image/png;base64,${b64}`;
+            saveGenerationInSupabase({
+              userId: user.id,
+              imageDataUrl: dataUrl,
+              prompt,
+              negativePrompt: negative,
+              width: Number(width),
+              height: Number(height),
+              steps: Number(steps),
+            }).then((saved) => {
+              if (saved) {
+                // opcional: podríamos actualizar el id con el de la BD
+              }
+            });
+          }
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -380,7 +429,8 @@ function CreatorPanel() {
             </div>
           )}
           <p className="mt-2 text-[10px] text-neutral-500">
-            Por ahora las imágenes se guardan solo en tu navegador.
+            Por ahora las imágenes también se guardan en tu cuenta (Supabase)
+            además de esta sesión.
           </p>
         </div>
       </div>
