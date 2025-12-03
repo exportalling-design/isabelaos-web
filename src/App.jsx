@@ -180,7 +180,7 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // 🔹 NUEVO: contador diario y límite
+  // 🔹 Contador diario y límite
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
@@ -198,7 +198,6 @@ function CreatorPanel() {
       const mapped = rows.map((row) => {
         let b64 = "";
 
-        // asumimos que guardamos un data URL en image_url
         if (row.image_url && row.image_url.startsWith("data:image")) {
           const parts = row.image_url.split(",");
           b64 = parts[1] || "";
@@ -358,7 +357,7 @@ function CreatorPanel() {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -455,7 +454,7 @@ function CreatorPanel() {
                 <button
                   key={item.id}
                   type="button"
-                  className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/50"
+                  className="group relative overflow-hidden rounded-xl border border.white/10 bg-black/50"
                   onClick={() => setImageB64(item.image_b64)}
                 >
                   <img
@@ -463,7 +462,7 @@ function CreatorPanel() {
                     alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items=end p-2">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items-end p-2">
                     <span className="line-clamp-2">{item.prompt}</span>
                   </div>
                 </button>
@@ -625,7 +624,7 @@ function LandingView({ onOpenAuth }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
                 Probar generador en vivo
               </button>
@@ -663,6 +662,47 @@ function LandingView({ onOpenAuth }) {
                 IA desarrollado desde Latinoamérica pensado para creadores,
                 estudios y agencias de modelos virtuales.
               </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Galería de resultados (4 imágenes) */}
+        <section className="mt-16">
+          <h3 className="text-sm font-semibold text-white">
+            Algunas imágenes generadas con isabelaOs Studio
+          </h3>
+          <p className="mt-1 text-xs text-neutral-400">
+            Ejemplos renderizados con el motor actual de imagen. Más estilos y
+            módulos (video, BodySync AI) estarán disponibles pronto.
+          </p>
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallary/img1.png"
+                alt="Imagen generada 1"
+                className="h-32 w-full object-cover"
+              />
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallary/img2.png"
+                alt="Imagen generada 2"
+                className="h-32 w-full object-cover"
+              />
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallary/img3.png"
+                alt="Imagen generada 3"
+                className="h-32 w-full object-cover"
+              />
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallary/img4.png"
+                alt="Imagen generada 4"
+                className="h-32 w-full object-cover"
+              />
             </div>
           </div>
         </section>
