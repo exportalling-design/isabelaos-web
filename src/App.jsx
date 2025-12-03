@@ -104,9 +104,7 @@ function AuthModal({ open, onClose }) {
           </div>
 
           {error && (
-            <p className="whitespace-pre-line text-xs text-red-400">
-              {error}
-            </p>
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
           )}
 
           <button
@@ -182,10 +180,15 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // Cargar historial desde Supabase cuando haya usuario
+  // 🔹 NUEVO: contador diario y límite
+  const [dailyCount, setDailyCount] = useState(0);
+  const DAILY_LIMIT = 10;
+
+  // 🔹 Cargar historial desde Supabase cuando haya usuario
   useEffect(() => {
     if (!user) {
       setHistory([]);
+      setDailyCount(0);
       return;
     }
 
@@ -210,11 +213,32 @@ function CreatorPanel() {
       });
 
       setHistory(mapped);
+
+      // 🔹 calcular cuántas imágenes son de HOY
+      const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+      const countToday = rows.filter(
+        (row) =>
+          row.created_at &&
+          typeof row.created_at === "string" &&
+          row.created_at.startsWith(todayStr)
+      ).length;
+      setDailyCount(countToday);
     })();
   }, [user]);
 
   const handleGenerate = async () => {
     setError("");
+
+    // 🔹 Chequeo de límite diario
+    if (dailyCount >= DAILY_LIMIT) {
+      setStatus("ERROR");
+      setStatusText("Límite diario alcanzado.");
+      setError(
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana para seguir generando.`
+      );
+      return;
+    }
+
     setImageB64(null);
     setStatus("IN_QUEUE");
     setStatusText("Enviando job a RunPod...");
@@ -274,11 +298,14 @@ function CreatorPanel() {
             image_b64: b64,
           };
 
-          // historial local
+          // historial local (como antes)
           setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
 
-          // Guardar también en Supabase (si hay usuario)
+          // 🔹 incrementar contador diario
+          setDailyCount((prev) => prev + 1);
+
+          // 🔹 Guardar también en Supabase (si hay usuario)
           if (user?.id) {
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
@@ -331,7 +358,7 @@ function CreatorPanel() {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -386,20 +413,28 @@ function CreatorPanel() {
 
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
             Estado actual: {statusText || "Listo para generar."}
+            <br />
+            <span className="text-[11px] text-neutral-400">
+              Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
+            </span>
           </div>
 
           {error && (
-            <p className="whitespace-pre-line text-xs text-red-400">
-              {error}
-            </p>
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
           )}
 
           <button
             onClick={handleGenerate}
-            disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+            disabled={
+              status === "IN_QUEUE" ||
+              status === "IN_PROGRESS" ||
+              dailyCount >= DAILY_LIMIT
+            }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {status === "IN_QUEUE" || status === "IN_PROGRESS"
+            {dailyCount >= DAILY_LIMIT
+              ? "Límite diario alcanzado"
+              : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
               : "Generar imagen desde prompt"}
           </button>
@@ -428,7 +463,7 @@ function CreatorPanel() {
                     alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-                  <div className="absolute inset-0 flex items-end bg-black/40 p-2 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items=end p-2">
                     <span className="line-clamp-2">{item.prompt}</span>
                   </div>
                 </button>
@@ -484,8 +519,7 @@ function DashboardView() {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs{" "}
-                <span className="text-xs text-neutral-400">Studio</span>
+                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
                 Panel del creador · Beta
@@ -494,7 +528,7 @@ function DashboardView() {
           </div>
 
           <div className="flex items-center gap-3 text-xs">
-            <span className="hidden text-neutral-300 sm:inline">
+            <span className="hidden sm:inline text-neutral-300">
               {user?.email} {isAdmin && "· admin"}
             </span>
             <button
@@ -568,7 +602,6 @@ function LandingView({ onOpenAuth }) {
 
       {/* Hero / landing */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* HERO */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
@@ -577,26 +610,22 @@ function LandingView({ onOpenAuth }) {
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               isabelaOs Studio{" "}
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                la nueva generación de imágenes con IA
+                generación de imágenes con IA en la nube
               </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Primer sistema de generación visual con IA desarrollado en
-              Guatemala. isabelaOs Studio fue construido desde Latinoamérica
-              para creadores, estudios y agencias que necesitan renders con
-              calidad cinematográfica sin instalar nada en su computadora.
-            </p>
-            <p className="mt-2 max-w-xl text-xs text-cyan-200/90">
-              Conectado a infraestructura de alto rendimiento en RunPod y listo
-              para integrar <span className="font-semibold">BodySync v1</span>,
-              nuestro motor propio de movimiento y expresión entrenado por
-              Stalling Technologic.
+              Crea imágenes con calidad de estudio conectadas a nuestro
+              pipeline real en RunPod. Versión inicial enfocada solo en{" "}
+              <span className="font-medium text-cyan-300">
+                generación de imagen
+              </span>
+              , mientras terminamos los módulos de video y BodySync.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
               >
                 Probar generador en vivo
               </button>
@@ -612,8 +641,7 @@ function LandingView({ onOpenAuth }) {
               Plan actual:{" "}
               <span className="font-semibold text-white">$5/mes</span> ·
               Generación ilimitada de imágenes mientras esté en beta. Tu cuenta
-              se podrá migrar a los planes completos cuando activemos video y
-              los módulos avanzados (BodySync, CineCam, etc.).
+              se podrá migrar a los planes completos cuando activemos video.
             </p>
           </div>
 
@@ -626,93 +654,20 @@ function LandingView({ onOpenAuth }) {
                 Interfaz simple para escribir un prompt, ajustar resolución y
                 ver el resultado generado por el motor conectado a RunPod.
               </p>
-              <div className="mt-4 h-52 overflow-hidden rounded-2xl border border-white/10 bg-black/80">
-                <img
-                  src="/preview/panel.png"
-                  alt="Panel del creador de isabelaOs Studio"
-                  className="h-full w-full object-cover"
-                />
+              <div className="mt-4 h-52 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/80 border border-white/10 flex items-center justify-center text-[11px] text-neutral-300">
+                Panel real de isabelaOs Studio funcionando con tu endpoint
+                serverless.
               </div>
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
-                IA desarrollado desde Guatemala, pensado para creadores,
+                IA desarrollado desde Latinoamérica pensado para creadores,
                 estudios y agencias de modelos virtuales.
               </p>
             </div>
           </div>
         </section>
 
-        {/* IMÁGENES GENERADAS */}
-        <section className="mt-16 space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold text-white">
-              Imágenes generadas con isabelaOs Studio
-            </h2>
-            <p className="mt-1 text-xs text-neutral-400">
-              Ejemplos creados con el pipeline real: retratos, escenas
-              cinematográficas y composición lista para redes o campañas.
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-4">
-            {/* Card 1 */}
-            <div className="group overflow-hidden rounded-3xl border border-white/10 bg-black/60">
-              <div className="h-52 w-full overflow-hidden">
-                <img
-                  src="/gallery/img1.png"
-                  alt="Retrato generado con isabelaOs Studio"
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                />
-              </div>
-              <div className="border-t border-white/10 bg-black/80 p-3 text-[11px] text-neutral-300">
-                Retratos con luz suave y detalle natural en piel.
-              </div>
-            </div>
-
-            {/* Card 2 */}
-            <div className="group overflow-hidden rounded-3xl border border-white/10 bg-black/60">
-              <div className="h-52 w-full overflow-hidden">
-                <img
-                  src="/gallery/img2.png"
-                  alt="Escena cinematográfica generada con isabelaOs Studio"
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                />
-              </div>
-              <div className="border-t border-white/10 bg-black/80 p-3 text-[11px] text-neutral-300">
-                Escenas estilizadas con look cinematográfico.
-              </div>
-            </div>
-
-            {/* Card 3 */}
-            <div className="group overflow-hidden rounded-3xl border border-white/10 bg-black/60">
-              <div className="h-52 w-full overflow-hidden">
-                <img
-                  src="/gallery/img3.png"
-                  alt="Close up generado con isabelaOs Studio"
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                />
-              </div>
-              <div className="border-t border-white/10 bg-black/80 p-3 text-[11px] text-neutral-300">
-                Profundidad de campo y composición cuidada.
-              </div>
-            </div>
-
-            {/* Card 4 (placeholder por ahora) */}
-            <div className="group overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-orange-500/40 via-amber-400/20 to-black/80">
-              <div className="h-52 w-full" />
-              <div className="border-t border-white/10 bg-black/80 p-3 text-[11px] text-neutral-300">
-                Ideal para portadas, branding y contenido social.
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-2 text-[10px] text-neutral-500">
-            Más adelante podrás sustituir estos bloques por las imágenes
-            oficiales generadas directamente desde el panel del creador.
-          </p>
-        </section>
-
-        {/* Panel del creador (ancla) */}
+        {/* Panel del creador “demo” (solo mensaje si no hay usuario) */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
@@ -736,8 +691,7 @@ function LandingView({ onOpenAuth }) {
               Stalling Technologic.
             </span>
             <span>
-              Versión beta · Módulos futuros: video, BodySync AI, CineCam y
-              más.
+              Versión beta · Módulos futuros: video, BodySync AI, CineCam y más.
             </span>
           </div>
         </footer>
@@ -762,7 +716,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="grid min-h-screen place-items-center bg-black text-white">
+      <div className="min-h-screen grid place-items-center bg-black text-white">
         <p className="text-sm text-neutral-400">Cargando sesión...</p>
       </div>
     );
@@ -770,7 +724,11 @@ export default function App() {
 
   return (
     <>
-      {user ? <DashboardView /> : <LandingView onOpenAuth={openAuth} />}
+      {user ? (
+        <DashboardView />
+      ) : (
+        <LandingView onOpenAuth={openAuth} />
+      )}
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
