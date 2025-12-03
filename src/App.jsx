@@ -182,8 +182,9 @@ function CreatorPanel() {
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
-  // función de suscripción (Stripe) → redirige directo al endpoint
+  // 🔹 Botón de suscripción (Stripe)
   const handleSubscribe = () => {
+    // Redirección directa al endpoint de Vercel
     window.location.href = "/api/create-checkout";
   };
 
@@ -335,8 +336,7 @@ function CreatorPanel() {
 
   const handleDeleteFromHistory = (id) => {
     setHistory((prev) => prev.filter((item) => item.id !== id));
-    // (Opcional) aquí podríamos borrar también en Supabase, pero
-    // tú dijiste que con borrar de la interfaz está bien por ahora.
+    // (Opcional) borrar también en Supabase más adelante.
   };
 
   const handleDownload = () => {
@@ -624,9 +624,21 @@ function LandingView({ onOpenAuth }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
+  const [checkoutStatus, setCheckoutStatus] = useState(null); // success | cancel | null
 
-  // función de suscripción en landing → redirige directo
+  // Leer ?checkout=success / cancel al cargar la página
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("checkout");
+    if (status === "success") {
+      setCheckoutStatus("success");
+    } else if (status === "cancel") {
+      setCheckoutStatus("cancel");
+    }
+  }, []);
+
   const handleSubscribe = () => {
+    // Redirección directa al endpoint que crea el checkout
     window.location.href = "/api/create-checkout";
   };
 
@@ -684,6 +696,21 @@ function LandingView({ onOpenAuth }) {
 
       {/* Hero */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        {/* Banner de resultado de checkout */}
+        {checkoutStatus === "success" && (
+          <div className="mb-6 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
+            ✅ Pago completado. Bienvenido a{" "}
+            <span className="font-semibold">IsabelaOS Studio Basic</span>. En
+            breve recibirás un correo con los detalles de tu suscripción.
+          </div>
+        )}
+        {checkoutStatus === "cancel" && (
+          <div className="mb-6 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-3 text-xs text-yellow-100">
+            ⚠️ El pago fue cancelado. Si fue un error, puedes intentarlo de
+            nuevo cuando quieras.
+          </div>
+        )}
+
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
