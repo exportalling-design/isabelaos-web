@@ -6,6 +6,13 @@ import {
 } from "./lib/generations";
 
 // ---------------------------------------------------------
+// PayPal – Client ID (puede venir de env o usar el fijo)
+// ---------------------------------------------------------
+const PAYPAL_CLIENT_ID =
+  import.meta.env.VITE_PAYPAL_CLIENT_ID ||
+  "AZgwhtDkXVf9N6VrwtWk6dzwzM65DWBrM3dn3Og4DXgZhbxSxqRu1UWdEtbj12W_7ItmcrNhZDI3mtPG";
+
+// ---------------------------------------------------------
 // Helper scroll suave
 // ---------------------------------------------------------
 function scrollToId(id) {
@@ -13,6 +20,94 @@ function scrollToId(id) {
   if (el) {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+}
+
+// ---------------------------------------------------------
+// Botón PayPal reutilizable
+// ---------------------------------------------------------
+function PayPalButton({ amount = "5.00", containerId }) {
+  const divId = containerId || "paypal-button-container";
+
+  useEffect(() => {
+    if (!PAYPAL_CLIENT_ID) {
+      console.warn("No hay PAYPAL_CLIENT_ID configurado");
+      return;
+    }
+
+    const renderButtons = () => {
+      if (!window.paypal) return;
+
+      window.paypal
+        .Buttons({
+          style: {
+            layout: "horizontal",
+            color: "gold",
+            shape: "pill",
+            label: "paypal",
+          },
+          createOrder: (data, actions) => {
+            return actions.order.create({
+              purchase_units: [
+                {
+                  amount: {
+                    value: amount,
+                    currency_code: "USD",
+                  },
+                  description: "IsabelaOS Studio – Plan Basic",
+                },
+              ],
+            });
+          },
+          onApprove: async (data, actions) => {
+            try {
+              const details = await actions.order.capture();
+              console.log("Pago PayPal completado:", details);
+              alert(
+                "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
+              );
+              // TODO: aquí luego marcamos en Supabase / backend que el usuario tiene plan activo
+            } catch (err) {
+              console.error("Error al capturar pago PayPal:", err);
+              alert("Ocurrió un error al confirmar el pago con PayPal.");
+            }
+          },
+          onError: (err) => {
+            console.error("Error PayPal:", err);
+            alert("Error al conectar con PayPal.");
+          },
+        })
+        .render(`#${divId}`);
+    };
+
+    // ¿Ya existe el script?
+    const existingScript = document.querySelector(
+      'script[src*="https://www.paypal.com/sdk/js"]'
+    );
+
+    if (existingScript) {
+      if (window.paypal) {
+        renderButtons();
+      } else {
+        existingScript.addEventListener("load", renderButtons);
+      }
+      return;
+    }
+
+    // Crear script nuevo
+    const script = document.createElement("script");
+    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
+    script.async = true;
+    script.onload = renderButtons;
+    document.body.appendChild(script);
+
+    return () => {
+      // NO borramos el script para poder reutilizarlo en otras vistas
+    };
+  }, [amount, divId]);
+
+  return (
+    <div id={divId} className="mt-2 w-full flex justify-center" />
+  );
 }
 
 // ---------------------------------------------------------
@@ -182,10 +277,24 @@ function CreatorPanel() {
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
-  // 🔹 Botón de suscripción (Stripe)
-  const handleSubscribe = () => {
-    // Redirección directa al endpoint de Vercel
-    window.location.href = "/api/create-checkout";
+  // función de suscripción (Stripe)
+  const handleSubscribe = async () => {
+    try {
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Respuesta Stripe:", data);
+        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+      }
+    } catch (err) {
+      console.error("Error Stripe:", err);
+      alert("Error al conectar con el sistema de pago.");
+    }
   };
 
   // Cargar historial desde Supabase cuando haya usuario
@@ -336,7 +445,8 @@ function CreatorPanel() {
 
   const handleDeleteFromHistory = (id) => {
     setHistory((prev) => prev.filter((item) => item.id !== id));
-    // (Opcional) borrar también en Supabase más adelante.
+    // (Opcional) aquí podríamos borrar también en Supabase, pero
+    // tú dijiste que con borrar de la interfaz está bien por ahora.
   };
 
   const handleDownload = () => {
@@ -459,13 +569,24 @@ function CreatorPanel() {
           </button>
 
           {dailyCount >= DAILY_LIMIT && (
-            <button
-              type="button"
-              onClick={handleSubscribe}
-              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-            >
-              Desbloquear con IsabelaOS Basic – US$5/mes
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleSubscribe}
+                className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+              >
+                Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Stripe)
+              </button>
+
+              <div className="mt-2 text-[11px] text-neutral-400 text-center">
+                o pagar con <span className="font-semibold">PayPal</span>:
+              </div>
+
+              <PayPalButton
+                amount="5.00"
+                containerId="paypal-button-dashboard"
+              />
+            </>
           )}
         </div>
 
@@ -624,22 +745,24 @@ function LandingView({ onOpenAuth }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
-  const [checkoutStatus, setCheckoutStatus] = useState(null); // success | cancel | null
 
-  // Leer ?checkout=success / cancel al cargar la página
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get("checkout");
-    if (status === "success") {
-      setCheckoutStatus("success");
-    } else if (status === "cancel") {
-      setCheckoutStatus("cancel");
+  const handleSubscribe = async () => {
+    try {
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Respuesta Stripe:", data);
+        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+      }
+    } catch (err) {
+      console.error("Error Stripe:", err);
+      alert("Error al conectar con el sistema de pago.");
     }
-  }, []);
-
-  const handleSubscribe = () => {
-    // Redirección directa al endpoint que crea el checkout
-    window.location.href = "/api/create-checkout";
   };
 
   const handleContactSubmit = (e) => {
@@ -696,21 +819,6 @@ function LandingView({ onOpenAuth }) {
 
       {/* Hero */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Banner de resultado de checkout */}
-        {checkoutStatus === "success" && (
-          <div className="mb-6 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
-            ✅ Pago completado. Bienvenido a{" "}
-            <span className="font-semibold">IsabelaOS Studio Basic</span>. En
-            breve recibirás un correo con los detalles de tu suscripción.
-          </div>
-        )}
-        {checkoutStatus === "cancel" && (
-          <div className="mb-6 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-3 text-xs text-yellow-100">
-            ⚠️ El pago fue cancelado. Si fue un error, puedes intentarlo de
-            nuevo cuando quieras.
-          </div>
-        )}
-
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
@@ -744,14 +852,17 @@ function LandingView({ onOpenAuth }) {
                 onClick={handleSubscribe}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
-                Probar isabelaOs – US$5/mes
+                Probar isabelaOs – US$5/mes (tarjeta / Stripe)
               </button>
-              <button
-                onClick={onOpenAuth}
-                className="rounded-2xl border border-white/20 px-5 py-2 text-xs text-white hover:bg-white/10"
-              >
-                Iniciar sesión / registrarse
-              </button>
+              <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
+                <span className="text-neutral-300">
+                  o pagar con <span className="font-semibold">PayPal</span>:
+                </span>
+                <PayPalButton
+                  amount="5.00"
+                  containerId="paypal-button-landing"
+                />
+              </div>
             </div>
 
             <p className="mt-4 text-xs text-neutral-400">
