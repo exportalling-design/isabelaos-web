@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useEffect } from "react";
 import { useAuth } from "./context/AuthContext";
 import {
@@ -182,6 +181,26 @@ function CreatorPanel() {
   // 🔹 límite diario
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
+
+  // función de suscripción (Stripe)
+  const handleSubscribe = async () => {
+    try {
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Respuesta Stripe:", data);
+        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+      }
+    } catch (err) {
+      console.error("Error Stripe:", err);
+      alert("Error al conectar con el sistema de pago.");
+    }
+  };
 
   // Cargar historial desde Supabase cuando haya usuario
   useEffect(() => {
@@ -453,6 +472,16 @@ function CreatorPanel() {
               ? "Generando..."
               : "Generar imagen desde prompt"}
           </button>
+
+          {dailyCount >= DAILY_LIMIT && (
+            <button
+              type="button"
+              onClick={handleSubscribe}
+              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+            >
+              Desbloquear con IsabelaOS Basic – US$5/mes
+            </button>
+          )}
         </div>
 
         {/* Biblioteca sesión */}
@@ -531,6 +560,14 @@ function CreatorPanel() {
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
 
+  const handleContact = () => {
+    const subject = encodeURIComponent("Soporte IsabelaOS Studio");
+    const body = encodeURIComponent(
+      "Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)"
+    );
+    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
+  };
+
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -547,7 +584,8 @@ function DashboardView() {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+                isabelaOs{" "}
+                <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
                 Panel del creador · Beta
@@ -559,6 +597,12 @@ function DashboardView() {
             <span className="hidden sm:inline text-neutral-300">
               {user?.email} {isAdmin && "· admin"}
             </span>
+            <button
+              onClick={handleContact}
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Contacto
+            </button>
             <button
               onClick={signOut}
               className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -592,6 +636,38 @@ function DashboardView() {
 // Landing (sin sesión)
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth }) {
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+
+  const handleSubscribe = async () => {
+    try {
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Respuesta Stripe:", data);
+        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+      }
+    } catch (err) {
+      console.error("Error Stripe:", err);
+      alert("Error al conectar con el sistema de pago.");
+    }
+  };
+
+  const handleContactSubmit = (e) => {
+    e.preventDefault();
+    const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
+    const body = encodeURIComponent(
+      `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
+    );
+    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
+  };
+
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -618,12 +694,20 @@ function LandingView({ onOpenAuth }) {
             </div>
           </div>
 
-          <button
-            onClick={onOpenAuth}
-            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-          >
-            Iniciar sesión
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => scrollToId("contacto")}
+              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Contacto
+            </button>
+            <button
+              onClick={onOpenAuth}
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Iniciar sesión
+            </button>
+          </div>
         </div>
       </header>
 
@@ -643,8 +727,8 @@ function LandingView({ onOpenAuth }) {
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               Crea imágenes con calidad de estudio con el primer sistema de
               generación visual con IA desarrollado desde{" "}
-              <span className="font-semibold text-white">Guatemala</span>. Versión
-              inicial enfocada solo en{" "}
+              <span className="font-semibold text-white">Guatemala</span>.
+              Versión inicial enfocada solo en{" "}
               <span className="font-medium text-cyan-300">
                 generación de imagen
               </span>
@@ -659,10 +743,10 @@ function LandingView({ onOpenAuth }) {
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={() => scrollToId("panel-creador")}
+                onClick={handleSubscribe}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
-                Probar generador en vivo
+                Probar isabelaOs – US$5/mes
               </button>
               <button
                 onClick={onOpenAuth}
@@ -766,22 +850,58 @@ function LandingView({ onOpenAuth }) {
           </div>
         </section>
 
-        {/* Panel del creador (demo) */}
-        <section id="panel-creador" className="mt-16 space-y-6">
-          <div className="flex items-baseline justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-white">
-                Panel del creador
-              </h2>
-              <p className="mt-1 text-xs text-neutral-400">
-                Escribe un prompt y deja que isabelaOs Studio genere una imagen
-                usando nuestro pipeline real en RunPod. 10 imágenes diarias
-                gratis; después podrás seguir generando con el plan de $5/mes.
-              </p>
-            </div>
-          </div>
+        {/* Sección de contacto */}
+        <section id="contacto" className="mt-16 max-w-xl">
+          <h2 className="text-sm font-semibold text-white">
+            Contacto y soporte
+          </h2>
+          <p className="mt-1 text-xs text-neutral-400">
+            Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de
+            soporte responderá desde{" "}
+            <span className="font-semibold text-white">
+              contacto@isabelaos.com
+            </span>
+            .
+          </p>
 
-          <CreatorPanel />
+          <form
+            onSubmit={handleContactSubmit}
+            className="mt-4 space-y-3 text-sm"
+          >
+            <div>
+              <label className="text-xs text-neutral-300">Nombre</label>
+              <input
+                type="text"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-300">Correo</label>
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-300">Mensaje</label>
+              <textarea
+                rows={4}
+                value={contactMessage}
+                onChange={(e) => setContactMessage(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+            <button
+              type="submit"
+              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+            >
+              Enviar mensaje
+            </button>
+          </form>
         </section>
 
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
