@@ -7,7 +7,7 @@ import {
 } from "./lib/generations";
 
 // ---------------------------------------------------------
-// Helper para scroll suave
+// Helper scroll suave
 // ---------------------------------------------------------
 function scrollToId(id) {
   const el = document.getElementById(id);
@@ -17,11 +17,11 @@ function scrollToId(id) {
 }
 
 // ---------------------------------------------------------
-// Modal de autenticación (correo + password + Google)
+// Modal de autenticación
 // ---------------------------------------------------------
 function AuthModal({ open, onClose }) {
   const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
-  const [mode, setMode] = useState("login"); // 'login' | 'register'
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [localLoading, setLocalLoading] = useState(false);
@@ -55,7 +55,6 @@ function AuthModal({ open, onClose }) {
     setLocalLoading(true);
     try {
       await signInWithGoogle();
-      // Supabase redirige automáticamente
     } catch (err) {
       setError(err.message || String(err));
       setLocalLoading(false);
@@ -180,11 +179,11 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // 🔹 NUEVO: contador diario y límite
+  // 🔹 límite diario
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
-  // 🔹 Cargar historial desde Supabase cuando haya usuario
+  // Cargar historial desde Supabase cuando haya usuario
   useEffect(() => {
     if (!user) {
       setHistory([]);
@@ -197,7 +196,6 @@ function CreatorPanel() {
 
       const mapped = rows.map((row) => {
         let b64 = "";
-
         if (row.image_url && row.image_url.startsWith("data:image")) {
           const parts = row.image_url.split(",");
           b64 = parts[1] || "";
@@ -205,7 +203,7 @@ function CreatorPanel() {
 
         return {
           id: row.id,
-          prompt: row.prompt || "",
+          prompt: "",
           createdAt: row.created_at,
           image_b64: b64,
         };
@@ -213,8 +211,7 @@ function CreatorPanel() {
 
       setHistory(mapped);
 
-      // 🔹 calcular cuántas imágenes son de HOY
-      const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+      const todayStr = new Date().toISOString().slice(0, 10);
       const countToday = rows.filter(
         (row) =>
           row.created_at &&
@@ -225,22 +222,9 @@ function CreatorPanel() {
     })();
   }, [user]);
 
-  // 🔹 seleccionar imagen del historial
-  const handleSelectFromHistory = (item) => {
-    if (!item?.image_b64) return;
-    setImageB64(item.image_b64);
-  };
-
-  // 🔹 eliminar imagen del historial (solo a nivel de sesión)
-  const handleDeleteFromHistory = (id) => {
-    setHistory((prev) => prev.filter((item) => item.id !== id));
-    // Si luego quieres, aquí se podría llamar a una función para borrar en Supabase.
-  };
-
   const handleGenerate = async () => {
     setError("");
 
-    // 🔹 Chequeo de límite diario
     if (dailyCount >= DAILY_LIMIT) {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
@@ -311,7 +295,6 @@ function CreatorPanel() {
 
           setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
-
           setDailyCount((prev) => prev + 1);
 
           if (user?.id) {
@@ -340,6 +323,28 @@ function CreatorPanel() {
     }
   };
 
+  const handleSelectFromHistory = (item) => {
+    if (item.image_b64) {
+      setImageB64(item.image_b64);
+    }
+  };
+
+  const handleDeleteFromHistory = (id) => {
+    setHistory((prev) => prev.filter((item) => item.id !== id));
+    // (Opcional) aquí podríamos borrar también en Supabase, pero
+    // tú dijiste que con borrar de la interfaz está bien por ahora.
+  };
+
+  const handleDownload = () => {
+    if (!imageB64) return;
+    const link = document.createElement("a");
+    link.href = `data:image/png;base64,${imageB64}`;
+    link.download = "isabelaos-image.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (!user) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
@@ -348,9 +353,9 @@ function CreatorPanel() {
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
-          a RunPod, con 10 imágenes gratis al día. Si quieres ir más allá,
-          podrás activar el plan de $5/mes para generar ilimitadas mientras
-          dure la beta.
+          a RunPod. 10 imágenes diarias gratis; si quieres ir más allá, podrás
+          activar el plan de $5/mes para generar ilimitadas mientras dure la
+          beta.
         </p>
       </div>
     );
@@ -368,7 +373,7 @@ function CreatorPanel() {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -469,27 +474,19 @@ function CreatorPanel() {
                 >
                   <img
                     src={`data:image/png;base64,${item.image_b64}`}
-                    alt={item.prompt || "Imagen generada"}
+                    alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-
-                  {/* Botón eliminar */}
                   <button
                     type="button"
-                    className="absolute right-1 top-1 rounded-full bg-black/70 px-1.5 text-[11px] text-neutral-200 hover:bg-red-500/80 hover:text-white"
                     onClick={(e) => {
-                      e.stopPropagation(); // que no abra la imagen al borrar
+                      e.stopPropagation();
                       handleDeleteFromHistory(item.id);
                     }}
+                    className="absolute right-1 top-1 rounded-full bg-black/70 px-2 text-[10px] text-white opacity-0 group-hover:opacity-100"
                   >
-                    ×
+                    ✕
                   </button>
-
-                  <div className="pointer-events-none absolute inset-0 flex items-end bg-black/40 opacity-0 transition group-hover:opacity-100 text-[10px] text-white p-2">
-                    <span className="line-clamp-2">
-                      {item.prompt || "Imagen generada"}
-                    </span>
-                  </div>
                 </div>
               ))}
             </div>
@@ -502,9 +499,9 @@ function CreatorPanel() {
       </div>
 
       {/* Resultado */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
-        <div className="mt-4 flex h-[420px] items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {imageB64 ? (
             <img
               src={`data:image/png;base64,${imageB64}`}
@@ -515,13 +512,21 @@ function CreatorPanel() {
             <p>Aquí verás el resultado en cuanto se complete el render.</p>
           )}
         </div>
+        {imageB64 && (
+          <button
+            onClick={handleDownload}
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+          >
+            Descargar imagen
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------
-// Vista de Dashboard (solo para usuarios logueados)
+// Vista Dashboard (logueado)
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
@@ -534,7 +539,6 @@ function DashboardView() {
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
       }}
     >
-      {/* Header compacto */}
       <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
@@ -572,10 +576,8 @@ function DashboardView() {
               Panel del creador
             </h1>
             <p className="mt-1 text-xs text-neutral-400">
-              Escribe un prompt y deja que isabelaOs Studio genere una imagen
-              usando nuestro motor real conectado a RunPod. 10 imágenes diarias
-              gratis; después podrás seguir generando con el plan de $5/mes
-              ilimitadas mientras dure la beta.
+              Genera imágenes directamente desde tu cuenta conectada al pipeline
+              real en RunPod.
             </p>
           </div>
 
@@ -587,7 +589,7 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Vista Landing (para visitantes sin sesión)
+// Landing (sin sesión)
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth }) {
   return (
@@ -625,12 +627,12 @@ function LandingView({ onOpenAuth }) {
         </div>
       </header>
 
-      {/* Hero / landing */}
+      {/* Hero */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
-              BETA PRIVADA · SOLO GENERACIÓN DE IMAGEN
+              Beta privada · Solo generación de imagen
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               isabelaOs Studio{" "}
@@ -641,23 +643,24 @@ function LandingView({ onOpenAuth }) {
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               Crea imágenes con calidad de estudio con el primer sistema de
               generación visual con IA desarrollado desde{" "}
-              <span className="font-semibold text-white">Guatemala</span>.
-              Versión inicial enfocada solo en{" "}
+              <span className="font-semibold text-white">Guatemala</span>. Versión
+              inicial enfocada solo en{" "}
               <span className="font-medium text-cyan-300">
                 generación de imagen
               </span>
               , mientras terminamos los módulos de video y nuestro motor propio
               de realismo corporal{" "}
-              <span className="font-semibold text-fuchsia-300">
-                BodySync v1
-              </span>{" "}
-              (movimiento y expresión más naturales) · próximamente.
+              <span className="font-semibold text-white">BodySync v1</span>{" "}
+              (movimiento y expresión más naturales) ·{" "}
+              <span className="font-semibold text-yellow-300">
+                próximamente.
+              </span>
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
                 Probar generador en vivo
               </button>
@@ -681,6 +684,7 @@ function LandingView({ onOpenAuth }) {
             </p>
           </div>
 
+          {/* Vista previa del panel con imagen */}
           <div className="relative">
             <div className="h-full w-full rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
               <h3 className="text-sm font-semibold text-white">
@@ -688,12 +692,15 @@ function LandingView({ onOpenAuth }) {
               </h3>
               <p className="mt-2 text-[11px] text-neutral-400">
                 Interfaz simple para escribir un prompt, ajustar resolución y
-                ver el resultado generado por el motor conectado a RunPod,
+                ver el resultado generado por el motor conectado a RunPod y
                 preparado para integrar BodySync v1 en las próximas versiones.
               </p>
-              <div className="mt-4 h-52 rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/80 flex items-center justify-center text-[11px] text-neutral-300">
-                Panel real de isabelaOs Studio funcionando con tu endpoint
-                serverless.
+              <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
+                <img
+                  src="/preview/panel.png"
+                  alt="Vista previa del panel de isabelaOs Studio"
+                  className="w-full object-cover"
+                />
               </div>
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
@@ -704,7 +711,62 @@ function LandingView({ onOpenAuth }) {
           </div>
         </section>
 
-        {/* Panel del creador */}
+        {/* Galería de ejemplo (las 4 imágenes) */}
+        <section className="mt-12">
+          <h2 className="text-sm font-semibold text-white">
+            Algunas imágenes generadas con isabelaOs Studio
+          </h2>
+          <p className="mt-1 text-[11px] text-neutral-400">
+            Ejemplos renderizados con el motor actual de imagen. Más estilos,
+            resoluciones y módulos (video, BodySync AI) estarán disponibles
+            pronto.
+          </p>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallery/img1.png"
+                alt="Imagen generada 1"
+                className="h-40 w-full object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Imagen generada 1
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallery/img2.png"
+                alt="Imagen generada 2"
+                className="h-40 w-full object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Imagen generada 2
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallery/img3.png"
+                alt="Imagen generada 3"
+                className="h-40 w-full object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Imagen generada 3
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+              <img
+                src="/gallery/img4.png"
+                alt="Imagen generada 4"
+                className="h-40 w-full object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Imagen generada 4
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Panel del creador (demo) */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
@@ -713,9 +775,8 @@ function LandingView({ onOpenAuth }) {
               </h2>
               <p className="mt-1 text-xs text-neutral-400">
                 Escribe un prompt y deja que isabelaOs Studio genere una imagen
-                usando nuestro motor real conectado a RunPod. 10 imágenes
-                diarias gratis; después podrás seguir generando con el plan de
-                $5/mes ilimitadas mientras dure la beta.
+                usando nuestro pipeline real en RunPod. 10 imágenes diarias
+                gratis; después podrás seguir generando con el plan de $5/mes.
               </p>
             </div>
           </div>
@@ -772,4 +833,3 @@ export default function App() {
     </>
   );
 }
-
