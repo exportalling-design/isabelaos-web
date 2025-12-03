@@ -3,74 +3,69 @@ import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-export default async function handler(req) {
-  const cors = {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "POST, OPTIONS, GET",
-    "access-control-allow-headers": "content-type",
-  };
+/**
+ * Vercel Serverless Function estilo Node.js (req, res)
+ */
+export default async function handler(req, res) {
+  // CORS básico
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
 
-  // Preflight CORS
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: cors });
+    // Preflight
+    return res.status(200).end();
   }
 
-  // Si entras desde el navegador (GET), solo mostramos un mensaje simple
   if (req.method === "GET") {
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        message: "Endpoint de Stripe activo. Usa POST desde el frontend.",
-      }),
-      {
-        status: 200,
-        headers: {
-          ...cors,
-          "content-type": "application/json",
-        },
-      }
-    );
-  }
-
-  // Solo aceptamos POST para crear el checkout
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: cors,
+    // Para probar rápido en el navegador
+    return res.status(200).json({
+      ok: true,
+      message:
+        "Endpoint de Stripe activo. Usa POST desde el frontend para crear el checkout.",
     });
   }
 
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
   try {
+    const priceId = process.env.STRIPE_PRICE_BASIC;
+    const siteUrl = process.env.SITE_URL || "https://isabelaos.com";
+
+    if (!process.env.STRIPE_SECRET_KEY || !priceId) {
+      console.error("Faltan variables de Stripe en Vercel");
+      return res.status(500).json({
+        error:
+          "Configuración de Stripe incompleta en el servidor.",
+      });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [
         {
-          price: process.env.STRIPE_PRICE_BASIC, // price_1SaNGd4xP9m1XMxvtFwXztG8
+          price: priceId,
           quantity: 1,
         },
       ],
-      success_url: `${process.env.SITE_URL}/?checkout=success`,
-      cancel_url: `${process.env.SITE_URL}/?checkout=cancel`,
+      success_url: `${siteUrl}/?checkout=success`,
+      cancel_url: `${siteUrl}/?checkout=cancel`,
     });
 
-    return new Response(JSON.stringify({ url: session.url }), {
-      status: 200,
-      headers: {
-        ...cors,
-        "content-type": "application/json",
-      },
-    });
+    return res.status(200).json({ url: session.url });
   } catch (err) {
     console.error("Stripe error:", err);
-    return new Response(
-      JSON.stringify({ error: "Stripe error", details: err.message }),
-      {
-        status: 500,
-        headers: {
-          ...cors,
-          "content-type": "application/json",
-        },
-      }
-    );
+    return res.status(500).json({
+      error: "Stripe error",
+      details: err.message,
+    });
   }
 }
