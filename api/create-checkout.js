@@ -3,19 +3,18 @@ import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-/**
- * Endpoint que redirige directo a Stripe Checkout
- */
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
+  // Aceptamos GET (para window.location) y POST (para fetch)
+  if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
   }
 
-  const priceId = process.env.STRIPE_PRICE_BASIC;
+  // ⚠️ AHORA usamos la variable nueva
+  const priceId = process.env.STRIPE_PRICE_ID_BASIC;
   const siteUrl = process.env.SITE_URL || "https://isabelaos.com";
 
   if (!process.env.STRIPE_SECRET_KEY || !priceId) {
-    console.error("Faltan variables STRIPE_SECRET_KEY o STRIPE_PRICE_BASIC");
+    console.error("Faltan STRIPE_SECRET_KEY o STRIPE_PRICE_ID_BASIC");
     return res
       .status(500)
       .send("Stripe no está configurado correctamente en el servidor.");
@@ -34,7 +33,12 @@ export default async function handler(req, res) {
       cancel_url: `${siteUrl}/?checkout=cancel`,
     });
 
-    // Redirigir al checkout de Stripe
+    // Si vienes con fetch POST, devolvemos JSON
+    if (req.method === "POST") {
+      return res.status(200).json({ url: session.url });
+    }
+
+    // Si entras directo por GET (window.location o URL)
     res.writeHead(303, { Location: session.url });
     res.end();
   } catch (err) {
