@@ -234,7 +234,7 @@ function CreatorPanel() {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
       setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana o pásate al plan de pago para seguir generando.`
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana o activa el plan de $5/mes para seguir generando sin límites mientras la beta siga activa.`
       );
       return;
     }
@@ -298,7 +298,7 @@ function CreatorPanel() {
             image_b64: b64,
           };
 
-          // historial local (como antes)
+          // historial local
           setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
 
@@ -332,6 +332,11 @@ function CreatorPanel() {
     }
   };
 
+  // 🔹 NUEVO: eliminar imagen del historial local de la sesión
+  const handleDeleteFromHistory = (id) => {
+    setHistory((prev) => prev.filter((item) => item.id !== id));
+  };
+
   if (!user) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
@@ -339,9 +344,10 @@ function CreatorPanel() {
           Debes iniciar sesión para usar el generador de imágenes.
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás crear imágenes (con límite diario) usando el
-          pipeline real conectado a RunPod. Más adelante podrás pasarte al plan
-          ilimitado.
+          Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
+          a RunPod, con 10 imágenes gratis al día. Si quieres ir más allá,
+          podrás activar el plan de $5/mes para generar ilimitadas mientras
+          dure la beta.
         </p>
       </div>
     );
@@ -417,6 +423,8 @@ function CreatorPanel() {
             <br />
             <span className="text-[11px] text-neutral-400">
               Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes (gratis).
+              Después de esas 10, podrás seguir generando ilimitadas con el
+              plan de $5/mes mientras la beta siga activa.
             </span>
           </div>
 
@@ -453,34 +461,50 @@ function CreatorPanel() {
           ) : (
             <div className="mt-3 grid grid-cols-3 gap-3">
               {history.map((item) => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
                   className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/50"
-                  onClick={() => setImageB64(item.image_b64)}
                 >
-                  <img
-                    src={`data:image/png;base64,${item.image_b64}`}
-                    alt={item.prompt}
-                    className="h-24 w-full object-cover group-hover:opacity-80"
-                  />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items-end p-2">
-                    <span className="line-clamp-2">{item.prompt}</span>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    className="block w-full"
+                    onClick={() => setImageB64(item.image_b64)}
+                  >
+                    <img
+                      src={`data:image/png;base64,${item.image_b64}`}
+                      alt={item.prompt}
+                      className="h-24 w-full object-cover group-hover:opacity-80"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition text-[10px] text-white flex items-end p-2">
+                      <span className="line-clamp-2">{item.prompt}</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteFromHistory(item.id);
+                    }}
+                    className="absolute right-1 top-1 rounded-full bg-black/70 px-2 py-1 text-[10px] text-neutral-200 hover:bg-red-600 hover:text-white"
+                    title="Eliminar imagen de esta sesión"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           )}
           <p className="mt-2 text-[10px] text-neutral-500">
-            Por ahora las imágenes también se guardan en tu cuenta (Supabase)
-            además de esta sesión.
+            Por ahora las imágenes también se guardan en tu cuenta (Supabase),
+            además de esta sesión. Aquí puedes eliminar solo las vistas de esta
+            sesión si quieres mantener tu panel más limpio.
           </p>
         </div>
       </div>
 
       {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Resultado</h2>
+        <h2 className="text-lg font-semibold text.white">Resultado</h2>
         <div className="mt-4 flex h-[420px] items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {imageB64 ? (
             <img
@@ -496,16 +520,6 @@ function CreatorPanel() {
     </div>
   );
 }
-
-// ---------------------------------------------------------
-// Galería estática de ejemplos
-// ---------------------------------------------------------
-const GALLERY_IMAGES = [
-  { src: "/gallery/img1.png", title: "Imagen generada 1" },
-  { src: "/gallery/img2.png", title: "Imagen generada 2" },
-  { src: "/gallery/img3.png", title: "Imagen generada 3" },
-  { src: "/gallery/img4.png", title: "Imagen generada 4" },
-];
 
 // ---------------------------------------------------------
 // Vista de Dashboard (solo para usuarios logueados)
@@ -530,7 +544,8 @@ function DashboardView() {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+                isabelaOs{" "}
+                <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
                 Panel del creador · Beta
@@ -597,14 +612,14 @@ function LandingView({ onOpenAuth }) {
                 <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
-                Generación visual con IA
+                Generación visual con IA desde Guatemala
               </div>
             </div>
           </div>
 
           <button
             onClick={onOpenAuth}
-            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg.white/10"
+            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
           >
             Iniciar sesión
           </button>
@@ -625,12 +640,23 @@ function LandingView({ onOpenAuth }) {
               </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Crea imágenes con calidad de estudio conectadas a nuestro
-              pipeline real en RunPod. Versión inicial enfocada solo en{" "}
+              Crea imágenes con calidad de estudio con el primer sistema de
+              generación visual con IA desarrollado desde{" "}
+              <span className="font-semibold text-cyan-300">Guatemala</span>{" "}
+              para Latinoamérica. Versión inicial enfocada solo en{" "}
               <span className="font-medium text-cyan-300">
                 generación de imagen
               </span>
-              , mientras terminamos los módulos de video y BodySync.
+              , mientras terminamos los módulos de video y nuestro motor propio
+              de realismo corporal{" "}
+              <span className="font-semibold text-fuchsia-300">
+                BodySync v1
+              </span>{" "}
+              (movimiento y expresión más naturales) ·{" "}
+              <span className="text-yellow-300 font-semibold">
+                próximamente
+              </span>
+              .
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -649,14 +675,14 @@ function LandingView({ onOpenAuth }) {
             </div>
 
             <p className="mt-4 text-xs text-neutral-400">
-              Puedes generar hasta{" "}
+              Plan actual:{" "}
               <span className="font-semibold text-white">
                 10 imágenes gratis al día
-              </span>
-              . Si quieres seguir generando después del límite, el plan actual
-              es{" "}
+              </span>{" "}
+              por usuario. Si quieres seguir generando, podrás activar el plan{" "}
               <span className="font-semibold text-white">$5/mes</span> con
-              imágenes ilimitadas mientras isabelaOs Studio esté en beta.
+              generación ilimitada de imágenes mientras isabelaOs Studio se
+              mantenga en beta.
             </p>
           </div>
 
@@ -669,53 +695,21 @@ function LandingView({ onOpenAuth }) {
                 Interfaz simple para escribir un prompt, ajustar resolución y
                 ver el resultado generado por el motor conectado a RunPod.
               </p>
-              <div className="mt-4 h-52 overflow-hidden rounded-2xl border border-white/10 bg-black/80 flex items-center justify-center">
-                <img
-                  src="/preview/panel.png"
-                  alt="Panel real de isabelaOs Studio"
-                  className="h-full w-full object-cover"
-                />
+              <div className="mt-4 h-52 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/80 border border-white/10 flex items-center justify-center text-[11px] text-neutral-300">
+                Panel real de isabelaOs Studio funcionando con tu endpoint
+                serverless y preparado para integrar BodySync v1 en las próximas
+                versiones.
               </div>
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
-                IA desarrollado desde Latinoamérica pensado para creadores,
-                estudios y agencias de modelos virtuales.
+                IA desarrollado desde Guatemala pensando en creadores, estudios
+                y agencias de modelos virtuales.
               </p>
             </div>
           </div>
         </section>
 
-        {/* Galería de ejemplos */}
-        <section className="mt-16">
-          <h2 className="text-sm font-semibold text-white">
-            Algunas imágenes generadas con isabelaOs Studio
-          </h2>
-          <p className="mt-1 text-xs text-neutral-400">
-            Ejemplos renderizados con el motor actual de imagen. Más estilos y
-            módulos (video, BodySync AI) estarán disponibles pronto.
-          </p>
-          <div className="mt-4 grid gap-4 md:grid-cols-4">
-            {GALLERY_IMAGES.map((img) => (
-              <div
-                key={img.title}
-                className="overflow-hidden rounded-2xl border border-white/10 bg-black/60"
-              >
-                <div className="h-40 w-full bg-black">
-                  <img
-                    src={img.src}
-                    alt={img.title}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-                <div className="px-3 py-2 text-[11px] text-neutral-300">
-                  {img.title}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Panel del creador “demo” */}
+        {/* Panel del creador “demo” (mismo panel real) */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
@@ -724,7 +718,9 @@ function LandingView({ onOpenAuth }) {
               </h2>
               <p className="mt-1 text-xs text-neutral-400">
                 Escribe un prompt y deja que isabelaOs Studio genere una imagen
-                usando nuestro pipeline real en RunPod.
+                usando nuestro pipeline real en RunPod. 10 imágenes diarias
+                gratis; después podrás seguir generando con el plan de $5/mes
+                ilimitado mientras dure la beta.
               </p>
             </div>
           </div>
@@ -735,11 +731,11 @@ function LandingView({ onOpenAuth }) {
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado por
-              Stalling Technologic.
+              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
+              Guatemala por Stalling Technologic.
             </span>
             <span>
-              Versión beta · Módulos futuros: video, BodySync AI, CineCam y más.
+              Versión beta · Módulos futuros: video, BodySync v1, CineCam y más.
             </span>
           </div>
         </footer>
