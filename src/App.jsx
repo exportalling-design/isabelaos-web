@@ -182,24 +182,9 @@ function CreatorPanel() {
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
-  // función de suscripción (Stripe)
-  const handleSubscribe = async () => {
-    try {
-      const res = await fetch("/api/create-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Stripe:", data);
-        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
-      }
-    } catch (err) {
-      console.error("Error Stripe:", err);
-      alert("Error al conectar con el sistema de pago.");
-    }
+  // función de suscripción (Stripe) → redirige directo al endpoint
+  const handleSubscribe = () => {
+    window.location.href = "/api/create-checkout";
   };
 
   // Cargar historial desde Supabase cuando haya usuario
@@ -640,23 +625,9 @@ function LandingView({ onOpenAuth }) {
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
 
-  const handleSubscribe = async () => {
-    try {
-      const res = await fetch("/api/create-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Stripe:", data);
-        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
-      }
-    } catch (err) {
-      console.error("Error Stripe:", err);
-      alert("Error al conectar con el sistema de pago.");
-    }
+  // función de suscripción en landing → redirige directo
+  const handleSubscribe = () => {
+    window.location.href = "/api/create-checkout";
   };
 
   const handleContactSubmit = (e) => {
@@ -953,3 +924,4 @@ export default function App() {
     </>
   );
 }
+
