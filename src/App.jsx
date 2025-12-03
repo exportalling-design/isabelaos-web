@@ -180,7 +180,7 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // 🔹 Contador diario y límite
+  // 🔹 NUEVO: contador diario y límite
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
@@ -198,6 +198,7 @@ function CreatorPanel() {
       const mapped = rows.map((row) => {
         let b64 = "";
 
+        // asumimos que guardamos un data URL en image_url
         if (row.image_url && row.image_url.startsWith("data:image")) {
           const parts = row.image_url.split(",");
           b64 = parts[1] || "";
@@ -233,7 +234,7 @@ function CreatorPanel() {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
       setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana para seguir generando.`
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana o pásate al plan de pago para seguir generando.`
       );
       return;
     }
@@ -338,8 +339,9 @@ function CreatorPanel() {
           Debes iniciar sesión para usar el generador de imágenes.
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás crear imágenes ilimitadas (mientras esté en
-          beta) usando el pipeline real conectado a RunPod.
+          Desde tu cuenta podrás crear imágenes (con límite diario) usando el
+          pipeline real conectado a RunPod. Más adelante podrás pasarte al plan
+          ilimitado.
         </p>
       </div>
     );
@@ -357,7 +359,7 @@ function CreatorPanel() {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -414,7 +416,7 @@ function CreatorPanel() {
             Estado actual: {statusText || "Listo para generar."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
+              Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes (gratis).
             </span>
           </div>
 
@@ -454,7 +456,7 @@ function CreatorPanel() {
                 <button
                   key={item.id}
                   type="button"
-                  className="group relative overflow-hidden rounded-xl border border.white/10 bg-black/50"
+                  className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/50"
                   onClick={() => setImageB64(item.image_b64)}
                 >
                   <img
@@ -494,6 +496,16 @@ function CreatorPanel() {
     </div>
   );
 }
+
+// ---------------------------------------------------------
+// Galería estática de ejemplos
+// ---------------------------------------------------------
+const GALLERY_IMAGES = [
+  { src: "/gallery/img1.png", title: "Imagen generada 1" },
+  { src: "/gallery/img2.png", title: "Imagen generada 2" },
+  { src: "/gallery/img3.png", title: "Imagen generada 3" },
+  { src: "/gallery/img4.png", title: "Imagen generada 4" },
+];
 
 // ---------------------------------------------------------
 // Vista de Dashboard (solo para usuarios logueados)
@@ -592,7 +604,7 @@ function LandingView({ onOpenAuth }) {
 
           <button
             onClick={onOpenAuth}
-            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg.white/10"
           >
             Iniciar sesión
           </button>
@@ -624,7 +636,7 @@ function LandingView({ onOpenAuth }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("panel-creador")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
               >
                 Probar generador en vivo
               </button>
@@ -637,10 +649,14 @@ function LandingView({ onOpenAuth }) {
             </div>
 
             <p className="mt-4 text-xs text-neutral-400">
-              Plan actual:{" "}
-              <span className="font-semibold text-white">$5/mes</span> ·
-              Generación ilimitada de imágenes mientras esté en beta. Tu cuenta
-              se podrá migrar a los planes completos cuando activemos video.
+              Puedes generar hasta{" "}
+              <span className="font-semibold text-white">
+                10 imágenes gratis al día
+              </span>
+              . Si quieres seguir generando después del límite, el plan actual
+              es{" "}
+              <span className="font-semibold text-white">$5/mes</span> con
+              imágenes ilimitadas mientras isabelaOs Studio esté en beta.
             </p>
           </div>
 
@@ -653,9 +669,12 @@ function LandingView({ onOpenAuth }) {
                 Interfaz simple para escribir un prompt, ajustar resolución y
                 ver el resultado generado por el motor conectado a RunPod.
               </p>
-              <div className="mt-4 h-52 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-fuchsia-500/10 to-black/80 border border-white/10 flex items-center justify-center text-[11px] text-neutral-300">
-                Panel real de isabelaOs Studio funcionando con tu endpoint
-                serverless.
+              <div className="mt-4 h-52 overflow-hidden rounded-2xl border border-white/10 bg-black/80 flex items-center justify-center">
+                <img
+                  src="/preview/panel.png"
+                  alt="Panel real de isabelaOs Studio"
+                  className="h-full w-full object-cover"
+                />
               </div>
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
@@ -666,48 +685,37 @@ function LandingView({ onOpenAuth }) {
           </div>
         </section>
 
-        {/* Galería de resultados (4 imágenes) */}
+        {/* Galería de ejemplos */}
         <section className="mt-16">
-          <h3 className="text-sm font-semibold text-white">
+          <h2 className="text-sm font-semibold text-white">
             Algunas imágenes generadas con isabelaOs Studio
-          </h3>
+          </h2>
           <p className="mt-1 text-xs text-neutral-400">
             Ejemplos renderizados con el motor actual de imagen. Más estilos y
             módulos (video, BodySync AI) estarán disponibles pronto.
           </p>
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallary/img1.png"
-                alt="Imagen generada 1"
-                className="h-32 w-full object-cover"
-              />
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallary/img2.png"
-                alt="Imagen generada 2"
-                className="h-32 w-full object-cover"
-              />
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallary/img3.png"
-                alt="Imagen generada 3"
-                className="h-32 w-full object-cover"
-              />
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallary/img4.png"
-                alt="Imagen generada 4"
-                className="h-32 w-full object-cover"
-              />
-            </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-4">
+            {GALLERY_IMAGES.map((img) => (
+              <div
+                key={img.title}
+                className="overflow-hidden rounded-2xl border border-white/10 bg-black/60"
+              >
+                <div className="h-40 w-full bg-black">
+                  <img
+                    src={img.src}
+                    alt={img.title}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="px-3 py-2 text-[11px] text-neutral-300">
+                  {img.title}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
-        {/* Panel del creador “demo” (solo mensaje si no hay usuario) */}
+        {/* Panel del creador “demo” */}
         <section id="panel-creador" className="mt-16 space-y-6">
           <div className="flex items-baseline justify-between gap-3">
             <div>
