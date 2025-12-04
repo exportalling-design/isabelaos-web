@@ -41,7 +41,7 @@ function PayPalButton({ amount = "5.00", containerId }) {
         .Buttons({
           style: {
             layout: "horizontal",
-            color: "black", // fondo oscuro del botón PayPal
+            color: "black", // fondo oscuro
             shape: "pill",
             label: "paypal",
           },
@@ -100,13 +100,12 @@ function PayPalButton({ amount = "5.00", containerId }) {
     document.body.appendChild(script);
 
     return () => {
-      // NO borramos el script para poder reutilizarlo en otras vistas
+      // dejamos el script para reutilizarlo
     };
   }, [amount, divId]);
 
   return (
     <div className="mt-2 w-full flex justify-center">
-      {/* Contenedor bonito oscuro/morado */}
       <div className="rounded-2xl bg-gradient-to-r from-indigo-700/80 via-fuchsia-600/80 to-indigo-800/80 px-4 py-2 shadow-lg">
         <div id={divId} className="min-w-[160px]" />
       </div>
@@ -277,7 +276,6 @@ function CreatorPanel() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
 
-  // 🔹 límite diario
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
@@ -303,7 +301,7 @@ function CreatorPanel() {
     }
   };
 
-  // Cargar historial desde Supabase cuando haya usuario
+  // Cargar historial desde Supabase
   useEffect(() => {
     if (!user) {
       setHistory([]);
@@ -734,12 +732,11 @@ function DashboardView() {
 // ---------------------------------------------------------
 // Landing (sin sesión)
 // ---------------------------------------------------------
-function LandingView({ onOpenAuth }) {
+function LandingView({ onOpenAuth, hidePayPal = false }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
 
-  // Checkout de Paddle para la landing
   const handlePaddleCheckout = async () => {
     try {
       const res = await fetch("/api/paddle-checkout", {
@@ -854,11 +851,13 @@ function LandingView({ onOpenAuth }) {
                 <span className="text-neutral-300">
                   o pagar con <span className="font-semibold">PayPal</span>:
                 </span>
-                {/* PayPal SOLO en la landing */}
-                <PayPalButton
-                  amount="5.00"
-                  containerId="paypal-button-landing"
-                />
+                {/* PayPal SOLO en landing, y desaparece si el login está abierto */}
+                {!hidePayPal && (
+                  <PayPalButton
+                    amount="5.00"
+                    containerId="paypal-button-landing"
+                  />
+                )}
               </div>
             </div>
 
@@ -874,7 +873,7 @@ function LandingView({ onOpenAuth }) {
             </p>
           </div>
 
-          {/* Vista previa del panel con imagen */}
+          {/* Vista previa del panel */}
           <div className="relative">
             <div className="h-full w-full rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
               <h3 className="text-sm font-semibold text-white">
@@ -901,7 +900,7 @@ function LandingView({ onOpenAuth }) {
           </div>
         </section>
 
-        {/* Galería de ejemplo (las 4 imágenes) */}
+        {/* Galería */}
         <section className="mt-12">
           <h2 className="text-sm font-semibold text-white">
             Algunas imágenes generadas con isabelaOs Studio
@@ -956,7 +955,7 @@ function LandingView({ onOpenAuth }) {
           </div>
         </section>
 
-        {/* Sección de contacto */}
+        {/* Contacto */}
         <section id="contacto" className="mt-16 max-w-xl">
           <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
@@ -1010,42 +1009,25 @@ function LandingView({ onOpenAuth }) {
           </form>
         </section>
 
-        {/* Footer con enlaces legales */}
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
               Guatemala por Stalling Technologic.
             </span>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <a
-                href="/terms.html"
-                className="text-neutral-400 hover:text-white"
-                target="_blank"
-                rel="noreferrer"
-              >
+            <span className="flex flex-wrap gap-3">
+              <a href="/terms.html" className="hover:text-neutral-300">
                 Términos de servicio
               </a>
-              <span className="text-neutral-600">•</span>
-              <a
-                href="/privacy.html"
-                className="text-neutral-400 hover:text-white"
-                target="_blank"
-                rel="noreferrer"
-              >
+              <span>•</span>
+              <a href="/privacy.html" className="hover:text-neutral-300">
                 Política de privacidad
               </a>
-              <span className="text-neutral-600">•</span>
-              <a
-                href="/refund.html"
-                className="text-neutral-400 hover:text-white"
-                target="_blank"
-                rel="noreferrer"
-              >
+              <span>•</span>
+              <a href="/refunds.html" className="hover:text-neutral-300">
                 Política de reembolsos
               </a>
-            </div>
+            </span>
           </div>
         </footer>
       </main>
@@ -1077,8 +1059,13 @@ export default function App() {
 
   return (
     <>
-      {user ? <DashboardView /> : <LandingView onOpenAuth={openAuth} />}
+      {user ? (
+        <DashboardView />
+      ) : (
+        <LandingView hidePayPal={showAuthModal} onOpenAuth={openAuth} />
+      )}
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
 }
+
