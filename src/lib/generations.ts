@@ -63,3 +63,34 @@ export async function loadGenerationsForUser(userId: string) {
   console.log("[loadGenerationsForUser] Filas:", data?.length || 0);
   return data || [];
 }
+
+/**
+ * Devuelve cuántas imágenes ha generado el usuario HOY,
+ * usando el inicio del día en horario local.
+ */
+export async function getTodayGenerationCount(userId: string) {
+  console.log("[getTodayGenerationCount] Contando generadas HOY para:", userId);
+
+  const now = new Date();
+  // Inicio del día local (Guatemala) y luego a ISO (UTC)
+  const startOfDayLocal = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0, 0, 0, 0
+  );
+
+  const { error, count } = await supabase
+    .from("generations")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", startOfDayLocal.toISOString());
+
+  if (error) {
+    console.error("[getTodayGenerationCount] Error:", error);
+    return 0;
+  }
+
+  console.log("[getTodayGenerationCount] Count =", count ?? 0);
+  return count ?? 0;
+}

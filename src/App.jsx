@@ -3,6 +3,7 @@ import { useAuth } from "./context/AuthContext";
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
+  getTodayGenerationCount, // 👈 nuevo import
 } from "./lib/generations";
 
 // ---------------------------------------------------------
@@ -23,9 +24,9 @@ function scrollToId(id) {
 }
 
 // ---------------------------------------------------------
-// Botón PayPal reutilizable (solo landing)
+// Botón PayPal reutilizable
 // ---------------------------------------------------------
-function PayPalButton({ amount = "5.00", containerId }) {
+function PayPalButton({ amount = "5.00", containerId, onPaid }) {
   const divId = containerId || "paypal-button-container";
 
   useEffect(() => {
@@ -62,8 +63,18 @@ function PayPalButton({ amount = "5.00", containerId }) {
             try {
               const details = await actions.order.capture();
               console.log("Pago PayPal completado:", details);
+
+              // 👇 si nos pasan callback, lo llamamos para marcar premium
+              if (typeof onPaid === "function") {
+                try {
+                  onPaid(details);
+                } catch (cbErr) {
+                  console.error("Error en onPaid PayPal:", cbErr);
+                }
+              }
+
               alert(
-                "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
+                "Pago completado con PayPal. Tu plan Basic se ha activado en este navegador."
               );
             } catch (err) {
               console.error("Error al capturar pago PayPal:", err);
@@ -102,7 +113,7 @@ function PayPalButton({ amount = "5.00", containerId }) {
     return () => {
       // dejamos el script para reutilizarlo
     };
-  }, [amount, divId]);
+  }, [amount, divId, onPaid]);
 
   return (
     <div className="mt-2 w-full flex justify-center">
@@ -279,6 +290,28 @@ function CreatorPanel() {
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
+  const [isPremium, setIsPremium] = useState(false);
+
+  // Clave local para este usuario (modo beta)
+  const premiumKey = user ? `isabelaos_premium_${user.id}` : null;
+
+  // Leer premium desde localStorage
+  useEffect(() => {
+    if (!user) {
+      setIsPremium(false);
+      setDailyCount(0);
+      setHistory([]);
+      return;
+    }
+    try {
+      const stored = premiumKey ? localStorage.getItem(premiumKey) : null;
+      setIsPremium(stored === "1");
+    } catch (e) {
+      console.warn("No se pudo leer premium desde localStorage:", e);
+      setIsPremium(false);
+    }
+  }, [user, premiumKey]);
+
   // función de suscripción (Paddle)
   const handlePaddleCheckout = async () => {
     try {
@@ -301,7 +334,7 @@ function CreatorPanel() {
     }
   };
 
-  // Cargar historial desde Supabase
+  // Cargar historial y conteo diario desde Supabase
   useEffect(() => {
     if (!user) {
       setHistory([]);
@@ -329,13 +362,8 @@ function CreatorPanel() {
 
       setHistory(mapped);
 
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const countToday = rows.filter(
-        (row) =>
-          row.created_at &&
-          typeof row.created_at === "string" &&
-          row.created_at.startsWith(todayStr)
-      ).length;
+      // 👇 ahora el conteo de hoy se hace contra Supabase con inicio de día local
+      const countToday = await getTodayGenerationCount(user.id);
       setDailyCount(countToday);
     })();
   }, [user]);
@@ -343,11 +371,11 @@ function CreatorPanel() {
   const handleGenerate = async () => {
     setError("");
 
-    if (dailyCount >= DAILY_LIMIT) {
+    if (!isPremium && dailyCount >= DAILY_LIMIT) {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
       setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana para seguir generando.`
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana o activa el plan de pago para seguir generando.`
       );
       return;
     }
@@ -413,6 +441,8 @@ function CreatorPanel() {
 
           setHistory((prev) => [newItem, ...prev]);
           setStatusText("Render completado.");
+
+          // Para premium igual contamos, pero no lo usamos para bloquear
           setDailyCount((prev) => prev + 1);
 
           if (user?.id) {
@@ -459,6 +489,21 @@ function CreatorPanel() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handlePayPalUnlock = () => {
+    if (!user || !premiumKey) return;
+    try {
+      localStorage.setItem(premiumKey, "1");
+      setIsPremium(true);
+      setError("");
+      setStatus("IDLE");
+      setStatusText(
+        "Plan Basic activado: ya no tienes límite diario en este navegador."
+      );
+    } catch (e) {
+      console.error("No se pudo guardar premium en localStorage:", e);
+    }
   };
 
   if (!user) {
@@ -546,7 +591,13 @@ function CreatorPanel() {
             Estado actual: {statusText || "Listo para generar."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
+              {isPremium ? (
+                <>Uso de hoy: {dailyCount} · Plan Basic activo (sin límite)</>
+              ) : (
+                <>
+                  Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
+                </>
+              )}
             </span>
           </div>
 
@@ -559,25 +610,36 @@ function CreatorPanel() {
             disabled={
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
-              dailyCount >= DAILY_LIMIT
+              (!isPremium && dailyCount >= DAILY_LIMIT)
             }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {dailyCount >= DAILY_LIMIT
+            {!isPremium && dailyCount >= DAILY_LIMIT
               ? "Límite diario alcanzado"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
               : "Generar imagen desde prompt"}
           </button>
 
-          {dailyCount >= DAILY_LIMIT && (
-            <button
-              type="button"
-              onClick={handlePaddleCheckout}
-              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-            >
-              Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
-            </button>
+          {!isPremium && dailyCount >= DAILY_LIMIT && (
+            <>
+              <button
+                type="button"
+                onClick={handlePaddleCheckout}
+                className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+              >
+                Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
+              </button>
+
+              <div className="mt-3 text-[11px] text-neutral-400">
+                o pagar con <span className="font-semibold">PayPal</span>:
+                <PayPalButton
+                  amount="5.00"
+                  containerId="paypal-button-panel"
+                  onPaid={handlePayPalUnlock}
+                />
+              </div>
+            </>
           )}
         </div>
 
@@ -869,7 +931,8 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               por usuario. Si quieres seguir generando, podrás activar el plan{" "}
               <span className="font-semibold text-white">$5/mes</span> con
               generación ilimitada de imágenes mientras isabelaOs Studio se
-              mantenga en beta.
+              mantenga en beta (en este momento el plan ilimitado se activa por
+              navegador tras el pago).
             </p>
           </div>
 
