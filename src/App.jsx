@@ -23,7 +23,7 @@ function scrollToId(id) {
 }
 
 // ---------------------------------------------------------
-// Botón PayPal reutilizable (solo landing + dashboard si quieres)
+// Botón PayPal reutilizable (solo landing)
 // ---------------------------------------------------------
 function PayPalButton({ amount = "5.00", containerId }) {
   const divId = containerId || "paypal-button-container";
@@ -65,7 +65,6 @@ function PayPalButton({ amount = "5.00", containerId }) {
               alert(
                 "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
               );
-              // TODO: aquí luego marcamos en Supabase / backend que el usuario tiene plan activo
             } catch (err) {
               console.error("Error al capturar pago PayPal:", err);
               alert("Ocurrió un error al confirmar el pago con PayPal.");
@@ -452,8 +451,6 @@ function CreatorPanel() {
 
   const handleDeleteFromHistory = (id) => {
     setHistory((prev) => prev.filter((item) => item.id !== id));
-    // (Opcional) aquí podríamos borrar también en Supabase, pero
-    // tú dijiste que con borrar de la interfaz está bien por ahora.
   };
 
   const handleDownload = () => {
@@ -1013,15 +1010,42 @@ function LandingView({ onOpenAuth }) {
           </form>
         </section>
 
+        {/* Footer con enlaces legales */}
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
               Guatemala por Stalling Technologic.
             </span>
-            <span>
-              Versión beta · Módulos futuros: video, BodySync v1, CineCam y más.
-            </span>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href="/terms.html"
+                className="text-neutral-400 hover:text-white"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Términos de servicio
+              </a>
+              <span className="text-neutral-600">•</span>
+              <a
+                href="/privacy.html"
+                className="text-neutral-400 hover:text-white"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Política de privacidad
+              </a>
+              <span className="text-neutral-600">•</span>
+              <a
+                href="/refund.html"
+                className="text-neutral-400 hover:text-white"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Política de reembolsos
+              </a>
+            </div>
           </div>
         </footer>
       </main>
