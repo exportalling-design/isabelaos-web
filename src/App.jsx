@@ -71,11 +71,12 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
                 } catch (cbErr) {
                   console.error("Error en onPaid PayPal:", cbErr);
                 }
+              } else {
+                // Mensaje genérico solo si NO hay callback
+                alert(
+                  "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
+                );
               }
-
-              alert(
-                "Pago completado con PayPal. Tu plan Basic se ha activado en este navegador."
-              );
             } catch (err) {
               console.error("Error al capturar pago PayPal:", err);
               alert("Ocurrió un error al confirmar el pago con PayPal.");
@@ -295,7 +296,7 @@ function CreatorPanel() {
   // Clave local para este usuario (modo beta)
   const premiumKey = user ? `isabelaos_premium_${user.id}` : null;
 
-  // Leer premium desde localStorage
+  // Leer premium desde localStorage + tu correo siempre premium
   useEffect(() => {
     if (!user) {
       setIsPremium(false);
@@ -303,6 +304,20 @@ function CreatorPanel() {
       setHistory([]);
       return;
     }
+
+    // Tu cuenta siempre premium
+    if (user.email === "exportalling@gmail.com") {
+      setIsPremium(true);
+      if (premiumKey) {
+        try {
+          localStorage.setItem(premiumKey, "1");
+        } catch (e) {
+          console.warn("No se pudo guardar premium para exportalling:", e);
+        }
+      }
+      return;
+    }
+
     try {
       const stored = premiumKey ? localStorage.getItem(premiumKey) : null;
       setIsPremium(stored === "1");
@@ -362,7 +377,6 @@ function CreatorPanel() {
 
       setHistory(mapped);
 
-      // 👇 ahora el conteo de hoy se hace contra Supabase con inicio de día local
       const countToday = await getTodayGenerationCount(user.id);
       setDailyCount(countToday);
     })();
@@ -375,7 +389,7 @@ function CreatorPanel() {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
       setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes por hoy. Vuelve mañana o activa el plan de pago para seguir generando.`
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Para seguir disfrutando del generador puedes activar la suscripción mensual de US$5 y generar sin límite mientras dure la beta.`
       );
       return;
     }
@@ -453,7 +467,7 @@ function CreatorPanel() {
               prompt: "",
               negativePrompt: "",
               width: Number(width),
-              height: Number(height),
+              height: Number(steps),
               steps: Number(steps),
             }).catch((e) => {
               console.error("Error guardando en Supabase:", e);
@@ -501,6 +515,9 @@ function CreatorPanel() {
       setStatusText(
         "Plan Basic activado: ya no tienes límite diario en este navegador."
       );
+      alert(
+        "Bienvenido a tu suscripción mensual de isabelaOs Studio. Con este pago aseguras un precio especial durante un año completo para nuestro siguiente módulo (próximamente)."
+      );
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
     }
@@ -521,6 +538,8 @@ function CreatorPanel() {
       </div>
     );
   }
+
+  const remaining = DAILY_LIMIT - dailyCount;
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -592,7 +611,10 @@ function CreatorPanel() {
             <br />
             <span className="text-[11px] text-neutral-400">
               {isPremium ? (
-                <>Uso de hoy: {dailyCount} · Plan Basic activo (sin límite)</>
+                <>
+                  Uso de hoy: {dailyCount} · Plan Basic activo (sin límite, con
+                  precio beta asegurado 1 año).
+                </>
               ) : (
                 <>
                   Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
@@ -600,6 +622,21 @@ function CreatorPanel() {
               )}
             </span>
           </div>
+
+          {/* Aviso cuando ya van 7 o más, pero todavía no llegan al límite */}
+          {!isPremium &&
+            dailyCount >= 7 &&
+            dailyCount < DAILY_LIMIT &&
+            remaining > 0 && (
+              <div className="mt-2 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
+                Ya generaste {dailyCount} imágenes hoy. Solo te quedan{" "}
+                {remaining} imágenes gratis.  
+                <br />
+                Para seguir disfrutando del generador sin límite puedes activar
+                el plan ilimitado de <strong>US$5/mes</strong> mientras dure la
+                beta.
+              </div>
+            )}
 
           {error && (
             <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
@@ -866,7 +903,7 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               onClick={onOpenAuth}
               className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
-              Iniciar sesión
+              Iniciar sesión / Registrarse
             </button>
           </div>
         </div>
@@ -904,23 +941,15 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={handlePaddleCheckout}
+                onClick={onOpenAuth}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
-                Probar isabelaOs – US$5/mes (tarjeta / Paddle)
+                Empezar gratis · Crear cuenta
               </button>
-              <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
-                <span className="text-neutral-300">
-                  o pagar con <span className="font-semibold">PayPal</span>:
-                </span>
-                {/* PayPal SOLO en landing, y desaparece si el login está abierto */}
-                {!hidePayPal && (
-                  <PayPalButton
-                    amount="5.00"
-                    containerId="paypal-button-landing"
-                  />
-                )}
-              </div>
+              <p className="max-w-xs text-[11px] text-neutral-400">
+                El registro es gratuito. Las opciones de pago para generar sin
+                límite aparecen más abajo, solo si quieres activarlas.
+              </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-400">
@@ -928,11 +957,11 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               <span className="font-semibold text-white">
                 10 imágenes gratis al día
               </span>{" "}
-              por usuario. Si quieres seguir generando, podrás activar el plan{" "}
+              por usuario. Si quieres seguir generando, más abajo encontrarás el
+              plan{" "}
               <span className="font-semibold text-white">$5/mes</span> con
               generación ilimitada de imágenes mientras isabelaOs Studio se
-              mantenga en beta (en este momento el plan ilimitado se activa por
-              navegador tras el pago).
+              mantenga en beta.
             </p>
           </div>
 
@@ -1016,6 +1045,47 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* Sección de plan de pago más abajo */}
+        <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
+          <h2 className="text-sm font-semibold text-white">
+            Plan beta para creadores
+          </h2>
+          <p className="mt-2 text-xs text-neutral-300">
+            Si llegas al límite de 10 imágenes gratuitas al día y quieres seguir
+            generando sin restricciones, puedes activar el plan ilimitado mientras
+            dure la beta.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <button
+              onClick={handlePaddleCheckout}
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+            >
+              isabelaOs Basic – US$5/mes (tarjeta / Paddle)
+            </button>
+            <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
+              <span className="text-neutral-300">
+                o pagar con <span className="font-semibold">PayPal</span>:
+              </span>
+              {!hidePayPal && (
+                <PayPalButton
+                  amount="5.00"
+                  containerId="paypal-button-landing"
+                />
+              )}
+            </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-neutral-400">
+            Los usuarios que se registren durante la beta mantendrán un{" "}
+            <span className="font-semibold text-white">
+              precio preferencial durante el primer año
+            </span>{" "}
+            frente al precio público general cuando lancemos los módulos
+            siguientes.
+          </p>
         </section>
 
         {/* Contacto */}
