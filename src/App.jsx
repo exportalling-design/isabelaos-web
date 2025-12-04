@@ -613,7 +613,7 @@ function CreatorPanel() {
               {isPremium ? (
                 <>
                   Uso de hoy: {dailyCount} · Plan Basic activo (sin límite, con
-                  precio beta asegurado 1 año).
+                  precio beta).
                 </>
               ) : (
                 <>
@@ -848,7 +848,7 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
       } else {
         console.error("Respuesta Paddle:", data);
         alert(
-          "No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde."
+          "No se pudo abrir el pago con Paddle. Intenta con Paypal."
         );
       }
     } catch (err) {
@@ -985,7 +985,7 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               </div>
               <p className="mt-3 text-[10px] text-neutral-500">
                 isabelaOs Studio es el primer sistema de generación visual con
-                IA desarrollado desde Guatemala pensando en creadores, estudios
+                IA desarrollado en Guatemala pensando en creadores, estudios
                 y agencias de modelos virtuales.
               </p>
             </div>
@@ -1146,7 +1146,7 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
-              Guatemala por Stalling Technologic.
+              Guatemala, Coban Alta verapaz por Stalling Technologic.
             </span>
             <span className="flex flex-wrap gap-3">
               <a href="/terms.html" className="hover:text-neutral-300">
