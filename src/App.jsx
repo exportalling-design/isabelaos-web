@@ -23,7 +23,7 @@ function scrollToId(id) {
 }
 
 // ---------------------------------------------------------
-// Botón PayPal reutilizable
+// Botón PayPal reutilizable (solo landing + dashboard si quieres)
 // ---------------------------------------------------------
 function PayPalButton({ amount = "5.00", containerId }) {
   const divId = containerId || "paypal-button-container";
@@ -41,7 +41,7 @@ function PayPalButton({ amount = "5.00", containerId }) {
         .Buttons({
           style: {
             layout: "horizontal",
-            color: "gold",
+            color: "black", // fondo oscuro del botón PayPal
             shape: "pill",
             label: "paypal",
           },
@@ -106,7 +106,12 @@ function PayPalButton({ amount = "5.00", containerId }) {
   }, [amount, divId]);
 
   return (
-    <div id={divId} className="mt-2 w-full flex justify-center" />
+    <div className="mt-2 w-full flex justify-center">
+      {/* Contenedor bonito oscuro/morado */}
+      <div className="rounded-2xl bg-gradient-to-r from-indigo-700/80 via-fuchsia-600/80 to-indigo-800/80 px-4 py-2 shadow-lg">
+        <div id={divId} className="min-w-[160px]" />
+      </div>
+    </div>
   );
 }
 
@@ -277,10 +282,10 @@ function CreatorPanel() {
   const [dailyCount, setDailyCount] = useState(0);
   const DAILY_LIMIT = 10;
 
-  // función de suscripción (Stripe)
-  const handleSubscribe = async () => {
+  // función de suscripción (Paddle)
+  const handlePaddleCheckout = async () => {
     try {
-      const res = await fetch("/api/create-checkout", {
+      const res = await fetch("/api/paddle-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -288,12 +293,14 @@ function CreatorPanel() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        console.error("Respuesta Stripe:", data);
-        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+        console.error("Respuesta Paddle:", data);
+        alert(
+          "No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde."
+        );
       }
     } catch (err) {
-      console.error("Error Stripe:", err);
-      alert("Error al conectar con el sistema de pago.");
+      console.error("Error Paddle:", err);
+      alert("Error al conectar con Paddle.");
     }
   };
 
@@ -569,24 +576,13 @@ function CreatorPanel() {
           </button>
 
           {dailyCount >= DAILY_LIMIT && (
-            <>
-              <button
-                type="button"
-                onClick={handleSubscribe}
-                className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-              >
-                Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Stripe)
-              </button>
-
-              <div className="mt-2 text-[11px] text-neutral-400 text-center">
-                o pagar con <span className="font-semibold">PayPal</span>:
-              </div>
-
-              <PayPalButton
-                amount="5.00"
-                containerId="paypal-button-dashboard"
-              />
-            </>
+            <button
+              type="button"
+              onClick={handlePaddleCheckout}
+              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+            >
+              Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
+            </button>
           )}
         </div>
 
@@ -746,9 +742,10 @@ function LandingView({ onOpenAuth }) {
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
 
-  const handleSubscribe = async () => {
+  // Checkout de Paddle para la landing
+  const handlePaddleCheckout = async () => {
     try {
-      const res = await fetch("/api/create-checkout", {
+      const res = await fetch("/api/paddle-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -756,12 +753,14 @@ function LandingView({ onOpenAuth }) {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        console.error("Respuesta Stripe:", data);
-        alert("No se pudo abrir el pago. Intenta de nuevo más tarde.");
+        console.error("Respuesta Paddle:", data);
+        alert(
+          "No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde."
+        );
       }
     } catch (err) {
-      console.error("Error Stripe:", err);
-      alert("Error al conectar con el sistema de pago.");
+      console.error("Error Paddle:", err);
+      alert("Error al conectar con Paddle.");
     }
   };
 
@@ -849,15 +848,16 @@ function LandingView({ onOpenAuth }) {
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={handleSubscribe}
+                onClick={handlePaddleCheckout}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
               >
-                Probar isabelaOs – US$5/mes (tarjeta / Stripe)
+                Probar isabelaOs – US$5/mes (tarjeta / Paddle)
               </button>
               <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
                 <span className="text-neutral-300">
                   o pagar con <span className="font-semibold">PayPal</span>:
                 </span>
+                {/* PayPal SOLO en la landing */}
                 <PayPalButton
                   amount="5.00"
                   containerId="paypal-button-landing"
@@ -1053,13 +1053,8 @@ export default function App() {
 
   return (
     <>
-      {user ? (
-        <DashboardView />
-      ) : (
-        <LandingView onOpenAuth={openAuth} />
-      )}
+      {user ? <DashboardView /> : <LandingView onOpenAuth={openAuth} />}
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
 }
-
