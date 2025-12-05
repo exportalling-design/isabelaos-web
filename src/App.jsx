@@ -917,7 +917,7 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión) - CON CUADRÍCULA DE 4 IMÁGENES ARRIBA
+// Landing (sin sesión) - CON CUADRÍCULA DE 4 IMÁGENES ARRIBA Y CACHÉ FORZADO
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
@@ -1045,16 +1045,17 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="grid grid-cols-2 gap-2"> 
               
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
-                <img src="/gallery/img1.png" alt="Imagen generada 1" className="w-full h-auto object-cover" />
+                {/* CACHÉ FORZADO: AÑADIDO ?v=2 */}
+                <img src="/gallery/img1.png?v=2" alt="Imagen generada 1" className="w-full h-auto object-cover" />
               </div>
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
-                <img src="/gallery/img2.png" alt="Imagen generada 2" className="w-full h-auto object-cover" />
+                <img src="/gallery/img2.png?v=2" alt="Imagen generada 2" className="w-full h-auto object-cover" />
               </div>
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
-                <img src="/gallery/img3.png" alt="Imagen generada 3" className="w-full h-auto object-cover" />
+                <img src="/gallery/img3.png?v=2" alt="Imagen generada 3" className="w-full h-auto object-cover" />
               </div>
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
-                <img src="/gallery/img4.png" alt="Imagen generada 4" className="w-full h-auto object-cover" />
+                <img src="/gallery/img4.png?v=2" alt="Imagen generada 4" className="w-full h-auto object-cover" />
               </div>
             </div>
 
