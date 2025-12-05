@@ -3,8 +3,16 @@ import { useAuth } from "./context/AuthContext";
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
-  getTodayGenerationCount, // 👈 Se mantiene
+  getTodayGenerationCount,
 } from "./lib/generations";
+
+// ---------------------------------------------------------
+// LÍMITES GLOBALES AJUSTADOS
+// ---------------------------------------------------------
+const DEMO_LIMIT = 3; // Imágenes para usuarios sin registrar (Modo Invitado)
+const DAILY_LIMIT = 5; // Imágenes para usuarios registrados (Modo Beta Gratuito)
+// ---------------------------------------------------------
+
 
 // ---------------------------------------------------------
 // PayPal – Client ID
@@ -269,11 +277,9 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (RunPod) - Acepta isDemo
 // ---------------------------------------------------------
-function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop isDemo y onAuthRequired
+function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
   
-  // Si estamos en modo demo, el user es nulo intencionalmente. Si NO es demo, user debe existir.
-  // userLoggedIn es útil para saber si debemos guardar en la base de datos o restringir funciones.
   const userLoggedIn = !isDemo && user;
 
   const [prompt, setPrompt] = useState(
@@ -293,7 +299,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
   const [error, setError] = useState("");
 
   const [dailyCount, setDailyCount] = useState(0);
-  const DAILY_LIMIT = 10;
+  
+  // Usamos el límite global aquí
+  // const DAILY_LIMIT = 5; 
 
   const [isPremium, setIsPremium] = useState(false);
 
@@ -329,7 +337,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
       console.warn("No se pudo leer premium desde localStorage:", e);
       setIsPremium(false);
     }
-  }, [userLoggedIn, user, premiumKey]); // dependencia ajustada
+  }, [userLoggedIn, user, premiumKey]); 
 
   // función de suscripción (Paddle)
   const handlePaddleCheckout = async () => {
@@ -411,29 +419,31 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
   const handleGenerate = async () => {
     setError("");
 
-    // Bloqueo para modo Demo
-    if (isDemo && demoCount >= 3) { // 👈 Límite de prueba reducido a 3 para forzar registro
+    // --- LÓGICA DE BLOQUEO DE LÍMITE ---
+    const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
+    const currentCount = isDemo ? demoCount : dailyCount;
+
+    // Bloqueo para modo Demo o usuario Logueado (No Premium)
+    if (!isPremium && currentCount >= currentLimit) { 
       setStatus("ERROR");
-      setStatusText("Límite de prueba alcanzado.");
-      // 👇 Aquí forzamos el registro
-      if (onAuthRequired) {
+      setStatusText("Límite de generación alcanzado.");
+
+      if (isDemo && onAuthRequired) {
+        // Bloqueo para Demo (siempre forzar Auth)
         alert(
-          "¡Genial! Has agotado tus imágenes de prueba. Por favor, crea tu cuenta para seguir generando con 10 imágenes gratis al día."
+          `¡Genial! Has agotado tus ${DEMO_LIMIT} imágenes de prueba. ¡Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar!`
         );
         onAuthRequired();
+      } else if (userLoggedIn) {
+         // Bloqueo para usuario Logueado
+         setError(
+          `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 y genera sin límite.`
+        );
       }
       return;
     }
-    
-    // Bloqueo para usuario logueado (No Premium)
-    if (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT) {
-      setStatus("ERROR");
-      setStatusText("Límite diario alcanzado.");
-      setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Para seguir disfrutando del generador puedes activar la suscripción mensual de US$5 y generar sin límite mientras dure la beta.`
-      );
-      return;
-    }
+    // --- FIN LÓGICA DE BLOQUEO DE LÍMITE ---
+
 
     setImageB64(null);
     setStatus("IN_QUEUE");
@@ -494,7 +504,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
             image_b64: b64,
           };
           
-          // Solo si es un usuario logueado o si queremos mostrar historial local del demo
           setHistory((prev) => [newItem, ...prev]); 
           setStatusText("Render completado.");
 
@@ -544,6 +553,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
   };
 
   const handleDeleteFromHistory = (id) => {
+    if (isDemo) {
+        alert("Para gestionar tu historial, por favor, crea tu cuenta o inicia sesión.");
+        onAuthRequired();
+        return;
+    }
     setHistory((prev) => prev.filter((item) => item.id !== id));
   };
 
@@ -591,7 +605,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
-          a RunPod. 10 imágenes diarias gratis; si quieres ir más allá, podrás
+          a RunPod. {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más allá, podrás
           activar el plan de $5/mes para generar ilimitadas mientras dure la
           beta.
         </p>
@@ -599,7 +613,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
     );
   }
 
-  const remaining = isDemo ? (3 - demoCount) : (DAILY_LIMIT - dailyCount); // Nuevo cálculo de restante
+  const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
+  const currentCount = isDemo ? demoCount : dailyCount;
+  const remaining = currentLimit - currentCount;
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -614,8 +630,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
             **Modo de prueba gratuito:** Genera **{remaining} imágenes** más sin necesidad de registrarte. **Descarga y acceso a biblioteca requerirán crear cuenta.**
           </div>
         )}
+        
+        {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
+            // Mensaje de advertencia para usuario logueado
+             <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
+                ¡Atención! Solo te quedan **{remaining} imágenes gratis** hoy. Activa el plan ilimitado de **US$5/mes** para seguir generando.
+            </div>
+        )}
 
         <div className="mt-4 space-y-4 text-sm">
+          {/* ... Campos de Prompt, Negative Prompt, Steps, Width, Height sin cambios ... */}
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
@@ -672,39 +696,25 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
             </div>
           </div>
 
+
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
             Estado actual: {statusText || "Listo para generar."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              {isDemo && `Uso de prueba: ${demoCount} / 3 imágenes restantes.`}
+              {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit} imágenes restantes.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {dailyCount} · Plan Basic activo (sin límite, con
+                  Uso de hoy: {currentCount} · Plan Basic activo (sin límite, con
                   precio beta).
                 </>
               )}
               {userLoggedIn && !isPremium && (
                 <>
-                  Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
+                  Uso de hoy: {currentCount} / {currentLimit} imágenes.
                 </>
               )}
             </span>
           </div>
-
-          {/* Aviso cuando ya van 7 o más, pero todavía no llegan al límite (Solo usuarios logueados) */}
-          {userLoggedIn && !isPremium &&
-            dailyCount >= 7 &&
-            dailyCount < DAILY_LIMIT &&
-            remaining > 0 && (
-              <div className="mt-2 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-                Ya generaste {dailyCount} imágenes hoy. Solo te quedan{" "}
-                {remaining} imágenes gratis.  
-                <br />
-                Para seguir disfrutando del generador sin límite puedes activar
-                el plan ilimitado de <strong>US$5/mes</strong> mientras dure la
-                beta.
-              </div>
-            )}
 
           {error && (
             <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
@@ -715,12 +725,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
             disabled={
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
-              (isDemo && demoCount >= 3) || // Bloqueo demo
-              (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT) // Bloqueo usuario logueado
+              (!isPremium && currentCount >= currentLimit) 
             }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {(isDemo && demoCount >= 3) || (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT)
+            {(!isPremium && currentCount >= currentLimit)
               ? "Límite alcanzado (Crea cuenta / Desbloquea Plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
@@ -728,7 +737,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
           </button>
 
           {/* Opciones de pago si se alcanza el límite (Solo usuarios logueados) */}
-          {userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT && (
+          {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
             <>
               <button
                 type="button"
@@ -768,7 +777,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
             </p>
           ) : (
             <div className={`mt-3 grid gap-3 ${isDemo ? 'grid-cols-1' : 'grid-cols-3'}`}>
-              {/* En modo demo solo mostramos la última imagen y si está en history */}
               {(isDemo ? history.slice(0, 1) : history).map((item) => (
                 <div
                   key={item.id}
@@ -781,7 +789,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop i
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
                   {/* Deshabilitar botones de acción en modo demo para forzar registro */}
-                  {!isDemo && (
+                  {userLoggedIn && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -905,7 +913,6 @@ function DashboardView() {
             </p>
           </div>
 
-          {/* El CreatorPanel para el usuario logueado */}
           <CreatorPanel /> 
         </section>
       </main>
@@ -914,9 +921,9 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión) - Modificada para priorizar imágenes y demo
+// Landing (sin sesión) - Modificada para reflejar el límite de 3
 // ---------------------------------------------------------
-function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
+function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
@@ -996,7 +1003,6 @@ function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
 
       {/* Hero and Gallery (Combined) */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Cambiado el layout de Hero para priorizar imágenes y CTA */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
@@ -1011,19 +1017,18 @@ function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               Crea imágenes con **calidad de estudio** con el primer sistema de
               generación visual con IA desarrollado desde **Guatemala**.
-              Empieza ahora con **10 imágenes gratis al día.**
+              Empieza ahora con **3 imágenes gratis al día.**
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                // Nuevo CTA: Inicia el modo DEMO
                 onClick={onStartDemo}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30"
               >
-                Generar Mis 10 Imágenes GRATIS Ahora
+                Generar Mis {DEMO_LIMIT} Imágenes GRATIS Ahora
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Prueba la calidad del motor antes de crear tu cuenta.
+                Prueba la calidad del motor antes de crear tu cuenta y **desbloquea {DAILY_LIMIT} imágenes diarias**.
               </p>
             </div>
 
@@ -1085,7 +1090,6 @@ function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
           </p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Los elementos de la galería img3, img4, etc. van aquí */}
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
               <img
                 src="/gallery/img3.png"
@@ -1116,7 +1120,7 @@ function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
             Plan beta para creadores
           </h2>
           <p className="mt-2 text-xs text-neutral-300">
-            Si llegas al límite de **10 imágenes gratuitas al día** (por usuario registrado) y quieres seguir
+            Si llegas al límite de **{DAILY_LIMIT} imágenes gratuitas al día** (por usuario registrado) y quieres seguir
             generando sin restricciones, puedes activar el plan ilimitado mientras
             dure la beta.
           </p>
@@ -1151,7 +1155,6 @@ function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
 
         {/* Contacto y Footer sin cambios */}
         <section id="contacto" className="mt-16 max-w-xl">
-          {/* ... Contacto Form (sin cambios) ... */}
           <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
           </h2>
@@ -1237,7 +1240,6 @@ export default function App() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   
-  // 👈 Nuevo estado para controlar la vista: 'landing', 'demo', o 'dashboard' (por user logueado)
   const [viewMode, setViewMode] = useState('landing'); 
 
   useEffect(() => {
@@ -1246,16 +1248,14 @@ export default function App() {
 
   const openAuth = () => {
     setShowAuthModal(true);
-    setViewMode('landing'); // Volver a landing para que se muestre el modal
+    setViewMode('landing'); 
   }
   const closeAuth = () => setShowAuthModal(false);
   
   const handleStartDemo = () => {
-    setViewMode('demo'); // Cambia a modo demo (CreatorPanel en modo isDemo)
-    scrollToId("top"); // Opcional: subir al inicio si el panel de demo aparece arriba
+    setViewMode('demo'); 
   }
   
-  // useEffect para manejar la navegación si el usuario se loguea desde el modal
   useEffect(() => {
     if (user && viewMode !== 'dashboard') {
         setViewMode('dashboard');
@@ -1284,6 +1284,7 @@ export default function App() {
             <div id="top" className="pt-10">
               <CreatorPanel isDemo={true} onAuthRequired={openAuth} /> 
             </div>
+            {/* Mostramos la landing debajo del panel de prueba */}
             <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
             <AuthModal open={showAuthModal} onClose={closeAuth} />
         </>
