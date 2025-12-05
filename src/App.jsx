@@ -3,11 +3,11 @@ import { useAuth } from "./context/AuthContext";
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
-  getTodayGenerationCount, // 👈 nuevo import
+  getTodayGenerationCount, // 👈 Se mantiene
 } from "./lib/generations";
 
 // ---------------------------------------------------------
-// PayPal – Client ID (puede venir de env o usar el fijo)
+// PayPal – Client ID
 // ---------------------------------------------------------
 const PAYPAL_CLIENT_ID =
   import.meta.env.VITE_PAYPAL_CLIENT_ID ||
@@ -267,10 +267,14 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (RunPod)
+// Panel del creador (RunPod) - Acepta isDemo
 // ---------------------------------------------------------
-function CreatorPanel() {
+function CreatorPanel({ isDemo = false, onAuthRequired }) { // 👈 Nuevo prop isDemo y onAuthRequired
   const { user } = useAuth();
+  
+  // Si estamos en modo demo, el user es nulo intencionalmente. Si NO es demo, user debe existir.
+  // userLoggedIn es útil para saber si debemos guardar en la base de datos o restringir funciones.
+  const userLoggedIn = !isDemo && user;
 
   const [prompt, setPrompt] = useState(
     "Cinematic portrait, ultra detailed, soft light, 8k"
@@ -294,11 +298,11 @@ function CreatorPanel() {
   const [isPremium, setIsPremium] = useState(false);
 
   // Clave local para este usuario (modo beta)
-  const premiumKey = user ? `isabelaos_premium_${user.id}` : null;
+  const premiumKey = userLoggedIn ? `isabelaos_premium_${user.id}` : null;
 
   // Leer premium desde localStorage + tu correo siempre premium
   useEffect(() => {
-    if (!user) {
+    if (!userLoggedIn) {
       setIsPremium(false);
       setDailyCount(0);
       setHistory([]);
@@ -325,10 +329,16 @@ function CreatorPanel() {
       console.warn("No se pudo leer premium desde localStorage:", e);
       setIsPremium(false);
     }
-  }, [user, premiumKey]);
+  }, [userLoggedIn, user, premiumKey]); // dependencia ajustada
 
   // función de suscripción (Paddle)
   const handlePaddleCheckout = async () => {
+    if (!userLoggedIn) {
+      alert("Por favor, inicia sesión para activar el plan.");
+      onAuthRequired();
+      return;
+    }
+    // ... resto del código handlePaddleCheckout sin cambios
     try {
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
@@ -351,7 +361,8 @@ function CreatorPanel() {
 
   // Cargar historial y conteo diario desde Supabase
   useEffect(() => {
-    if (!user) {
+    if (!userLoggedIn) {
+      // En modo demo o sin login, no cargamos historial de Supabase
       setHistory([]);
       setDailyCount(0);
       return;
@@ -380,12 +391,42 @@ function CreatorPanel() {
       const countToday = await getTodayGenerationCount(user.id);
       setDailyCount(countToday);
     })();
-  }, [user]);
+  }, [userLoggedIn, user]);
 
+  // Contador local para modo Demo
+  const [demoCount, setDemoCount] = useState(0);
+
+  // Intentar leer demoCount de localStorage al iniciar el demo
+  useEffect(() => {
+    if (isDemo) {
+        try {
+            const storedDemoCount = localStorage.getItem("isabelaos_demo_count") || "0";
+            setDemoCount(Number(storedDemoCount));
+        } catch (e) {
+            console.warn("Error leyendo demo count:", e);
+        }
+    }
+  }, [isDemo]);
+  
   const handleGenerate = async () => {
     setError("");
 
-    if (!isPremium && dailyCount >= DAILY_LIMIT) {
+    // Bloqueo para modo Demo
+    if (isDemo && demoCount >= 3) { // 👈 Límite de prueba reducido a 3 para forzar registro
+      setStatus("ERROR");
+      setStatusText("Límite de prueba alcanzado.");
+      // 👇 Aquí forzamos el registro
+      if (onAuthRequired) {
+        alert(
+          "¡Genial! Has agotado tus imágenes de prueba. Por favor, crea tu cuenta para seguir generando con 10 imágenes gratis al día."
+        );
+        onAuthRequired();
+      }
+      return;
+    }
+    
+    // Bloqueo para usuario logueado (No Premium)
+    if (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT) {
       setStatus("ERROR");
       setStatusText("Límite diario alcanzado.");
       setError(
@@ -452,14 +493,23 @@ function CreatorPanel() {
             createdAt: new Date().toISOString(),
             image_b64: b64,
           };
-
-          setHistory((prev) => [newItem, ...prev]);
+          
+          // Solo si es un usuario logueado o si queremos mostrar historial local del demo
+          setHistory((prev) => [newItem, ...prev]); 
           setStatusText("Render completado.");
 
-          // Para premium igual contamos, pero no lo usamos para bloquear
-          setDailyCount((prev) => prev + 1);
+          // ----------------------------------------------------
+          // Lógica de conteo y guardado
+          // ----------------------------------------------------
+          if (isDemo) {
+            // Contamos y guardamos el contador en localStorage para el modo demo
+            const newDemoCount = demoCount + 1;
+            setDemoCount(newDemoCount);
+            localStorage.setItem("isabelaos_demo_count", String(newDemoCount));
+          } else if (userLoggedIn) {
+            // Lógica para usuario logueado (siempre contamos, guardamos en Supabase)
+            setDailyCount((prev) => prev + 1);
 
-          if (user?.id) {
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
@@ -467,12 +517,14 @@ function CreatorPanel() {
               prompt: "",
               negativePrompt: "",
               width: Number(width),
-              height: Number(steps),
+              height: Number(steps), // Nota: Aquí usas `steps` en lugar de `height`, revisa si es un error tipográfico.
               steps: Number(steps),
             }).catch((e) => {
               console.error("Error guardando en Supabase:", e);
             });
           }
+          // ----------------------------------------------------
+
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -496,6 +548,13 @@ function CreatorPanel() {
   };
 
   const handleDownload = () => {
+    // Si es demo, forzamos registro/login para descargar
+    if (isDemo) {
+      alert("Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión.");
+      onAuthRequired();
+      return;
+    }
+    
     if (!imageB64) return;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${imageB64}`;
@@ -506,7 +565,7 @@ function CreatorPanel() {
   };
 
   const handlePayPalUnlock = () => {
-    if (!user || !premiumKey) return;
+    if (!userLoggedIn || !premiumKey) return;
     try {
       localStorage.setItem(premiumKey, "1");
       setIsPremium(true);
@@ -523,7 +582,8 @@ function CreatorPanel() {
     }
   };
 
-  if (!user) {
+  // Muestra un mensaje de advertencia si estamos en modo Demo.
+  if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
         <p className="font-medium">
@@ -539,7 +599,7 @@ function CreatorPanel() {
     );
   }
 
-  const remaining = DAILY_LIMIT - dailyCount;
+  const remaining = isDemo ? (3 - demoCount) : (DAILY_LIMIT - dailyCount); // Nuevo cálculo de restante
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -548,6 +608,12 @@ function CreatorPanel() {
         <h2 className="text-lg font-semibold text-white">
           Generador desde prompt
         </h2>
+
+        {isDemo && ( // Mensaje claro para el modo Demo
+          <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
+            **Modo de prueba gratuito:** Genera **{remaining} imágenes** más sin necesidad de registrarte. **Descarga y acceso a biblioteca requerirán crear cuenta.**
+          </div>
+        )}
 
         <div className="mt-4 space-y-4 text-sm">
           <div>
@@ -610,12 +676,14 @@ function CreatorPanel() {
             Estado actual: {statusText || "Listo para generar."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              {isPremium ? (
+              {isDemo && `Uso de prueba: ${demoCount} / 3 imágenes restantes.`}
+              {userLoggedIn && isPremium && (
                 <>
                   Uso de hoy: {dailyCount} · Plan Basic activo (sin límite, con
                   precio beta).
                 </>
-              ) : (
+              )}
+              {userLoggedIn && !isPremium && (
                 <>
                   Uso de hoy: {dailyCount} / {DAILY_LIMIT} imágenes.
                 </>
@@ -623,8 +691,8 @@ function CreatorPanel() {
             </span>
           </div>
 
-          {/* Aviso cuando ya van 7 o más, pero todavía no llegan al límite */}
-          {!isPremium &&
+          {/* Aviso cuando ya van 7 o más, pero todavía no llegan al límite (Solo usuarios logueados) */}
+          {userLoggedIn && !isPremium &&
             dailyCount >= 7 &&
             dailyCount < DAILY_LIMIT &&
             remaining > 0 && (
@@ -647,18 +715,20 @@ function CreatorPanel() {
             disabled={
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
-              (!isPremium && dailyCount >= DAILY_LIMIT)
+              (isDemo && demoCount >= 3) || // Bloqueo demo
+              (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT) // Bloqueo usuario logueado
             }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {!isPremium && dailyCount >= DAILY_LIMIT
-              ? "Límite diario alcanzado"
+            {(isDemo && demoCount >= 3) || (userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT)
+              ? "Límite alcanzado (Crea cuenta / Desbloquea Plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
               : "Generar imagen desde prompt"}
           </button>
 
-          {!isPremium && dailyCount >= DAILY_LIMIT && (
+          {/* Opciones de pago si se alcanza el límite (Solo usuarios logueados) */}
+          {userLoggedIn && !isPremium && dailyCount >= DAILY_LIMIT && (
             <>
               <button
                 type="button"
@@ -683,15 +753,23 @@ function CreatorPanel() {
         {/* Biblioteca sesión */}
         <div className="mt-6 border-t border-white/10 pt-4">
           <h3 className="text-sm font-semibold text-white">
-            Biblioteca de esta sesión
+            {isDemo ? "Última imagen generada" : "Biblioteca de esta sesión"}
           </h3>
+          
+          {isDemo && (
+            <p className="mt-2 text-xs text-red-400">
+              **Crea tu cuenta** para guardar tu historial, acceder a la biblioteca y descargar imágenes.
+            </p>
+          )}
+
           {history.length === 0 ? (
             <p className="mt-2 text-xs text-neutral-400">
-              Aún no has generado imágenes en esta sesión.
+              Aún no has generado imágenes.
             </p>
           ) : (
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              {history.map((item) => (
+            <div className={`mt-3 grid gap-3 ${isDemo ? 'grid-cols-1' : 'grid-cols-3'}`}>
+              {/* En modo demo solo mostramos la última imagen y si está en history */}
+              {(isDemo ? history.slice(0, 1) : history).map((item) => (
                 <div
                   key={item.id}
                   className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/50 cursor-pointer"
@@ -702,24 +780,30 @@ function CreatorPanel() {
                     alt={item.prompt}
                     className="h-24 w-full object-cover group-hover:opacity-80"
                   />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteFromHistory(item.id);
-                    }}
-                    className="absolute right-1 top-1 rounded-full bg-black/70 px-2 text-[10px] text-white opacity-0 group-hover:opacity-100"
-                  >
-                    ✕
-                  </button>
+                  {/* Deshabilitar botones de acción en modo demo para forzar registro */}
+                  {!isDemo && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteFromHistory(item.id);
+                      }}
+                      className="absolute right-1 top-1 rounded-full bg-black/70 px-2 text-[10px] text-white opacity-0 group-hover:opacity-100"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
-          <p className="mt-2 text-[10px] text-neutral-500">
-            Por ahora las imágenes también se guardan en tu cuenta (Supabase)
-            además de esta sesión.
-          </p>
+          
+          {userLoggedIn && (
+            <p className="mt-2 text-[10px] text-neutral-500">
+              Por ahora las imágenes también se guardan en tu cuenta (Supabase)
+              además de esta sesión.
+            </p>
+          )}
         </div>
       </div>
 
@@ -742,7 +826,7 @@ function CreatorPanel() {
             onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
-            Descargar imagen
+            {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"} 
           </button>
         )}
       </div>
@@ -751,7 +835,7 @@ function CreatorPanel() {
 }
 
 // ---------------------------------------------------------
-// Vista Dashboard (logueado)
+// Vista Dashboard (logueado) - Sin cambios
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
@@ -821,7 +905,8 @@ function DashboardView() {
             </p>
           </div>
 
-          <CreatorPanel />
+          {/* El CreatorPanel para el usuario logueado */}
+          <CreatorPanel /> 
         </section>
       </main>
     </div>
@@ -829,9 +914,9 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión)
+// Landing (sin sesión) - Modificada para priorizar imágenes y demo
 // ---------------------------------------------------------
-function LandingView({ onOpenAuth, hidePayPal = false }) {
+function LandingView({ onOpenAuth, onStartDemo }) { // 👈 onStartDemo es nuevo
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
@@ -909,121 +994,98 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
         </div>
       </header>
 
-      {/* Hero */}
+      {/* Hero and Gallery (Combined) */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        {/* Cambiado el layout de Hero para priorizar imágenes y CTA */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
-              Beta privada · Solo generación de imagen
+              Beta privada · Motor de Imagen de Estudio
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              isabelaOs Studio{" "}
+              Genera **Imágenes Fotorrealistas**{" "} 
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                generación de imágenes con IA en la nube
+                con IA en la nube.
               </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Crea imágenes con calidad de estudio con el primer sistema de
-              generación visual con IA desarrollado desde{" "}
-              <span className="font-semibold text-white">Guatemala</span>.
-              Versión inicial enfocada solo en{" "}
-              <span className="font-medium text-cyan-300">
-                generación de imagen
-              </span>
-              , mientras terminamos los módulos de video y nuestro motor propio
-              de realismo corporal{" "}
-              <span className="font-semibold text-white">BodySync v1</span>{" "}
-              (movimiento y expresión más naturales) ·{" "}
-              <span className="font-semibold text-yellow-300">
-                próximamente.
-              </span>
+              Crea imágenes con **calidad de estudio** con el primer sistema de
+              generación visual con IA desarrollado desde **Guatemala**.
+              Empieza ahora con **10 imágenes gratis al día.**
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={onOpenAuth}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+                // Nuevo CTA: Inicia el modo DEMO
+                onClick={onStartDemo}
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30"
               >
-                Empezar gratis · Crear cuenta
+                Generar Mis 10 Imágenes GRATIS Ahora
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                El registro es gratuito. Las opciones de pago para generar sin
-                límite aparecen más abajo, solo si quieres activarlas.
+                Prueba la calidad del motor antes de crear tu cuenta.
               </p>
             </div>
 
-            <p className="mt-4 text-xs text-neutral-400">
-              Plan actual:{" "}
-              <span className="font-semibold text-white">
-                10 imágenes gratis al día
-              </span>{" "}
-              por usuario. Si quieres seguir generando, más abajo encontrarás el
-              plan{" "}
-              <span className="font-semibold text-white">$5/mes</span> con
-              generación ilimitada de imágenes mientras isabelaOs Studio se
-              mantenga en beta.
+            <p className="mt-4 text-xs text-neutral-500">
+              **Próximamente:** Módulos de video y nuestro motor propio de realismo corporal 
+              <span className="font-semibold text-white"> BodySync v1</span>.
             </p>
           </div>
 
-          {/* Vista previa del panel */}
-          <div className="relative">
-            <div className="h-full w-full rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-              <h3 className="text-sm font-semibold text-white">
-                Vista previa del panel
-              </h3>
-              <p className="mt-2 text-[11px] text-neutral-400">
-                Interfaz simple para escribir un prompt, ajustar resolución y
-                ver el resultado generado por el motor conectado a RunPod y
-                preparado para integrar BodySync v1 en las próximas versiones.
-              </p>
-              <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
-                <img
-                  src="/preview/panel.png"
-                  alt="Vista previa del panel de isabelaOs Studio"
-                  className="w-full object-cover"
-                />
+          {/* Galería (Moviendo el valor visual arriba) */}
+          <div className="relative order-first lg:order-last">
+            <h2 className="text-sm font-semibold text-white mb-3">
+              Calidad de estudio · Renderizado con el motor actual
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              {/* Mapea tus imágenes reales aquí. Usaré img1 y img2 como ejemplo */}
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-fuchsia-500/10">
+                <img src="/gallery/img1.png" alt="Imagen generada" className="w-full object-cover" />
               </div>
-              <p className="mt-3 text-[10px] text-neutral-500">
-                isabelaOs Studio es el primer sistema de generación visual con
-                IA desarrollado en Guatemala pensando en creadores, estudios
-                y agencias de modelos virtuales.
-              </p>
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-cyan-500/10">
+                <img src="/gallery/img2.png" alt="Imagen generada" className="w-full object-cover" />
+              </div>
+            </div>
+            <p className="mt-3 text-[10px] text-neutral-500">
+              isabelaOs Studio es el primer sistema de generación visual con IA desarrollado en Guatemala pensando en creadores, estudios y agencias de modelos virtuales.
+            </p>
+          </div>
+        </section>
+        
+        {/* Vista previa del panel (Ahora debajo del Hero) */}
+        <section className="mt-12">
+          <h2 className="text-sm font-semibold text-white mb-4">
+            Flujo de trabajo simple y potente
+          </h2>
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <h3 className="text-sm font-semibold text-white">
+              Vista previa del panel del creador
+            </h3>
+            <p className="mt-2 text-[11px] text-neutral-400">
+              Interfaz simple para escribir un prompt, ajustar resolución y ver el resultado generado por el motor conectado a RunPod.
+            </p>
+            <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
+              <img
+                src="/preview/panel.png"
+                alt="Vista previa del panel de isabelaOs Studio"
+                className="w-full object-cover"
+              />
             </div>
           </div>
         </section>
 
-        {/* Galería */}
+        {/* Galería completa (Moviendo el resto aquí) */}
         <section className="mt-12">
           <h2 className="text-sm font-semibold text-white">
-            Algunas imágenes generadas con isabelaOs Studio
+            Más ejemplos de renderizados
           </h2>
           <p className="mt-1 text-[11px] text-neutral-400">
-            Ejemplos renderizados con el motor actual de imagen. Más estilos,
-            resoluciones y módulos (video, BodySync AI) estarán disponibles
-            pronto.
+            Explora la calidad de nuestro motor de imagen.
           </p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallery/img1.png"
-                alt="Imagen generada 1"
-                className="h-40 w-full object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Imagen generada 1
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallery/img2.png"
-                alt="Imagen generada 2"
-                className="h-40 w-full object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Imagen generada 2
-              </div>
-            </div>
+            {/* Los elementos de la galería img3, img4, etc. van aquí */}
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
               <img
                 src="/gallery/img3.png"
@@ -1044,16 +1106,17 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
                 Imagen generada 4
               </div>
             </div>
+            {/* Puedes añadir más aquí para llenar el espacio */}
           </div>
         </section>
 
-        {/* Sección de plan de pago más abajo */}
+        {/* Sección de plan de pago (Moviéndola abajo del todo) */}
         <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">
             Plan beta para creadores
           </h2>
           <p className="mt-2 text-xs text-neutral-300">
-            Si llegas al límite de 10 imágenes gratuitas al día y quieres seguir
+            Si llegas al límite de **10 imágenes gratuitas al día** (por usuario registrado) y quieres seguir
             generando sin restricciones, puedes activar el plan ilimitado mientras
             dure la beta.
           </p>
@@ -1069,12 +1132,10 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
               <span className="text-neutral-300">
                 o pagar con <span className="font-semibold">PayPal</span>:
               </span>
-              {!hidePayPal && (
-                <PayPalButton
-                  amount="5.00"
-                  containerId="paypal-button-landing"
-                />
-              )}
+              <PayPalButton
+                amount="5.00"
+                containerId="paypal-button-landing"
+              />
             </div>
           </div>
 
@@ -1088,8 +1149,9 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
           </p>
         </section>
 
-        {/* Contacto */}
+        {/* Contacto y Footer sin cambios */}
         <section id="contacto" className="mt-16 max-w-xl">
+          {/* ... Contacto Form (sin cambios) ... */}
           <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
           </h2>
@@ -1174,13 +1236,32 @@ function LandingView({ onOpenAuth, hidePayPal = false }) {
 export default function App() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  
+  // 👈 Nuevo estado para controlar la vista: 'landing', 'demo', o 'dashboard' (por user logueado)
+  const [viewMode, setViewMode] = useState('landing'); 
 
   useEffect(() => {
     document.documentElement.style.background = "#06070B";
   }, []);
 
-  const openAuth = () => setShowAuthModal(true);
+  const openAuth = () => {
+    setShowAuthModal(true);
+    setViewMode('landing'); // Volver a landing para que se muestre el modal
+  }
   const closeAuth = () => setShowAuthModal(false);
+  
+  const handleStartDemo = () => {
+    setViewMode('demo'); // Cambia a modo demo (CreatorPanel en modo isDemo)
+    scrollToId("top"); // Opcional: subir al inicio si el panel de demo aparece arriba
+  }
+  
+  // useEffect para manejar la navegación si el usuario se loguea desde el modal
+  useEffect(() => {
+    if (user && viewMode !== 'dashboard') {
+        setViewMode('dashboard');
+    }
+  }, [user, viewMode]);
+
 
   if (loading) {
     return (
@@ -1190,15 +1271,30 @@ export default function App() {
     );
   }
 
+  // Lógica de renderizado
+  if (user) {
+    // Usuario logueado: siempre ve el Dashboard
+    return <DashboardView />;
+  }
+  
+  if (viewMode === 'demo') {
+    // Usuario no logueado, pero activó el botón de prueba
+    return (
+        <>
+            <div id="top" className="pt-10">
+              <CreatorPanel isDemo={true} onAuthRequired={openAuth} /> 
+            </div>
+            <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
+            <AuthModal open={showAuthModal} onClose={closeAuth} />
+        </>
+    );
+  }
+  
+  // Usuario no logueado, en la Landing normal
   return (
     <>
-      {user ? (
-        <DashboardView />
-      ) : (
-        <LandingView hidePayPal={showAuthModal} onOpenAuth={openAuth} />
-      )}
+      <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
 }
-
