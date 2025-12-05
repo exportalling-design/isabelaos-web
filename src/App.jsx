@@ -300,9 +300,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const [dailyCount, setDailyCount] = useState(0);
   
-  // Usamos el límite global aquí
-  // const DAILY_LIMIT = 5; 
-
   const [isPremium, setIsPremium] = useState(false);
 
   // Clave local para este usuario (modo beta)
@@ -346,7 +343,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       onAuthRequired();
       return;
     }
-    // ... resto del código handlePaddleCheckout sin cambios
     try {
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
@@ -921,7 +917,7 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión) - Modificada para reflejar el límite de 3
+// Landing (sin sesión) - CON CUADRÍCULA DE 4 IMÁGENES ARRIBA
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
@@ -1004,6 +1000,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       {/* Hero and Gallery (Combined) */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
+          {/* Columna de Texto y CTA */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
               Beta privada · Motor de Imagen de Estudio
@@ -1017,7 +1014,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               Crea imágenes con **calidad de estudio** con el primer sistema de
               generación visual con IA desarrollado desde **Guatemala**.
-              Empieza ahora con **3 imágenes gratis al día.**
+              Empieza ahora con **{DEMO_LIMIT} imágenes gratis al día.**
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -1038,27 +1035,36 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
           </div>
 
-          {/* Galería (Moviendo el valor visual arriba) */}
+          {/* Columna de 4 Imágenes (MODIFICADA AQUÍ) */}
           <div className="relative order-first lg:order-last">
             <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
-            <div className="grid grid-cols-2 gap-3">
-              {/* Mapea tus imágenes reales aquí. Usaré img1 y img2 como ejemplo */}
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-fuchsia-500/10">
-                <img src="/gallery/img1.png" alt="Imagen generada" className="w-full object-cover" />
+            
+            {/* Nuevo Grid 2x2 para equilibrio visual */}
+            <div className="grid grid-cols-2 gap-2"> 
+              
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+                <img src="/gallery/img1.png" alt="Imagen generada 1" className="w-full h-auto object-cover" />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-cyan-500/10">
-                <img src="/gallery/img2.png" alt="Imagen generada" className="w-full object-cover" />
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+                <img src="/gallery/img2.png" alt="Imagen generada 2" className="w-full h-auto object-cover" />
+              </div>
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+                <img src="/gallery/img3.png" alt="Imagen generada 3" className="w-full h-auto object-cover" />
+              </div>
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+                <img src="/gallery/img4.png" alt="Imagen generada 4" className="w-full h-auto object-cover" />
               </div>
             </div>
+
             <p className="mt-3 text-[10px] text-neutral-500">
               isabelaOs Studio es el primer sistema de generación visual con IA desarrollado en Guatemala pensando en creadores, estudios y agencias de modelos virtuales.
             </p>
           </div>
         </section>
         
-        {/* Vista previa del panel (Ahora debajo del Hero) */}
+        {/* Vista previa del panel */}
         <section className="mt-12">
           <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
@@ -1080,41 +1086,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
-        {/* Galería completa (Moviendo el resto aquí) */}
-        <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white">
-            Más ejemplos de renderizados
-          </h2>
-          <p className="mt-1 text-[11px] text-neutral-400">
-            Explora la calidad de nuestro motor de imagen.
-          </p>
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallery/img3.png"
-                alt="Imagen generada 3"
-                className="h-40 w-full object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Imagen generada 3
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-              <img
-                src="/gallery/img4.png"
-                alt="Imagen generada 4"
-                className="h-40 w-full object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Imagen generada 4
-              </div>
-            </div>
-            {/* Puedes añadir más aquí para llenar el espacio */}
-          </div>
-        </section>
-
-        {/* Sección de plan de pago (Moviéndola abajo del todo) */}
+        {/* Sección de plan de pago (Se mantiene) */}
         <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">
             Plan beta para creadores
@@ -1153,7 +1125,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </p>
         </section>
 
-        {/* Contacto y Footer sin cambios */}
+        {/* Contacto y Footer */}
         <section id="contacto" className="mt-16 max-w-xl">
           <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
