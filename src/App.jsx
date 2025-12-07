@@ -49,7 +49,7 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
         .Buttons({
           style: {
             layout: "horizontal",
-            color: "black", // fondo oscuro
+            color: "black",
             shape: "pill",
             label: "paypal",
           },
@@ -71,7 +71,6 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
               const details = await actions.order.capture();
               console.log("Pago PayPal completado:", details);
 
-              // callback para marcar premium
               if (typeof onPaid === "function") {
                 try {
                   onPaid(details);
@@ -96,7 +95,6 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
         .render(`#${divId}`);
     };
 
-    // ¿Ya existe el script?
     const existingScript = document.querySelector(
       'script[src*="https://www.paypal.com/sdk/js"]'
     );
@@ -110,7 +108,6 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
       return;
     }
 
-    // Crear script nuevo
     const script = document.createElement("script");
     script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
     script.async = true;
@@ -118,7 +115,7 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
     document.body.appendChild(script);
 
     return () => {
-      // dejamos el script para reutilizarlo
+      // dejamos el script
     };
   }, [amount, divId, onPaid]);
 
@@ -273,7 +270,7 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (RunPod) - ahora SIN lógica de biblioteca
+// Panel del creador (RunPod) - solo IMÁGENES
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -298,10 +295,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [dailyCount, setDailyCount] = useState(0);
   const [isPremium, setIsPremium] = useState(false);
 
-  // Clave local para este usuario (modo beta)
   const premiumKey = userLoggedIn ? `isabelaos_premium_${user.id}` : null;
 
-  // Leer premium desde localStorage + tu correo siempre premium
   useEffect(() => {
     if (!userLoggedIn) {
       setIsPremium(false);
@@ -309,7 +304,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
 
-    // Tu cuenta siempre premium
     if (user.email === "exportalling@gmail.com") {
       setIsPremium(true);
       if (premiumKey) {
@@ -331,7 +325,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [userLoggedIn, user, premiumKey]);
 
-  // función de suscripción (Paddle)
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
       alert("Por favor, inicia sesión para activar el plan.");
@@ -356,7 +349,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   };
 
-  // Cargar solo el conteo diario desde Supabase (historial se maneja en LibraryView)
   useEffect(() => {
     if (!userLoggedIn) {
       setDailyCount(0);
@@ -373,10 +365,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user]);
 
-  // Contador local para modo Demo
   const [demoCount, setDemoCount] = useState(0);
 
-  // Intentar leer demoCount de localStorage al iniciar el demo
   useEffect(() => {
     if (isDemo) {
       try {
@@ -392,11 +382,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const handleGenerate = async () => {
     setError("");
 
-    // --- LÓGICA DE BLOQUEO DE LÍMITE ---
     const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
     const currentCount = isDemo ? demoCount : dailyCount;
 
-    // Bloqueo para modo Demo o usuario Logueado (No Premium)
     if (!isPremium && currentCount >= currentLimit) {
       setStatus("ERROR");
       setStatusText("Límite de generación alcanzado.");
@@ -413,7 +401,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       }
       return;
     }
-    // --- FIN LÓGICA DE BLOQUEO DE LÍMITE ---
 
     setImageB64(null);
     setStatus("IN_QUEUE");
@@ -468,9 +455,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           setImageB64(b64);
           setStatusText("Render completado.");
 
-          // ----------------------------------------------------
-          // Lógica de conteo y guardado
-          // ----------------------------------------------------
           if (isDemo) {
             const newDemoCount = demoCount + 1;
             setDemoCount(newDemoCount);
@@ -485,14 +469,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               prompt: "",
               negativePrompt: "",
               width: Number(width),
-              // BUG ARREGLADO: ahora usamos height real, no steps
-              height: Number(height),
+              height: Number(height), // BUG corregido
               steps: Number(steps),
             }).catch((e) => {
               console.error("Error guardando en Supabase:", e);
             });
           }
-          // ----------------------------------------------------
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -506,7 +488,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   };
 
   const handleDownload = () => {
-    // Si es demo, forzamos registro/login para descargar
     if (isDemo) {
       alert(
         "Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión."
@@ -542,7 +523,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   };
 
-  // Muestra un mensaje de advertencia si estamos en modo Demo.
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
@@ -552,8 +532,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
           a RunPod. {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más
-          allá, podrás activar el plan de $5/mes para generar ilimitadas mientras
-          dure la beta.
+          allá, podrás activar el plan de $5/mes para generar ilimitadas
+          mientras dure la beta.
         </p>
       </div>
     );
@@ -653,8 +633,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 `Uso de prueba: ${currentCount} / ${currentLimit} imágenes.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount} · Plan Basic activo (sin límite, con
-                  precio beta).
+                  Uso de hoy: {currentCount} · Plan Basic activo (sin límite,
+                  con precio beta).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -685,7 +665,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               : "Generar imagen desde prompt"}
           </button>
 
-          {/* Opciones de pago si se alcanza el límite (Solo usuarios logueados) */}
           {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
             <>
               <button
@@ -739,7 +718,182 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 }
 
 // ---------------------------------------------------------
-// LibraryView – HISTORIAL separado del CreatorPanel
+// VideoPanel – interfaz de GENERAR VIDEO (placeholder)
+// ---------------------------------------------------------
+function VideoPanel() {
+  const { user } = useAuth();
+  const userLoggedIn = !!user;
+
+  const [prompt, setPrompt] = useState(
+    "Cinematic moving shot, ultra detailed, 8k, studio lighting"
+  );
+  const [negative, setNegative] = useState(
+    "blurry, low quality, deformed, watermark, text"
+  );
+  const [width, setWidth] = useState(768);
+  const [height, setHeight] = useState(432);
+  const [steps, setSteps] = useState(20);
+  const [frames, setFrames] = useState(16);
+  const [fps, setFps] = useState(8);
+
+  const [statusText] = useState(
+    "Módulo de video en desarrollo sobre el mismo motor conectado a RunPod."
+  );
+
+  const handleGenerateVideo = () => {
+    alert(
+      "Módulo de video próximamente.\n\nEstamos trabajando para conectarlo al pipeline de RunPod y AnimateDiff."
+    );
+  };
+
+  if (!userLoggedIn) {
+    return (
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        <p className="font-medium">
+          Inicia sesión para acceder al generador de video (en desarrollo).
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-2">
+      {/* Formulario video */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text-white">
+          Generar video desde prompt
+        </h2>
+        <p className="mt-2 text-xs text-red-400 font-semibold">
+          Estamos trabajando para tenerlo listo lo antes posible. Esta interfaz
+          es una vista previa del módulo de video.
+        </p>
+
+        <div className="mt-4 space-y-4 text-sm">
+          <div>
+            <label className="text-neutral-300">Prompt de video</label>
+            <textarea
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-neutral-300">Negative prompt</label>
+            <textarea
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+              value={negative}
+              onChange={(e) => setNegative(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-neutral-300">Steps</label>
+              <input
+                type="number"
+                min={8}
+                max={40}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+                value={steps}
+                onChange={(e) => setSteps(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-neutral-300">Frames</label>
+              <input
+                type="number"
+                min={8}
+                max={48}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+                value={frames}
+                onChange={(e) => setFrames(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-neutral-300">FPS</label>
+              <input
+                type="number"
+                min={4}
+                max={30}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+                value={fps}
+                onChange={(e) => setFps(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-neutral-300">Width</label>
+              <input
+                type="number"
+                min={512}
+                max={1024}
+                step={64}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+                value={width}
+                onChange={(e) => setWidth(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-neutral-300">Height</label>
+              <input
+                type="number"
+                min={288}
+                max={1024}
+                step={64}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-fuchsia-400"
+                value={height}
+                onChange={(e) => setHeight(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado actual: {statusText}
+            <br />
+            <span className="text-[11px] text-neutral-400">
+              El módulo de video usará AnimateDiff, BodySync y Render en RunPod
+              para producir clips cortos de alta calidad listos para redes
+              sociales.
+            </span>
+          </div>
+
+          <button
+            onClick={handleGenerateVideo}
+            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-fuchsia-500 to-violet-500 py-3 text-sm font-semibold text-white shadow-lg shadow-fuchsia-500/30"
+          >
+            Generar video desde prompt (Próximamente)
+          </button>
+        </div>
+      </div>
+
+      {/* Resultado video */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text-white">Previsualización</h2>
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-gradient-to-br from-black via-black to-fuchsia-900/40 text-sm text-neutral-300">
+          <div className="text-center px-6">
+            <p className="text-red-400 font-semibold mb-2">
+              Estamos trabajando para tener el módulo de video listo lo antes
+              posible.
+            </p>
+            <p className="text-[12px] text-neutral-300">
+              Aquí verás un reproductor con tu clip generado, controles de
+              reproducción y opciones para descargar el video en{" "}
+              <span className="font-semibold">1080p</span> o{" "}
+              <span className="font-semibold">4K</span>, junto con presets para
+              Reels, TikTok y Shorts.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// LibraryView – HISTORIAL
 // ---------------------------------------------------------
 function LibraryView() {
   const { user } = useAuth();
@@ -784,7 +938,6 @@ function LibraryView() {
   }, [user]);
 
   const handleDeleteLocal = (id) => {
-    // Eliminación local (solo de la vista actual)
     setItems((prev) => prev.filter((it) => it.id !== id));
     if (selected && selected.id === id) {
       setSelected(null);
@@ -865,7 +1018,6 @@ function LibraryView() {
         </p>
       </div>
 
-      {/* Vista grande de la imagen seleccionada */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">
           Detalle de la imagen
@@ -903,11 +1055,11 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// Vista Dashboard (logueado) – ahora con appViewMode
+// Vista Dashboard (logueado) – con MENÚ LATERAL
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
-  const [appViewMode, setAppViewMode] = useState("creator"); // "creator" | "library"
+  const [appViewMode, setAppViewMode] = useState("image"); // "image" | "video" | "library"
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
@@ -922,7 +1074,7 @@ function DashboardView() {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
+          "radial-gradient(1400px_900px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(1100px_700px_at_-10%_0%,rgba(0,229,255,0.16),transparent_55%),radial-gradient(900px_900px_at_50%_120%,rgba(88,101,242,0.18),transparent_60%),#06070B",
       }}
     >
       <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
@@ -943,32 +1095,6 @@ function DashboardView() {
           </div>
 
           <div className="flex items-center gap-3 text-xs">
-            {/* Navegación interna: Generador / Biblioteca */}
-            <div className="hidden md:flex items-center gap-1 rounded-2xl bg-white/5 p-1">
-              <button
-                type="button"
-                onClick={() => setAppViewMode("creator")}
-                className={`rounded-2xl px-3 py-1 text-[11px] transition ${
-                  appViewMode === "creator"
-                    ? "bg-white text-black shadow shadow-cyan-500/40"
-                    : "text-neutral-300 hover:bg-white/10"
-                }`}
-              >
-                Generador
-              </button>
-              <button
-                type="button"
-                onClick={() => setAppViewMode("library")}
-                className={`rounded-2xl px-3 py-1 text-[11px] transition ${
-                  appViewMode === "library"
-                    ? "bg-white text-black shadow shadow-fuchsia-500/40"
-                    : "text-neutral-300 hover:bg-white/10"
-                }`}
-              >
-                Biblioteca
-              </button>
-            </div>
-
             <span className="hidden sm:inline text-neutral-300">
               {user?.email} {isAdmin && "· admin"}
             </span>
@@ -989,33 +1115,91 @@ function DashboardView() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="space-y-6">
-          <div>
-            <h1 className="text-xl font-semibold text-white">
-              {appViewMode === "creator"
-                ? "Panel del creador"
-                : "Biblioteca de imágenes"}
-            </h1>
-            <p className="mt-1 text-xs text-neutral-400">
-              {appViewMode === "creator"
-                ? "Genera imágenes directamente desde tu cuenta conectada al pipeline real en RunPod."
-                : "Revisa y organiza las imágenes que has generado con tu cuenta en isabelaOs Studio."}
-            </p>
-          </div>
+        <div className="flex flex-col gap-8 lg:flex-row">
+          {/* MENÚ LATERAL */}
+          <aside className="w-full lg:w-60">
+            <div className="rounded-3xl bg-gradient-to-b from-cyan-500/20 via-fuchsia-500/15 to-indigo-700/20 border border-white/10 p-4 shadow-xl shadow-fuchsia-500/20">
+              <p className="text-xs font-semibold text-neutral-200 mb-3">
+                Navegación del panel
+              </p>
+              <div className="space-y-2 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setAppViewMode("image")}
+                  className={`w-full rounded-2xl px-3 py-2 text-left transition ${
+                    appViewMode === "image"
+                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white shadow-lg shadow-cyan-500/40"
+                      : "bg-black/40 text-neutral-200 hover:bg-white/10"
+                  }`}
+                >
+                  Generar imagen desde prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAppViewMode("video")}
+                  className={`w-full rounded-2xl px-3 py-2 text-left transition ${
+                    appViewMode === "video"
+                      ? "bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white shadow-lg shadow-fuchsia-500/40"
+                      : "bg-black/40 text-neutral-200 hover:bg-white/10"
+                  }`}
+                >
+                  Generar video desde prompt{" "}
+                  <span className="text-[10px] text-yellow-200">
+                    (Próximamente)
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAppViewMode("library")}
+                  className={`w-full rounded-2xl px-3 py-2 text-left transition ${
+                    appViewMode === "library"
+                      ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-lg shadow-indigo-500/40"
+                      : "bg-black/40 text-neutral-200 hover:bg-white/10"
+                  }`}
+                >
+                  Biblioteca de imágenes
+                </button>
+              </div>
+              <p className="mt-4 text-[11px] text-neutral-300">
+                isabelaOs Studio está en{" "}
+                <span className="font-semibold text-white">beta</span>. Algunas
+                funciones, como el módulo de video, se irán activando en las
+                próximas semanas.
+              </p>
+            </div>
+          </aside>
 
-          {appViewMode === "creator" ? (
-            <CreatorPanel />
-          ) : (
-            <LibraryView />
-          )}
-        </section>
+          {/* CONTENIDO PRINCIPAL */}
+          <section className="flex-1 space-y-6">
+            <div>
+              <h1 className="text-xl font-semibold text-white">
+                {appViewMode === "image"
+                  ? "Generador de imágenes"
+                  : appViewMode === "video"
+                  ? "Generador de video"
+                  : "Biblioteca de imágenes"}
+              </h1>
+              <p className="mt-1 text-xs text-neutral-400">
+                {appViewMode === "image"
+                  ? "Crea imágenes de calidad de estudio usando nuestro motor conectado a RunPod."
+                  : appViewMode === "video"
+                  ? "Próximamente podrás generar clips de video cortos listos para redes sociales usando AnimateDiff y BodySync."
+                  : "Explora y visualiza las imágenes que has generado con tu cuenta en isabelaOs Studio."}
+              </p>
+            </div>
+
+            {appViewMode === "image" && <CreatorPanel />}
+            {appViewMode === "video" && <VideoPanel />}
+            {appViewMode === "library" && <LibraryView />}
+          </section>
+        </div>
       </main>
     </div>
   );
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión)
+// Landing (sin sesión) – más neón y más info
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
@@ -1055,14 +1239,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
+          "radial-gradient(1400px_900px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(1100px_700px_at_-10%_0%,rgba(0,229,255,0.16),transparent_55%),radial-gradient(900px_900px_at_50%_120%,rgba(88,101,242,0.22),transparent_60%),#05060A",
       }}
     >
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-fuchsia-500/40">
               io
             </div>
             <div>
@@ -1102,35 +1286,62 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               Beta privada · Motor de Imagen de Estudio
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              Genera <span className="font-bold">Imágenes Fotorrealistas</span>{" "}
+              Genera{" "}
+              <span className="font-bold">imágenes fotorrealistas de estudio</span>{" "}
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
                 con IA en la nube.
               </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Crea imágenes con <strong>calidad de estudio</strong> con el
-              primer sistema de generación visual con IA desarrollado desde{" "}
-              <strong>Guatemala</strong>. Empieza ahora con{" "}
-              <strong>{DEMO_LIMIT} imágenes gratis al día</strong>.
+              isabelaOs Studio es el primer sistema de generación visual con IA
+              desarrollado desde <strong>Guatemala</strong> para creadores,
+              estudios y agencias de modelos virtuales. Conecta tu navegador a
+              un motor de render en GPU (RunPod) y genera imágenes con calidad
+              de campaña publicitaria.
             </p>
+
+            <div className="mt-4 grid gap-2 text-[11px] text-neutral-300">
+              <div className="flex items-center gap-2">
+                <span className="h-1 w-4 rounded-full bg-cyan-400" />
+                <span>
+                  <strong>Para creadores:</strong> portadas, promos, contenido
+                  diario para redes.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-1 w-4 rounded-full bg-fuchsia-400" />
+                <span>
+                  <strong>Para estudios y marcas:</strong> concept art, storyboards y
+                  visuales rápidos para campañas.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-1 w-4 rounded-full bg-violet-400" />
+                <span>
+                  <strong>Para agencias de modelos virtuales:</strong> contenido
+                  consistente y escalable para tus avatares IA.
+                </span>
+              </div>
+            </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/40"
               >
-                Generar Mis {DEMO_LIMIT} Imágenes GRATIS Ahora
+                Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
                 Prueba la calidad del motor antes de crear tu cuenta y{" "}
-                <strong>desbloquea {DAILY_LIMIT} imágenes diarias</strong>.
+                <strong>desbloquea {DAILY_LIMIT} imágenes diarias</strong> en el
+                modo beta.
               </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-500">
-              <strong>Próximamente:</strong> Módulos de video y nuestro motor
-              propio de realismo corporal{" "}
-              <span className="font-semibold text-white">BodySync v1</span>.
+              <strong>Próximamente:</strong> Módulo de video, BodySync v1 para
+              movimiento corporal realista, Script2Film y herramientas avanzadas
+              para creadores audiovisuales.
             </p>
           </div>
 
@@ -1141,28 +1352,28 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </h2>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/20">
                 <img
                   src="/gallery/img1.png?v=2"
                   alt="Imagen generada 1"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/20">
                 <img
                   src="/gallery/img2.png?v=2"
                   alt="Imagen generada 2"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/20">
                 <img
                   src="/gallery/img3.png?v=2"
                   alt="Imagen generada 3"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/20">
                 <img
                   src="/gallery/img4.png?v=2"
                   alt="Imagen generada 4"
@@ -1172,9 +1383,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
 
             <p className="mt-3 text-[10px] text-neutral-500">
-              isabelaOs Studio es el primer sistema de generación visual con IA
-              desarrollado en Guatemala pensando en creadores, estudios y
-              agencias de modelos virtuales.
+              isabelaOs Studio trabaja 100% en la nube y está optimizado para
+              flujos reales de creadores que necesitan imágenes constantes,
+              rápidas y con buena iluminación.
             </p>
           </div>
         </section>
@@ -1184,13 +1395,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
           </h2>
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+          <div className="rounded-3xl border border-white/10 bg-black/60 p-5 text-xs text-neutral-300 shadow-xl shadow-indigo-500/20">
             <h3 className="text-sm font-semibold text-white">
               Vista previa del panel del creador
             </h3>
             <p className="mt-2 text-[11px] text-neutral-400">
-              Interfaz simple para escribir un prompt, ajustar resolución y ver
-              el resultado generado por el motor conectado a RunPod.
+              Desde un panel minimalista defines el prompt, resolución y
+              parámetros técnicos. El motor se encarga del resto y devuelve el
+              resultado a tu navegador listo para descargar.
             </p>
             <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img
@@ -1199,6 +1411,26 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 className="w-full object-cover"
               />
             </div>
+          </div>
+        </section>
+
+        {/* Imagen BodySync grande */}
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold text-white mb-3">
+            BodySync v1 · Movimiento corporal artístico (concepto)
+          </h2>
+          <p className="text-[11px] text-neutral-400 max-w-2xl">
+            Esta imagen fue generada con nuestro modelo experimental de
+            movimiento corporal. El objetivo de BodySync es lograr poses y
+            transiciones naturales listas para animar en el módulo de video:
+            danza, deporte, moda y más.
+          </p>
+          <div className="mt-4 rounded-3xl border border-white/10 bg-black/60 overflow-hidden shadow-2xl shadow-fuchsia-500/30">
+            <img
+              src="/gallery/bodysync_dancer.png"
+              alt="Ejemplo artístico generado con BodySync"
+              className="w-full object-cover"
+            />
           </div>
         </section>
 
@@ -1356,12 +1588,10 @@ export default function App() {
     );
   }
 
-  // Usuario logueado: siempre ve el Dashboard
   if (user) {
     return <DashboardView />;
   }
 
-  // Usuario no logueado, en modo demo
   if (viewMode === "demo") {
     return (
       <>
@@ -1374,7 +1604,6 @@ export default function App() {
     );
   }
 
-  // Usuario no logueado, Landing normal
   return (
     <>
       <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
