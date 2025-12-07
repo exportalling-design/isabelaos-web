@@ -918,8 +918,8 @@ function XmasPhotoPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          image_b64: pureB64,          // 👈 coincide con api/generate-xmas.js
-          description: extraPrompt || ""
+          image_b64: pureB64, // 👈 coincide con api/generate-xmas.js
+          description: extraPrompt || "",
         }),
       });
 
@@ -1270,7 +1270,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.18),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.35),transparent_60%),#05060A",
+          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
       }}
     >
       {/* Header */}
@@ -1426,7 +1426,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-3">
+          <h2 className="text-sm font-semibold text-white mb-2">
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
@@ -1435,13 +1435,31 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             personajes IA. Muy pronto podrás combinar IsabelaOS Studio con
             BodySync para crear escenas completas en movimiento.
           </p>
-          <div className="mt-4 rounded-3xl border border-white/10 bg-black/60 overflow-hidden">
-            {/* Guarda la imagen en: public/gallery/bodysync_showcase.png */}
-            <img
-              src="/gallery/bodysync_showcase.png"
-              alt="Ejemplo generado con BodySync"
-              className="w-full object-cover"
-            />
+
+          <ul className="mt-3 max-w-2xl list-disc list-inside text-[11px] text-neutral-400">
+            <li>
+              Diseñado para creadores que necesitan coreografías y poses
+              naturales sin horas de animación manual.
+            </li>
+            <li>
+              Ideal para videos cortos, reels y escenas cinemáticas con
+              personajes IA consistentes.
+            </li>
+            <li>
+              Integración directa con el motor de imágenes y video de
+              IsabelaOS Studio.
+            </li>
+          </ul>
+
+          <div className="mt-6 flex justify-center">
+            <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
+              {/* Guarda la imagen en: public/gallery/bodysync_showcase.png */}
+              <img
+                src="/gallery/bodysync_showcase.png"
+                alt="Ejemplo generado con BodySync"
+                className="w-full rounded-2xl object-cover"
+              />
+            </div>
           </div>
         </section>
 
@@ -1617,4 +1635,3 @@ export default function App() {
     </>
   );
 }
-
