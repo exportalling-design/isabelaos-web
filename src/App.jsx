@@ -9,7 +9,7 @@ import {
 } from "./lib/generations";
 
 // ---------------------------------------------------------
-// LÍMITES GLOBALES AJUSTADOS
+// LÍMITES GLOBALES
 // ---------------------------------------------------------
 const DEMO_LIMIT = 3; // Imágenes para usuarios sin registrar (Modo Invitado)
 const DAILY_LIMIT = 5; // Imágenes para usuarios registrados (Modo Beta Gratuito)
@@ -50,7 +50,7 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
         .Buttons({
           style: {
             layout: "horizontal",
-            color: "black", // fondo oscuro
+            color: "black",
             shape: "pill",
             label: "paypal",
           },
@@ -115,9 +115,7 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
     script.onload = renderButtons;
     document.body.appendChild(script);
 
-    return () => {
-      // dejamos el script para reutilizarlo
-    };
+    return () => {};
   }, [amount, divId, onPaid]);
 
   return (
@@ -271,7 +269,7 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (RunPod) - Acepta isDemo
+// Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -296,10 +294,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [dailyCount, setDailyCount] = useState(0);
   const [isPremium, setIsPremium] = useState(false);
 
-  // Clave local para este usuario (modo beta)
   const premiumKey = userLoggedIn ? `isabelaos_premium_${user.id}` : null;
 
-  // Leer premium desde localStorage + tu correo siempre premium
   useEffect(() => {
     if (!userLoggedIn) {
       setIsPremium(false);
@@ -328,7 +324,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [userLoggedIn, user, premiumKey]);
 
-  // función de suscripción (Paddle) – plan básico imágenes
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
       alert("Por favor, inicia sesión para activar el plan.");
@@ -353,7 +348,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   };
 
-  // Cargar conteo diario desde Supabase
   useEffect(() => {
     if (!userLoggedIn) {
       setDailyCount(0);
@@ -366,7 +360,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user]);
 
-  // Contador local para modo Demo
   const [demoCount, setDemoCount] = useState(0);
 
   useEffect(() => {
@@ -393,7 +386,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       if (isDemo && onAuthRequired) {
         alert(
-          `¡Genial! Has agotado tus ${DEMO_LIMIT} imágenes de prueba. ¡Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar!`
+          `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar.`
         );
         onAuthRequired();
       } else if (userLoggedIn) {
@@ -401,7 +394,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 y genera sin límite.`
         );
       }
-
       return;
     }
 
@@ -438,9 +430,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         const statusData = await statusRes.json();
 
         if (!statusRes.ok || statusData.error) {
-          throw new Error(
-            statusData.error || "Error al consultar /api/status."
-          );
+          throw new Error(statusData.error || "Error al consultar /api/status.");
         }
 
         const st = statusData.status;
@@ -467,10 +457,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt,
-              negativePrompt: negative,
+              prompt: "",
+              negativePrompt: "",
               width: Number(width),
-              height: Number(height), // ✅ corregido, antes estaba steps
+              height: Number(height), // FIX: aquí ahora sí va height
               steps: Number(steps),
             }).catch((e) => {
               console.error("Error guardando en Supabase:", e);
@@ -490,7 +480,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const handleDownload = () => {
     if (isDemo) {
-      alert("Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión.");
+      alert(
+        "Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión."
+      );
       onAuthRequired && onAuthRequired();
       return;
     }
@@ -515,7 +507,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         "Plan Basic activado: ya no tienes límite diario en este navegador."
       );
       alert(
-        "Bienvenido a tu suscripción mensual de isabelaOs Studio. Con este pago aseguras un precio especial durante un año completo para nuestro siguiente módulo (próximamente)."
+        "Bienvenido a tu suscripción mensual de isabelaOs Studio. Con este pago aseguras un precio especial durante un año completo para nuestro siguiente módulo."
       );
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
@@ -552,18 +544,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            <strong>Modo de prueba gratuito:</strong> Genera{" "}
-            <strong>{remaining}</strong> imágenes más sin necesidad de
-            registrarte. <br />
-            <strong>Descarga y acceso a biblioteca requerirán crear cuenta.</strong>
+            Modo de prueba gratuito: te quedan {remaining} imágenes de prueba
+            sin registrarte. La descarga y la biblioteca requieren crear una
+            cuenta.
           </div>
         )}
 
         {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            ¡Atención! Solo te quedan <strong>{remaining}</strong> imágenes
-            gratis hoy. Activa el plan ilimitado de <strong>US$5/mes</strong>{" "}
-            para seguir generando.
+            Atención: solo te quedan {remaining} imágenes gratis hoy. Activa el
+            plan ilimitado de US$5/mes para seguir generando.
           </div>
         )}
 
@@ -628,15 +618,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             Estado actual: {statusText || "Listo para generar."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              {isDemo &&
-                `Uso de prueba: ${currentCount} / ${currentLimit} imágenes.`}
+              {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount} · Plan Basic activo (sin límite,
-                  con precio beta).
+                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite,
+                  precio beta).
                 </>
               )}
-              {userLoggedIn && !isPremium && !isDemo && (
+              {userLoggedIn && !isPremium && (
                 <>
                   Uso de hoy: {currentCount} / {currentLimit} imágenes.
                 </>
@@ -658,7 +647,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {!isPremium && currentCount >= currentLimit
-              ? "Límite alcanzado (Crea cuenta / Desbloquea Plan)"
+              ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
               : "Generar imagen desde prompt"}
@@ -715,40 +704,37 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 }
 
 // ---------------------------------------------------------
-// Biblioteca (historial) – ahora separada
+// Biblioteca (LibraryView) – usa Supabase
 // ---------------------------------------------------------
 function LibraryView() {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!user) {
       setItems([]);
+      setSelected(null);
       setLoading(false);
       return;
     }
 
     (async () => {
+      setLoading(true);
       try {
         const rows = await loadGenerationsForUser(user.id);
-        const mapped = rows.map((row) => {
-          let b64 = "";
-          if (row.image_url && row.image_url.startsWith("data:image")) {
-            const parts = row.image_url.split(",");
-            b64 = parts[1] || "";
-          }
-          return {
-            id: row.id,
-            createdAt: row.created_at,
-            image_b64: b64,
-          };
-        });
+        const mapped = rows.map((row) => ({
+          id: row.id,
+          createdAt: row.created_at,
+          src: row.image_url,
+        }));
         setItems(mapped);
+        if (mapped.length > 0) {
+          setSelected(mapped[0]);
+        }
       } catch (e) {
-        console.error(e);
-        setError("Error cargando tu biblioteca.");
+        console.error("Error cargando biblioteca:", e);
       } finally {
         setLoading(false);
       }
@@ -757,203 +743,212 @@ function LibraryView() {
 
   if (!user) {
     return (
-      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-sm text-yellow-100">
-        Inicia sesión para ver tu biblioteca de imágenes.
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-black/50 p-6 text-sm text-neutral-200">
-        Cargando biblioteca...
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-3xl border border-red-400/30 bg-red-500/10 p-6 text-sm text-red-100">
-        {error}
-      </div>
-    );
-  }
-
-  if (items.length === 0) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-black/50 p-6 text-sm text-neutral-300">
-        Aún no tienes imágenes guardadas en tu biblioteca.
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        Inicia sesión para acceder a tu biblioteca de imágenes generadas.
       </div>
     );
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-black/50 p-6">
-      <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
-      <p className="mt-1 text-xs text-neutral-400">
-        Todas las imágenes generadas desde tu cuenta se guardan en esta
-        sección.
-      </p>
+    <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
+        <p className="mt-1 text-xs text-neutral-400">
+          Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
+          RunPod.
+        </p>
 
-      <div className="mt-4 grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/50"
-          >
-            <img
-              src={`data:image/png;base64,${item.image_b64}`}
-              alt="Imagen generada"
-              className="h-32 w-full object-cover group-hover:opacity-80"
-            />
-            <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1 text-[10px] text-neutral-300">
-              {new Date(item.createdAt).toLocaleString()}
-            </div>
+        {loading ? (
+          <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
+        ) : items.length === 0 ? (
+          <p className="mt-4 text-xs text-neutral-400">
+            Aún no tienes imágenes guardadas en tu cuenta.
+          </p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelected(item)}
+                className={`group relative overflow-hidden rounded-xl border ${
+                  selected && selected.id === item.id
+                    ? "border-cyan-400"
+                    : "border-white/10"
+                } bg-black/60`}
+              >
+                <img
+                  src={item.src}
+                  alt="Generación"
+                  className="h-24 w-full object-cover group-hover:opacity-80"
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-[10px] text-neutral-300">
+                  {new Date(item.createdAt).toLocaleString()}
+                </div>
+              </button>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
-      <p className="mt-3 text-[10px] text-neutral-500">
-        Próximamente podrás eliminar imágenes y organizarlas en carpetas desde
-        esta vista.
-      </p>
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text-white">Vista previa</h2>
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+          {selected ? (
+            <img
+              src={selected.src}
+              alt="Imagen seleccionada"
+              className="h-full w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <p>Selecciona una imagen de tu biblioteca para verla en grande.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------
-// Panel Foto Navideña (Premium – Plan Navidad)
+// Placeholder de video (próximamente)
+// ---------------------------------------------------------
+function VideoPlaceholderPanel() {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <h2 className="text-lg font-semibold text-white">
+        Generador de video desde prompt (próximamente)
+      </h2>
+      <p className="mt-2 text-sm text-neutral-300">
+        Estamos preparando el módulo de video para que puedas escribir un prompt
+        y obtener secuencias animadas con calidad cinematográfica usando nuestro
+        motor en RunPod.
+      </p>
+      <p className="mt-4 text-xs text-red-400 font-semibold">
+        Estamos trabajando para tener este módulo lo antes posible con la máxima
+        calidad de estudio.
+      </p>
+      <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
+        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
+          <h3 className="text-sm font-semibold text-white">
+            ¿Qué podrás hacer?
+          </h3>
+          <ul className="mt-2 space-y-1 list-disc list-inside">
+            <li>Clips cortos desde texto (5–10 segundos).</li>
+            <li>Escenas con cámara cinematográfica.</li>
+            <li>Opciones de estilo (realista, anime, artístico).</li>
+          </ul>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
+          <h3 className="text-sm font-semibold text-white">
+            Integración con BodySync
+          </h3>
+          <p className="mt-2">
+            Más adelante podrás combinar este módulo con BodySync para aplicar
+            movimiento corporal a tus personajes IA.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// Módulo Foto Navideña IA (Premium)
 // ---------------------------------------------------------
 function XmasPhotoPanel() {
   const { user } = useAuth();
-  const [hasXmasPlan, setHasXmasPlan] = useState(false);
 
-  const [filePreview, setFilePreview] = useState(null);
-  const [fileB64, setFileB64] = useState(null);
+  const [dataUrl, setDataUrl] = useState(null); // data:image/...;base64,xxx
+  const [pureB64, setPureB64] = useState(null); // solo base64
   const [extraPrompt, setExtraPrompt] = useState("");
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
-  const [error, setError] = useState("");
   const [resultB64, setResultB64] = useState(null);
+  const [error, setError] = useState("");
 
-  const xmasKey = user ? `isabelaos_xmas_plan_${user.id}` : null;
+  const fileInputId = "xmas-file-input";
 
-  useEffect(() => {
-    if (!user || !xmasKey) {
-      setHasXmasPlan(false);
-      return;
-    }
-    try {
-      const stored = localStorage.getItem(xmasKey);
-      setHasXmasPlan(stored === "1");
-    } catch (e) {
-      console.warn("No se pudo leer plan navideño:", e);
-      setHasXmasPlan(false);
-    }
-  }, [user, xmasKey]);
-
-  const markXmasPlanActive = () => {
-    if (!user || !xmasKey) return;
-    localStorage.setItem(xmasKey, "1");
-    setHasXmasPlan(true);
-    alert(
-      "Plan Navidad marcado como activo en este navegador (modo prueba). Luego lo conectamos a Paddle."
-    );
+  const handlePickFile = () => {
+    const input = document.getElementById(fileInputId);
+    if (input) input.click();
   };
 
-  const handleXmasCheckout = async () => {
-    if (!user) {
-      alert("Inicia sesión para activar el Plan Navidad.");
-      return;
-    }
+  const fileToBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
 
-    try {
-      const res = await fetch("/api/paddle-checkout-xmas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Paddle Xmas:", data);
-        alert("No se pudo abrir el pago de Navidad. Revisa Paddle.");
-      }
-    } catch (err) {
-      console.error("Error Paddle Xmas:", err);
-      alert("Error al conectar con Paddle.");
-    }
-  };
-
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      alert("Por favor, sube un archivo de imagen (JPG/PNG).");
-      return;
+    try {
+      const dataUrlResult = await fileToBase64(file);
+      setDataUrl(dataUrlResult);
+      const parts = String(dataUrlResult).split(",");
+      setPureB64(parts[1] || null);
+    } catch (err) {
+      console.error("Error leyendo archivo:", err);
+      setError("No se pudo leer la imagen. Intenta con otra foto.");
     }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      setFilePreview(result);
-      const [, b64] = String(result).split(",");
-      setFileB64(b64 || null);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleGenerateXmas = async () => {
     setError("");
 
     if (!user) {
-      alert("Debes iniciar sesión.");
+      setError("Debes iniciar sesión para usar este módulo.");
       return;
     }
 
-    if (!hasXmasPlan) {
-      alert("Esta función es exclusiva del Plan Navidad (US$10 en diciembre).");
+    if (!pureB64) {
+      setError("Por favor sube una foto primero.");
       return;
     }
 
-    if (!fileB64) {
-      alert("Primero sube una foto.");
-      return;
-    }
-
+    setResultB64(null);
     setStatus("IN_QUEUE");
     setStatusText("Enviando foto navideña a RunPod...");
-    setResultB64(null);
 
     try {
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          init_image_b64: fileB64,
-          extraPrompt: extraPrompt || "",
+          init_image_b64: pureB64,
+          extra_prompt: extraPrompt || "",
+          width: 768,
+          height: 1024,
+          steps: 30,
+          strength: 0.6,
+          guidance_scale: 7.5,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.ok || !data.jobId) {
-        throw new Error(data.error || "Error creando el job navideño.");
+      const data = await res.json().catch(() => null);
+      console.log("Respuesta /api/generate-xmas:", data);
+
+      if (!res.ok || !data || !data.ok || !data.jobId) {
+        throw new Error(
+          data?.error || "Error lanzando job navideño en RunPod."
+        );
       }
 
       const jobId = data.jobId;
-      setStatusText(`Job Navidad enviado. ID: ${jobId}. Consultando estado...`);
+      setStatusText(`Foto enviada. ID: ${jobId}. Consultando estado...`);
 
       let finished = false;
       while (!finished) {
-        await new Promise((r) => setTimeout(r, 2500));
+        await new Promise((r) => setTimeout(r, 2000));
 
         const statusRes = await fetch(`/api/status?id=${jobId}`);
-        const statusData = await statusRes.json();
+        const statusData = await statusRes.json().catch(() => null);
 
-        if (!statusRes.ok || statusData.error) {
+        if (!statusRes.ok || !statusData) {
           throw new Error(
-            statusData.error || "Error al consultar /api/status."
+            statusData?.error || "Error al consultar /api/status."
           );
         }
 
@@ -968,156 +963,114 @@ function XmasPhotoPanel() {
         if (st === "COMPLETED" && statusData.output?.image_b64) {
           const b64 = statusData.output.image_b64;
           setResultB64(b64);
-          setStatusText("Foto navideña generada.");
-
-          try {
-            const dataUrl = `data:image/png;base64,${b64}`;
-            await saveGenerationInSupabase({
-              userId: user.id,
-              imageUrl: dataUrl,
-              prompt: "FOTO_NAVIDENA_IA",
-              negativePrompt: "",
-              width: 768,
-              height: 1024,
-              steps: 30,
-            });
-          } catch (e) {
-            console.error(
-              "Error guardando foto navideña en Supabase:",
-              e
-            );
-          }
+          setStatusText("Foto navideña generada con éxito.");
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
       }
     } catch (err) {
-      console.error(err);
+      console.error("Error en handleGenerateXmas:", err);
       setStatus("ERROR");
       setStatusText("Error al generar la foto navideña.");
       setError(err.message || String(err));
     }
   };
 
-  if (!user) {
-    return (
-      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-sm text-yellow-100">
-        Debes iniciar sesión para usar el generador de foto navideña.
-      </div>
-    );
-  }
-
-  if (!hasXmasPlan) {
-    return (
-      <div className="rounded-3xl border border-fuchsia-400/40 bg-fuchsia-500/10 p-6 text-sm text-fuchsia-50 space-y-4">
-        <h2 className="text-lg font-semibold">
-          🎄 Foto Navideña IA – Plan Navidad
-        </h2>
-        <p className="text-xs text-fuchsia-100/90">
-          Esta función convierte tu foto o la de tu familia en un{" "}
-          <span className="font-semibold">
-            retrato navideño de estudio profesional
-          </span>{" "}
-          con árbol de navidad, luces cálidas y ambiente premium, como si
-          hubieras pagado una sesión en estudio.
-        </p>
-        <p className="text-xs text-red-400 font-semibold">
-          Disponible solo con el Plan Navidad – US$10 (mes de diciembre).
-        </p>
-
-        <button
-          onClick={handleXmasCheckout}
-          className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
-        >
-          Activar Plan Navidad – US$10
-        </button>
-
-        <button
-          type="button"
-          onClick={markXmasPlanActive}
-          className="w-full rounded-2xl border border-white/30 px-6 py-2 text-[11px] text-neutral-200 hover:bg-white/10"
-        >
-          (Solo pruebas) Marcar plan como activo en este navegador
-        </button>
-      </div>
-    );
-  }
+  const handleDownload = () => {
+    if (!resultB64) return;
+    const link = document.createElement("a");
+    link.href = `data:image/png;base64,${resultB64}`;
+    link.download = "isabelaos-xmas-photo.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Columna: subida y controles */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 space-y-4">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
-          🎄 Generador de Foto Navideña
+          Foto Navideña IA (Premium)
         </h2>
-        <p className="text-xs text-neutral-300">
-          Sube una foto (tuya, en pareja o familia) y la convertiremos en un
-          retrato navideño de estudio profesional.
+        <p className="mt-2 text-sm text-neutral-300">
+          Convierte tu foto (o la de tu familia) en un retrato navideño de
+          estudio profesional, con iluminación cuidada y fondo temático.
         </p>
-
-        <div className="mt-2 text-xs text-red-400 font-semibold">
+        <p className="mt-3 text-xs font-semibold text-red-400">
           Estamos trabajando para tener este módulo lo antes posible con la
           máxima calidad de estudio.
-        </div>
+        </p>
 
-        <div className="mt-4">
-          <label className="text-xs text-neutral-300">
-            1. Sube tu foto (JPG/PNG)
-          </label>
-          <label className="mt-1 flex h-32 w-full cursor-pointer items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400/60 hover:text-cyan-200">
+        <div className="mt-5 space-y-4 text-sm">
+          <div>
+            <p className="text-xs text-neutral-300">
+              1. Sube tu foto (JPG/PNG)
+            </p>
+            <button
+              type="button"
+              onClick={handlePickFile}
+              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300"
+            >
+              {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
+            </button>
             <input
+              id={fileInputId}
               type="file"
               accept="image/*"
               className="hidden"
               onChange={handleFileChange}
             />
-            {filePreview ? "Cambiar foto" : "Haz clic aquí para seleccionar tu foto"}
-          </label>
-          {filePreview && (
-            <div className="mt-3 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
-              <img
-                src={filePreview}
-                alt="Foto subida"
-                className="h-40 w-full object-cover"
-              />
-            </div>
+            {dataUrl && (
+              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+                <img
+                  src={dataUrl}
+                  alt="Foto base"
+                  className="w-full object-cover"
+                />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs text-neutral-300">
+              2. Opcional: describe brevemente (familia, pareja, niños, etc.)
+            </p>
+            <input
+              type="text"
+              value={extraPrompt}
+              onChange={(e) => setExtraPrompt(e.target.value)}
+              placeholder="Por ejemplo: familia de 4 personas, dos niños pequeños..."
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+          </div>
+
+          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado actual:{" "}
+            {statusText || "Listo para enviar tu foto navideña a RunPod."}
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
           )}
+
+          <button
+            type="button"
+            onClick={handleGenerateXmas}
+            disabled={
+              status === "IN_QUEUE" ||
+              status === "IN_PROGRESS" ||
+              !pureB64 ||
+              !user
+            }
+            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {status === "IN_QUEUE" || status === "IN_PROGRESS"
+              ? "Generando foto navideña..."
+              : "Generar foto navideña IA"}
+          </button>
         </div>
-
-        <div className="mt-4">
-          <label className="text-xs text-neutral-300">
-            2. Opcional: describe brevemente (familia, pareja, niños, etc.)
-          </label>
-          <input
-            type="text"
-            value={extraPrompt}
-            onChange={(e) => setExtraPrompt(e.target.value)}
-            placeholder="Por ejemplo: familia de 4 personas, dos niños pequeños..."
-            className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-          />
-        </div>
-
-        <div className="mt-4 rounded-2xl bg-black/60 px-4 py-2 text-xs text-neutral-300">
-          Estado actual:{" "}
-          {statusText || "Listo para generar tu foto navideña."}
-        </div>
-
-        {error && (
-          <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-        )}
-
-        <button
-          onClick={handleGenerateXmas}
-          disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
-          className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          {status === "IN_QUEUE" || status === "IN_PROGRESS"
-            ? "Generando foto navideña..."
-            : "Generar retrato navideño"}
-        </button>
       </div>
 
-      {/* Columna: resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
@@ -1128,21 +1081,12 @@ function XmasPhotoPanel() {
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>
-              Aquí verás tu foto navideña en cuanto se complete el render.
-            </p>
+            <p>Aquí verás tu foto navideña en cuanto se complete el render.</p>
           )}
         </div>
         {resultB64 && (
           <button
-            onClick={() => {
-              const link = document.createElement("a");
-              link.href = `data:image/png;base64,${resultB64}`;
-              link.download = "isabelaos-foto-navidenia.png";
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }}
+            onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             Descargar foto navideña
@@ -1154,34 +1098,11 @@ function XmasPhotoPanel() {
 }
 
 // ---------------------------------------------------------
-// Vista de video (placeholder – próximamente)
-// ---------------------------------------------------------
-function VideoPanel() {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-black/40 p-6 text-sm text-neutral-200">
-      <h2 className="text-lg font-semibold text-white">
-        Generador de video desde prompt (próximamente)
-      </h2>
-      <p className="mt-2 text-xs text-red-400 font-semibold">
-        Estamos trabajando para tener este módulo de video listo lo antes
-        posible. Se conectará a tu mismo motor en la nube para generar secuencias
-        animadas desde tus prompts.
-      </p>
-      <p className="mt-3 text-xs text-neutral-300">
-        La interfaz ya está preparada para recibir parámetros de video (frames,
-        duración, resolución, motion adapter, etc.). En cuanto definamos el
-        pipeline en RunPod, solo conectaremos esta vista al nuevo endpoint.
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------
-// Vista Dashboard (logueado)
+// Dashboard (logueado) con sidebar de vistas
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
-  const [appViewMode, setAppViewMode] = useState("creator");
+  const [appViewMode, setAppViewMode] = useState("generator");
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
@@ -1196,7 +1117,7 @@ function DashboardView() {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.20),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.18),transparent_50%),#06070B",
+          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
       }}
     >
       <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
@@ -1237,73 +1158,74 @@ function DashboardView() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="space-y-6">
-          <div>
-            <h1 className="text-xl font-semibold text-white">
-              Panel del creador
-            </h1>
-            <p className="mt-1 text-xs text-neutral-400">
-              Genera imágenes directamente desde tu cuenta conectada al pipeline
-              real en RunPod y accede a funciones avanzadas como la Foto
-              Navideña IA.
+        <section className="flex gap-6">
+          {/* Sidebar */}
+          <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
+            <p className="text-[11px] font-semibold text-neutral-300 mb-3">
+              Navegación
             </p>
-          </div>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("generator")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "generator"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Generar imagen desde prompt
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("video")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "video"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Generar video desde prompt (próximamente)
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("library")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "library"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Biblioteca
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("xmas")}
+              className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "xmas"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
+              }`}
+            >
+              🎄 Foto Navideña IA (Premium)
+            </button>
+          </aside>
 
-          <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-            {/* Sidebar */}
-            <div className="rounded-3xl border border-white/10 bg-black/50 p-4 text-xs space-y-2">
-              <button
-                onClick={() => setAppViewMode("creator")}
-                className={`w-full rounded-2xl px-3 py-2 text-left ${
-                  appViewMode === "creator"
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-black/60 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                Generar imagen desde prompt
-              </button>
-
-              <button
-                onClick={() => setAppViewMode("video")}
-                className={`w-full rounded-2xl px-3 py-2 text-left ${
-                  appViewMode === "video"
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-black/60 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                Generar video desde prompt (próximamente)
-              </button>
-
-              <button
-                onClick={() => setAppViewMode("library")}
-                className={`w-full rounded-2xl px-3 py-2 text-left ${
-                  appViewMode === "library"
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-black/60 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                Biblioteca
-              </button>
-
-              <button
-                onClick={() => setAppViewMode("xmas")}
-                className={`w-full rounded-2xl px-3 py-2 text-left ${
-                  appViewMode === "xmas"
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-black/60 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                🎄 Foto Navideña IA (Premium)
-              </button>
+          {/* Contenido principal */}
+          <div className="flex-1 space-y-6">
+            <div>
+              <h1 className="text-xl font-semibold text-white">
+                Panel del creador
+              </h1>
+              <p className="mt-1 text-xs text-neutral-400">
+                Genera imágenes y próximamente videos desde tu cuenta conectada
+                al pipeline real en RunPod.
+              </p>
             </div>
 
-            {/* Contenido principal */}
-            <div className="space-y-6">
-              {appViewMode === "creator" && <CreatorPanel />}
-              {appViewMode === "video" && <VideoPanel />}
-              {appViewMode === "library" && <LibraryView />}
-              {appViewMode === "xmas" && <XmasPhotoPanel />}
-            </div>
+            {appViewMode === "generator" && <CreatorPanel />}
+            {appViewMode === "video" && <VideoPlaceholderPanel />}
+            {appViewMode === "library" && <LibraryView />}
+            {appViewMode === "xmas" && <XmasPhotoPanel />}
           </div>
         </section>
       </main>
@@ -1312,7 +1234,7 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (sin sesión) – mejorada + BodySync
+// Landing (no sesión) con neon + BodySync
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
@@ -1352,14 +1274,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.20),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.18),transparent_50%),linear-gradient(135deg,#050509,#060712,#050509)",
+          "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.18),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.35),transparent_60%),#05060A",
       }}
     >
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
               io
             </div>
             <div>
@@ -1368,7 +1290,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
-                Generación visual con IA · Beta
+                Generación visual con IA
               </div>
             </div>
           </div>
@@ -1390,29 +1312,32 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         </div>
       </header>
 
-      {/* Contenido principal */}
+      {/* Hero + Gallery */}
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Hero + Galería 2x2 */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           {/* Columna texto */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
-              Beta privada · Motor de Imagen de Estudio
+              Beta privada · Motor de imagen de estudio
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              Genera{" "}
-              <span className="bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                imágenes fotorrealistas
-              </span>{" "}
-              con IA en segundos.
+              Genera imágenes fotorrealistas{" "}
+              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+                con IA en la nube.
+              </span>
             </h1>
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              isabelaOs Studio es el primer sistema de generación visual con IA
-              desarrollado desde{" "}
-              <span className="font-semibold text-white">Guatemala</span> para
-              creadores, estudios y agencias. Escribe un prompt, elige la
-              resolución y obtén resultados con calidad de sesión fotográfica de
-              estudio.
+              IsabelaOS Studio es el primer sistema de generación visual con IA
+              desarrollado desde Guatemala para creadores, estudios y agencias
+              de modelos virtuales. Escribe un prompt y obtén imágenes con
+              calidad de estudio en segundos.
+            </p>
+
+            <p className="mt-3 max-w-xl text-xs text-neutral-400">
+              Durante la beta puedes usar nuestro motor de imágenes y, más
+              adelante, acceder a módulos exclusivos como BodySync (movimiento
+              corporal IA), Script2Film, CineCam y generador de video desde
+              texto.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -1423,22 +1348,18 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Prueba la calidad del motor antes de crear tu cuenta y{" "}
-                <strong>desbloquea {DAILY_LIMIT} imágenes diarias</strong> al
-                registrarte. Ideal para portadas, redes sociales y proyectos
-                creativos.
+                Prueba la calidad del motor antes de crear tu cuenta y desbloquea{" "}
+                {DAILY_LIMIT} imágenes diarias registrándote.
               </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-500">
-              Próximamente: módulos de{" "}
-              <span className="font-semibold text-white">video</span> y nuestro
-              motor propio de realismo corporal{" "}
-              <span className="font-semibold text-white">BodySync v1</span>.
+              Próximamente: módulos de video y nuestro motor propio de realismo
+              corporal <span className="font-semibold text-white">BodySync v1</span>.
             </p>
           </div>
 
-          {/* Columna galería 4 imágenes */}
+          {/* Galería 2x2 */}
           <div className="relative order-first lg:order-last">
             <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
@@ -1476,9 +1397,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
 
             <p className="mt-3 text-[10px] text-neutral-500">
-              isabelaOs Studio está pensado para creadores que necesitan
-              resultados con calidad profesional sin complicarse con modelos y
-              configuraciones técnicas.
+              isabelaOs Studio es el primer sistema de generación visual con IA
+              desarrollado en Guatemala pensando en creadores, estudios y
+              agencias de modelos virtuales.
             </p>
           </div>
         </section>
@@ -1494,9 +1415,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </h3>
             <p className="mt-2 text-[11px] text-neutral-400">
               Interfaz simple para escribir un prompt, ajustar resolución y ver
-              el resultado generado por el motor conectado a RunPod. Todo se
-              ejecuta en la nube para que no necesites una tarjeta gráfica
-              potente.
+              el resultado generado por el motor conectado a RunPod.
             </p>
             <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img
@@ -1508,31 +1427,24 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
-        {/* BodySync – imagen grande */}
+        {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-4">
-            Vista previa de BodySync v1 (próximamente)
+          <h2 className="text-sm font-semibold text-white mb-3">
+            Preparándonos para BodySync · Movimiento corporal IA
           </h2>
-          <div className="rounded-3xl border border-fuchsia-400/40 bg-black/60 p-5 text-xs text-neutral-300">
-            <p className="text-[11px] text-neutral-300 mb-3">
-              BodySync será nuestro módulo de realismo corporal: movimientos,
-              poses y composición pensados para creadores que necesitan escenas
-              con impacto visual. Esta es una imagen generada durante las
-              pruebas internas del modelo.
-            </p>
-            <div className="rounded-2xl border border-white/10 overflow-hidden bg-black/80">
-              {/* 👉 Guarda la imagen en public/gallery/bodysync_back_art.png */}
-              <img
-                src="/gallery/bodysync_back_art.png"
-                alt="Ejemplo generado con BodySync"
-                className="w-full object-cover"
-              />
-            </div>
-            <p className="mt-3 text-[10px] text-neutral-500">
-              Esta imagen es un ejemplo de la dirección artística que buscamos
-              con BodySync: escenas dinámicas, iluminación cuidada y nivel de
-              detalle cinematográfico.
-            </p>
+          <p className="text-xs text-neutral-300 max-w-2xl">
+            Esta imagen fue generada con nuestro modelo de pruebas BodySync,
+            pensado para aplicar poses y movimiento corporal realista a tus
+            personajes IA. Muy pronto podrás combinar IsabelaOS Studio con
+            BodySync para crear escenas completas en movimiento.
+          </p>
+          <div className="mt-4 rounded-3xl border border-white/10 bg-black/60 overflow-hidden">
+            {/* Guarda la imagen en: public/gallery/bodysync_showcase.png */}
+            <img
+              src="/gallery/bodysync_showcase.png"
+              alt="Ejemplo generado con BodySync"
+              className="w-full object-cover"
+            />
           </div>
         </section>
 
@@ -1542,10 +1454,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             Plan beta para creadores
           </h2>
           <p className="mt-2 text-xs text-neutral-300">
-            Si llegas al límite de <strong>{DAILY_LIMIT}</strong> imágenes
-            gratuitas al día (por usuario registrado) y quieres seguir generando
-            sin restricciones, puedes activar el plan ilimitado mientras dure la
-            beta.
+            Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día (por
+            usuario registrado) y quieres seguir generando sin restricciones,
+            puedes activar el plan ilimitado mientras dure la beta.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -1564,16 +1475,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
 
           <p className="mt-3 text-[11px] text-neutral-400">
-            Los usuarios que se registren durante la beta mantendrán un{" "}
-            <span className="font-semibold text-white">
-              precio preferencial durante el primer año
-            </span>{" "}
-            frente al precio público general cuando lancemos los módulos
-            siguientes (video, BodySync y más).
+            Los usuarios que se registren durante la beta mantendrán un precio
+            preferencial durante el primer año frente al precio general cuando
+            lancemos los módulos siguientes.
           </p>
         </section>
 
-        {/* Contacto y Footer */}
+        {/* Contacto */}
         <section id="contacto" className="mt-16 max-w-xl">
           <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
@@ -1669,7 +1577,6 @@ export default function App() {
     setShowAuthModal(true);
     setViewMode("landing");
   };
-
   const closeAuth = () => setShowAuthModal(false);
 
   const handleStartDemo = () => {
