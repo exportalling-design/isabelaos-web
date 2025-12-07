@@ -1,193 +1,102 @@
 // api/generate-xmas.js
-//
-// Lanza un job ESPECIAL de "foto navideña" en RunPod.
-// NO toca nada del generador normal de imágenes.
-
-// Igual que generate.js: primero RUNPOD_ENDPOINT_ID, luego RP_ENDPOINT
-const ENDPOINT_ID =
-  process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
-
-const RUNPOD_API_KEY = process.env.RP_API_KEY;
-
-// CORS básico (igual estilo que api/generate.js)
-const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
-};
+// Lanza un job especial "navidad_estudio" en RunPod
+// para la Foto Navideña IA de estudio
 
 export default async function handler(req) {
+  // CORS básico
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+
   // Preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: CORS_HEADERS });
+    return new Response(null, { headers: cors });
   }
 
   // Solo aceptamos POST
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
       status: 405,
-      headers: CORS_HEADERS,
+      headers: cors,
     });
-  }
-
-  if (!ENDPOINT_ID || !RUNPOD_API_KEY) {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error:
-          "Falta configuración de RunPod (RUNPOD_ENDPOINT_ID / RP_ENDPOINT o RP_API_KEY).",
-      }),
-      {
-        status: 500,
-        headers: {
-          ...CORS_HEADERS,
-          "content-type": "application/json",
-        },
-      }
-    );
   }
 
   try {
     const body = await req.json().catch(() => null);
 
-    if (!body) {
+    if (!body || !body.image_b64) {
       return new Response(
-        JSON.stringify({
-          ok: false,
-          error: "Cuerpo de la petición vacío.",
-        }),
-        {
-          status: 400,
-          headers: {
-            ...CORS_HEADERS,
-            "content-type": "application/json",
-          },
-        }
+        JSON.stringify({ error: "Falta image_b64 en el cuerpo." }),
+        { status: 400, headers: cors }
       );
     }
 
-    // Aceptamos tanto image_b64 como init_image_b64 (como lo mandas desde React)
-    const image_b64 = body.image_b64 || body.init_image_b64 || null;
+    const image_b64 = body.image_b64;
+    const description = body.description || "";
 
-    if (!image_b64) {
+    // 👇 Usa EXACTAMENTE el mismo endpoint ID y API key que en /api/generate.js
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+    const apiKey = process.env.RUNPOD_API_KEY;
+
+    if (!endpointId || !apiKey) {
       return new Response(
         JSON.stringify({
-          ok: false,
           error:
-            "Falta image_b64 / init_image_b64 en el cuerpo de la petición.",
+            "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
         }),
-        {
-          status: 400,
-          headers: {
-            ...CORS_HEADERS,
-            "content-type": "application/json",
-          },
-        }
+        { status: 500, headers: cors }
       );
     }
 
-    // También aceptamos description o extra_prompt
-    const description = body.description || body.extra_prompt || "";
+    const url = `https://api.runpod.ai/v2/${endpointId}/run`;
 
-    // Construimos el input para el worker
-    const input = {
-      action: "xmas_photo", // lo que espera rp_handler.py
-      image_b64,
-      description,
-      // Estos los puedes usar después cuando metas el pipeline real
-      width: body.width || 768,
-      height: body.height || 1024,
-      steps: body.steps || 30,
-      strength: body.strength ?? 0.6,
-      guidance_scale: body.guidance_scale ?? 7.5,
-      prompt: "studio christmas portrait, soft light, high quality",
-    };
-
-    const base = `https://api.runpod.ai/v2/${ENDPOINT_ID}`;
-
-    const rpRes = await fetch(`${base}/run`, {
+    const rpRes = await fetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        Authorization: `Bearer ${RUNPOD_API_KEY}`,
+        authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify({
+        input: {
+          action: "navidad_estudio", // 👈 NUEVO MODO
+          image_b64,
+          description,
+        },
+      }),
     });
 
-    const rpData = await rpRes.json().catch(() => null);
+    const data = await rpRes.json().catch(() => null);
 
-    if (!rpRes.ok || !rpData) {
-      console.error("Error RunPod Xmas:", rpRes.status, rpData);
+    if (!rpRes.ok || !data || data.error) {
+      console.error("Error RunPod generate-xmas:", data);
       return new Response(
         JSON.stringify({
           ok: false,
-          error:
-            rpData?.error ||
-            "No se pudo lanzar el job navideño en RunPod (respuesta no válida).",
+          error: data?.error || "Error al lanzar job en RunPod.",
         }),
-        {
-          status: rpRes.status || 500,
-          headers: {
-            ...CORS_HEADERS,
-            "content-type": "application/json",
-          },
-        }
+        { status: 500, headers: cors }
       );
     }
 
-    const jobId =
-      rpData.id || rpData.requestId || rpData.jobId || rpData.data?.id;
-
-    if (!jobId) {
-      console.error("RunPod Xmas sin id:", rpData);
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: "RunPod no devolvió ID para la foto navideña.",
-        }),
-        {
-          status: 500,
-          headers: {
-            ...CORS_HEADERS,
-            "content-type": "application/json",
-          },
-        }
-      );
-    }
-
-    // Igual que api/generate: devolvemos el jobId
+    // RunPod responde algo tipo { id: "jobId", status: "IN_QUEUE", ... }
     return new Response(
       JSON.stringify({
         ok: true,
-        jobId,
+        jobId: data.id,
       }),
-      {
-        status: 200,
-        headers: {
-          ...CORS_HEADERS,
-          "content-type": "application/json",
-        },
-      }
+      { status: 200, headers: cors }
     );
   } catch (err) {
     console.error("Error en /api/generate-xmas:", err);
     return new Response(
       JSON.stringify({
         ok: false,
-        error: err?.message || String(err),
+        error: err.message || String(err),
       }),
-      {
-        status: 500,
-        headers: {
-          ...CORS_HEADERS,
-          "content-type": "application/json",
-        },
-      }
+      { status: 500, headers: cors }
     );
   }
 }
 
-// Igual que generate.js -> Edge Function
-export const config = {
-  runtime: "edge",
-};
