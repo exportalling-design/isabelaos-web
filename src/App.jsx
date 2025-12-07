@@ -895,7 +895,6 @@ function XmasPhotoPanel() {
     }
   };
 
-  // 🔴 AQUÍ ES DONDE ESTABA EL PROBLEMA: ahora enviamos image_b64 y description
   const handleGenerateXmas = async () => {
     setError("");
 
@@ -918,7 +917,7 @@ function XmasPhotoPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          image_b64: pureB64, // 👈 coincide con api/generate-xmas.js
+          image_b64: pureB64,
           description: extraPrompt || "",
         }),
       });
@@ -1277,7 +1276,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
               io
             </div>
             <div>
@@ -1313,8 +1312,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           {/* Columna texto */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
-              Beta privada · Motor de imagen de estudio
+            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
+              <span className="h-1 w-1 rounded-full bg-cyan-300" />
+              <span>Beta privada · Motor de imagen de estudio</span>
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               Genera imágenes fotorrealistas{" "}
@@ -1322,6 +1322,10 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 con IA en la nube.
               </span>
             </h1>
+
+            {/* Barra neón bajo el título */}
+            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
+
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               IsabelaOS Studio es el primer sistema de generación visual con IA
               desarrollado desde Guatemala para creadores, estudios y agencias
@@ -1339,7 +1343,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
@@ -1358,11 +1362,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
           {/* Galería 2x2 */}
           <div className="relative order-first lg:order-last">
+            {/* Halo neón detrás de la galería */}
+            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+
             <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img1.png?v=2"
@@ -1403,6 +1410,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Vista previa del panel */}
         <section className="mt-12">
+          {/* Línea separadora con gradiente */}
+          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
           <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
           </h2>
@@ -1453,7 +1462,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
           <div className="mt-6 flex justify-center">
             <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
-              {/* Guarda la imagen en: public/gallery/bodysync_showcase.png */}
               <img
                 src="/gallery/bodysync_showcase.png"
                 alt="Ejemplo generado con BodySync"
