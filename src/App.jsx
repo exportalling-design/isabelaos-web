@@ -460,7 +460,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               prompt: "",
               negativePrompt: "",
               width: Number(width),
-              height: Number(height), // FIX: aquí ahora sí va height
+              height: Number(height),
               steps: Number(steps),
             }).catch((e) => {
               console.error("Error guardando en Supabase:", e);
@@ -895,6 +895,7 @@ function XmasPhotoPanel() {
     }
   };
 
+  // 🔴 AQUÍ ES DONDE ESTABA EL PROBLEMA: ahora enviamos image_b64 y description
   const handleGenerateXmas = async () => {
     setError("");
 
@@ -917,13 +918,8 @@ function XmasPhotoPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          init_image_b64: pureB64,
-          extra_prompt: extraPrompt || "",
-          width: 768,
-          height: 1024,
-          steps: 30,
-          strength: 0.6,
-          guidance_scale: 7.5,
+          image_b64: pureB64,          // 👈 coincide con api/generate-xmas.js
+          description: extraPrompt || ""
         }),
       });
 
@@ -1348,14 +1344,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Prueba la calidad del motor antes de crear tu cuenta y desbloquea{" "}
-                {DAILY_LIMIT} imágenes diarias registrándote.
+                Prueba la calidad del motor antes de crear tu cuenta y
+                desbloquea {DAILY_LIMIT} imágenes diarias registrándote.
               </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-500">
               Próximamente: módulos de video y nuestro motor propio de realismo
-              corporal <span className="font-semibold text-white">BodySync v1</span>.
+              corporal{" "}
+              <span className="font-semibold text-white">BodySync v1</span>.
             </p>
           </div>
 
@@ -1620,3 +1617,4 @@ export default function App() {
     </>
   );
 }
+
