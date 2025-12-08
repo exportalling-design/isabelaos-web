@@ -2,44 +2,10 @@ import { useState } from "react";
 import { saveGenerationInSupabase } from "./lib/generations"; // ajusta la ruta si es distinto
 
 // -------------------------------------------------------------------
-// NUEVO compresor seguro compatible con fotos gigantes de celular
+// Helper: comprimir/redimensionar foto a ~1600px y devolver base64
 // -------------------------------------------------------------------
 async function fileToCompressedBase64(file) {
-  const MAX_SIZE = 1600; // tamaño final deseado
-
-  // Si el navegador soporta createImageBitmap (Chrome/Android, etc.)
-  if (typeof createImageBitmap === "function") {
-    const imgBitmap = await createImageBitmap(file);
-
-    let { width, height } = imgBitmap;
-
-    // Redimensionar manteniendo proporción
-    if (width > height) {
-      if (width > MAX_SIZE) {
-        height = Math.round((height * MAX_SIZE) / width);
-        width = MAX_SIZE;
-      }
-    } else {
-      if (height > MAX_SIZE) {
-        width = Math.round((width * MAX_SIZE) / height);
-        height = MAX_SIZE;
-      }
-    }
-
-    // Canvas pequeño y seguro
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(imgBitmap, 0, 0, width, height);
-
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    return dataUrl.split(",")[1];
-  }
-
-  // 🔙 Fallback para navegadores que no tengan createImageBitmap
-  const MAX_SIZE = 1600;
+  const MAX_SIZE = 1600; // lado más grande
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -50,6 +16,7 @@ async function fileToCompressedBase64(file) {
         let width = img.width;
         let height = img.height;
 
+        // Mantener proporción y limitar tamaño
         if (width > height) {
           if (width > MAX_SIZE) {
             height = Math.round((height * MAX_SIZE) / width);
@@ -69,31 +36,24 @@ async function fileToCompressedBase64(file) {
 
         ctx.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-        const base64 = dataUrl.split(",")[1];
+        // JPEG alta calidad, peso razonable
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        const base64 = dataUrl.split(",")[1]; // quitar "data:image/jpeg;base64,"
 
         resolve(base64);
       };
 
-      img.onerror = reject;
+      img.onerror = (err) => {
+        console.error("Error cargando imagen para compresión:", err);
+        reject(err);
+      };
       img.src = e.target.result;
     };
 
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// 🔹 Fallback: usar la imagen original en base64 si todo lo demás falla
-async function fileToRawBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result || "";
-      const base64 = String(dataUrl).split(",")[1] || "";
-      resolve(base64);
+    reader.onerror = (err) => {
+      console.error("Error leyendo archivo para compresión:", err);
+      reject(err);
     };
-    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
@@ -117,13 +77,17 @@ function ChristmasStudioPage({ currentUser }) {
     setSubiendo(true);
 
     try {
-      // 1) Comprimir/redimensionar con createImageBitmap
+      // 1) SIEMPRE intentar comprimir/redimensionar
       let base64Compressed;
       try {
         base64Compressed = await fileToCompressedBase64(file);
       } catch (err) {
-        console.error("Error al comprimir, usando imagen original:", err);
-        base64Compressed = await fileToRawBase64(file);
+        console.error("No se pudo comprimir esta imagen:", err);
+        setErrorMsg(
+          "Esta foto es demasiado grande o tiene un formato que el navegador no puede procesar. Intenta con otra imagen o baja la resolución desde la cámara."
+        );
+        setSubiendo(false);
+        return;
       }
 
       // Guardar preview original (izquierda)
@@ -145,7 +109,7 @@ function ChristmasStudioPage({ currentUser }) {
         console.error("Error al lanzar job navidad_estudio:", data);
         setErrorMsg(
           data?.error ||
-            "Ocurrió un error al enviar la foto navideña. Inténtalo de nuevo."
+            "Ocurrió un error al enviar la foto navideña. Inténtalo de nuevo con otra imagen."
         );
         return;
       }
@@ -180,7 +144,9 @@ function ChristmasStudioPage({ currentUser }) {
 
         if (statusData.status === "FAILED") {
           console.error("Job RunPod FAILED:", statusData);
-          setErrorMsg("El procesamiento navideño falló. Intenta con otra foto.");
+          setErrorMsg(
+            "El procesamiento navideño falló. Intenta con otra foto (idealmente menos pesada)."
+          );
           return;
         }
 
@@ -269,7 +235,7 @@ function ChristmasStudioPage({ currentUser }) {
         />
       </div>
 
-      <div style={{ marginBottom: "1rem" }}>
+      <div style={{ marginBottom: "0.5rem" }}>
         <label
           style={{
             display: "block",
@@ -285,6 +251,17 @@ function ChristmasStudioPage({ currentUser }) {
           onChange={handleFileChange}
           disabled={subiendo}
         />
+        <p
+          style={{
+            fontSize: "0.85rem",
+            opacity: 0.6,
+            marginTop: "0.25rem",
+          }}
+        >
+          Para mejores resultados, usa fotos en formato JPG/PNG y evita imágenes
+          extremadamente pesadas. Algunas fotos con ropa muy reveladora pueden
+          no procesarse por políticas de seguridad del sistema.
+        </p>
       </div>
 
       {subiendo && (
