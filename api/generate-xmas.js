@@ -1,6 +1,20 @@
-// api/generate-xmas.js
-// Lanza un job especial "navidad_estudio" en RunPod
-// para la Foto Navideña IA de estudio
+// pages/api/generate-xmas.js
+// Lanza el job navideño en RunPod a partir de una foto subida (FormData)
+
+export const config = {
+  runtime: "edge",
+};
+
+async function fileToBase64(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // btoa está disponible en runtime Edge
+  return btoa(binary);
+}
 
 export default async function handler(req) {
   const cors = {
@@ -23,33 +37,110 @@ export default async function handler(req) {
   }
 
   try {
-    const body = await req.json().catch(() => null);
+    const contentType = req.headers.get("content-type") || "";
+    let imageBase64 = "";
+    let description = "";
+    let userId = null;
 
-    if (!body || !body.image_b64) {
+    // -----------------------------------------
+    // 1) LECTURA DEL CUERPO
+    //    Acepta multipart/form-data (desde el navegador)
+    //    y también JSON por si algún cliente viejo la usa.
+    // -----------------------------------------
+    if (contentType.startsWith("multipart/form-data")) {
+      const formData = await req.formData();
+
+      const file = formData.get("file");
+      if (!file) {
+        return new Response(
+          JSON.stringify({ error: "Falta archivo de imagen (file)" }),
+          {
+            status: 400,
+            headers: {
+              ...cors,
+              "content-type": "application/json",
+            },
+          }
+        );
+      }
+
+      imageBase64 = await fileToBase64(file);
+      description = formData.get("description") || "";
+      userId = formData.get("userId") || null;
+    } else {
+      // Modo JSON (por si algún cliente lo usa)
+      const body = await req.json().catch(() => null);
+      if (!body || !body.image_b64) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Falta image_b64 en el cuerpo de la petición (JSON) o multipart/form-data.",
+          }),
+          {
+            status: 400,
+            headers: {
+              ...cors,
+              "content-type": "application/json",
+            },
+          }
+        );
+      }
+      imageBase64 = body.image_b64;
+      description = body.description || "";
+      userId = body.userId || null;
+    }
+
+    // -----------------------------------------
+    // 2) VALIDACIONES BÁSICAS
+    // -----------------------------------------
+    if (!imageBase64) {
       return new Response(
-        JSON.stringify({ error: "Falta image_b64 en el cuerpo." }),
-        { status: 400, headers: cors }
+        JSON.stringify({ error: "No se pudo convertir la imagen a base64." }),
+        {
+          status: 400,
+          headers: {
+            ...cors,
+            "content-type": "application/json",
+          },
+        }
       );
     }
 
-    const image_b64 = body.image_b64;
-    const description = body.description || "";
-
-    // Usa EXACTAMENTE las mismas variables que /api/generate.js
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-    const apiKey = process.env.RUNPOD_API_KEY;
+    const endpointId =
+      process.env.RP_ENDPOINT_XMAS_ID || process.env.RP_ENDPOINT_ID;
+    const apiKey = process.env.RP_API_KEY;
 
     if (!endpointId || !apiKey) {
+      console.error(
+        "[generate-xmas] Falta RP_ENDPOINT_XMAS_ID/RP_ENDPOINT_ID o RP_API_KEY"
+      );
       return new Response(
         JSON.stringify({
-          error:
-            "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
+          error: "Configuración de RunPod incompleta en el servidor.",
         }),
-        { status: 500, headers: cors }
+        {
+          status: 500,
+          headers: {
+            ...cors,
+            "content-type": "application/json",
+          },
+        }
       );
     }
 
+    // -----------------------------------------
+    // 3) LLAMADA A RUNPOD
+    // -----------------------------------------
     const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+
+    const payload = {
+      input: {
+        action: "navidad_estudio",
+        image_b64: imageBase64,
+        description: description,
+        userId: userId,
+      },
+    };
 
     const rpRes = await fetch(url, {
       method: "POST",
@@ -57,54 +148,65 @@ export default async function handler(req) {
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        input: {
-          action: "navidad_estudio",
-          image_b64,
-          description,
-        },
-      }),
+      body: JSON.stringify(payload),
     });
 
-    const data = await rpRes.json().catch(() => null);
-
-    if (!rpRes.ok || !data || data.error) {
-      console.error("Error RunPod generate-xmas:", data);
+    if (!rpRes.ok) {
+      const text = await rpRes.text();
+      console.error("[generate-xmas] Error RunPod:", rpRes.status, text);
       return new Response(
-        JSON.stringify({
-          ok: false,
-          error: data?.error || "Error al lanzar job en RunPod.",
-        }),
-        { status: 500, headers: cors }
+        JSON.stringify({ error: "Error al lanzar job en RunPod." }),
+        {
+          status: 500,
+          headers: {
+            ...cors,
+            "content-type": "application/json",
+          },
+        }
       );
     }
 
-    // RunPod responde algo tipo { id: "jobId", status: "IN_QUEUE", ... }
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        jobId: data.id,
-      }),
-      { status: 200, headers: cors }
-    );
+    const rpJson = await rpRes.json();
+    const jobId = rpJson.id || rpJson.jobId || rpJson.requestId || null;
+
+    if (!jobId) {
+      console.error("[generate-xmas] Respuesta RunPod sin jobId:", rpJson);
+      return new Response(
+        JSON.stringify({
+          error: "RunPod no devolvió un ID de job válido.",
+        }),
+        {
+          status: 500,
+          headers: {
+            ...cors,
+            "content-type": "application/json",
+          },
+        }
+      );
+    }
+
+    // -----------------------------------------
+    // 4) RESPUESTA OK
+    // -----------------------------------------
+    return new Response(JSON.stringify({ jobId }), {
+      status: 200,
+      headers: {
+        ...cors,
+        "content-type": "application/json",
+      },
+    });
   } catch (err) {
-    console.error("Error en /api/generate-xmas:", err);
+    console.error("[generate-xmas] ERROR general:", err);
     return new Response(
-      JSON.stringify({
-        ok: false,
-        error: err.message || String(err),
-      }),
-      { status: 500, headers: cors }
+      JSON.stringify({ error: "Error interno en generate-xmas." }),
+      {
+        status: 500,
+        headers: {
+          ...cors,
+          "content-type": "application/json",
+        },
+      }
     );
   }
 }
-
-// ⬇️ Muy importante: permitir cuerpos "grandes" para fotos del cel
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "15mb", // puedes bajar a "10mb" si quieres
-    },
-  },
-};
 
