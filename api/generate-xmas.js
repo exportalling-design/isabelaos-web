@@ -102,8 +102,10 @@ export default async function handler(req) {
 
     const base = `https://api.runpod.ai/v2/${endpointId}`;
 
-    // Enviamos al worker con la acción especial de navidad
-    const rp = await fetch(`${base}/run`, {
+    // 🔴 AQUÍ ESTABA EL PROBLEMA:
+    // Antes: `${base}/run`  -> solo devuelve { id, status }
+    // Ahora: usamos /runsync para que devuelva el output completo con image_b64
+    const rp = await fetch(`${base}/runsync`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.RP_API_KEY}`,
@@ -165,4 +167,3 @@ export default async function handler(req) {
 export const config = {
   runtime: "edge",
 };
-
