@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { saveGenerationInSupabase } from "./lib/generations";
+import { saveGenerationInSupabase } from "./lib/generations"; // ajusta la ruta si es distinto
 
-// Helper: comprimir y redimensionar foto
+// -------------------------------------------------------------------
+// Helper: comprimir/redimensionar foto a ~1600px (con modo agresivo)
+// -------------------------------------------------------------------
 async function fileToCompressedBase64(file) {
-  const MAX_SIZE = 1600;
+  const MAX_SIZE = 1600; // lado base más grande recomendado
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -15,17 +17,22 @@ async function fileToCompressedBase64(file) {
         let height = img.height;
 
         const maxSide = Math.max(width, height);
+
+        // Compresión súper agresiva para imágenes enormes
         let targetMax = MAX_SIZE;
         let quality = 0.9;
 
         if (maxSide > 7000) {
+          // Fotos tipo 200MP / resolución extrema
           targetMax = 1280;
           quality = 0.72;
         } else if (maxSide > 5000) {
+          // Fotos tipo 50–108MP
           targetMax = 1400;
           quality = 0.78;
         }
 
+        // Mantener proporción y limitar tamaño según targetMax
         if (width > height) {
           if (width > targetMax) {
             height = Math.round((height * targetMax) / width);
@@ -45,8 +52,9 @@ async function fileToCompressedBase64(file) {
 
         ctx.drawImage(img, 0, 0, width, height);
 
+        // JPEG con calidad ajustada según tamaño original
         const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        const base64 = dataUrl.split(",")[1];
+        const base64 = dataUrl.split(",")[1]; // quitar "data:image/jpeg;base64,"
 
         resolve(base64);
       };
@@ -60,7 +68,7 @@ async function fileToCompressedBase64(file) {
   });
 }
 
-// Fallback: usar la foto original
+// 🔹 NUEVO: fallback por si la compresión falla (usa la imagen original)
 async function fileToRawBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -74,7 +82,7 @@ async function fileToRawBase64(file) {
   });
 }
 
-// Leer dimensiones reales
+// 🔹 NUEVO: helper para leer dimensiones reales de la foto
 async function getImageDimensions(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -95,10 +103,16 @@ function ChristmasStudioPage({ currentUser }) {
   const [subiendo, setSubiendo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [descripcion, setDescripcion] = useState("");
-  const [uploadedImage, setUploadedImage] = useState(null);
-  const [navidadImage, setNavidadImage] = useState(null);
+
+  const [uploadedImage, setUploadedImage] = useState(null); // preview original
+  const [navidadImage, setNavidadImage] = useState(null);   // resultado estudio
+
+  // 🔹 NUEVO: aviso dinámico según tamaño/resolución de la foto
   const [resolutionWarning, setResolutionWarning] = useState("");
 
+  // -------------------------------------------------------------------
+  // Manejar archivo subido
+  // -------------------------------------------------------------------
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -108,63 +122,75 @@ function ChristmasStudioPage({ currentUser }) {
     setSubiendo(true);
 
     try {
+      // 0) Analizar peso y resolución de la foto para mostrar aviso
       try {
         const megaBytes = file.size / (1024 * 1024);
         let warning = "";
 
         if (megaBytes > 8) {
-          warning = "Tu foto pesa " + megaBytes.toFixed(1) + " MB. Si ves errores al procesar, prueba bajando la calidad de la cámara.";
+          warning =
+            `Tu foto pesa aproximadamente ${megaBytes.toFixed(
+              1
+            )} MB. ` +
+            "Si ves errores al procesar, prueba bajando la calidad de la cámara a modo estándar o recortando la foto antes de subirla.";
         }
 
         const dims = await getImageDimensions(file).catch(() => null);
         if (dims) {
-          const width = dims.width;
-          const height = dims.height;
+          const { width, height } = dims;
           const maxSide = Math.max(width, height);
 
           if (maxSide > 5000) {
-            warning = (warning ? warning + " " : "") +
-              "Detectamos una resolución muy alta (" +
-              width +
-              " x " +
-              height +
-              "). Si tu foto no se procesa correctamente, usa calidad estándar o retrato.";
+            warning =
+              (warning ? warning + " " : "") +
+              `Detectamos una resolución muy alta (${width} x ${height}). ` +
+              "Las cámaras de gama alta (Xiaomi, Samsung, iPhone, etc.) pueden generar archivos enormes. " +
+              "Si tu foto no se procesa correctamente, toma la foto en calidad estándar / retrato o reduce la resolución antes de subirla.";
           }
         }
 
         if (warning) {
           setResolutionWarning(warning);
         }
-      } catch (_) {}
+      } catch (dimErr) {
+        console.warn("No se pudieron leer las dimensiones de la foto:", dimErr);
+      }
 
+      // 1) Comprimir/redimensionar
+      // 🔹 CAMBIO: intentamos comprimir y, si falla, usamos la imagen original
       let base64Compressed;
       try {
         base64Compressed = await fileToCompressedBase64(file);
-      } catch (_) {
+      } catch (err) {
+        console.error("Error al comprimir, usando imagen original:", err);
         base64Compressed = await fileToRawBase64(file);
       }
 
-      setUploadedImage("data:image/jpeg;base64," + base64Compressed);
+      // Guardar preview original (izquierda)
+      setUploadedImage(`data:image/jpeg;base64,${base64Compressed}`);
 
+      // 2) Lanzar job en /api/generate-xmas
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: base64Compressed,
-          description: descripcion
-        })
+          description: descripcion || "",
+        }),
       });
 
       const data = await res.json().catch(() => null);
 
       if (!res.ok || !data || !data.ok || !data.jobId) {
+        console.error("Error al lanzar job navidad_estudio:", data);
         setErrorMsg(
           data?.error ||
-            "Error al enviar la foto. Si la tomaste en resolución muy alta, intenta bajarla."
+            "Ocurrió un error al enviar la foto navideña. Si la tomaste en máxima resolución, intenta bajando la calidad de la cámara y vuelve a intentarlo."
         );
         return;
       }
 
+      // 3) Polling al endpoint de status (igual que haces para /api/generate-status)
       const jobId = data.jobId;
       let done = false;
       let finalImageB64 = null;
@@ -173,13 +199,16 @@ function ChristmasStudioPage({ currentUser }) {
         const statusRes = await fetch("/api/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jobId })
+          body: JSON.stringify({ jobId }),
         });
 
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
-          setErrorMsg("Error consultando el estado del procesamiento.");
+          console.error("Error consultando status RunPod:", statusData);
+          setErrorMsg(
+            "Error consultando el estado del procesamiento. Si el problema continúa, intenta con una foto en calidad estándar."
+          );
           return;
         }
 
@@ -187,46 +216,60 @@ function ChristmasStudioPage({ currentUser }) {
           statusData.status === "IN_QUEUE" ||
           statusData.status === "IN_PROGRESS"
         ) {
+          // Esperar un poco y seguir
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
 
         if (statusData.status === "FAILED") {
-          setErrorMsg("El procesamiento falló. Intenta una foto más ligera.");
+          console.error("Job RunPod FAILED:", statusData);
+          setErrorMsg(
+            "El procesamiento navideño falló. Si usaste una foto muy grande, prueba tomarla en calidad estándar y vuelve a intentarlo."
+          );
           return;
         }
 
+        // status === "COMPLETED"
         finalImageB64 =
           statusData.output?.image_b64 ||
           statusData.output?.result?.image_b64 ||
           null;
 
         if (!finalImageB64) {
-          setErrorMsg("No se recibió la imagen procesada.");
+          console.error("No se encontró image_b64 en output:", statusData);
+          setErrorMsg(
+            "No se recibió la imagen procesada desde el servidor. Intenta con una foto un poco más ligera o en modo retrato."
+          );
           return;
         }
 
         done = true;
       }
 
-      const resultDataUrl = "data:image/png;base64," + finalImageB64;
+      const resultDataUrl = `data:image/png;base64,${finalImageB64}`;
 
+      // Mostrar resultado (derecha)
       setNavidadImage(resultDataUrl);
 
+      // 4) Guardar en la biblioteca
       try {
         await saveGenerationInSupabase({
           imageDataUrl: resultDataUrl,
           meta: {
             mode: "navidad_estudio",
-            description: descripcion
+            description: descripcion || "",
           },
           userId: currentUser?.id || null,
-          prompt: "[Foto navideña de estudio]"
+          prompt: "[Foto navideña de estudio – fondo reemplazado]",
         });
-      } catch (_) {}
+      } catch (err) {
+        console.error("Error guardando en biblioteca:", err);
+        // No rompas la experiencia si solo falla el guardado
+      }
     } catch (err) {
+      console.error("Error manejando archivo navideño:", err);
       setErrorMsg(
-        "No se pudo procesar la imagen. Si fue tomada en resolución máxima, usa calidad estándar y vuelve a intentar."
+        "No se pudo procesar la imagen. Si tu foto fue tomada en resolución máxima, intenta bajando la calidad o usando modo retrato y vuelve a subirla."
       );
     } finally {
       setSubiendo(false);
@@ -242,11 +285,20 @@ function ChristmasStudioPage({ currentUser }) {
         Foto Navideña IA de Estudio
       </h1>
       <p style={{ marginBottom: "1rem", opacity: 0.8 }}>
-        Sube una foto y el sistema reemplaza el fondo por un set navideño profesional.
+        Sube una foto tuya o de tu familia y IsabelaOS convierte el fondo en un
+        set navideño hiperreal de estudio profesional: luces de lujo, edición
+        premium y detalles como si lo hubieras hecho en un estudio fotográfico
+        carísimo.
       </p>
 
       <div style={{ marginBottom: "1rem" }}>
-        <label style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}>
+        <label
+          style={{
+            display: "block",
+            fontWeight: 600,
+            marginBottom: "0.25rem",
+          }}
+        >
           Descripción (opcional)
         </label>
         <input
@@ -260,13 +312,19 @@ function ChristmasStudioPage({ currentUser }) {
             borderRadius: 8,
             border: "1px solid rgba(255,255,255,0.15)",
             background: "rgba(0,0,0,0.4)",
-            color: "white"
+            color: "white",
           }}
         />
       </div>
 
       <div style={{ marginBottom: "1rem" }}>
-        <label style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}>
+        <label
+          style={{
+            display: "block",
+            fontWeight: 600,
+            marginBottom: "0.25rem",
+          }}
+        >
           Sube tu foto
         </label>
         <input
@@ -277,15 +335,17 @@ function ChristmasStudioPage({ currentUser }) {
         />
       </div>
 
+      {/* 🔹 NUEVO: Recuadro elegante con instrucciones de tamaño/calidad */}
       <div
         style={{
           marginBottom: "1rem",
           borderRadius: 12,
           border: "1px solid rgba(255,255,255,0.12)",
-          background: "linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,64,175,0.35))",
+          background:
+            "linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,64,175,0.35))",
           padding: "0.85rem 1rem",
           fontSize: "0.78rem",
-          color: "rgba(226,232,240,0.9)"
+          color: "rgba(226,232,240,0.9)",
         }}
       >
         <div
@@ -294,27 +354,55 @@ function ChristmasStudioPage({ currentUser }) {
             marginBottom: "0.35rem",
             display: "flex",
             alignItems: "center",
-            gap: "0.4rem"
+            gap: "0.4rem",
           }}
         >
-          Recomendaciones
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "999px",
+              background:
+                "radial-gradient(circle, #22d3ee 0%, transparent 70%)",
+            }}
+          />
+          Recomendaciones para que tu foto se procese bien
         </div>
         <ul style={{ margin: 0, paddingLeft: "1.1rem", lineHeight: 1.4 }}>
-          <li>Resolución ideal: entre 1500 y 3000 px por lado.</li>
-          <li>Peso sugerido: menos de 4 a 5 MB.</li>
-          <li>Evitar modo alta resolución (48MP, 50MP, 108MP, 200MP).</li>
-          <li>Fotos explícitas pueden generar resultados en negro por seguridad.</li>
+          <li>
+            Resolución ideal: entre{" "}
+            <strong>1500 y 3000 píxeles por lado</strong>.
+          </li>
+          <li>
+            Peso sugerido: menos de <strong>4–5 MB</strong> por foto.
+          </li>
+          <li>
+            Si tu cámara está en modo <strong>alta resolución</strong> (48MP,
+            50MP, 108MP, 200MP), usa mejor modo estándar o retrato.
+          </li>
+          <li>
+            Si el sistema detecta <strong>desnudos o ropa demasiado
+            explícita</strong>, la imagen resultante puede aparecer en negro por
+            seguridad automática.
+          </li>
         </ul>
 
         {resolutionWarning && (
-          <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#bfdbfe" }}>
+          <p
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.75rem",
+              color: "#bfdbfe",
+            }}
+          >
             {resolutionWarning}
           </p>
         )}
       </div>
 
       {subiendo && (
-        <p style={{ marginBottom: "0.75rem" }}>Procesando foto...</p>
+        <p style={{ marginBottom: "0.75rem" }}>Procesando foto navideña...</p>
       )}
 
       {errorMsg && (
@@ -326,7 +414,7 @@ function ChristmasStudioPage({ currentUser }) {
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
           gap: "1rem",
-          marginTop: "1rem"
+          marginTop: "1rem",
         }}
       >
         <div
@@ -334,7 +422,7 @@ function ChristmasStudioPage({ currentUser }) {
             borderRadius: 12,
             padding: "0.75rem",
             border: "1px solid rgba(255,255,255,0.1)",
-            background: "rgba(0,0,0,0.25)"
+            background: "rgba(0,0,0,0.25)",
           }}
         >
           <h3 style={{ marginBottom: "0.5rem" }}>Foto original</h3>
@@ -346,7 +434,7 @@ function ChristmasStudioPage({ currentUser }) {
                 width: "100%",
                 borderRadius: 12,
                 objectFit: "contain",
-                maxHeight: 400
+                maxHeight: 400,
               }}
             />
           ) : (
@@ -359,24 +447,24 @@ function ChristmasStudioPage({ currentUser }) {
             borderRadius: 12,
             padding: "0.75rem",
             border: "1px solid rgba(255,255,255,0.1)",
-            background: "rgba(0,0,0,0.25)"
+            background: "rgba(0,0,0,0.25)",
           }}
         >
           <h3 style={{ marginBottom: "0.5rem" }}>Foto navideña de estudio</h3>
           {navidadImage ? (
             <img
               src={navidadImage}
-              alt="Foto navideña"
+              alt="Foto navideña IA"
               style={{
                 width: "100%",
                 borderRadius: 12,
                 objectFit: "contain",
-                maxHeight: 400
+                maxHeight: 400,
               }}
             />
           ) : (
             <p style={{ opacity: 0.6 }}>
-              Aquí aparecerá tu foto procesada.
+              Aquí aparecerá tu foto con fondo navideño de estudio.
             </p>
           )}
         </div>
@@ -386,3 +474,4 @@ function ChristmasStudioPage({ currentUser }) {
 }
 
 export default ChristmasStudioPage;
+
