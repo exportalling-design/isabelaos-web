@@ -52,6 +52,20 @@ async function fileToCompressedBase64(file) {
   });
 }
 
+// 🔹 NUEVO: fallback por si la compresión falla (usa la imagen original)
+async function fileToRawBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result || "";
+      const base64 = String(dataUrl).split(",")[1] || "";
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function ChristmasStudioPage({ currentUser }) {
   const [subiendo, setSubiendo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -72,7 +86,14 @@ function ChristmasStudioPage({ currentUser }) {
 
     try {
       // 1) Comprimir/redimensionar
-      const base64Compressed = await fileToCompressedBase64(file);
+      // 🔹 CAMBIO: intentamos comprimir y, si falla, usamos la imagen original
+      let base64Compressed;
+      try {
+        base64Compressed = await fileToCompressedBase64(file);
+      } catch (err) {
+        console.error("Error al comprimir, usando imagen original:", err);
+        base64Compressed = await fileToRawBase64(file);
+      }
 
       // Guardar preview original (izquierda)
       setUploadedImage(`data:image/jpeg;base64,${base64Compressed}`);
