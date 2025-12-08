@@ -2,10 +2,44 @@ import { useState } from "react";
 import { saveGenerationInSupabase } from "./lib/generations"; // ajusta la ruta si es distinto
 
 // -------------------------------------------------------------------
-// Helper: comprimir/redimensionar foto a ~1600px y devolver base64
+// NUEVO compresor seguro compatible con fotos gigantes de celular
 // -------------------------------------------------------------------
 async function fileToCompressedBase64(file) {
-  const MAX_SIZE = 1600; // lado más grande
+  const MAX_SIZE = 1600; // tamaño final deseado
+
+  // Si el navegador soporta createImageBitmap (Chrome/Android, etc.)
+  if (typeof createImageBitmap === "function") {
+    const imgBitmap = await createImageBitmap(file);
+
+    let { width, height } = imgBitmap;
+
+    // Redimensionar manteniendo proporción
+    if (width > height) {
+      if (width > MAX_SIZE) {
+        height = Math.round((height * MAX_SIZE) / width);
+        width = MAX_SIZE;
+      }
+    } else {
+      if (height > MAX_SIZE) {
+        width = Math.round((width * MAX_SIZE) / height);
+        height = MAX_SIZE;
+      }
+    }
+
+    // Canvas pequeño y seguro
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(imgBitmap, 0, 0, width, height);
+
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    return dataUrl.split(",")[1];
+  }
+
+  // 🔙 Fallback para navegadores que no tengan createImageBitmap
+  const MAX_SIZE = 1600;
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -16,7 +50,6 @@ async function fileToCompressedBase64(file) {
         let width = img.width;
         let height = img.height;
 
-        // Mantener proporción y limitar tamaño
         if (width > height) {
           if (width > MAX_SIZE) {
             height = Math.round((height * MAX_SIZE) / width);
@@ -36,9 +69,8 @@ async function fileToCompressedBase64(file) {
 
         ctx.drawImage(img, 0, 0, width, height);
 
-        // JPEG alta calidad, peso razonable
         const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-        const base64 = dataUrl.split(",")[1]; // quitar "data:image/jpeg;base64,"
+        const base64 = dataUrl.split(",")[1];
 
         resolve(base64);
       };
@@ -52,7 +84,7 @@ async function fileToCompressedBase64(file) {
   });
 }
 
-// 🔹 NUEVO: fallback por si la compresión falla (usa la imagen original)
+// 🔹 Fallback: usar la imagen original en base64 si todo lo demás falla
 async function fileToRawBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -63,59 +95,6 @@ async function fileToRawBase64(file) {
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
-}
-
-// 🔹 NUEVO: loader seguro para fotos gigantes (Xiaomi, iPhone Pro, etc.)
-async function safeLoadAndCompress(file) {
-  const MAX_SIDE_HUGE = 4096; // para fotos de muchísimos megapíxeles
-  const MAX_SIDE_NORMAL = 1600;
-
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-
-    img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-
-      const megaPixels = (width * height) / 1000000;
-
-      // Si es una foto gigantesca (>20MP), reducimos primero a 4096px máximo
-      let maxSide = megaPixels > 20 ? MAX_SIDE_HUGE : MAX_SIDE_NORMAL;
-
-      if (width > height) {
-        if (width > maxSide) {
-          height = Math.round((height * maxSide) / width);
-          width = maxSide;
-        }
-      } else {
-        if (height > maxSide) {
-          width = Math.round((width * maxSide) / height);
-          height = maxSide;
-        }
-      }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-
-      ctx.drawImage(img, 0, 0, width, height);
-
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-      const base64 = dataUrl.split(",")[1];
-
-      URL.revokeObjectURL(url);
-      resolve(base64);
-    };
-
-    img.onerror = (err) => {
-      URL.revokeObjectURL(url);
-      reject(err);
-    };
-
-    img.src = url;
   });
 }
 
@@ -138,20 +117,13 @@ function ChristmasStudioPage({ currentUser }) {
     setSubiendo(true);
 
     try {
-      // 1) Carga segura + compresión para fotos gigantes (Xiaomi 14 Ultra, etc.)
+      // 1) Comprimir/redimensionar con createImageBitmap
       let base64Compressed;
       try {
-        // Primero intentamos la ruta segura que maneja megapíxeles altos
-        base64Compressed = await safeLoadAndCompress(file);
+        base64Compressed = await fileToCompressedBase64(file);
       } catch (err) {
-        console.error("Error en safeLoadAndCompress, intentando compresión estándar:", err);
-        try {
-          // Si falla, usamos la compresión estándar que ya tenías
-          base64Compressed = await fileToCompressedBase64(file);
-        } catch (err2) {
-          console.error("Error al comprimir, usando imagen original:", err2);
-          base64Compressed = await fileToRawBase64(file);
-        }
+        console.error("Error al comprimir, usando imagen original:", err);
+        base64Compressed = await fileToRawBase64(file);
       }
 
       // Guardar preview original (izquierda)
@@ -179,8 +151,6 @@ function ChristmasStudioPage({ currentUser }) {
       }
 
       // 3) Polling al endpoint de status (igual que haces para /api/generate-status)
-      //    Asumo que ya tienes /api/status.js o similar para RunPod.
-      //    Si tu endpoint se llama distinto, cambia la URL aquí.
       const jobId = data.jobId;
       let done = false;
       let finalImageB64 = null;
@@ -200,8 +170,10 @@ function ChristmasStudioPage({ currentUser }) {
           return;
         }
 
-        if (statusData.status === "IN_QUEUE" || statusData.status === "IN_PROGRESS") {
-          // Esperar un poco y seguir
+        if (
+          statusData.status === "IN_QUEUE" ||
+          statusData.status === "IN_PROGRESS"
+        ) {
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
@@ -212,8 +184,7 @@ function ChristmasStudioPage({ currentUser }) {
           return;
         }
 
-        // status === "COMPLETED"
-        // Espero que tu worker devuelva el dict con "image_b64" en output
+        // COMPLETED
         finalImageB64 =
           statusData.output?.image_b64 ||
           statusData.output?.result?.image_b64 ||
@@ -239,18 +210,15 @@ function ChristmasStudioPage({ currentUser }) {
       try {
         await saveGenerationInSupabase({
           imageDataUrl: resultDataUrl,
-          // Ajusta estos campos a cómo lo usas en App.jsx
           meta: {
             mode: "navidad_estudio",
             description: descripcion || "",
           },
-          // Si tu función requiere userId, prompt, etc., agrégalo aquí:
           userId: currentUser?.id || null,
           prompt: "[Foto navideña de estudio – fondo reemplazado]",
         });
       } catch (err) {
         console.error("Error guardando en biblioteca:", err);
-        // No rompas la experiencia si solo falla el guardado
       }
     } catch (err) {
       console.error("Error manejando archivo navideño:", err);
@@ -261,7 +229,10 @@ function ChristmasStudioPage({ currentUser }) {
   };
 
   return (
-    <div className="xmas-page" style={{ padding: "1.5rem", maxWidth: 1200, margin: "0 auto" }}>
+    <div
+      className="xmas-page"
+      style={{ padding: "1.5rem", maxWidth: 1200, margin: "0 auto" }}
+    >
       <h1 style={{ fontSize: "1.8rem", marginBottom: "0.75rem" }}>
         Foto Navideña IA de Estudio
       </h1>
