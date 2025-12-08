@@ -2,6 +2,7 @@ import { useState } from "react";
 import { saveGenerationInSupabase } from "./lib/generations"; // ajusta la ruta si es distinto
 
 // -------------------------------------------------------------------
+<<<<<<< HEAD
 // Helper: comprimir/redimensionar foto y devolver base64
 // - Normal: 1600px, calidad 0.85
 // - Súper pesada (>5MB): 1280px, calidad 0.7 (más agresiva)
@@ -10,6 +11,12 @@ async function fileToCompressedBase64(file) {
   const isHuge = file.size > 5 * 1024 * 1024; // >5MB = súper pesada
   const MAX_SIZE = isHuge ? 1280 : 1600;
   const QUALITY = isHuge ? 0.7 : 0.85;
+=======
+// Helper: comprimir/redimensionar foto a ~1600px (con modo agresivo)
+// -------------------------------------------------------------------
+async function fileToCompressedBase64(file) {
+  const MAX_SIZE = 1600; // lado base más grande recomendado
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -20,16 +27,32 @@ async function fileToCompressedBase64(file) {
         let width = img.width;
         let height = img.height;
 
-        // Mantener proporción y limitar tamaño
+        const maxSide = Math.max(width, height);
+
+        // Compresión súper agresiva para imágenes enormes
+        let targetMax = MAX_SIZE;
+        let quality = 0.9;
+
+        if (maxSide > 7000) {
+          // Fotos tipo 200MP / resolución extrema
+          targetMax = 1280;
+          quality = 0.72;
+        } else if (maxSide > 5000) {
+          // Fotos tipo 50–108MP
+          targetMax = 1400;
+          quality = 0.78;
+        }
+
+        // Mantener proporción y limitar tamaño según targetMax
         if (width > height) {
-          if (width > MAX_SIZE) {
-            height = Math.round((height * MAX_SIZE) / width);
-            width = MAX_SIZE;
+          if (width > targetMax) {
+            height = Math.round((height * targetMax) / width);
+            width = targetMax;
           }
         } else {
-          if (height > MAX_SIZE) {
-            width = Math.round((width * MAX_SIZE) / height);
-            height = MAX_SIZE;
+          if (height > targetMax) {
+            width = Math.round((width * targetMax) / height);
+            height = targetMax;
           }
         }
 
@@ -40,9 +63,15 @@ async function fileToCompressedBase64(file) {
 
         ctx.drawImage(img, 0, 0, width, height);
 
+<<<<<<< HEAD
         // JPEG con calidad variable según tamaño original
         const dataUrl = canvas.toDataURL("image/jpeg", QUALITY);
         const base64 = dataUrl.split(",")[1]; // quitar encabezado
+=======
+        // JPEG con calidad ajustada según tamaño original
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        const base64 = dataUrl.split(",")[1]; // quitar "data:image/jpeg;base64,"
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
 
         resolve(base64);
       };
@@ -62,6 +91,37 @@ async function fileToCompressedBase64(file) {
   });
 }
 
+// 🔹 NUEVO: fallback por si la compresión falla (usa la imagen original)
+async function fileToRawBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result || "";
+      const base64 = String(dataUrl).split(",")[1] || "";
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// 🔹 NUEVO: helper para leer dimensiones reales de la foto
+async function getImageDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({ width: img.width, height: img.height });
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function ChristmasStudioPage({ currentUser }) {
   const [subiendo, setSubiendo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -69,6 +129,9 @@ function ChristmasStudioPage({ currentUser }) {
 
   const [uploadedImage, setUploadedImage] = useState(null);
   const [navidadImage, setNavidadImage] = useState(null);
+
+  // 🔹 NUEVO: aviso dinámico según tamaño/resolución de la foto
+  const [resolutionWarning, setResolutionWarning] = useState("");
 
   // -------------------------------------------------------------------
   // Manejar archivo subido
@@ -86,20 +149,65 @@ function ChristmasStudioPage({ currentUser }) {
     }
 
     setErrorMsg("");
+    setResolutionWarning("");
     setSubiendo(true);
 
     try {
+<<<<<<< HEAD
       // 1) Comprimir/redimensionar SIEMPRE (con modo agresivo si es muy pesada)
+=======
+      // 0) Analizar peso y resolución de la foto para mostrar aviso
+      try {
+        const megaBytes = file.size / (1024 * 1024);
+        let warning = "";
+
+        if (megaBytes > 8) {
+          warning =
+            `Tu foto pesa aproximadamente ${megaBytes.toFixed(
+              1
+            )} MB. ` +
+            "Si ves errores al procesar, prueba bajando la calidad de la cámara a modo estándar o recortando la foto antes de subirla.";
+        }
+
+        const dims = await getImageDimensions(file).catch(() => null);
+        if (dims) {
+          const { width, height } = dims;
+          const maxSide = Math.max(width, height);
+
+          if (maxSide > 5000) {
+            warning =
+              (warning ? warning + " " : "") +
+              `Detectamos una resolución muy alta (${width} x ${height}). ` +
+              "Las cámaras de gama alta (Xiaomi, Samsung, iPhone, etc.) pueden generar archivos enormes. " +
+              "Si tu foto no se procesa correctamente, toma la foto en calidad estándar / retrato o reduce la resolución antes de subirla.";
+          }
+        }
+
+        if (warning) {
+          setResolutionWarning(warning);
+        }
+      } catch (dimErr) {
+        console.warn("No se pudieron leer las dimensiones de la foto:", dimErr);
+      }
+
+      // 1) Comprimir/redimensionar
+      // 🔹 CAMBIO: intentamos comprimir y, si falla, usamos la imagen original
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
       let base64Compressed;
       try {
         base64Compressed = await fileToCompressedBase64(file);
       } catch (err) {
+<<<<<<< HEAD
         console.error("No se pudo comprimir:", err);
         setErrorMsg(
           "No se pudo procesar esta foto en el navegador. Intenta tomarla en calidad estándar o baja."
         );
         setSubiendo(false);
         return;
+=======
+        console.error("Error al comprimir, usando imagen original:", err);
+        base64Compressed = await fileToRawBase64(file);
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
       }
 
       // Guardar preview
@@ -121,12 +229,20 @@ function ChristmasStudioPage({ currentUser }) {
         console.error("Error al lanzar job navidad_estudio:", data);
         setErrorMsg(
           data?.error ||
+<<<<<<< HEAD
             "Ocurrió un error al enviar la foto. Intenta con otra imagen o baja un poco la calidad desde la cámara."
+=======
+            "Ocurrió un error al enviar la foto navideña. Si la tomaste en máxima resolución, intenta bajando la calidad de la cámara y vuelve a intentarlo."
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
         );
         return;
       }
 
+<<<<<<< HEAD
       // 3) Polling al status
+=======
+      // 3) Polling al endpoint de status (igual que haces para /api/generate-status)
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
       const jobId = data.jobId;
       let done = false;
       let finalImageB64 = null;
@@ -142,7 +258,13 @@ function ChristmasStudioPage({ currentUser }) {
 
         if (!statusRes.ok || !statusData) {
           console.error("Error consultando status RunPod:", statusData);
+<<<<<<< HEAD
           setErrorMsg("Error consultando el estado del procesamiento. Intenta de nuevo.");
+=======
+          setErrorMsg(
+            "Error consultando el estado del procesamiento. Si el problema continúa, intenta con una foto en calidad estándar."
+          );
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
           return;
         }
 
@@ -150,6 +272,10 @@ function ChristmasStudioPage({ currentUser }) {
           statusData.status === "IN_QUEUE" ||
           statusData.status === "IN_PROGRESS"
         ) {
+<<<<<<< HEAD
+=======
+          // Esperar un poco y seguir
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
@@ -157,12 +283,20 @@ function ChristmasStudioPage({ currentUser }) {
         if (statusData.status === "FAILED") {
           console.error("Job RunPod FAILED:", statusData);
           setErrorMsg(
+<<<<<<< HEAD
             "El procesamiento navideño falló. Prueba con otra foto (mejor en calidad estándar)."
+=======
+            "El procesamiento navideño falló. Si usaste una foto muy grande, prueba tomarla en calidad estándar y vuelve a intentarlo."
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
           );
           return;
         }
 
+<<<<<<< HEAD
         // COMPLETED
+=======
+        // status === "COMPLETED"
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
         finalImageB64 =
           statusData.output?.image_b64 ||
           statusData.output?.result?.image_b64 ||
@@ -171,7 +305,11 @@ function ChristmasStudioPage({ currentUser }) {
         if (!finalImageB64) {
           console.error("No se encontró image_b64 en output:", statusData);
           setErrorMsg(
+<<<<<<< HEAD
             "No se recibió la imagen procesada desde RunPod. Intenta de nuevo con otra foto."
+=======
+            "No se recibió la imagen procesada desde el servidor. Intenta con una foto un poco más ligera o en modo retrato."
+>>>>>>> d396ca3 (Actualización Xmas + Fix generación + nuevas funciones)
           );
           return;
         }
@@ -199,7 +337,9 @@ function ChristmasStudioPage({ currentUser }) {
       }
     } catch (err) {
       console.error("Error manejando archivo navideño:", err);
-      setErrorMsg("No se pudo procesar la imagen. Intenta con otra foto.");
+      setErrorMsg(
+        "No se pudo procesar la imagen. Si tu foto fue tomada en resolución máxima, intenta bajando la calidad o usando modo retrato y vuelve a subirla."
+      );
     } finally {
       setSubiendo(false);
     }
@@ -275,6 +415,72 @@ function ChristmasStudioPage({ currentUser }) {
           En celulares muy nuevos (Xiaomi, iPhone, etc.) evita el modo de
           máxima calidad para esta función.
         </p>
+      </div>
+
+      {/* 🔹 NUEVO: Recuadro elegante con instrucciones de tamaño/calidad */}
+      <div
+        style={{
+          marginBottom: "1rem",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background:
+            "linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,64,175,0.35))",
+          padding: "0.85rem 1rem",
+          fontSize: "0.78rem",
+          color: "rgba(226,232,240,0.9)",
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 600,
+            marginBottom: "0.35rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.4rem",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "999px",
+              background:
+                "radial-gradient(circle, #22d3ee 0%, transparent 70%)",
+            }}
+          />
+          Recomendaciones para que tu foto se procese bien
+        </div>
+        <ul style={{ margin: 0, paddingLeft: "1.1rem", lineHeight: 1.4 }}>
+          <li>
+            Resolución ideal: entre{" "}
+            <strong>1500 y 3000 píxeles por lado</strong>.
+          </li>
+          <li>
+            Peso sugerido: menos de <strong>4–5 MB</strong> por foto.
+          </li>
+          <li>
+            Si tu cámara está en modo <strong>alta resolución</strong> (48MP,
+            50MP, 108MP, 200MP), usa mejor modo estándar o retrato.
+          </li>
+          <li>
+            Si el sistema detecta <strong>desnudos o ropa demasiado
+            explícita</strong>, la imagen resultante puede aparecer en negro por
+            seguridad automática.
+          </li>
+        </ul>
+
+        {resolutionWarning && (
+          <p
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.75rem",
+              color: "#bfdbfe",
+            }}
+          >
+            {resolutionWarning}
+          </p>
+        )}
       </div>
 
       {subiendo && (
