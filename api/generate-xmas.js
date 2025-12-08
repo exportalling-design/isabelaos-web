@@ -1,51 +1,52 @@
-// pages/api/generate-xmas.js
+// api/generate-xmas.js
 // Lanza un job especial "navidad_estudio" en RunPod
 // para la Foto Navideña IA de estudio
 
-export default async function handler(req, res) {
-  // CORS básico
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader(
-    "access-control-allow-methods",
-    "POST, OPTIONS"
-  );
-  res.setHeader(
-    "access-control-allow-headers",
-    "content-type"
-  );
+export default async function handler(req) {
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
 
   // Preflight
   if (req.method === "OPTIONS") {
-    return res.status(200).end();
+    return new Response(null, { headers: cors });
   }
 
-  // Solo aceptamos POST
+  // Solo POST
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: cors,
+    });
   }
 
   try {
-    // En API routes de Next la data viene en req.body
-    const body = req.body || {};
+    const body = await req.json().catch(() => null);
 
-    if (!body.image_b64) {
-      return res
-        .status(400)
-        .json({ error: "Falta image_b64 en el cuerpo." });
+    if (!body || !body.image_b64) {
+      return new Response(
+        JSON.stringify({ error: "Falta image_b64 en el cuerpo." }),
+        { status: 400, headers: cors }
+      );
     }
 
     const image_b64 = body.image_b64;
     const description = body.description || "";
 
-    // Usa EXACTAMENTE el mismo endpoint ID y API key que en /api/generate.js
+    // Usa EXACTAMENTE las mismas variables que /api/generate.js
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     const apiKey = process.env.RUNPOD_API_KEY;
 
     if (!endpointId || !apiKey) {
-      return res.status(500).json({
-        error:
-          "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
-      });
+      return new Response(
+        JSON.stringify({
+          error:
+            "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
+        }),
+        { status: 500, headers: cors }
+      );
     }
 
     const url = `https://api.runpod.ai/v2/${endpointId}/run`;
@@ -58,7 +59,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         input: {
-          action: "navidad_estudio", // 👈 NUEVO MODO
+          action: "navidad_estudio",
           image_b64,
           description,
         },
@@ -69,23 +70,41 @@ export default async function handler(req, res) {
 
     if (!rpRes.ok || !data || data.error) {
       console.error("Error RunPod generate-xmas:", data);
-      return res.status(500).json({
-        ok: false,
-        error: data?.error || "Error al lanzar job en RunPod.",
-      });
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: data?.error || "Error al lanzar job en RunPod.",
+        }),
+        { status: 500, headers: cors }
+      );
     }
 
     // RunPod responde algo tipo { id: "jobId", status: "IN_QUEUE", ... }
-    return res.status(200).json({
-      ok: true,
-      jobId: data.id,
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        jobId: data.id,
+      }),
+      { status: 200, headers: cors }
+    );
   } catch (err) {
     console.error("Error en /api/generate-xmas:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message || String(err),
-    });
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: err.message || String(err),
+      }),
+      { status: 500, headers: cors }
+    );
   }
 }
+
+// ⬇️ Muy importante: permitir cuerpos "grandes" para fotos del cel
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "15mb", // puedes bajar a "10mb" si quieres
+    },
+  },
+};
 
