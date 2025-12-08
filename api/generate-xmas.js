@@ -29,24 +29,27 @@ export default async function handler(req) {
     if (!body || !body.image_b64) {
       return new Response(
         JSON.stringify({ error: "Falta image_b64 en el cuerpo." }),
-        { status: 400, headers: cors }
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
     const image_b64 = body.image_b64;
     const description = body.description || "";
 
-    // 👇 Usa EXACTAMENTE el mismo endpoint ID y API key que en /api/generate.js
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-    const apiKey = process.env.RUNPOD_API_KEY;
+    // Usa EXACTAMENTE el mismo endpoint ID y API key que en /api/generate.js.
+    // Soporta ambos nombres de variables por si acaso:
+    const endpointId =
+      process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
+    const apiKey =
+      process.env.RUNPOD_API_KEY || process.env.RP_API_KEY;
 
     if (!endpointId || !apiKey) {
       return new Response(
         JSON.stringify({
           error:
-            "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
+            "Faltan RUNPOD_ENDPOINT_ID/RP_ENDPOINT o RUNPOD_API_KEY/RP_API_KEY en las variables de entorno.",
         }),
-        { status: 500, headers: cors }
+        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
@@ -60,7 +63,7 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         input: {
-          action: "navidad_estudio", // 👈 NUEVO MODO
+          action: "navidad_estudio", // 👈 modo navideño en tu worker
           image_b64,
           description,
         },
@@ -76,7 +79,7 @@ export default async function handler(req) {
           ok: false,
           error: data?.error || "Error al lanzar job en RunPod.",
         }),
-        { status: 500, headers: cors }
+        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
@@ -86,16 +89,21 @@ export default async function handler(req) {
         ok: true,
         jobId: data.id,
       }),
-      { status: 200, headers: cors }
+      { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("Error en /api/generate-xmas:", err);
     return new Response(
       JSON.stringify({
         ok: false,
-        error: err.message || String(err),
+        error: err?.message || String(err),
       }),
-      { status: 500, headers: cors }
+      { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
     );
   }
 }
+
+// Igual que generate.js (Edge Runtime)
+export const config = {
+  runtime: "edge",
+};
