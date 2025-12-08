@@ -6,7 +6,6 @@ import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
   getTodayGenerationCount,
-  deleteGenerationFromSupabase, // NUEVO: para borrar desde Supabase
 } from "./lib/generations";
 
 // ---------------------------------------------------------
@@ -392,7 +391,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         onAuthRequired();
       } else if (userLoggedIn) {
         setError(
-          `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 para generar sin límite y desbloquear todos los módulos premium (como la Foto Navideña IA).`
+          `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 y genera sin límite.`
         );
       }
       return;
@@ -505,10 +504,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setError("");
       setStatus("IDLE");
       setStatusText(
-        "Plan Basic activado: ya no tienes límite diario en este navegador y se desbloquean los módulos premium mientras dure la beta."
+        "Plan Basic activado: ya no tienes límite diario en este navegador."
       );
       alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium (como la Foto Navideña IA) mientras dure la beta."
+        "Bienvenido a tu suscripción mensual de isabelaOs Studio. Con este pago aseguras un precio especial durante un año completo para nuestro siguiente módulo."
       );
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
@@ -524,8 +523,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
           a RunPod. {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más
-          allá, podrás activar el plan de US$5/mes para generar sin límite y
-          desbloquear todos los módulos premium.
+          allá, podrás activar el plan de $5/mes para generar ilimitadas
+          mientras dure la beta.
         </p>
       </div>
     );
@@ -554,8 +553,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
             Atención: solo te quedan {remaining} imágenes gratis hoy. Activa el
-            plan ilimitado de US$5/mes para seguir generando y desbloquear los
-            módulos premium.
+            plan ilimitado de US$5/mes para seguir generando.
           </div>
         )}
 
@@ -623,8 +621,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con
-                  acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite,
+                  precio beta).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -745,23 +743,28 @@ function LibraryView() {
   }, [user]);
 
   const handleDeleteSelected = async () => {
-    if (!selected || !user) return;
+    if (!user || !selected) return;
+
     const confirmDelete = window.confirm(
-      "¿Seguro que quieres eliminar esta imagen de tu biblioteca? Esta acción también la borrará de Supabase."
+      "¿Eliminar esta imagen de tu biblioteca?"
     );
     if (!confirmDelete) return;
 
+    const idToDelete = selected.id;
+    setDeleting(true);
     try {
-      setDeleting(true);
-      await deleteGenerationFromSupabase(selected.id);
-      setItems((prev) => prev.filter((it) => it.id !== selected.id));
-      setSelected((prevSelected) => {
-        const remaining = items.filter((it) => it.id !== prevSelected.id);
-        return remaining.length > 0 ? remaining[0] : null;
-      });
+      // Opcional: si creas /api/delete-generation en el backend,
+      // aquí también se borrará en Supabase.
+      await fetch("/api/delete-generation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: idToDelete }),
+      }).catch(() => {});
+
+      setItems((prev) => prev.filter((it) => it.id !== idToDelete));
+      setSelected((prev) => (prev && prev.id === idToDelete ? null : prev));
     } catch (e) {
-      console.error("Error eliminando imagen de Supabase:", e);
-      alert("No se pudo eliminar la imagen. Intenta de nuevo.");
+      console.error("Error eliminando imagen:", e);
     } finally {
       setDeleting(false);
     }
@@ -778,11 +781,12 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text:white text-white">
+          Biblioteca
+        </h2>
         <p className="mt-1 text-xs text-neutral-400">
           Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
-          RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
-          no la necesitas.
+          RunPod.
         </p>
 
         {loading ? (
@@ -819,7 +823,7 @@ function LibraryView() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Vista previa</h2>
+        <h2 className="text-lg font-semibold text-white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
             <img
@@ -833,6 +837,7 @@ function LibraryView() {
         </div>
         {selected && (
           <button
+            type="button"
             onClick={handleDeleteSelected}
             disabled={deleting}
             className="mt-4 w-full rounded-2xl border border-red-500/60 py-2 text-xs text-red-200 hover:bg-red-500/10 disabled:opacity-60"
@@ -901,6 +906,26 @@ function XmasPhotoPanel() {
   const [statusText, setStatusText] = useState("");
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
+  const [isPremium, setIsPremium] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setIsPremium(false);
+      return;
+    }
+    if (user.email === "exportalling@gmail.com") {
+      setIsPremium(true);
+      return;
+    }
+    try {
+      const key = `isabelaos_premium_${user.id}`;
+      const stored = localStorage.getItem(key);
+      setIsPremium(stored === "1");
+    } catch (e) {
+      console.warn("No se pudo leer premium en módulo navideño:", e);
+      setIsPremium(false);
+    }
+  }, [user]);
 
   const fileInputId = "xmas-file-input";
 
@@ -936,6 +961,13 @@ function XmasPhotoPanel() {
 
     if (!user) {
       setError("Debes iniciar sesión para usar este módulo.");
+      return;
+    }
+
+    if (!isPremium) {
+      setError(
+        "Esta función está disponible para usuarios con el plan Basic activo (US$5/mes)."
+      );
       return;
     }
 
@@ -995,6 +1027,25 @@ function XmasPhotoPanel() {
           const b64 = statusData.output.image_b64;
           setResultB64(b64);
           setStatusText("Foto navideña generada con éxito.");
+
+          // Guardar en Supabase/Biblioteca
+          if (user) {
+            const dataUrlFinal = `data:image/png;base64,${b64}`;
+            saveGenerationInSupabase({
+              userId: user.id,
+              imageUrl: dataUrlFinal,
+              prompt: "[Foto Navideña IA – fondo reemplazado]",
+              negativePrompt: "",
+              width: null,
+              height: null,
+              steps: null,
+            }).catch((e) => {
+              console.error(
+                "Error guardando foto navideña en Supabase:",
+                e
+              );
+            });
+          }
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -1019,43 +1070,50 @@ function XmasPhotoPanel() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      <div className="rounded-3xl border border.white/10 bg-black/40 p-6">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
           Foto Navideña IA (Premium)
         </h2>
         <p className="mt-2 text-sm text-neutral-300">
           Convierte tu foto (o la de tu familia) en un retrato navideño de
-          estudio profesional, con iluminación cuidada y fondo temático
-          totalmente generado por IA.
+          estudio profesional, con iluminación cuidada y fondo temático:
+          chimeneas, cabañas con nieve, árboles de Navidad, luces cálidas y
+          ambiente hiperreal.
         </p>
         <p className="mt-3 text-xs text-neutral-300">
-          Recomendaciones para tu foto:
+          Recomendamos fotos familiares o de pareja con buena iluminación,
+          tomadas de frente, sin recortar partes importantes del cuerpo y sin
+          usar flash directo.
         </p>
-        <ul className="mt-1 list-disc list-inside text-[11px] text-neutral-400">
-          <li>Foto bien iluminada (de día o con buena luz dentro de casa).</li>
+        <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-300">
+          <li>Formato JPG o PNG, idealmente desde la cámara trasera.</li>
           <li>
-            Que se vea completa la persona o la familia (sin cabezas cortadas
-            ni recortes extraños).
+            Ropa casual o formal; evita ropa transparente o contenido
+            explícito.
           </li>
           <li>
-            Evita filtros muy fuertes o efectos que cambien mucho los colores.
-          </li>
-          <li>
-            Ropa normal y adecuada para todo público. Si el sistema detecta
-            desnudez o ropa excesivamente reveladora, la zona será cubierta con
-            color oscuro o la foto puede ser rechazada.
+            Procura un fondo relativamente limpio, el sistema lo reemplazará
+            por un set navideño de estudio.
           </li>
         </ul>
-        <p className="mt-2 text-[11px] text-neutral-400">
-          El módulo intentará respetar la posición y la expresión de las
-          personas, y cambiará el fondo y detalles para convertirla en una
-          escena navideña lo más realista posible.
+        <p className="mt-3 text-[11px] text-neutral-400">
+          Por seguridad, si el sistema detecta desnudos o ropa extremadamente
+          provocativa, la imagen resultante se generará en negro y no se
+          aplicará el fondo navideño.
         </p>
+
+        {!isPremium && (
+          <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
+            Esta función está incluida en el plan Basic (US$5/mes). Activa tu
+            plan desde el generador principal para transformar tantas fotos
+            navideñas como quieras durante la temporada.
+          </div>
+        )}
 
         <div className="mt-5 space-y-4 text-sm">
           <div>
             <p className="text-xs text-neutral-300">
-              1. Sube tu foto (JPG/PNG)
+              1. Sube tu foto (JPG/PNG, bien iluminada)
             </p>
             <button
               type="button"
@@ -1084,20 +1142,15 @@ function XmasPhotoPanel() {
 
           <div>
             <p className="text-xs text-neutral-300">
-              2. Opcional: cuéntanos quién aparece y qué tipo de escena quieres
+              2. Describe brevemente quiénes aparecen (opcional)
             </p>
             <input
               type="text"
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
-              placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
+              placeholder="Ejemplo: familia de 4 personas, dos niños pequeños y un perro..."
               className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <p className="mt-1 text-[11px] text-neutral-400">
-              Este texto ayuda a la IA a adaptar mejor el fondo y los detalles
-              (árbol, luces, regalos, etc.). Si lo dejas vacío, se usará un
-              estilo navideño estándar.
-            </p>
           </div>
 
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1116,7 +1169,8 @@ function XmasPhotoPanel() {
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
               !pureB64 ||
-              !user
+              !user ||
+              !isPremium
             }
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
@@ -1124,13 +1178,6 @@ function XmasPhotoPanel() {
               ? "Generando foto navideña..."
               : "Generar foto navideña IA"}
           </button>
-
-          <p className="mt-2 text-[11px] text-neutral-400">
-            Este módulo forma parte de las funciones premium de IsabelaOS
-            Studio. Si activas el Plan Basic (US$5/mes), podrás usarlo junto con
-            el generador ilimitado desde prompt y el resto de mejoras que
-            vayamos liberando en la beta.
-          </p>
         </div>
       </div>
 
@@ -1212,7 +1259,7 @@ function DashboardView() {
             </button>
             <button
               onClick={signOut}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+              className="rounded-xl border border:white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Cerrar sesión
             </button>
@@ -1221,59 +1268,6 @@ function DashboardView() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Navegación móvil */}
-        <div className="mb-4 md:hidden">
-          <p className="text-[11px] font-semibold text-neutral-300 mb-2">
-            Navegación
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Imagen desde prompt
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Video (próximamente)
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg.white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("xmas")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
-                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text-white/90"
-              }`}
-            >
-              🎄 Foto Navideña IA
-            </button>
-          </div>
-        </div>
-
         <section className="flex gap-6">
           {/* Sidebar */}
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
@@ -1318,7 +1312,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("xmas")}
               className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
               }`}
             >
@@ -1333,10 +1327,57 @@ function DashboardView() {
                 Panel del creador
               </h1>
               <p className="mt-1 text-xs text-neutral-400">
-                Genera imágenes, guarda tu historial en la biblioteca y prueba
-                los módulos especiales como Foto Navideña IA, todo desde tu
-                cuenta conectada al pipeline real en RunPod.
+                Genera imágenes y próximamente videos desde tu cuenta conectada
+                al pipeline real en RunPod.
               </p>
+            </div>
+
+            {/* Navegación móvil */}
+            <div className="md:hidden flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setAppViewMode("generator")}
+                className={`rounded-2xl px-3 py-2 text-xs ${
+                  appViewMode === "generator"
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                }`}
+              >
+                Generador
+              </button>
+              <button
+                type="button"
+                onClick={() => setAppViewMode("video")}
+                className={`rounded-2xl px-3 py-2 text-xs ${
+                  appViewMode === "video"
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                }`}
+              >
+                Video (próx.)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAppViewMode("library")}
+                className={`rounded-2xl px-3 py-2 text-xs ${
+                  appViewMode === "library"
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                }`}
+              >
+                Biblioteca
+              </button>
+              <button
+                type="button"
+                onClick={() => setAppViewMode("xmas")}
+                className={`rounded-2xl px-3 py-2 text-xs ${
+                  appViewMode === "xmas"
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
+                }`}
+              >
+                🎄 Foto Navideña
+              </button>
             </div>
 
             {appViewMode === "generator" && <CreatorPanel />}
@@ -1380,7 +1421,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   const handleContactSubmit = (e) => {
     e.preventDefault();
     const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
-    the body = encodeURIComponent(
+    const body = encodeURIComponent(
       `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
     );
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
@@ -1421,7 +1462,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </button>
             <button
               onClick={onOpenAuth}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg:white/10"
             >
               Iniciar sesión / Registrarse
             </button>
@@ -1440,13 +1481,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               Genera imágenes fotorrealistas{" "}
-              <span className="block bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
                 con IA en la nube.
               </span>
             </h1>
 
             {/* Barra neón bajo el título */}
-            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
+            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               IsabelaOS Studio es el primer sistema de generación visual con IA
@@ -1459,18 +1500,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               Durante la beta puedes usar nuestro motor de imágenes y, más
               adelante, acceder a módulos exclusivos como BodySync (movimiento
               corporal IA), Script2Film, CineCam y generador de video desde
-              texto. Además, hemos añadido un módulo especial de{" "}
-              <span className="font-semibold text-white">
-                Foto Navideña IA
-              </span>{" "}
-              para transformar una foto real de tu familia en un retrato
-              navideño de estudio con fondo totalmente generado por IA.
+              texto.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
@@ -1490,35 +1526,35 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           {/* Galería 2x2 */}
           <div className="relative order-first lg:order-last">
             {/* Halo neón detrás de la galería */}
-            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient.to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
             <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img1.png?v=2"
                   alt="Imagen generada 1"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img2.png?v=2"
                   alt="Imagen generada 2"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border:white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img3.png?v=2"
                   alt="Imagen generada 3"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img4.png?v=2"
                   alt="Imagen generada 4"
@@ -1535,52 +1571,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
-        {/* Sección especial Foto Navideña IA */}
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">
-              Especial Navidad · Foto Navideña IA
-            </h3>
-            <p className="mt-2 text-[11px] text-neutral-300">
-              Sube una foto real tuya o de tu familia y deja que IsabelaOS
-              Studio la convierta en un retrato navideño de estudio con fondo,
-              luces y decoración generados por IA.
-            </p>
-            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
-              <li>Ideal para compartir en redes sociales o imprimir.</li>
-              <li>
-                Respeta la pose original y cambia el entorno a una escena
-                navideña realista.
-              </li>
-              <li>
-                Forma parte de los módulos premium incluidos al activar el Plan
-                Basic de US$5/mes.
-              </li>
-            </ul>
-            <p className="mt-3 text-[11px] text-neutral-400">
-              Dentro del panel del creador encontrarás la sección{" "}
-              <span className="font-semibold text-white">
-                “Foto Navideña IA (Premium)”
-              </span>{" "}
-              donde se explica con detalle qué tipo de foto subir y cómo
-              funciona el proceso.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/60 p-4 flex items-center justify-center">
-            <img
-              src="/gallery/xmas_family_before_after.png"
-              alt="Ejemplo de familia antes y después con fondo navideño"
-              className="w-full rounded-2xl object-cover"
-            />
-          </div>
-        </section>
-
         {/* Vista previa del panel */}
         <section className="mt-12">
           {/* Línea separadora con gradiente */}
-          <div className="mb-3 h-px w-24 bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text.white mb-4">
+          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
+          <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
           </h2>
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
@@ -1603,7 +1598,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text.white mb-2">
+          <h2 className="text-sm font-semibold text-white mb-2">
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
@@ -1639,6 +1634,54 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
+        {/* Sección Foto Navideña IA */}
+        <section className="mt-12 max-w-5xl">
+          <h2 className="text-sm font-semibold text-white mb-2">
+            🎄 Foto Navideña IA de estudio (incluida en el plan Basic)
+          </h2>
+          <div className="grid gap-6 md:grid-cols-[1.1fr_1fr] text-xs text-neutral-300">
+            <div>
+              <p>
+                Durante esta temporada navideña, IsabelaOS Studio incluye un
+                módulo especial para transformar tus fotos familiares en
+                retratos de estudio con fondos navideños hiperrealistas:
+                chimeneas, cabañas con nieve, árboles decorados, luces cálidas
+                y ambiente de catálogo.
+              </p>
+              <p className="mt-3">
+                Con el plan Basic de US$5/mes podrás:
+              </p>
+              <ul className="mt-2 space-y-1 list-disc list-inside text-[11px] text-neutral-300">
+                <li>Usar el generador desde prompt sin límite diario.</li>
+                <li>Guardar y acceder a toda tu biblioteca de imágenes.</li>
+                <li>
+                  Crear tantas fotos navideñas de estudio como quieras mientras
+                  dure la temporada.
+                </li>
+              </ul>
+              <p className="mt-3 text-[11px] text-neutral-400">
+                Solo necesitas subir una foto bien iluminada (ropa casual o
+                formal, sin desnudos ni contenido explícito) y el sistema
+                reemplaza el fondo por un set navideño profesional manteniendo
+                a tu familia intacta.
+              </p>
+            </div>
+            <div className="flex items-center justify-center">
+              <div className="w-full max-w-xs rounded-3xl border border-white/10 bg-black/60 p-3 shadow-lg shadow-cyan-500/25">
+                <img
+                  src="/gallery/xmas_family_before_after.png"
+                  alt="Ejemplo de foto navideña antes y después"
+                  className="w-full rounded-2xl object-cover"
+                />
+                <p className="mt-2 text-[10px] text-neutral-400 text-center">
+                  Ejemplo ilustrativo: tu foto original se convierte en un
+                  retrato navideño con fondo de estudio hiperreal.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Plan de pago */}
         <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">
@@ -1647,22 +1690,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <p className="mt-2 text-xs text-neutral-300">
             Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día (por
             usuario registrado) y quieres seguir generando sin restricciones,
-            puedes activar el plan ilimitado mientras dure la beta. El Plan
-            Basic de US$5/mes desbloquea:
+            puedes activar el plan ilimitado mientras dure la beta.
           </p>
-          <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
-            <li>Generador de imágenes desde prompt sin límite diario.</li>
-            <li>Acceso a los módulos premium actuales (como Foto Navideña IA).</li>
-            <li>
-              Acceso anticipado a nuevos módulos avanzados que se vayan
-              liberando durante la beta.
-            </li>
-          </ul>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <button
               onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               isabelaOs Basic – US$5/mes (tarjeta / Paddle)
             </button>
@@ -1675,11 +1709,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
 
           <p className="mt-3 text-[11px] text-neutral-400">
-            Los usuarios que se registren y activen el plan durante la beta
-            serán considerados{" "}
-            <span className="font-semibold text-white">usuarios beta</span> con
-            un Plan Basic activo (sin límite de imágenes) mientras se mantenga
-            la suscripción.
+            Los usuarios que se registren durante la beta mantendrán un precio
+            preferencial durante el primer año frente al precio general cuando
+            lancemos los módulos siguientes.
           </p>
         </section>
 
@@ -1730,7 +1762,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
             <button
               type="submit"
-              className="mt-2 rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               Enviar mensaje
             </button>
