@@ -38,22 +38,16 @@ async function fileToCompressedBase64(file) {
 
         // JPEG alta calidad, peso razonable
         const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-        const base64 = dataUrl.split(",")[1]; // quitar "data:image/jpeg;base64,"
+        const base64 = dataUrl.split(",")[1]; // quitar encabezado
 
         resolve(base64);
       };
 
-      img.onerror = (err) => {
-        console.error("Error cargando imagen para compresión:", err);
-        reject(err);
-      };
+      img.onerror = reject;
       img.src = e.target.result;
     };
 
-    reader.onerror = (err) => {
-      console.error("Error leyendo archivo para compresión:", err);
-      reject(err);
-    };
+    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
@@ -63,8 +57,8 @@ function ChristmasStudioPage({ currentUser }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [descripcion, setDescripcion] = useState("");
 
-  const [uploadedImage, setUploadedImage] = useState(null); // preview original
-  const [navidadImage, setNavidadImage] = useState(null);   // resultado estudio
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [navidadImage, setNavidadImage] = useState(null);
 
   // -------------------------------------------------------------------
   // Manejar archivo subido
@@ -73,27 +67,35 @@ function ChristmasStudioPage({ currentUser }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 🔥 NUEVO: BLOQUEO SI EL ARCHIVO ES MAYOR A 8MB
+    if (file.size > 8 * 1024 * 1024) {
+      setErrorMsg(
+        "La foto es demasiado pesada para procesarla. Tómala en calidad estándar o baja e inténtalo de nuevo."
+      );
+      return;
+    }
+
     setErrorMsg("");
     setSubiendo(true);
 
     try {
-      // 1) SIEMPRE intentar comprimir/redimensionar
+      // 1) Comprimir/redimensionar SIEMPRE
       let base64Compressed;
       try {
         base64Compressed = await fileToCompressedBase64(file);
       } catch (err) {
-        console.error("No se pudo comprimir esta imagen:", err);
+        console.error("No se pudo comprimir:", err);
         setErrorMsg(
-          "Esta foto es demasiado grande o tiene un formato que el navegador no puede procesar. Intenta con otra imagen o baja la resolución desde la cámara."
+          "No se pudo procesar esta foto. Intenta tomarla en calidad estándar o baja."
         );
         setSubiendo(false);
         return;
       }
 
-      // Guardar preview original (izquierda)
+      // Guardar preview
       setUploadedImage(`data:image/jpeg;base64,${base64Compressed}`);
 
-      // 2) Lanzar job en /api/generate-xmas
+      // 2) Enviar a RunPod
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,12 +111,12 @@ function ChristmasStudioPage({ currentUser }) {
         console.error("Error al lanzar job navidad_estudio:", data);
         setErrorMsg(
           data?.error ||
-            "Ocurrió un error al enviar la foto navideña. Inténtalo de nuevo con otra imagen."
+            "Ocurrió un error al enviar la foto. Inténtalo con otra imagen."
         );
         return;
       }
 
-      // 3) Polling al endpoint de status (igual que haces para /api/generate-status)
+      // 3) Polling al status
       const jobId = data.jobId;
       let done = false;
       let finalImageB64 = null;
@@ -129,8 +131,7 @@ function ChristmasStudioPage({ currentUser }) {
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
-          console.error("Error consultando status RunPod:", statusData);
-          setErrorMsg("Error consultando el estado del procesamiento.");
+          setErrorMsg("Error consultando estado del procesamiento.");
           return;
         }
 
@@ -143,24 +144,20 @@ function ChristmasStudioPage({ currentUser }) {
         }
 
         if (statusData.status === "FAILED") {
-          console.error("Job RunPod FAILED:", statusData);
           setErrorMsg(
-            "El procesamiento navideño falló. Intenta con otra foto (idealmente menos pesada)."
+            "El procesamiento falló. Prueba con otra foto (idealmente menos pesada)."
           );
           return;
         }
 
-        // COMPLETED
+        // completo
         finalImageB64 =
           statusData.output?.image_b64 ||
           statusData.output?.result?.image_b64 ||
           null;
 
         if (!finalImageB64) {
-          console.error("No se encontró image_b64 en output:", statusData);
-          setErrorMsg(
-            "No se recibió la imagen procesada desde RunPod, revisa el worker."
-          );
+          setErrorMsg("No se recibió la imagen procesada desde RunPod.");
           return;
         }
 
@@ -169,10 +166,9 @@ function ChristmasStudioPage({ currentUser }) {
 
       const resultDataUrl = `data:image/png;base64,${finalImageB64}`;
 
-      // Mostrar resultado (derecha)
       setNavidadImage(resultDataUrl);
 
-      // 4) Guardar en la biblioteca
+      // 4) Guardar en Supabase
       try {
         await saveGenerationInSupabase({
           imageDataUrl: resultDataUrl,
@@ -184,10 +180,9 @@ function ChristmasStudioPage({ currentUser }) {
           prompt: "[Foto navideña de estudio – fondo reemplazado]",
         });
       } catch (err) {
-        console.error("Error guardando en biblioteca:", err);
+        console.error("Error guardando:", err);
       }
     } catch (err) {
-      console.error("Error manejando archivo navideño:", err);
       setErrorMsg("No se pudo procesar la imagen. Intenta con otra foto.");
     } finally {
       setSubiendo(false);
@@ -195,28 +190,18 @@ function ChristmasStudioPage({ currentUser }) {
   };
 
   return (
-    <div
-      className="xmas-page"
-      style={{ padding: "1.5rem", maxWidth: 1200, margin: "0 auto" }}
-    >
+    <div className="xmas-page" style={{ padding: "1.5rem", maxWidth: 1200, margin: "0 auto" }}>
       <h1 style={{ fontSize: "1.8rem", marginBottom: "0.75rem" }}>
         Foto Navideña IA de Estudio
       </h1>
+
       <p style={{ marginBottom: "1rem", opacity: 0.8 }}>
         Sube una foto tuya o de tu familia y IsabelaOS convierte el fondo en un
-        set navideño hiperreal de estudio profesional: luces de lujo, edición
-        premium y detalles como si lo hubieras hecho en un estudio fotográfico
-        carísimo.
+        set navideño hiperreal de estudio profesional.
       </p>
 
       <div style={{ marginBottom: "1rem" }}>
-        <label
-          style={{
-            display: "block",
-            fontWeight: 600,
-            marginBottom: "0.25rem",
-          }}
-        >
+        <label style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}>
           Descripción (opcional)
         </label>
         <input
@@ -236,41 +221,21 @@ function ChristmasStudioPage({ currentUser }) {
       </div>
 
       <div style={{ marginBottom: "0.5rem" }}>
-        <label
-          style={{
-            display: "block",
-            fontWeight: 600,
-            marginBottom: "0.25rem",
-          }}
-        >
+        <label style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}>
           Sube tu foto
         </label>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handleFileChange}
-          disabled={subiendo}
-        />
-        <p
-          style={{
-            fontSize: "0.85rem",
-            opacity: 0.6,
-            marginTop: "0.25rem",
-          }}
-        >
-          Para mejores resultados, usa fotos en formato JPG/PNG y evita imágenes
-          extremadamente pesadas. Algunas fotos con ropa muy reveladora pueden
-          no procesarse por políticas de seguridad del sistema.
+
+        <input type="file" accept="image/*" onChange={handleFileChange} disabled={subiendo} />
+
+        <p style={{ fontSize: "0.85rem", opacity: 0.6, marginTop: "0.25rem" }}>
+          Para mejores resultados, usa fotos con calidad estándar.  
+          Las imágenes extremadamente pesadas pueden fallar.
         </p>
       </div>
 
-      {subiendo && (
-        <p style={{ marginBottom: "0.75rem" }}>Procesando foto navideña...</p>
-      )}
+      {subiendo && <p style={{ marginBottom: "0.75rem" }}>Procesando foto navideña...</p>}
 
-      {errorMsg && (
-        <p style={{ marginBottom: "0.75rem", color: "#ff6b6b" }}>{errorMsg}</p>
-      )}
+      {errorMsg && <p style={{ marginBottom: "0.75rem", color: "#ff6b6b" }}>{errorMsg}</p>}
 
       <div
         style={{
