@@ -94,3 +94,31 @@ export async function getTodayGenerationCount(userId: string) {
   console.log("[getTodayGenerationCount] Count =", count ?? 0);
   return count ?? 0;
 }
+
+/**
+ * Elimina una imagen de la tabla generations para ese usuario.
+ * Devuelve true si se borró correctamente, false si hubo error.
+ */
+export async function deleteGenerationFromSupabase(
+  id: string,
+  userId: string
+): Promise<boolean> {
+  console.log("[deleteGenerationFromSupabase] Eliminando fila...", {
+    id,
+    userId,
+  });
+
+  const { error } = await supabase
+    .from("generations")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("[deleteGenerationFromSupabase] Error:", error);
+    return false;
+  }
+
+  console.log("[deleteGenerationFromSupabase] OK, fila eliminada");
+  return true;
+}
