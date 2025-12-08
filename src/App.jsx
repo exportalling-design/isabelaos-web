@@ -6,7 +6,7 @@ import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
   getTodayGenerationCount,
-  deleteGenerationFromSupabase,
+  deleteGenerationFromSupabase, // NUEVO: para borrar desde Supabase
 } from "./lib/generations";
 
 // ---------------------------------------------------------
@@ -623,8 +623,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y
-                  con acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con
+                  acceso a módulos premium).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -819,7 +819,7 @@ function LibraryView() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text-white">Vista previa</h2>
+        <h2 className="text-lg font-semibold text.white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
             <img
@@ -1019,7 +1019,7 @@ function XmasPhotoPanel() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <div className="rounded-3xl border border.white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
           Foto Navideña IA (Premium)
         </h2>
@@ -1254,8 +1254,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("library")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover:bg.white/10"
               }`}
             >
               Biblioteca
@@ -1380,7 +1380,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   const handleContactSubmit = (e) => {
     e.preventDefault();
     const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
-    const body = encodeURIComponent(
+    the body = encodeURIComponent(
       `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
     );
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
@@ -1440,13 +1440,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               Genera imágenes fotorrealistas{" "}
-              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+              <span className="block bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
                 con IA en la nube.
               </span>
             </h1>
 
             {/* Barra neón bajo el título */}
-            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
+            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               IsabelaOS Studio es el primer sistema de generación visual con IA
@@ -1470,7 +1470,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
@@ -1490,35 +1490,35 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           {/* Galería 2x2 */}
           <div className="relative order-first lg:order-last">
             {/* Halo neón detrás de la galería */}
-            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient.to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
             <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img1.png?v=2"
                   alt="Imagen generada 1"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img2.png?v=2"
                   alt="Imagen generada 2"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img3.png?v=2"
                   alt="Imagen generada 3"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img4.png?v=2"
                   alt="Imagen generada 4"
@@ -1579,8 +1579,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Vista previa del panel */}
         <section className="mt-12">
           {/* Línea separadora con gradiente */}
-          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text-white mb-4">
+          <div className="mb-3 h-px w-24 bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent" />
+          <h2 className="text-sm font-semibold text.white mb-4">
             Flujo de trabajo simple y potente
           </h2>
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
@@ -1603,7 +1603,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-2">
+          <h2 className="text-sm font-semibold text.white mb-2">
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
@@ -1652,9 +1652,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </p>
           <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
             <li>Generador de imágenes desde prompt sin límite diario.</li>
-            <li>
-              Acceso a los módulos premium actuales (como Foto Navideña IA).
-            </li>
+            <li>Acceso a los módulos premium actuales (como Foto Navideña IA).</li>
             <li>
               Acceso anticipado a nuevos módulos avanzados que se vayan
               liberando durante la beta.
@@ -1664,7 +1662,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <button
               onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               isabelaOs Basic – US$5/mes (tarjeta / Paddle)
             </button>
@@ -1732,7 +1730,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
             <button
               type="submit"
-              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              className="mt-2 rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               Enviar mensaje
             </button>
