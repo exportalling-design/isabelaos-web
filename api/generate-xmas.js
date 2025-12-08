@@ -1,56 +1,54 @@
-// api/generate-xmas.js
-// FOTO NAVIDEÑA: llama a RunPod y devuelve image_b64 directo
+// pages/api/generate-xmas.js
+// Lanza un job especial "navidad_estudio" en RunPod
+// para la Foto Navideña IA de estudio
 
-const cors = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
-};
+export default async function handler(req, res) {
+  // CORS básico
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader(
+    "access-control-allow-methods",
+    "POST, OPTIONS"
+  );
+  res.setHeader(
+    "access-control-allow-headers",
+    "content-type"
+  );
 
-export default async function handler(req) {
+  // Preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: cors });
+    return res.status(200).end();
   }
 
+  // Solo aceptamos POST
   if (req.method !== "POST") {
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: cors,
-    });
+    return res.status(405).json({ error: "Method Not Allowed" });
   }
 
   try {
-    const body = await req.json().catch(() => null);
+    // En API routes de Next la data viene en req.body
+    const body = req.body || {};
 
-    if (!body || !body.image_b64) {
-      return new Response(
-        JSON.stringify({ error: "Falta image_b64 en el cuerpo." }),
-        { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
-      );
+    if (!body.image_b64) {
+      return res
+        .status(400)
+        .json({ error: "Falta image_b64 en el cuerpo." });
     }
 
     const image_b64 = body.image_b64;
     const description = body.description || "";
-    const userId = body.userId || "";
-    const email = body.email || "";
-    const plan = body.plan || "";
 
-    const endpointId =
-      process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
-    const apiKey =
-      process.env.RUNPOD_API_KEY || process.env.RP_API_KEY;
+    // Usa EXACTAMENTE el mismo endpoint ID y API key que en /api/generate.js
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+    const apiKey = process.env.RUNPOD_API_KEY;
 
     if (!endpointId || !apiKey) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "Faltan RUNPOD_ENDPOINT_ID/RP_ENDPOINT o RUNPOD_API_KEY/RP_API_KEY.",
-        }),
-        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
-      );
+      return res.status(500).json({
+        error:
+          "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY en las variables de entorno.",
+      });
     }
 
-    const url = `https://api.runpod.ai/v2/${endpointId}/runsync`;
+    const url = `https://api.runpod.ai/v2/${endpointId}/run`;
 
     const rpRes = await fetch(url, {
       method: "POST",
@@ -60,10 +58,9 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         input: {
-          action: "navidad_estudio",
+          action: "navidad_estudio", // 👈 NUEVO MODO
           image_b64,
           description,
-          meta: { userId, email, plan, from: "xmas_photo" },
         },
       }),
     });
@@ -71,45 +68,23 @@ export default async function handler(req) {
     const data = await rpRes.json().catch(() => null);
 
     if (!rpRes.ok || !data || data.error) {
-      return new Response(
-        JSON.stringify({
-          error: data?.error || "Error en runsync de RunPod",
-          raw: data,
-        }),
-        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
-      );
+      console.error("Error RunPod generate-xmas:", data);
+      return res.status(500).json({
+        ok: false,
+        error: data?.error || "Error al lanzar job en RunPod.",
+      });
     }
 
-    const output = data.output || data;
-    const resultB64 =
-      output?.image_b64 ||
-      output?.image ||
-      output?.output_image ||
-      (Array.isArray(output) && output[0]?.image_b64) ||
-      null;
-
-    if (!resultB64) {
-      return new Response(
-        JSON.stringify({
-          error: "RunPod no devolvió image_b64",
-          raw: data,
-        }),
-        { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({ ok: true, image_b64: resultB64 }),
-      { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
-    );
+    // RunPod responde algo tipo { id: "jobId", status: "IN_QUEUE", ... }
+    return res.status(200).json({
+      ok: true,
+      jobId: data.id,
+    });
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err?.message || String(err) }),
-      { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
-    );
+    console.error("Error en /api/generate-xmas:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || String(err),
+    });
   }
 }
-
-export const config = {
-  runtime: "edge",
-};
