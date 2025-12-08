@@ -20,10 +20,52 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
   }
 
-  // Fallback por si existe Buffer
-  // (en Edge normalmente no se usa, pero no estorba)
+  // Fallback por si existe Buffer (Node)
   // @ts-ignore
   return Buffer.from(binary, "binary").toString("base64");
+}
+
+// Busca un string base64 de imagen en lo que devuelva RunPod
+function extractImageB64(data) {
+  if (!data) return null;
+
+  // Si es string grande, probablemente ya es la imagen
+  if (typeof data === "string") {
+    if (data.length > 200 && !data.includes("{") && !data.includes("}")) {
+      return data;
+    }
+    return null;
+  }
+
+  // Si es objeto, revisamos claves típicas
+  if (typeof data === "object") {
+    if (typeof data.image_b64 === "string") return data.image_b64;
+    if (typeof data.image_base64 === "string") return data.image_base64;
+    if (typeof data.output_image === "string") return data.output_image;
+    if (typeof data.image === "string") return data.image;
+
+    // Si tiene `output`, buscamos adentro
+    if (data.output) {
+      const nested = extractImageB64(data.output);
+      if (nested) return nested;
+    }
+
+    // Recorremos todas las claves por si acaso
+    for (const key of Object.keys(data)) {
+      const nested = extractImageB64(data[key]);
+      if (nested) return nested;
+    }
+  }
+
+  // Si es array, probamos cada item
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const nested = extractImageB64(item);
+      if (nested) return nested;
+    }
+  }
+
+  return null;
 }
 
 export default async function handler(req) {
@@ -66,7 +108,7 @@ export default async function handler(req) {
       const buffer = await file.arrayBuffer();
       imageB64 = arrayBufferToBase64(buffer);
     } else {
-      // ----- Fallback JSON (por si algún día lo llamas así) -----
+      // ----- Fallback JSON -----
       const body = await req.json().catch(() => null);
 
       if (!body || !body.image_b64) {
@@ -102,9 +144,7 @@ export default async function handler(req) {
 
     const base = `https://api.runpod.ai/v2/${endpointId}`;
 
-    // 🔴 AQUÍ ESTABA EL PROBLEMA:
-    // Antes: `${base}/run`  -> solo devuelve { id, status }
-    // Ahora: usamos /runsync para que devuelva el output completo con image_b64
+    // Usamos /runsync para que devuelva el output completo
     const rp = await fetch(`${base}/runsync`, {
       method: "POST",
       headers: {
@@ -126,26 +166,39 @@ export default async function handler(req) {
       }),
     });
 
+    const text = await rp.text();
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // si no es JSON válido, data se queda null
+    }
+
     if (!rp.ok) {
-      const txt = await rp.text();
+      // si vino algún output usable igual intentamos sacar imagen
+      const fromError = extractImageB64(data);
+      if (fromError) {
+        return new Response(
+          JSON.stringify({ ok: true, image_b64: fromError }),
+          { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ error: "RunPod run error", details: txt }),
+        JSON.stringify({ error: "RunPod run error", details: text }),
         { status: rp.status, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
-    const data = await rp.json();
-
-    // El worker devuelve la imagen final en image_b64
-    const output = data.output || data;
-    const resultB64 =
-      output?.image_b64 ||
-      (Array.isArray(output) && output[0]?.image_b64) ||
-      null;
+    // El worker devuelve algo en data; buscamos la imagen
+    const resultB64 = extractImageB64(data);
 
     if (!resultB64) {
       return new Response(
-        JSON.stringify({ error: "RunPod no devolvió image_b64", raw: data }),
+        JSON.stringify({
+          error: "RunPod no devolvió image_b64 reconocible",
+          raw: data,
+        }),
         { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
