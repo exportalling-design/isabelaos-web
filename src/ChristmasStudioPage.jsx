@@ -66,6 +66,59 @@ async function fileToRawBase64(file) {
   });
 }
 
+// 🔹 NUEVO: loader seguro para fotos gigantes (Xiaomi, iPhone Pro, etc.)
+async function safeLoadAndCompress(file) {
+  const MAX_SIDE_HUGE = 4096; // para fotos de muchísimos megapíxeles
+  const MAX_SIDE_NORMAL = 1600;
+
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      const megaPixels = (width * height) / 1000000;
+
+      // Si es una foto gigantesca (>20MP), reducimos primero a 4096px máximo
+      let maxSide = megaPixels > 20 ? MAX_SIDE_HUGE : MAX_SIDE_NORMAL;
+
+      if (width > height) {
+        if (width > maxSide) {
+          height = Math.round((height * maxSide) / width);
+          width = maxSide;
+        }
+      } else {
+        if (height > maxSide) {
+          width = Math.round((width * maxSide) / height);
+          height = maxSide;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const base64 = dataUrl.split(",")[1];
+
+      URL.revokeObjectURL(url);
+      resolve(base64);
+    };
+
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+
+    img.src = url;
+  });
+}
+
 function ChristmasStudioPage({ currentUser }) {
   const [subiendo, setSubiendo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -85,14 +138,20 @@ function ChristmasStudioPage({ currentUser }) {
     setSubiendo(true);
 
     try {
-      // 1) Comprimir/redimensionar
-      // 🔹 CAMBIO: intentamos comprimir y, si falla, usamos la imagen original
+      // 1) Carga segura + compresión para fotos gigantes (Xiaomi 14 Ultra, etc.)
       let base64Compressed;
       try {
-        base64Compressed = await fileToCompressedBase64(file);
+        // Primero intentamos la ruta segura que maneja megapíxeles altos
+        base64Compressed = await safeLoadAndCompress(file);
       } catch (err) {
-        console.error("Error al comprimir, usando imagen original:", err);
-        base64Compressed = await fileToRawBase64(file);
+        console.error("Error en safeLoadAndCompress, intentando compresión estándar:", err);
+        try {
+          // Si falla, usamos la compresión estándar que ya tenías
+          base64Compressed = await fileToCompressedBase64(file);
+        } catch (err2) {
+          console.error("Error al comprimir, usando imagen original:", err2);
+          base64Compressed = await fileToRawBase64(file);
+        }
       }
 
       // Guardar preview original (izquierda)
