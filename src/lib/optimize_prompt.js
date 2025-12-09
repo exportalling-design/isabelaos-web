@@ -1,6 +1,4 @@
-// ---------------------------------------------------------
-// optimize_prompt.js – Optimización de prompts con OpenAI
-// ---------------------------------------------------------
+// src/lib/optimize_prompt.js
 
 export async function optimizePrompt(originalPrompt) {
   try {
@@ -10,16 +8,21 @@ export async function optimizePrompt(originalPrompt) {
       body: JSON.stringify({ prompt: originalPrompt }),
     });
 
-    const data = await res.json();
-
-    if (!res.ok || !data?.optimized) {
-      console.error("Error optimizando prompt:", data);
+    if (!res.ok) {
+      console.error("Error HTTP en /api/optimize-prompt:", res.status);
       return originalPrompt;
     }
 
-    return data.optimized;
+    const data = await res.json();
+    if (!data?.ok || !data.optimizedPrompt) {
+      console.warn("Respuesta inesperada de /api/optimize-prompt:", data);
+      return originalPrompt;
+    }
+
+    // 👉 Devolvemos el texto mejorado
+    return data.optimizedPrompt;
   } catch (err) {
-    console.error("Fallo en optimizePrompt:", err);
+    console.error("Error llamando a /api/optimize-prompt:", err);
     return originalPrompt;
   }
 }
