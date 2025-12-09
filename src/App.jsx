@@ -1418,7 +1418,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   const handleContactSubmit = (e) => {
     e.preventDefault();
     const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
-    the body = encodeURIComponent(
+    const body = encodeURIComponent(
       `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
     );
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
