@@ -9,6 +9,8 @@ import {
   deleteGenerationFromSupabase, // NUEVO: para borrar desde Supabase
 } from "./lib/generations";
 
+import { optimizePrompt } from "./lib/optimize_prompt";
+
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
@@ -406,16 +408,24 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setStatusText("Enviando job a RunPod...");
 
     try {
+      // 👉 Si el usuario activó el checkbox, optimizamos el prompt antes
+      let finalPrompt = prompt;
+      if (autoPrompt) {
+        const optimized = await optimizePrompt(prompt);
+        finalPrompt = optimized || prompt;
+        setPrompt(finalPrompt); // mostramos en pantalla el prompt optimizado
+      }
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt,
+          prompt: finalPrompt,
           negative_prompt: negative,
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
-          // NUEVO: bandera para que el backend decida si optimiza con OpenAI
+          // Seguimos enviando la bandera por si el backend la usa también
           optimize_prompt: autoPrompt,
         }),
       });
@@ -800,7 +810,7 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text.white">Biblioteca</h2>
         <p className="mt-1 text-xs text-neutral-400">
           Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
           RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
@@ -1151,7 +1161,7 @@ function XmasPhotoPanel() {
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
               placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
             <p className="mt-1 text-[11px] text-neutral-400">
               Este texto ayuda a la IA a adaptar mejor el fondo y los detalles
@@ -1266,7 +1276,7 @@ function DashboardView() {
             </span>
             <button
               onClick={handleContact}
-              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs.text-white hover:bg-white/10"
             >
               Contacto
             </button>
@@ -1536,8 +1546,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 “Optimizar mi prompt con IA (OpenAI)”
               </span>{" "}
               para que el sistema mejore automáticamente el texto que escribes
-              antes de enviarlo al motor en la nube, tal como funciona en tu
-              versión local.
+              antes de enviarlo al motor en la nube.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -1703,7 +1712,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
           {/* ARREGLADO: centrar imagen de BodySync */}
           <div className="mt-6 flex justify-center">
-            <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
+            <div className="max-w-md w-full rounded-3xl border border.white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
               <img
                 src="/gallery/bodysync_showcase.png"
                 alt="Ejemplo generado con BodySync"
@@ -1783,7 +1792,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="text"
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
@@ -1792,7 +1801,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="email"
                 value={contactEmail}
                 onChange={(e) => setContactEmail(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
