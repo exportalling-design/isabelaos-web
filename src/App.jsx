@@ -200,7 +200,7 @@ function AuthModal({ open, onClose }) {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
           </div>
           <div>
@@ -210,7 +210,7 @@ function AuthModal({ open, onClose }) {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
           </div>
 
@@ -221,7 +221,7 @@ function AuthModal({ open, onClose }) {
           <button
             type="submit"
             disabled={localLoading}
-            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text.white disabled:opacity-60"
+            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
             {localLoading
               ? "Procesando..."
@@ -234,7 +234,7 @@ function AuthModal({ open, onClose }) {
         <button
           onClick={handleGoogle}
           disabled={localLoading}
-          className="mt-3 w-full rounded-2xl border border-white/20 py-2 text-sm text.white hover:bg-white/10 disabled:opacity-60"
+          className="mt-3 w-full rounded-2xl border border-white/20 py-2 text-sm text-white hover:bg-white/10 disabled:opacity-60"
         >
           Continuar con Google
         </button>
@@ -286,6 +286,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
+
+  // NUEVO: toggle para automatizar el prompt con OpenAI
+  const [autoPrompt, setAutoPrompt] = useState(false);
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -412,6 +415,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
+          // NUEVO: bandera para que el backend decida si optimiza con OpenAI
+          optimize_prompt: autoPrompt,
         }),
       });
 
@@ -539,7 +544,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     <div className="grid gap-8 lg:grid-cols-2">
       {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">
+        <h2 className="text-lg font-semibold text-white">
           Generador desde prompt
         </h2>
 
@@ -563,16 +568,33 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
           </div>
 
+          {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
+          <div className="flex items-start justify-between gap-3 text-xs">
+            <label className="flex items-center gap-2 text-neutral-300">
+              <input
+                type="checkbox"
+                checked={autoPrompt}
+                onChange={(e) => setAutoPrompt(e.target.checked)}
+                className="h-4 w-4 rounded border-white/30 bg-black/70"
+              />
+              <span>Optimizar mi prompt con IA (OpenAI)</span>
+            </label>
+            <span className="text-[10px] text-neutral-500 text-right">
+              Si está activado, el sistema ajusta tu texto automáticamente antes
+              de enviar el render al motor en RunPod.
+            </span>
+          </div>
+
           <div>
             <label className="text-neutral-300">Negative prompt</label>
             <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
@@ -585,7 +607,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 type="number"
                 min={5}
                 max={50}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
                 onChange={(e) => setSteps(e.target.value)}
               />
@@ -597,7 +619,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 min={256}
                 max={1024}
                 step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={width}
                 onChange={(e) => setWidth(e.target.value)}
               />
@@ -609,7 +631,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 min={256}
                 max={1024}
                 step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={height}
                 onChange={(e) => setHeight(e.target.value)}
               />
@@ -646,7 +668,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               status === "IN_PROGRESS" ||
               (!isPremium && currentCount >= currentLimit)
             }
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {!isPremium && currentCount >= currentLimit
               ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
@@ -680,7 +702,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {imageB64 ? (
             <img
@@ -695,7 +717,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         {imageB64 && (
           <button
             onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
           </button>
@@ -778,7 +800,7 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
         <p className="mt-1 text-xs text-neutral-400">
           Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
           RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
@@ -819,7 +841,7 @@ function LibraryView() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Vista previa</h2>
+        <h2 className="text-lg font-semibold text-white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
             <img
@@ -851,7 +873,7 @@ function LibraryView() {
 function VideoPlaceholderPanel() {
   return (
     <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-      <h2 className="text-lg font-semibold text.white">
+      <h2 className="text-lg font-semibold text-white">
         Generador de video desde prompt (próximamente)
       </h2>
       <p className="mt-2 text-sm text-neutral-300">
@@ -865,7 +887,7 @@ function VideoPlaceholderPanel() {
       </p>
       <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text.white">
+          <h3 className="text-sm font-semibold text-white">
             ¿Qué podrás hacer?
           </h3>
           <ul className="mt-2 space-y-1 list-disc list-inside">
@@ -875,7 +897,7 @@ function VideoPlaceholderPanel() {
           </ul>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text.white">
+          <h3 className="text-sm font-semibold text-white">
             Integración con BodySync
           </h3>
           <p className="mt-2">
@@ -1057,8 +1079,8 @@ function XmasPhotoPanel() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      <div className="rounded-3xl border border.white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text-white">
           Foto Navideña IA (Premium)
         </h2>
         <p className="mt-2 text-sm text-neutral-300">
@@ -1129,7 +1151,7 @@ function XmasPhotoPanel() {
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
               placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
             <p className="mt-1 text-[11px] text-neutral-400">
               Este texto ayuda a la IA a adaptar mejor el fondo y los detalles
@@ -1156,7 +1178,7 @@ function XmasPhotoPanel() {
               !pureB64 ||
               !user
             }
-            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando foto navideña..."
@@ -1173,7 +1195,7 @@ function XmasPhotoPanel() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {resultB64 ? (
             <img
@@ -1188,7 +1210,7 @@ function XmasPhotoPanel() {
         {resultB64 && (
           <button
             onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover.bg-white/10"
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             Descargar foto navideña
           </button>
@@ -1215,7 +1237,7 @@ function DashboardView() {
 
   return (
     <div
-      className="min-h-screen w-full text.white"
+      className="min-h-screen w-full text-white"
       style={{
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
@@ -1244,13 +1266,13 @@ function DashboardView() {
             </span>
             <button
               onClick={handleContact}
-              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text.white hover.bg-white/10"
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Contacto
             </button>
             <button
               onClick={signOut}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text.white hover.bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg.white/10"
             >
               Cerrar sesión
             </button>
@@ -1270,8 +1292,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("generator")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Imagen desde prompt
@@ -1281,8 +1303,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("video")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Video (próximamente)
@@ -1292,19 +1314,20 @@ function DashboardView() {
               onClick={() => setAppViewMode("library")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Biblioteca
             </button>
+            {/* ARREGLADO: botón morado también para Foto Navideña IA en móvil */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "xmas"
-                  ? "bg-gradient.to-r from-cyan-600 to-fuchsia-600 text.white"
-                  : "bg-gradient.to-r from-cyan-600/70 to-fuchsia-600/70 text.white/90"
+                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
+                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text-white/90"
               }`}
             >
               🎄 Foto Navideña IA
@@ -1323,8 +1346,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("generator")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Generar imagen desde prompt
@@ -1334,8 +1357,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("video")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Generar video desde prompt (próximamente)
@@ -1345,19 +1368,20 @@ function DashboardView() {
               onClick={() => setAppViewMode("library")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
               Biblioteca
             </button>
+            {/* ARREGLADO: botón morado también para Foto Navideña IA en sidebar */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
               className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "xmas"
-                  ? "bg-gradient.to-r from-cyan-600 to-fuchsia-600 text.white"
-                  : "bg-gradient.to-r from-cyan-600 to-fuchsia-600 text.white/90"
+                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
+                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
               }`}
             >
               🎄 Foto Navideña IA (Premium)
@@ -1367,7 +1391,7 @@ function DashboardView() {
           {/* Contenido principal */}
           <div className="flex-1 space-y-6">
             <div>
-              <h1 className="text-xl font-semibold text.white">
+              <h1 className="text-xl font-semibold text-white">
                 Panel del creador
               </h1>
               <p className="mt-1 text-xs text-neutral-400">
@@ -1426,7 +1450,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
   return (
     <div
-      className="min-h-screen w-full text.white"
+      className="min-h-screen w-full text-white"
       style={{
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
@@ -1453,13 +1477,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="flex items-center gap-3">
             <button
               onClick={() => scrollToId("contacto")}
-              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text.white hover.bg-white/10"
+              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Contacto
             </button>
             <button
               onClick={onOpenAuth}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text.white hover.bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Iniciar sesión / Registrarse
             </button>
@@ -1472,19 +1496,19 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           {/* Columna texto */}
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg.white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
+            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
               <span className="h-1 w-1 rounded-full bg-cyan-300" />
               <span>Beta privada · Motor de imagen de estudio</span>
             </p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               Genera imágenes fotorrealistas{" "}
-              <span className="block bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
                 con IA en la nube.
               </span>
             </h1>
 
             {/* Barra neón bajo el título */}
-            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
+            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
               IsabelaOS Studio es el primer sistema de generación visual con IA
@@ -1498,17 +1522,28 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               adelante, acceder a módulos exclusivos como BodySync (movimiento
               corporal IA), Script2Film, CineCam y generador de video desde
               texto. Además, hemos añadido un módulo especial de{" "}
-              <span className="font-semibold text.white">
+              <span className="font-semibold text-white">
                 Foto Navideña IA
               </span>{" "}
               para transformar una foto real de tu familia en un retrato
               navideño de estudio con fondo totalmente generado por IA.
             </p>
 
+            {/* NUEVO: descripción del sistema de prompts optimizados */}
+            <p className="mt-2 max-w-xl text-xs text-neutral-400">
+              También puedes activar la opción{" "}
+              <span className="font-semibold text-white">
+                “Optimizar mi prompt con IA (OpenAI)”
+              </span>{" "}
+              para que el sistema mejore automáticamente el texto que escribes
+              antes de enviarlo al motor en la nube, tal como funciona en tu
+              versión local.
+            </p>
+
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text.white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover.shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
@@ -1521,42 +1556,42 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <p className="mt-4 text-xs text-neutral-500">
               Próximamente: módulos de video y nuestro motor propio de realismo
               corporal{" "}
-              <span className="font-semibold text.white">BodySync v1</span>.
+              <span className="font-semibold text-white">BodySync v1</span>.
             </p>
           </div>
 
           {/* Galería 2x2 */}
           <div className="relative order-first lg:order-last">
             {/* Halo neón detrás de la galería */}
-            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient.to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text.white mb-3">
+            <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img1.png?v=2"
                   alt="Imagen generada 1"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img2.png?v=2"
                   alt="Imagen generada 2"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img3.png?v=2"
                   alt="Imagen generada 3"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img4.png?v=2"
                   alt="Imagen generada 4"
@@ -1576,7 +1611,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Sección especial Foto Navideña IA */}
         <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text.white">
+            <h3 className="text-sm font-semibold text-white">
               Especial Navidad · Foto Navideña IA
             </h3>
             <p className="mt-2 text-[11px] text-neutral-300">
@@ -1597,7 +1632,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </ul>
             <p className="mt-3 text-[11px] text-neutral-400">
               Dentro del panel del creador encontrarás la sección{" "}
-              <span className="font-semibold text.white">
+              <span className="font-semibold text-white">
                 “Foto Navideña IA (Premium)”
               </span>{" "}
               donde se explica con detalle qué tipo de foto subir y cómo
@@ -1617,12 +1652,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Vista previa del panel */}
         <section className="mt-12">
           {/* Línea separadora con gradiente */}
-          <div className="mb-3 h-px w-24 bg-gradient.to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text.white mb-4">
+          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
+          <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
           </h2>
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text.white">
+            <h3 className="text-sm font-semibold text-white">
               Vista previa del panel del creador
             </h3>
             <p className="mt-2 text-[11px] text-neutral-400">
@@ -1641,7 +1676,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text.white mb-2">
+          <h2 className="text-sm font-semibold text-white mb-2">
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
@@ -1666,7 +1701,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </li>
           </ul>
 
-          <div className="mt-6 flex.justify-center">
+          {/* ARREGLADO: centrar imagen de BodySync */}
+          <div className="mt-6 flex justify-center">
             <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
               <img
                 src="/gallery/bodysync_showcase.png"
@@ -1679,7 +1715,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Plan de pago */}
         <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
-          <h2 className="text-sm font-semibold text.white">
+          <h2 className="text-sm font-semibold text-white">
             Plan beta para creadores
           </h2>
           <p className="mt-2 text-xs text-neutral-300">
@@ -1690,7 +1726,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </p>
           <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
             <li>Generador de imágenes desde prompt sin límite diario.</li>
-            <li>Acceso a los módulos premium actuales (como Foto Navideña IA).</li>
+            <li>
+              Acceso a los módulos premium actuales (como Foto Navideña IA).
+            </li>
             <li>
               Acceso anticipado a nuevos módulos avanzados que se vayan
               liberando durante la beta.
@@ -1700,7 +1738,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <button
               onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               isabelaOs Basic – US$5/mes (tarjeta / Paddle)
             </button>
@@ -1715,7 +1753,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <p className="mt-3 text-[11px] text-neutral-400">
             Los usuarios que se registren y activen el plan durante la beta
             serán considerados{" "}
-            <span className="font-semibold text.white">usuarios beta</span> con
+            <span className="font-semibold text-white">usuarios beta</span> con
             un Plan Basic activo (sin límite de imágenes) mientras se mantenga
             la suscripción.
           </p>
@@ -1723,13 +1761,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Contacto */}
         <section id="contacto" className="mt-16 max-w-xl">
-          <h2 className="text-sm font-semibold text.white">
+          <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
           </h2>
           <p className="mt-1 text-xs text-neutral-400">
             Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de
             soporte responderá desde{" "}
-            <span className="font-semibold text.white">
+            <span className="font-semibold text-white">
               contacto@isabelaos.com
             </span>
             .
@@ -1745,7 +1783,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="text"
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
@@ -1754,7 +1792,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="email"
                 value={contactEmail}
                 onChange={(e) => setContactEmail(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
@@ -1763,12 +1801,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 rows={4}
                 value={contactMessage}
                 onChange={(e) => setContactMessage(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <button
               type="submit"
-              className="mt-2 rounded-2xl bg-gradient.to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               Enviar mensaje
             </button>
@@ -1782,15 +1820,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               Guatemala, Cobán Alta Verapaz por Stalling Technologic.
             </span>
             <span className="flex flex-wrap gap-3">
-              <a href="/terms.html" className="hover.text-neutral-300">
+              <a href="/terms.html" className="hover:text-neutral-300">
                 Términos de servicio
               </a>
               <span>•</span>
-              <a href="/privacy.html" className="hover.text-neutral-300">
+              <a href="/privacy.html" className="hover:text-neutral-300">
                 Política de privacidad
               </a>
               <span>•</span>
-              <a href="/refunds.html" className="hover.text-neutral-300">
+              <a href="/refunds.html" className="hover:text-neutral-300">
                 Política de reembolsos
               </a>
             </span>
@@ -1831,7 +1869,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center bg-black text.white">
+      <div className="min-h-screen grid place-items-center bg-black text-white">
         <p className="text-sm text-neutral-400">Cargando sesión...</p>
       </div>
     );
