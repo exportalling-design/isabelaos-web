@@ -344,7 +344,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         window.location.href = data.url;
       } else {
         console.error("Respuesta Paddle:", data);
-        alert("No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde.");
+        alert(
+          "No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde."
+        );
       }
     } catch (err) {
       console.error("Error Paddle:", err);
@@ -378,7 +380,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [isDemo]);
 
-  // NUEVO: función que llama al endpoint /api/optimize-prompt y actualiza el textarea
+  // NUEVO: función que llama al endpoint /api/optimize-prompt y actualiza el textarea (prompt positivo)
   const optimizePromptIfNeeded = async (originalPrompt) => {
     if (!autoPrompt || !originalPrompt?.trim()) {
       return originalPrompt;
@@ -404,8 +406,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       }
 
       const optimized = data.optimizedPrompt;
-      // aquí actualizamos el textarea para que TÚ veas el prompt mejorado
-      setPrompt(optimized);
+      setPrompt(optimized); // mostramos el prompt mejorado en el textarea
       return optimized;
     } catch (err) {
       console.error("Error al optimizar prompt:", err);
@@ -413,6 +414,46 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         "Error al optimizar el prompt; usando el texto original para el render."
       );
       return originalPrompt;
+    }
+  };
+
+  // NUEVO: optimizar también el negative prompt con el mismo endpoint
+  const optimizeNegativeIfNeeded = async (originalNegative) => {
+    if (!autoPrompt || !originalNegative?.trim()) {
+      return originalNegative;
+    }
+
+    try {
+      setStatus("OPTIMIZING");
+      setStatusText("Optimizando negative prompt con IA...");
+
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: originalNegative }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
+        console.warn(
+          "No se pudo optimizar el negative prompt, usando el original.",
+          data
+        );
+        setStatusText(
+          "No se pudo optimizar el negative prompt; usando el texto original para el render."
+        );
+        return originalNegative;
+      }
+
+      const optimized = data.optimizedPrompt;
+      setNegative(optimized); // mostramos el negative mejorado en el textarea
+      return optimized;
+    } catch (err) {
+      console.error("Error al optimizar negative prompt:", err);
+      setStatusText(
+        "Error al optimizar el negative prompt; usando el texto original para el render."
+      );
+      return originalNegative;
     }
   };
 
@@ -441,13 +482,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
     setImageB64(null);
 
-    // 1) si está activado, primero optimizamos el prompt y lo mostramos
+    // 1) si está activado, primero optimizamos el prompt (positivo) y el negative y los mostramos
     let promptToUse = prompt;
+    let negativeToUse = negative;
+
     if (autoPrompt) {
       promptToUse = await optimizePromptIfNeeded(prompt);
+      negativeToUse = await optimizeNegativeIfNeeded(negative);
     }
 
-    // 2) luego lanzamos el render normal a RunPod, usando el prompt optimizado
+    // 2) luego lanzamos el render normal a RunPod, usando los textos optimizados
     setStatus("IN_QUEUE");
     setStatusText("Enviando job a RunPod...");
 
@@ -457,7 +501,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptToUse,
-          negative_prompt: negative,
+          negative_prompt: negativeToUse,
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
@@ -691,8 +735,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con
-                  acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y
+                  con acceso a módulos premium).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -1318,7 +1362,7 @@ function DashboardView() {
             </button>
             <button
               onClick={signOut}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg.white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Cerrar sesión
             </button>
