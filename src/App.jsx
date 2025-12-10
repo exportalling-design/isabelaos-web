@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-
 import { useAuth } from "./context/AuthContext";
 
 import {
@@ -289,6 +288,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   // NUEVO: toggle para automatizar el prompt con OpenAI
   const [autoPrompt, setAutoPrompt] = useState(false);
+  // NUEVO: mostrar prompt optimizado debajo (sin tocar el original del usuario)
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -380,9 +382,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [isDemo]);
 
-  // NUEVO: función que llama al endpoint /api/optimize-prompt y actualiza el textarea (prompt positivo)
+  // NUEVO: función que llama al endpoint /api/optimize-prompt y NO cambia el textarea,
+  // solo actualiza el prompt optimizado que se muestra debajo
   const optimizePromptIfNeeded = async (originalPrompt) => {
     if (!autoPrompt || !originalPrompt?.trim()) {
+      setOptimizedPrompt("");
       return originalPrompt;
     }
 
@@ -398,28 +402,34 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-        console.warn("No se pudo optimizar el prompt, usando el original.", data);
+        console.warn(
+          "No se pudo optimizar el prompt, usando el original.",
+          data
+        );
         setStatusText(
           "No se pudo optimizar el prompt; usando el texto original para el render."
         );
+        setOptimizedPrompt("");
         return originalPrompt;
       }
 
       const optimized = data.optimizedPrompt;
-      setPrompt(optimized); // mostramos el prompt mejorado en el textarea
+      setOptimizedPrompt(optimized); // solo mostramos debajo
       return optimized;
     } catch (err) {
       console.error("Error al optimizar prompt:", err);
       setStatusText(
         "Error al optimizar el prompt; usando el texto original para el render."
       );
+      setOptimizedPrompt("");
       return originalPrompt;
     }
   };
 
-  // NUEVO: optimizar también el negative prompt con el mismo endpoint
+  // NUEVO: optimizar también el negative prompt
   const optimizeNegativeIfNeeded = async (originalNegative) => {
     if (!autoPrompt || !originalNegative?.trim()) {
+      setOptimizedNegative("");
       return originalNegative;
     }
 
@@ -442,17 +452,19 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         setStatusText(
           "No se pudo optimizar el negative prompt; usando el texto original para el render."
         );
+        setOptimizedNegative("");
         return originalNegative;
       }
 
       const optimized = data.optimizedPrompt;
-      setNegative(optimized); // mostramos el negative mejorado en el textarea
+      setOptimizedNegative(optimized);
       return optimized;
     } catch (err) {
       console.error("Error al optimizar negative prompt:", err);
       setStatusText(
         "Error al optimizar el negative prompt; usando el texto original para el render."
       );
+      setOptimizedNegative("");
       return originalNegative;
     }
   };
@@ -482,13 +494,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
     setImageB64(null);
 
-    // 1) si está activado, primero optimizamos el prompt (positivo) y el negative y los mostramos
+    // 1) si está activado, primero optimizamos el prompt (positivo) y el negative
     let promptToUse = prompt;
     let negativeToUse = negative;
 
     if (autoPrompt) {
       promptToUse = await optimizePromptIfNeeded(prompt);
       negativeToUse = await optimizeNegativeIfNeeded(negative);
+    } else {
+      setOptimizedPrompt("");
+      setOptimizedNegative("");
     }
 
     // 2) luego lanzamos el render normal a RunPod, usando los textos optimizados
@@ -505,7 +520,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
-          // se mantiene por compatibilidad, aunque ya optimizamos antes
+          // Se envía también el flag por compatibilidad con el handler
           optimize_prompt: autoPrompt,
         }),
       });
@@ -662,6 +677,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
+            {autoPrompt && (
+              <div className="mt-2 rounded-2xl bg-black/60 px-3 py-2 text-[11px] text-neutral-200">
+                <span className="font-semibold text-cyan-300">
+                  Prompt optimizado:
+                </span>{" "}
+                {optimizedPrompt
+                  ? optimizedPrompt
+                  : "Se generará automáticamente al lanzar el render."}
+              </div>
+            )}
           </div>
 
           {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
@@ -688,6 +713,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+            {autoPrompt && (
+              <div className="mt-2 rounded-2xl bg-black/60 px-3 py-2 text-[11px] text-neutral-200">
+                <span className="font-semibold text-cyan-300">
+                  Negative optimizado:
+                </span>{" "}
+                {optimizedNegative
+                  ? optimizedNegative
+                  : "Se generará automáticamente al lanzar el render."}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -890,7 +925,7 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
         <p className="mt-1 text-xs text-neutral-400">
           Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
           RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
@@ -958,43 +993,368 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// Placeholder de video (próximamente)
+// Generador de video desde prompt (nuevo módulo)
 // ---------------------------------------------------------
-function VideoPlaceholderPanel() {
+function VideoPanel() {
+  const { user } = useAuth();
+  const userLoggedIn = !!user;
+
+  const [prompt, setPrompt] = useState(
+    "A cinematic shot of a woman walking towards the camera on a beach, ultra detailed, soft light"
+  );
+  const [negative, setNegative] = useState(
+    "blurry, low quality, watermark, text, logo, flickering"
+  );
+  const [autoPrompt, setAutoPrompt] = useState(false);
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
+
+  const [aspectRatio, setAspectRatio] = useState("9:16"); // 1:1, 9:16, 16:9
+  const [resolutionMode, setResolutionMode] = useState("max"); // "max" o "720p"
+  const [durationSeconds, setDurationSeconds] = useState(5); // 5 o 10
+
+  const [status, setStatus] = useState("IDLE");
+  const [statusText, setStatusText] = useState("");
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  if (!userLoggedIn) {
+    return (
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        <p className="font-medium">
+          Debes iniciar sesión para usar el generador de video.
+        </p>
+        <p className="mt-1 text-xs text-yellow-200/80">
+          Este módulo usa nuestro motor de video conectado a RunPod. Durante la
+          beta lo estamos activando primero para usuarios registrados para
+          cuidar la carga de GPU.
+        </p>
+      </div>
+    );
+  }
+
+  const optimizePromptIfNeeded = async (originalPrompt) => {
+    if (!autoPrompt || !originalPrompt?.trim()) {
+      setOptimizedPrompt("");
+      return originalPrompt;
+    }
+
+    try {
+      setStatus("OPTIMIZING");
+      setStatusText("Optimizando prompt de video con IA...");
+
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: originalPrompt }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
+        console.warn(
+          "No se pudo optimizar el prompt de video, usando el original.",
+          data
+        );
+        setStatusText(
+          "No se pudo optimizar el prompt; usando el texto original para el render de video."
+        );
+        setOptimizedPrompt("");
+        return originalPrompt;
+      }
+
+      const optimized = data.optimizedPrompt;
+      setOptimizedPrompt(optimized);
+      return optimized;
+    } catch (err) {
+      console.error("Error al optimizar prompt de video:", err);
+      setStatusText(
+        "Error al optimizar el prompt; usando el texto original para el render de video."
+      );
+      setOptimizedPrompt("");
+      return originalPrompt;
+    }
+  };
+
+  const optimizeNegativeIfNeeded = async (originalNegative) => {
+    if (!autoPrompt || !originalNegative?.trim()) {
+      setOptimizedNegative("");
+      return originalNegative;
+    }
+
+    try {
+      setStatus("OPTIMIZING");
+      setStatusText("Optimizando negative prompt (video) con IA...");
+
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: originalNegative }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
+        console.warn(
+          "No se pudo optimizar el negative de video, usando el original.",
+          data
+        );
+        setStatusText(
+          "No se pudo optimizar el negative; usando el texto original para el render de video."
+        );
+        setOptimizedNegative("");
+        return originalNegative;
+      }
+
+      const optimized = data.optimizedPrompt;
+      setOptimizedNegative(optimized);
+      return optimized;
+    } catch (err) {
+      console.error("Error al optimizar negative de video:", err);
+      setStatusText(
+        "Error al optimizar el negative; usando el texto original para el render de video."
+      );
+      setOptimizedNegative("");
+      return originalNegative;
+    }
+  };
+
+  const handleGenerateVideo = async () => {
+    setError("");
+    setVideoUrl(null);
+
+    let promptToUse = prompt;
+    let negativeToUse = negative;
+
+    if (autoPrompt) {
+      promptToUse = await optimizePromptIfNeeded(prompt);
+      negativeToUse = await optimizeNegativeIfNeeded(negative);
+    } else {
+      setOptimizedPrompt("");
+      setOptimizedNegative("");
+    }
+
+    setStatus("IN_QUEUE");
+    setStatusText("Enviando job de video a RunPod...");
+
+    try {
+      const res = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptToUse,
+          negative_prompt: negativeToUse,
+          aspect_ratio: aspectRatio, // "1:1" | "9:16" | "16:9"
+          resolution_mode: resolutionMode, // "max" | "720p"
+          duration_seconds: Number(durationSeconds), // 5 | 10
+          optimize_prompt: autoPrompt,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok || !data.jobId) {
+        throw new Error(
+          data?.error ||
+            "Error en /api/generate-video. Revisa los logs del pod."
+        );
+      }
+
+      const jobId = data.jobId;
+      setStatusText(`Video enviado. ID: ${jobId}. Consultando estado...`);
+
+      let finished = false;
+      while (!finished) {
+        await new Promise((r) => setTimeout(r, 2500));
+
+        const statusRes = await fetch(`/api/status?id=${jobId}`);
+        const statusData = await statusRes.json().catch(() => null);
+
+        if (!statusRes.ok || !statusData) {
+          throw new Error(
+            statusData?.error || "Error al consultar /api/status para video."
+          );
+        }
+
+        const st = statusData.status;
+        setStatus(st);
+        setStatusText(`Estado actual: ${st}...`);
+
+        if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
+
+        finished = true;
+
+        // Aquí asumimos que el handler de video devuelve un campo output.video_url
+        // (si lo dejaste como base64, solo hay que ajustar este bloque).
+        if (st === "COMPLETED" && statusData.output?.video_url) {
+          setVideoUrl(statusData.output.video_url);
+          setStatusText("Video generado con éxito.");
+        } else {
+          throw new Error("Job de video terminado pero sin video_url en la salida.");
+        }
+      }
+    } catch (err) {
+      console.error("Error en handleGenerateVideo:", err);
+      setStatus("ERROR");
+      setStatusText("Error al generar el video.");
+      setError(err.message || String(err));
+    }
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-      <h2 className="text-lg font-semibold text-white">
-        Generador de video desde prompt (próximamente)
-      </h2>
-      <p className="mt-2 text-sm text-neutral-300">
-        Estamos preparando el módulo de video para que puedas escribir un prompt
-        y obtener secuencias animadas con calidad cinematográfica usando nuestro
-        motor en RunPod.
-      </p>
-      <p className="mt-4 text-xs text-red-400 font-semibold">
-        Estamos trabajando para tener este módulo lo antes posible con la máxima
-        calidad de estudio.
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
-        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text-white">
-            ¿Qué podrás hacer?
-          </h3>
-          <ul className="mt-2 space-y-1 list-disc list-inside">
-            <li>Clips cortos desde texto (5–10 segundos).</li>
-            <li>Escenas con cámara cinematográfica.</li>
-            <li>Opciones de estilo (realista, anime, artístico).</li>
-          </ul>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text-white">
-            Integración con BodySync
-          </h3>
-          <p className="mt-2">
-            Más adelante podrás combinar este módulo con BodySync para aplicar
-            movimiento corporal a tus personajes IA.
+    <div className="grid gap-8 lg:grid-cols-2">
+      {/* Formulario de video */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text-white">
+          Generar video desde prompt
+        </h2>
+        <p className="mt-1 text-xs text-neutral-400">
+          Escribe una escena y genera un clip corto con nuestro motor de video
+          conectado a RunPod. Puedes elegir relación de aspecto, duración y
+          calidad (máxima o 720p).
+        </p>
+
+        <div className="mt-4 space-y-4 text-sm">
+          <div>
+            <label className="text-neutral-300">Prompt de video</label>
+            <textarea
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            {autoPrompt && (
+              <div className="mt-2 rounded-2xl bg-black/60 px-3 py-2 text-[11px] text-neutral-200">
+                <span className="font-semibold text-cyan-300">
+                  Prompt optimizado (video):
+                </span>{" "}
+                {optimizedPrompt
+                  ? optimizedPrompt
+                  : "Se generará automáticamente al lanzar el render de video."}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-start justify-between gap-3 text-xs">
+            <label className="flex items-center gap-2 text-neutral-300">
+              <input
+                type="checkbox"
+                checked={autoPrompt}
+                onChange={(e) => setAutoPrompt(e.target.checked)}
+                className="h-4 w-4 rounded border-white/30 bg-black/70"
+              />
+              <span>Optimizar mi prompt y negative con IA (OpenAI)</span>
+            </label>
+            <span className="text-[10px] text-neutral-500 text-right">
+              El texto que escribas se mantiene en el cuadro. La IA genera una
+              versión optimizada que se muestra debajo y se envía al motor de
+              video.
+            </span>
+          </div>
+
+          <div>
+            <label className="text-neutral-300">Negative prompt (video)</label>
+            <textarea
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={negative}
+              onChange={(e) => setNegative(e.target.value)}
+            />
+            {autoPrompt && (
+              <div className="mt-2 rounded-2xl bg-black/60 px-3 py-2 text-[11px] text-neutral-200">
+                <span className="font-semibold text-cyan-300">
+                  Negative optimizado (video):
+                </span>{" "}
+                {optimizedNegative
+                  ? optimizedNegative
+                  : "Se generará automáticamente al lanzar el render de video."}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="text-neutral-300">Relación de aspecto</label>
+              <select
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+              >
+                <option value="1:1">1:1 (cuadrado)</option>
+                <option value="9:16">9:16 (vertical / Reels)</option>
+                <option value="16:9">16:9 (horizontal)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-neutral-300">Calidad</label>
+              <select
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={resolutionMode}
+                onChange={(e) => setResolutionMode(e.target.value)}
+              >
+                <option value="max">Máxima que permita el modelo</option>
+                <option value="720p">720p (más rápido y ligero)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-neutral-300">Duración</label>
+              <select
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={durationSeconds}
+                onChange={(e) => setDurationSeconds(Number(e.target.value))}
+              >
+                <option value={5}>5 segundos</option>
+                <option value={10}>10 segundos</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado actual:{" "}
+            {statusText || "Listo para enviar tu prompt al motor de video."}
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleGenerateVideo}
+            disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {status === "IN_QUEUE" || status === "IN_PROGRESS"
+              ? "Generando video..."
+              : "Generar video desde prompt"}
+          </button>
+
+          <p className="mt-2 text-[11px] text-neutral-400">
+            Durante la beta este módulo está en construcción. Usaremos primero
+            los modelos base de video (como CogVideoX) y más adelante podrás
+            combinarlo con BodySync para aplicar movimiento corporal avanzado.
           </p>
         </div>
+      </div>
+
+      {/* Resultado de video */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text-white">Resultado de video</h2>
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              className="h-full w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <p>
+              Aquí verás el clip generado una vez que el job de video se
+              complete.
+            </p>
+          )}
+        </div>
+        {videoUrl && (
+          <p className="mt-3 text-[11px] text-neutral-400">
+            Puedes hacer clic derecho sobre el video para guardarlo o usar las
+            opciones nativas del navegador.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1241,7 +1601,7 @@ function XmasPhotoPanel() {
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
               placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
             <p className="mt-1 text-[11px] text-neutral-400">
               Este texto ayuda a la IA a adaptar mejor el fondo y los detalles
@@ -1397,7 +1757,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Video (próximamente)
+              Video desde prompt
             </button>
             <button
               type="button"
@@ -1410,7 +1770,6 @@ function DashboardView() {
             >
               Biblioteca
             </button>
-            {/* ARREGLADO: botón morado también para Foto Navideña IA en móvil */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
@@ -1451,7 +1810,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Generar video desde prompt (próximamente)
+              Generar video desde prompt
             </button>
             <button
               type="button"
@@ -1464,7 +1823,6 @@ function DashboardView() {
             >
               Biblioteca
             </button>
-            {/* ARREGLADO: botón morado también para Foto Navideña IA en sidebar */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
@@ -1486,13 +1844,14 @@ function DashboardView() {
               </h1>
               <p className="mt-1 text-xs text-neutral-400">
                 Genera imágenes, guarda tu historial en la biblioteca y prueba
-                los módulos especiales como Foto Navideña IA, todo desde tu
-                cuenta conectada al pipeline real en RunPod.
+                los módulos especiales como Foto Navideña IA y el nuevo
+                generador de video desde prompt, todo desde tu cuenta conectada
+                al pipeline real en RunPod.
               </p>
             </div>
 
             {appViewMode === "generator" && <CreatorPanel />}
-            {appViewMode === "video" && <VideoPlaceholderPanel />}
+            {appViewMode === "video" && <VideoPanel />}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "xmas" && <XmasPhotoPanel />}
           </div>
@@ -1767,31 +2126,34 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Showcase BodySync */}
         <section className="mt-12">
           <h2 className="text-sm font-semibold text-white mb-2">
-            Preparándonos para BodySync · Movimiento corporal IA
+            BodySync v1 · Movimiento corporal para imagen (y futuro video)
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
-            Esta imagen fue generada con nuestro modelo de pruebas BodySync,
-            pensado para aplicar poses y movimiento corporal realista a tus
-            personajes IA. Muy pronto podrás combinar IsabelaOS Studio con
-            BodySync para crear escenas completas en movimiento.
+            Esta imagen fue generada con nuestro modelo de pruebas BodySync v1,
+            pensado para aplicar poses y movimiento corporal más natural a tus
+            personajes IA dentro del módulo de imagen. BodySync se basa en una
+            firma de movimiento propia (Motion Signature) que más adelante
+            podrá reutilizarse también en video, para que un mismo estilo de
+            movimiento se vea igual en imágenes y clips animados.
           </p>
 
           <ul className="mt-3 max-w-2xl list-disc list-inside text-[11px] text-neutral-400">
             <li>
-              Diseñado para creadores que necesitan coreografías y poses
-              naturales sin horas de animación manual.
+              Hoy se utiliza como guía de poses y actitud en imágenes
+              generadas con IsabelaOS Studio.
             </li>
             <li>
-              Ideal para videos cortos, reels y escenas cinemáticas con
-              personajes IA consistentes.
+              Estamos empezando a desarrollar su integración con el módulo de
+              video, para que puedas aplicar BodySync a clips de 5–10 segundos
+              generados desde texto.
             </li>
             <li>
-              Integración directa con el motor de imágenes y video de
-              IsabelaOS Studio.
+              Diseñado para creadores que necesitan movimiento consistente y
+              cinematográfico sin animación manual cuadro por cuadro.
             </li>
           </ul>
 
-          {/* ARREGLADO: centrar imagen de BodySync */}
+          {/* Imagen BodySync centrada */}
           <div className="mt-6 flex justify-center">
             <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
               <img
@@ -1821,7 +2183,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </li>
             <li>
               Acceso anticipado a nuevos módulos avanzados que se vayan
-              liberando durante la beta.
+              liberando durante la beta, incluyendo funciones de video.
             </li>
           </ul>
 
