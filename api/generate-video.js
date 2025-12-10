@@ -1,17 +1,18 @@
-// /api/generate-video.js
+// pages/api/generate-video.js
 
 export default async function handler(req, res) {
   console.log("📩 /api/generate-video recibido:", req.method, req.body);
 
+  // Solo aceptamos POST
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Método no permitido" });
+  }
+
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ ok: false, error: "Método no permitido" });
-    }
+    const workerBase = process.env.VIDEO_WORKER_URL;
+    console.log("🔧 VIDEO_WORKER_URL =", workerBase);
 
-    const baseUrl = process.env.VIDEO_WORKER_URL;
-    console.log("🔧 VIDEO_WORKER_URL =", baseUrl);
-
-    if (!baseUrl) {
+    if (!workerBase) {
       console.log("❌ ERROR: Falta VIDEO_WORKER_URL en variables de entorno");
       return res.status(500).json({
         ok: false,
@@ -19,32 +20,30 @@ export default async function handler(req, res) {
       });
     }
 
-    // Nos aseguramos de NO duplicar barras y agregar /api/video
-    const workerUrl = `${baseUrl.replace(/\/$/, "")}/api/video`;
-    console.log("🌐 Enviando solicitud al worker de RunPod:", workerUrl);
+    // Construimos la URL completa hacia FastAPI dentro del pod
+    const url = workerBase.endsWith("/")
+      ? `${workerBase}api/video`
+      : `${workerBase}/api/video`;
 
-    // El cuerpo que llega desde el frontend trae prompt, aspectRatio, etc.
-    // FastAPI solo usa `prompt` (y opcionalmente `seed`), el resto lo ignora.
-    const response = await fetch(workerUrl, {
+    console.log("🌐 Enviando solicitud al pod de RunPod:", url);
+
+    // Mandamos todo el body tal cual (prompt, negative, aspectRatio, etc.)
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: req.body.prompt,
-        seed: req.body.seed || null,
-      }),
+      body: JSON.stringify(req.body),
     });
 
-    console.log("📥 Respuesta del worker:", response.status);
+    console.log("📥 Status del pod:", response.status);
 
     const data = await response.json().catch((e) => {
-      console.log("⚠️ Error al parsear JSON del worker:", e);
+      console.log("⚠️ Error al parsear JSON del pod:", e);
       return null;
     });
 
-    console.log("📦 Contenido devuelto por worker:", data);
+    console.log("📦 Contenido devuelto por el pod:", data);
 
-    // Esperamos algo como:
-    // { status: "ok", filename: "COG5B_API_....mp4", url: "/output/archivo.mp4" }
+    // FastAPI devolverá: { status: "ok" | "error", filename, url }
     if (!response.ok || !data || data.status !== "ok") {
       return res.status(500).json({
         ok: false,
@@ -53,12 +52,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Proxy limpio hacia el frontend
+    // Enviamos a la web una respuesta simple con la URL del video
     return res.status(200).json({
       ok: true,
       filename: data.filename,
       videoUrl: data.url,
-      raw: data,
     });
   } catch (err) {
     console.log("💥 ERROR EN /api/generate-video:", err);
