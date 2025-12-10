@@ -1,61 +1,60 @@
 export default async function handler(req, res) {
+  console.log("📩 /api/generate-video recibido:", req.method, req.body);
+
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ ok: false, error: "Método no permitido" });
     }
 
-    const {
-      prompt,
-      negative_prompt,
-      aspect_ratio,
-      duration,
-      quality,
-      optimized_prompt,
-      optimized_negative
-    } = req.body;
-
     const workerUrl = process.env.VIDEO_WORKER_URL;
 
+    console.log("🔧 VIDEO_WORKER_URL =", workerUrl);
+
     if (!workerUrl) {
+      console.log("❌ ERROR: Falta VIDEO_WORKER_URL en variables de entorno");
       return res.status(500).json({
         ok: false,
-        error: "Falta VIDEO_WORKER_URL en variables de entorno"
+        error: "VIDEO_WORKER_URL no está configurado en Vercel"
       });
     }
+
+    console.log("🌐 Enviando solicitud al worker de RunPod...");
 
     const response = await fetch(workerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        negative_prompt,
-        aspect_ratio,
-        duration,
-        quality,
-        optimized_prompt,
-        optimized_negative
-      })
+      body: JSON.stringify(req.body)
     });
 
-    const data = await response.json();
+    console.log("📥 Respuesta del worker:", response.status);
 
-    if (!response.ok) {
+    const data = await response.json().catch((e) => {
+      console.log("⚠️ Error al parsear JSON:", e);
+      return null;
+    });
+
+    console.log("📦 Contenido devuelto por worker:", data);
+
+    if (!response.ok || !data) {
       return res.status(500).json({
         ok: false,
-        error: data.error || "Error en worker de video"
+        error: "El worker devolvió un error",
+        detalles: data
       });
     }
 
     return res.status(200).json({
       ok: true,
-      jobId: data.jobId
+      jobId: data.jobId,
+      raw: data
     });
 
   } catch (err) {
-    console.error("Error en generate-video:", err);
+    console.log("💥 ERROR EN generate-video.js:", err);
     return res.status(500).json({
       ok: false,
-      error: "Error inesperado en /api/generate-video"
+      error: "Error inesperado en /api/generate-video",
+      detalles: String(err)
     });
   }
 }
