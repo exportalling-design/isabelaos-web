@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/autosleep", "schedule": "*/1 * * * *" }
+  ]
+}
