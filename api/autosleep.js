@@ -3,30 +3,29 @@
 // IsabelaOS Studio - AutoSleep (Vercel Cron)
 //
 // Qué hace:
-// 1) Lee pod_state (id=1) en Supabase.
-// 2) Calcula minutos de inactividad desde last_used_at.
-// 3) Si supera el umbral (POD_IDLE_MINUTES):
-//    - Llama a RunPod API para STOP del pod (NO terminate).
-//    - Actualiza pod_state.status = STOPPED.
+// 1) Lee pod_state.last_used_at en Supabase
+// 2) Si el pod lleva X minutos sin uso:
+//    - Hace STOP del pod (NO terminate, para no borrar)
+//    - Actualiza pod_state.status = "STOPPED"
+//
+// Requisitos:
+// - Env Vars en Vercel: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// - Env Vars en Vercel: RUNPOD_API_KEY
+// - En Supabase: tabla pod_state con row id=1 y campo pod_id
+// - En Supabase: pod_state.pod_id debe tener el ID real (ej jjepg9cgioqlea)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
 
-// =====================
-// ENV (Vercel)
-// =====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
 
-// Umbral de inactividad en minutos (recomendado 10-15)
+// Minutos sin uso antes de dormir
 const IDLE_MINUTES = Number(process.env.POD_IDLE_MINUTES || 10);
 
 const POD_STATE_TABLE = "pod_state";
-
-// RunPod GraphQL endpoint (estable)
-const RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql";
 
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
@@ -34,116 +33,58 @@ function sbAdmin() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-/**
- * RunPod GraphQL helper
- * - RunPod usa GraphQL para operaciones sobre Pods
- * - Probamos 2 estilos de auth para ser tolerantes:
- *   1) Authorization: Bearer <key>
- *   2) X-API-KEY: <key>
- */
-async function runpodGraphQL(query, variables) {
+function runpodHeaders() {
   if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
-
-  // intento 1: Bearer
-  let resp = await fetch(RUNPOD_GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${RUNPOD_API_KEY}`,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  // si no funciona, intento 2: X-API-KEY
-  if (resp.status === 401 || resp.status === 403) {
-    resp = await fetch(RUNPOD_GRAPHQL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-KEY": RUNPOD_API_KEY,
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-  }
-
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(`RunPod GraphQL HTTP ${resp.status}: ${JSON.stringify(json)}`);
-  }
-  if (json.errors?.length) {
-    throw new Error(`RunPod GraphQL errors: ${JSON.stringify(json.errors)}`);
-  }
-  return json.data;
+  return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
 }
 
-/**
- * STOP pod (NO terminate)
- * - STOP conserva tu volumen/archivos (persisten).
- * - TERMINATE borraría el pod completo.
- */
-async function runpodStopPod(pod_id) {
-  const mutation = `
-    mutation StopPod($podId: String!) {
-      podStop(podId: $podId)
-    }
-  `;
+async function runpodStopPod(podId) {
+  // STOP (no terminate)
+  // Doc: POST https://rest.runpod.io/v1/pods/{podId}/stop 
+  const url = `https://rest.runpod.io/v1/pods/${podId}/stop`;
 
-  // Nota: algunos esquemas usan podId tipo ID/String.
-  // Si tu cuenta devuelve error por tipo, me pegas el error y lo ajustamos.
-  const data = await runpodGraphQL(mutation, { podId: pod_id });
-  return data;
+  const r = await fetch(url, { method: "POST", headers: runpodHeaders() });
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`RunPod STOP failed (${r.status}): ${t}`);
+  }
+
+  return true;
 }
 
 export default async function handler(req, res) {
   try {
     const sb = sbAdmin();
 
-    // 1) leer estado del pod
     const { data: state, error } = await sb.from(POD_STATE_TABLE).select("*").eq("id", 1).single();
     if (error) throw error;
 
-    const last = state.last_used_at ? new Date(state.last_used_at) : null;
-    const now = new Date();
-
-    // Si no hay registro de uso, no apagues nada
-    if (!last) {
-      return res.status(200).json({ ok: true, action: "noop", reason: "no last_used_at" });
+    // Si no hay pod_id, no podemos apagar por API
+    if (!state?.pod_id) {
+      return res.json({ ok: true, action: "noop", reason: "pod_state.pod_id vacío" });
     }
 
+    // Si nunca se usó, no apagues
+    if (!state.last_used_at) {
+      return res.json({ ok: true, action: "noop", reason: "no last_used_at" });
+    }
+
+    const last = new Date(state.last_used_at);
+    const now = new Date();
     const idleMinutes = (now.getTime() - last.getTime()) / 60000;
 
-    // Si no hay pod_id, estamos en modo manual (solo RP_ENDPOINT) → no se puede parar por API
-    if (!state.pod_id) {
-      return res.status(200).json({
-        ok: true,
-        action: "noop",
-        reason: "no pod_id in pod_state (agrega RUNPOD_POD_ID en Vercel o guarda pod_id en Supabase)",
-        idleMinutes,
-      });
-    }
-
-    // Si ya está detenido, no hagas nada
-    if (state.status === "STOPPED") {
-      return res.status(200).json({ ok: true, action: "noop", reason: "already STOPPED", idleMinutes });
-    }
-
-    // 2) si no ha pasado el umbral, no apagues
     if (idleMinutes < IDLE_MINUTES) {
-      return res.status(200).json({ ok: true, action: "noop", idleMinutes });
+      return res.json({ ok: true, action: "noop", idleMinutes });
     }
 
-    // 3) STOP por inactividad
+    // Apaga por inactividad
     await runpodStopPod(state.pod_id);
 
-    // 4) marcar STOPPED en Supabase
-    const { error: updErr } = await sb
-      .from(POD_STATE_TABLE)
-      .update({ status: "STOPPED" })
-      .eq("id", 1);
+    // Marca estado STOPPED
+    await sb.from(POD_STATE_TABLE).update({ status: "STOPPED" }).eq("id", 1);
 
-    if (updErr) throw updErr;
-
-    return res.status(200).json({ ok: true, action: "stopped", idleMinutes });
+    return res.json({ ok: true, action: "stopped", idleMinutes });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
