@@ -1,5 +1,8 @@
 {
   "crons": [
-    { "path": "/api/autosleep", "schedule": "*/1 * * * *" }
+    {
+      "path": "/api/pod_autosleep",
+      "schedule": "*/1 * * * *"
+    }
   ]
 }
