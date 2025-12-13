@@ -25,10 +25,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Worker URL pública del pod (proxy), ejemplo:
-// https://xxxxxx-8888.proxy.runpod.net
+// https://xxxxxx-8000.proxy.runpod.net  <-- OJO: debe ser el PUERTO del worker, no Jupyter 8888
 const RP_ENDPOINT = process.env.RP_ENDPOINT;
 
-// Pod ID de RunPod (tu ejemplo: "jjepg9cgioqlea") para poder START/STOP
+// Pod ID de RunPod (ej: "jjepg9cgioqlea") para poder START/STOP
 const RUNPOD_POD_ID = process.env.RUNPOD_POD_ID || null;
 
 // API Key de RunPod (Bearer token)
@@ -48,7 +48,8 @@ const LOCK_SECONDS = 90;
 // =====================
 // Start polling settings
 // =====================
-const READY_TIMEOUT_MS = 180000; // 3 min
+// Importante: 3 minutos suele ser poco. Subimos a 10 min para evitar falsos timeouts.
+const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 const POLL_MS = 3000;
 
 // =====================
@@ -65,6 +66,51 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function setPodState(sb, patch) {
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
+}
+
+// ============================================================
+// waitForWorkerReady
+// - El pod puede estar RUNNING pero tu API dentro todavía NO está lista.
+// - Esta función espera a que el worker responda antes de proxyear.
+// - Intenta /health y si no existe, intenta /api/video como ping.
+// ============================================================
+async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
+  const start = Date.now();
+
+  // Normalizamos base sin doble slash al final
+  const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
+
+  // Endpoints de prueba (en orden)
+  const candidates = [
+    `${base}/health`,      // ideal si lo implementas
+    `${base}/api/health`,  // alternativa común
+    `${base}/api/video`,   // ping directo (puede fallar si solo acepta POST, pero igual nos sirve para ver si está vivo)
+  ];
+
+  while (Date.now() - start < maxMs) {
+    for (const url of candidates) {
+      try {
+        // Usamos GET; si tu /api/video solo acepta POST, puede devolver 405 y eso AUN así indica que el server está vivo.
+        const r = await fetch(url, { method: "GET" });
+
+        // Si responde 200 -> listo
+        if (r.ok) return true;
+
+        // Si responde 405 (Method Not Allowed) -> también es señal de que el worker está arriba (solo no acepta GET)
+        if (r.status === 405) return true;
+
+        // Si responde 401/403 -> también indica que está vivo, solo protegido (si fuera el caso)
+        if (r.status === 401 || r.status === 403) return true;
+      } catch (e) {
+        // Si falla, seguimos intentando
+      }
+    }
+
+    // Esperamos un poco y reintentamos
+    await sleep(2500);
+  }
+
+  throw new Error("Worker not ready: no respondió a health/ping a tiempo (revisa RP_ENDPOINT y el puerto del worker)");
 }
 
 // =====================
@@ -116,12 +162,6 @@ async function waitForUnlock(sb) {
 
 // ============================================================
 // RUNPOD REST HELPERS
-// Docs: STOP endpoint confirmado:
-// POST https://rest.runpod.io/v1/pods/{podId}/stop 
-//
-// Para START/RESUME, RunPod tiene endpoint “Start or resume a Pod” en el mismo
-// API Reference. En la práctica algunos entornos usan /start y otros /resume.
-// Para no romper nada, intentamos ambos.
 // ============================================================
 
 function runpodHeaders() {
@@ -130,7 +170,7 @@ function runpodHeaders() {
 }
 
 async function runpodGetPod(podId) {
-  // GET Find a Pod by ID (misma base REST)
+  // GET Find a Pod by ID
   const url = `https://rest.runpod.io/v1/pods/${podId}`;
   const r = await fetch(url, { headers: runpodHeaders() });
 
@@ -166,9 +206,6 @@ async function waitUntilRunning(podId) {
 
   while (Date.now() - start < READY_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
-
-    // Nota: RunPod retorna varios campos; lo más común es status.
-    // Si tu JSON trae otro nombre (ej: desiredStatus), lo ajustamos luego.
     const status = (pod?.status || "").toUpperCase();
 
     if (status === "RUNNING") return pod;
@@ -176,13 +213,14 @@ async function waitUntilRunning(podId) {
     await sleep(POLL_MS);
   }
 
-  throw new Error("Timeout: el pod no llegó a RUNNING en 3 min");
+  throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
 }
 
 // =====================
 // ensurePodRunning
-// - Si no tienes RUNPOD_POD_ID/RUNPOD_API_KEY, se queda en modo “manual”
+// - Si no tienes RUNPOD_POD_ID/RUNPOD_API_KEY, modo “manual”
 // - Si sí los tienes, puede ENCENDER el pod si estaba STOPPED
+// - Luego espera a que el WORKER esté listo (no solo RUNNING)
 // =====================
 async function ensurePodRunning(sb) {
   // 1) Lock global
@@ -205,12 +243,12 @@ async function ensurePodRunning(sb) {
     last_used_at: new Date().toISOString(),
   });
 
-  // 4) Si tenemos pod_id + api_key, intentamos asegurar RUNNING de verdad
+  // 4) Si tenemos pod_id + api_key, aseguramos RUNNING real
   if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
     const pod = await runpodGetPod(RUNPOD_POD_ID);
     const status = (pod?.status || "").toUpperCase();
 
-    // Si está STOPPED (o no RUNNING), intentamos encender
+    // Si no está RUNNING, encendemos
     if (status !== "RUNNING") {
       await setPodState(sb, { status: "STARTING" });
 
@@ -225,9 +263,12 @@ async function ensurePodRunning(sb) {
       await setPodState(sb, { status: "RUNNING" });
     }
   } else {
-    // Modo manual: asumimos que el pod ya está encendido si RP_ENDPOINT responde
+    // Modo manual: marcamos RUNNING (pero igual haremos health-check abajo)
     await setPodState(sb, { status: "RUNNING" });
   }
+
+  // 5) CLAVE: esperar a que el WORKER responda (no solo pod RUNNING)
+  await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000); // 5 min para “warm up” del servicio
 
   return RP_ENDPOINT;
 }
@@ -243,23 +284,25 @@ export default async function handler(req, res) {
   try {
     const sb = sbAdmin();
 
-    // 1) Asegura pod RUNNING (real si hay pod_id + api_key)
+    // 1) Asegura pod RUNNING + worker listo
     const workerBase = await ensurePodRunning(sb);
 
-    // 2) Proxy al worker
+    // 2) Construye URL final del worker
     const url = workerBase.endsWith("/")
       ? `${workerBase}api/video`
       : `${workerBase}/api/video`;
 
+    // 3) Proxy al worker (POST real para generar video)
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req.body),
     });
 
+    // 4) Leemos respuesta
     const data = await r.json().catch(() => ({}));
 
-    // 3) last_used_at para autosleep
+    // 5) last_used_at para autosleep
     await setPodState(sb, { last_used_at: new Date().toISOString() });
 
     return res.status(r.status).json(data);
