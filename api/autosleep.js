@@ -1,3 +1,7 @@
+if (process.env.AUTOSLEEP_ENABLED === "false") {
+  return res.status(200).json({ ok: true, skipped: "autosleep disabled" });
+}
+
 // /api/autosleep.js
 // ============================================================
 // IsabelaOS Studio - AutoSleep (Vercel Cron)
