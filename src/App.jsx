@@ -292,9 +292,7 @@ function AuthModal({ open, onClose }) {
  * Contiene la lógica principal de límites, optimización y conexión a RunPod.
  */
 function GenerateImageFromPromptPanel({ isDemo = false, onAuthRequired }) {
-  // Lógica de estado y autenticación... (código omitido por brevedad, no hay cambios funcionales)
   // [START CreatorPanel Logic]
-
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && user;
@@ -309,10 +307,7 @@ function GenerateImageFromPromptPanel({ isDemo = false, onAuthRequired }) {
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  // NUEVO: toggle para automatizar el prompt con OpenAI
   const [autoPrompt, setAutoPrompt] = useState(false);
-
-  // NUEVO: almacenamos el prompt optimizado por separado
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
 
@@ -738,7 +733,6 @@ function GenerateImageFromPromptPanel({ isDemo = false, onAuthRequired }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
-            {/* Negative optimizado (Texto debajo del textarea) */}
             {autoPrompt && optimizedNegative && (
               <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
                 <span className="font-semibold">Negative optimizado:</span>{" "}
@@ -1352,32 +1346,25 @@ function ImageToVideoPanel() {
     window.open(videoUrl, "_blank");
   };
 
+  // Replicando la distribución y el diseño de la Imagen 1 del Dashboard.
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Configuración de Imagen a Video */}
+      {/* Controles de Input (Izquierda) */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text.white">
-          Imagen a Video (BodySync Motion)
+          Generate Video from Image
         </h2>
-        <p className="mt-1 text-xs text-neutral-400">
-          Usa una foto estática como base y aplica un movimiento corporal realista
-          generado por IA (BodySync Motion Signature v1). Convierte fotos de
-          personajes IA o modelos reales en clips animados.
-        </p>
 
         <div className="mt-4 space-y-4 text-sm">
-          {/* Subir Foto */}
+          {/* Subir Foto / Opción para subir varios videos e imagenes */}
           <div>
-            <p className="text-xs text-neutral-300">
-              1. Sube tu foto base (JPG/PNG) - Una o Varias
-            </p>
-            {/* Opción para subir varios videos e imagenes (mantener la estructura de subida de archivo) */}
+            <label className="text-neutral-300">Upload Your Image</label>
             <button
               type="button"
               onClick={handlePickFile}
-              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300"
+              className="mt-2 flex h-20 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300"
             >
-              {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
+              {dataUrl ? "Change Image" : "Click to Upload (Supports multiple files)"}
             </button>
             <input
               id={fileInputId}
@@ -1385,7 +1372,7 @@ function ImageToVideoPanel() {
               accept="image/*"
               className="hidden"
               onChange={handleFileChange}
-              multiple // Permite subir varios archivos (aunque la lógica solo usa el primero)
+              multiple // Opción para subir varios archivos
             />
             {/* Previsualización de la foto */}
             {dataUrl && (
@@ -1401,30 +1388,15 @@ function ImageToVideoPanel() {
 
           {/* Prompt de Movimiento */}
           <div>
-            <p className="text-xs text-neutral-300">
-              2. Describe el movimiento (Motion Prompt)
-            </p>
+            <label className="text-neutral-300">Enter Your Motion Prompt</label>
             <textarea
               rows={3}
               value={motionPrompt}
               onChange={(e) => setMotionPrompt(e.target.value)}
-              placeholder="Ejemplo: 'Caminando lentamente hacia la cámara', 'Giro elegante en 360 grados'."
+              placeholder="e.g., 'Confident runway walk towards the camera, cinematic, soft lighting'"
               className="mt-2 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <p className="mt-1 text-[11px] text-neutral-400">
-              Este prompt define el movimiento que BodySync aplicará a la persona en la foto.
-            </p>
           </div>
-
-          {/* Display de Estado */}
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual:{" "}
-            {statusText || "Listo para aplicar movimiento con BodySync."}
-          </div>
-
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
 
           {/* Botón Generar */}
           <button
@@ -1433,15 +1405,15 @@ function ImageToVideoPanel() {
             disabled={status === "IN_QUEUE" || status === "GENERATING" || !pureB64 || !user}
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
           >
-            {status === "GENERATING" ? "Generando movimiento..." : "Generar Video con BodySync"}
+            {status === "GENERATING" ? "Generating Video..." : "Generate Video with BodySync"}
           </button>
         </div>
       </div>
 
-      {/* Vista previa del video resultado */}
+      {/* Vista previa del video resultado (Derecha) */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado del Video</h2>
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+        <h2 className="text-lg font-semibold text.white">Video Preview</h2>
+        <div className="mt-4 flex h-[350px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400 border border-cyan-400/50"> 
           {videoUrl ? (
             <video
               src={videoUrl}
@@ -1449,9 +1421,22 @@ function ImageToVideoPanel() {
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>El video con movimiento BodySync aparecerá aquí.</p>
+            <p>Video result will appear here.</p>
           )}
         </div>
+
+        {/* Galería de Ejemplos (Abajo del Video Player) */}
+        <div className="mt-4">
+            <h3 className="text-sm font-semibold text-neutral-300 mb-2">Generate Video from Image</h3>
+            <div className="grid grid-cols-4 gap-2">
+                {/* Ejemplos de la galería (debe usar sus propias imágenes en /public/gallery/) */}
+                <img src="/gallery/fairy_grandma.jpg" alt="Example 1" className="w-full h-auto rounded-md object-cover border border-white/10" />
+                <img src="/gallery/fairy_makeup.jpg" alt="Example 2" className="w-full h-auto rounded-md object-cover border border-white/10" />
+                <img src="/gallery/fairy_redhead.jpg" alt="Example 3" className="w-full h-auto rounded-md object-cover border border-white/10" />
+                <img src="/gallery/city_street.jpg" alt="Example 4" className="w-full h-auto rounded-md object-cover border border-white/10" />
+            </div>
+        </div>
+
         {videoUrl && (
           <button
             type="button"
@@ -1943,8 +1928,8 @@ function XmasPhotoPanel() {
  */
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
-  // NUEVO: Añadir 'image-to-video' al estado inicial
-  const [appViewMode, setAppViewMode] = useState("generator");
+  // Se ha ajustado el estado inicial para que coincida con el menú lateral de la imagen.
+  const [appViewMode, setAppViewMode] = useState("image-to-video"); // Iniciar en "Generate Video from Image" como en la imagen de referencia.
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
@@ -1980,6 +1965,7 @@ function DashboardView() {
           </div>
 
           <div className="flex items-center gap-3 text-xs">
+            {/* ... Elementos del header ... */}
             <span className="hidden sm:inline text-neutral-300">
               {user?.email} {isAdmin && "· admin"}
             </span>
@@ -2000,14 +1986,12 @@ function DashboardView() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Navegación móvil */}
+        {/* Navegación móvil (Mantiene la funcionalidad del menú) */}
         <div className="mb-4 md:hidden">
           <p className="text-[11px] font-semibold text-neutral-300 mb-2">
             Navegación
           </p>
           <div className="flex flex-wrap gap-2 text-xs">
-            {/* Botones de navegación móvil */}
-            {/* Imagen desde prompt */}
             <button
               type="button"
               onClick={() => setAppViewMode("generator")}
@@ -2017,21 +2001,8 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Imagen desde prompt
+              Generate Image from Prompts
             </button>
-            {/* Video desde prompt */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Video desde prompt
-            </button>
-            {/* Imagen a Video (NUEVO) */}
             <button
               type="button"
               onClick={() => setAppViewMode("image-to-video")}
@@ -2041,21 +2012,8 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Imagen a Video (BodySync)
+              Generate Video from Image
             </button>
-            {/* Biblioteca */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-            {/* Foto Navideña IA */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
@@ -2065,54 +2023,30 @@ function DashboardView() {
                   : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text.white/90"
               }`}
             >
-              🎄 Foto Navideña IA
+              Generate Christmas Photos
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("library")}
+              className={`rounded-2xl px-3 py-1.5 ${
+                appViewMode === "library"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Library
             </button>
           </div>
         </div>
 
         <section className="flex gap-6">
-          {/* Sidebar */}
+          {/* Sidebar (Menú lateral izquierdo replicando la IMAGEN 1 del Dashboard) */}
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
             <p className="text-[11px] font-semibold text-neutral-300 mb-3">
-              Navegación
+              Módulos
             </p>
-            {/* Imagen desde prompt */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Generar imagen desde prompt
-            </button>
-            {/* Video desde prompt */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Generar video desde prompt
-            </button>
-            {/* Imagen a Video (NUEVO) */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("image-to-video")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "image-to-video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Imagen a Video (BodySync)
-            </button>
-            {/* Biblioteca */}
+            
+            {/* Opción 1: Library */}
             <button
               type="button"
               onClick={() => setAppViewMode("library")}
@@ -2122,40 +2056,77 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Biblioteca
+              Library
             </button>
-            {/* Foto Navideña IA (Premium) */}
+            
+            <p className="text-[11px] font-semibold text-neutral-300 mb-3 mt-4">
+              Herramientas de IA
+            </p>
+
+            {/* Opción 2: Generate Image from Prompts (Antiguo 'generator') */}
+            <button
+              type="button"
+              onClick={() => setAppViewMode("generator")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "generator"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Generate Image from Prompts
+            </button>
+
+            {/* Opción 3: Generate Video from Image (BodySync) */}
+            <button
+              type="button"
+              onClick={() => setAppViewMode("image-to-video")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "image-to-video"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Generate Video from Image
+            </button>
+
+            {/* Opción 4: Generate Christmas Photos (Premium) */}
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
-              className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "xmas"
                   ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text.white"
                   : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text.white/90"
               }`}
             >
-              🎄 Foto Navideña IA (Premium)
+              Generate Christmas Photos
+            </button>
+            
+            <p className="text-[11px] font-semibold text-neutral-300 mb-3 mt-4">
+              Ayuda
+            </p>
+            {/* Opción 5: Support (Asumo que es la misma que Contacto) */}
+            <button
+              type="button"
+              onClick={handleContact}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left text-neutral-200 hover:bg-white/10`}
+            >
+              Support
             </button>
           </aside>
 
           {/* Contenido principal */}
           <div className="flex-1 space-y-6">
-            <div>
-              <h1 className="text-xl font-semibold text.white">
-                Panel del creador
-              </h1>
-              <p className="mt-1 text-xs text-neutral-400">
-                Genera imágenes, guarda tu historial en la biblioteca y prueba
-                los módulos especiales como Foto Navideña IA y el nuevo
-                generador de video desde prompt, todo desde tu cuenta conectada
-                al pipeline real en RunPod.
-              </p>
-            </div>
+            {/* Título de la página, se puede omitir para el diseño full-screen como en la imagen */}
+            {/* <div>
+              <h1 className="text-xl font-semibold text.white">Panel del creador</h1>
+              <p className="mt-1 text-xs text-neutral-400">...</p>
+            </div> */}
 
             {/* Renderizado de Paneles basado en appViewMode */}
             {appViewMode === "generator" && <GenerateImageFromPromptPanel />}
             {appViewMode === "video" && <GenerateVideoFromPromptPanel />}
-            {appViewMode === "image-to-video" && <ImageToVideoPanel />} {/* NUEVO PANEL */}
+            {appViewMode === "image-to-video" && <ImageToVideoPanel />} 
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "xmas" && <XmasPhotoPanel />}
           </div>
@@ -2209,8 +2180,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   return (
     <div
       className="min-h-screen w-full text.white"
-      // Aplicar los colores neón de fondo (gradientes)
       style={{
+        // Fondos de gradiente neón como en la imagen
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
       }}
@@ -2232,16 +2203,21 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
           </div>
 
-          {/* Menú Superior (Asumiendo que Accede a secciones de la Landing) */}
+          {/* Menú Superior replicando la Imagen 3 de la Landing */}
           <div className="flex items-center gap-4 text-xs">
-            <a href="#video-modules" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Módulos</a>
+            <a href="#video-modules" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Modules</a>
             <a href="#pricing" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Pricing</a>
-            <a href="#contacto" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Contacto</a>
+            <a href="#contacto" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Contact</a>
             <button
               onClick={onOpenAuth}
               className="rounded-xl border border.white/20 px-4 py-1.5 text-xs text.white hover:bg.white/10"
             >
-              Iniciar sesión / Registrarse
+              Sign In / Register
+            </button>
+            <button
+                className="text-white hover:text-cyan-400"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             </button>
           </div>
         </div>
@@ -2249,10 +2225,10 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
         
-        {/* NUEVO: SECCIÓN PRINCIPAL (Recrea el diseño de la Imagen 1 con texto/imagen juntos) */}
-        <section id="hero-main" className="grid gap-10 lg:grid-cols-[1fr_1.5fr] items-center">
+        {/* RECREACIÓN DEL HERO (Imagen 3) */}
+        <section id="hero-main" className="grid gap-10 lg:grid-cols-2 items-center">
             
-            {/* Columna 1: Texto principal y Botón */}
+            {/* Columna 1: Texto principal y Botón (Izquierda en la imagen) */}
             <div>
                 <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
                     IsabelaOS Studio:
@@ -2277,60 +2253,56 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 </button>
             </div>
 
-            {/* Columna 2: Imagen Ficticia de Fondo Neón (replicando el diseño) */}
+            {/* Columna 2: Imagen grande de fondo (Derecha en la imagen) */}
             <div className="relative h-full w-full">
                 {/* Gráfico Neón y Imagen Grande de Fondo (como en el diseño) */}
-                <div className="absolute inset-0 pointer-events-none">
-                    {/* Líneas Neón (Simulación de los gráficos traseros) */}
-                    <div className="absolute top-0 left-1/4 h-full w-px bg-cyan-500/20 shadow-[0_0_20px_rgba(0,255,255,0.5)] transform -translate-x-1/2" />
-                    <div className="absolute top-1/4 right-0 h-px w-full bg-fuchsia-500/20 shadow-[0_0_20px_rgba(255,0,255,0.5)]" />
-                    <div className="absolute bottom-0 right-1/4 h-full w-px bg-cyan-500/20 shadow-[0_0_20px_rgba(0,255,255,0.5)] transform translate-x-1/2" />
-                </div>
+                <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+                
+                {/* Imagen del Bosque y Ciudad (Referencia de la Imagen 3) */}
                 <img
-                    src="/gallery/img_main_hero.png" // Usar una imagen de alta calidad que ilustre el concepto
-                    alt="Stunning AI Images in Seconds"
+                    src="/gallery/main_hero_scene.jpg" // Debe ser la imagen que ilustra el concepto (Bosque/Ciudad Neón)
+                    alt="AI Generated Scene"
                     className="w-full rounded-2xl object-cover relative z-10 shadow-xl border border-white/10"
                 />
             </div>
         </section>
-
-        {/* NUEVO: SECCIÓN IMAGE-TO-VIDEO (REPLICA DISTRIBUCIÓN DE LA IMAGEN 1) */}
+        
+        {/* RECREACIÓN: SECCIÓN IMAGE-TO-VIDEO (REPLICA DISTRIBUCIÓN DE LA IMAGEN 3) */}
         <section id="video-modules" className="mt-12 rounded-3xl border border-white/10 bg-black/50 p-6 shadow-xl shadow-violet-500/10">
             
-            {/* Título y Subtítulo de Image-to-Video */}
+            {/* Título de Image-to-Video */}
             <h2 className="text-xl font-semibold text.white mb-4">
               ⭐ Image-to-Video: Bring Your Art to Life
             </h2>
             
-            {/* Contenedor de la Secuencia de Transformación (3 Columnas) */}
-            <div className="grid gap-6 md:grid-cols-[1fr_0.1fr_1fr_0.1fr_1fr] items-center">
+            {/* Contenedor de la Secuencia de Transformación (5 Columnas) */}
+            <div className="grid gap-6 md:grid-cols-5 items-center">
                 
-                {/* 1. Foto Estática / Input */}
+                {/* 1. Foto Estática / Input (3a726542.jpg) */}
                 <div className="flex flex-col items-center text-center">
-                    <img src="/gallery/img1.png?v=2" alt="Foto Base" className="w-full max-w-[150px] h-auto rounded-xl object-cover border border-white/10" />
-                    <p className="mt-2 text-[10px] text-neutral-300">1. Base Static Image (BODY)</p>
+                    <img src="/gallery/face_static.jpg" alt="Foto Base" className="w-full max-w-[150px] h-auto rounded-xl object-cover border border-white/10" />
+                    <p className="mt-2 text-[10px] text-neutral-300">1. Face Static Image (BODY)</p>
                     <p className="text-[9px] text-neutral-500">Based on prompt or uploaded static image.</p>
                 </div>
 
-                {/* Flecha Neón (Gráfico 1) */}
+                {/* Flecha Neón 1 */}
                 <div className="flex flex-col items-center text-center text-cyan-400">
                     <span className="text-3xl font-bold">→</span>
                 </div>
                 
-                {/* 2. Aplicación del Modelo / WAN V2.2 */}
+                {/* 2. AI Motion (WAN V2.2) */}
                 <div className="flex flex-col items-center text-center">
-                    <div className="w-full max-w-[150px] h-auto rounded-xl border border-fuchsia-400 shadow-lg shadow-fuchsia-500/20 p-2">
-                        <p className="text-xs text-fuchsia-200 font-semibold">AI Motion (WAN V2.2)</p>
-                        <p className="text-[10px] text-neutral-400 mt-1">Our exclusive WAN model, fine-tuned to create fluid, realistic motion from a static image.</p>
-                    </div>
+                    <img src="/gallery/face_mid_transform.jpg" alt="Transformación" className="w-full max-w-[150px] h-auto rounded-xl object-cover border border-white/10" />
+                    <p className="mt-2 text-[10px] text-fuchsia-200 font-semibold">AI Motion (WAN V2.2)</p>
+                    <p className="text-[9px] text-neutral-400">Our exclusive WAN model, fine-tuned to create fluid, realistic motion from a static image.</p>
                 </div>
                 
-                {/* Flecha Neón (Gráfico 2) */}
+                {/* Flecha Neón 2 */}
                 <div className="flex flex-col items-center text-center text-cyan-400">
                     <span className="text-3xl font-bold">→</span>
                 </div>
 
-                {/* 3. Resultado Final (Video Placeholder) */}
+                {/* 3. Resultado Final (Video) */}
                 <div className="flex flex-col items-center text-center">
                     <div className="w-full max-w-[150px] h-[150px] rounded-xl bg-black/70 border border-cyan-400 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
                         {/* Placeholder de Video con el icono de Play */}
@@ -2341,61 +2313,26 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 </div>
             </div>
 
-            {/* Subsección: Video-to-Video Clips */}
+            {/* Subsección: Video-to-Video Clips (Galería de abajo) */}
             <div className="mt-10 border-t border-white/5 pt-6">
                 <h3 className="text-lg font-semibold text.white mb-4">
                   Video-to-Video: Transform Existing Clips
                 </h3>
                 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <img src="/gallery/img2.png?v=2" alt="Video Clip 1" className="w-full h-auto rounded-xl object-cover border border-white/10" />
-                    <img src="/gallery/img3.png?v=2" alt="Video Clip 2" className="w-full h-auto rounded-xl object-cover border border-white/10" />
-                    <img src="/gallery/img4.png?v=2" alt="Video Clip 3" className="w-full h-auto rounded-xl object-cover border border-white/10" />
+                    <img src="/gallery/woman_walking.jpg" alt="Video Clip 1" className="w-full h-auto rounded-xl object-cover border border-white/10" />
+                    <img src="/gallery/old_man_fire.jpg" alt="Video Clip 2" className="w-full h-auto rounded-xl object-cover border border-white/10" />
+                    <img src="/gallery/street_scene.jpg" alt="Video Clip 3" className="w-full h-auto rounded-xl object-cover border border-white/10" />
                     <div className="rounded-xl border border-white/10 bg-black/60 p-3 flex items-center justify-center">
                         <p className="text-xs text-neutral-400">MÁS CLIPS...</p>
                     </div>
                 </div>
+                
+                <p className="mt-4 text-xs text-neutral-300">Rowanda Datacada</p>
             </div>
         </section>
 
-
-        {/* Showcase BodySync (Reubicado y simplificado) */}
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-            <div className="rounded-3xl border border.white/10 bg-black/50 p-5 text-xs text-neutral-300">
-                <h2 className="text-sm font-semibold text.white mb-2">
-                  BodySync · Movimiento corporal IA
-                </h2>
-                <p className="text-[11px] text-neutral-300 max-w-2xl">
-                  Estas imágenes fueron generadas con nuestro prototipo BodySync,
-                  pensado para describir poses y movimiento corporal realista mediante
-                  una “firma de movimiento” (Motion Signature). Muy pronto podrás
-                  combinar IsabelaOS Studio con BodySync para crear escenas completas
-                  en video con movimiento natural.
-                </p>
-
-                <ul className="mt-3 max-w-2xl list-disc list-inside text-[11px] text-neutral-400">
-                  <li>
-                    Diseñado para creadores que necesitan coreografías y poses
-                    naturales sin horas de animación manual.
-                  </li>
-                  <li>
-                    Ideal para videos cortos, reels y escenas cinemáticas con
-                    personajes IA consistentes.
-                  </li>
-                </ul>
-            </div>
-
-            {/* Imagen BodySync a la par del texto, reducido */}
-            <div className="flex justify-center items-center">
-                <div className="max-w-sm w-full rounded-3xl border border.white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
-                    <img
-                      src="/gallery/bodysync_showcase.png"
-                      alt="Ejemplo generado con BodySync"
-                      className="w-full rounded-2xl object-cover"
-                    />
-                </div>
-            </div>
-        </section>
+        {/* ... El resto de secciones (Navidad, Pricing, Contacto) se mantienen abajo ... */}
         
         {/* Sección especial Foto Navideña IA */}
         <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
@@ -2435,31 +2372,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               alt="Ejemplo de familia antes y después con fondo navideño"
               className="w-full rounded-2xl object-cover"
             />
-          </div>
-        </section>
-
-        {/* Vista previa del panel (Se mantiene) */}
-        <section className="mt-12">
-          {/* Línea separadora con gradiente */}
-          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text.white mb-4">
-            Flujo de trabajo simple y potente
-          </h2>
-          <div className="rounded-3xl border border.white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text.white">
-              Vista previa del panel del creador
-            </h3>
-            <p className="mt-2 text-[11px] text-neutral-400">
-              Interfaz simple para escribir un prompt, ajustar resolución y ver
-              el resultado generado por el motor conectado a RunPod.
-            </p>
-            <div className="mt-4 rounded-2xl border border.white/10 overflow-hidden bg-black/60">
-              <img
-                src="/preview/panel.png"
-                alt="Vista previa del panel de isabelaOs Studio"
-                className="w-full object-cover"
-              />
-            </div>
           </div>
         </section>
 
@@ -2644,8 +2556,7 @@ export default function App() {
         <AuthModal open={showAuthModal} onClose={closeAuth} />
       </>
     );
-  );
-}
+  }
 
   return (
     <>
