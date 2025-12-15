@@ -2170,6 +2170,7 @@ function DashboardView() {
 // ---------------------------------------------------------
 /**
  * Vista de la landing page para usuarios no logueados.
+ * REFACTORIZADA para replicar el diseño de la imagen enviada.
  */
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
@@ -2208,8 +2209,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   return (
     <div
       className="min-h-screen w-full text.white"
+      // Aplicar los colores neón de fondo (gradientes)
       style={{
-        // Fondos de gradiente neón como en la imagen
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
       }}
@@ -2231,13 +2232,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => scrollToId("contacto")}
-              className="hidden sm:inline rounded-xl border border.white/20 px-4 py-1.5 text-xs text.white hover:bg.white/10"
-            >
-              Contacto
-            </button>
+          {/* Menú Superior (Asumiendo que Accede a secciones de la Landing) */}
+          <div className="flex items-center gap-4 text-xs">
+            <a href="#video-modules" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Módulos</a>
+            <a href="#pricing" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Pricing</a>
+            <a href="#contacto" className="text-neutral-300 hover:text-cyan-400 hidden sm:inline">Contacto</a>
             <button
               onClick={onOpenAuth}
               className="rounded-xl border border.white/20 px-4 py-1.5 text-xs text.white hover:bg.white/10"
@@ -2249,42 +2248,105 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Sección de Video a Video (similar al diseño de la Imagen 1) */}
-        <section className="rounded-3xl border border-white/10 bg-black/50 p-6 shadow-xl shadow-violet-500/10">
-            <h2 className="text-xl font-semibold text.white mb-4">
-              ✨ Video-to-Video: Transform Existing Clips
-            </h2>
-            {/* Estructura 3 columnas para la secuencia de Image-to-Video */}
-            <div className="grid gap-6 md:grid-cols-3 items-center">
+        
+        {/* NUEVO: SECCIÓN PRINCIPAL (Recrea el diseño de la Imagen 1 con texto/imagen juntos) */}
+        <section id="hero-main" className="grid gap-10 lg:grid-cols-[1fr_1.5fr] items-center">
+            
+            {/* Columna 1: Texto principal y Botón */}
+            <div>
+                <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
+                    IsabelaOS Studio:
+                    <span className="block">Unleash Your Imagination.</span>
+                    <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+                        Stunning AI Images in Seconds.
+                    </span>
+                </h1>
                 
-                {/* Columna 1: Imagen Estática / Foto Base */}
+                <p className="mt-4 max-w-xl text-sm text-neutral-300">
+                    IsabelaOS Studio es el primer sistema de generación visual con IA
+                    desarrollado desde Guatemala para creadores, estudios y agencias
+                    de modelos virtuales. Escribe un prompt y obtén imágenes con
+                    calidad de estudio en segundos.
+                </p>
+
+                <button
+                    onClick={onStartDemo}
+                    className="mt-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text.white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                >
+                    Generate Now
+                </button>
+            </div>
+
+            {/* Columna 2: Imagen Ficticia de Fondo Neón (replicando el diseño) */}
+            <div className="relative h-full w-full">
+                {/* Gráfico Neón y Imagen Grande de Fondo (como en el diseño) */}
+                <div className="absolute inset-0 pointer-events-none">
+                    {/* Líneas Neón (Simulación de los gráficos traseros) */}
+                    <div className="absolute top-0 left-1/4 h-full w-px bg-cyan-500/20 shadow-[0_0_20px_rgba(0,255,255,0.5)] transform -translate-x-1/2" />
+                    <div className="absolute top-1/4 right-0 h-px w-full bg-fuchsia-500/20 shadow-[0_0_20px_rgba(255,0,255,0.5)]" />
+                    <div className="absolute bottom-0 right-1/4 h-full w-px bg-cyan-500/20 shadow-[0_0_20px_rgba(0,255,255,0.5)] transform translate-x-1/2" />
+                </div>
+                <img
+                    src="/gallery/img_main_hero.png" // Usar una imagen de alta calidad que ilustre el concepto
+                    alt="Stunning AI Images in Seconds"
+                    className="w-full rounded-2xl object-cover relative z-10 shadow-xl border border-white/10"
+                />
+            </div>
+        </section>
+
+        {/* NUEVO: SECCIÓN IMAGE-TO-VIDEO (REPLICA DISTRIBUCIÓN DE LA IMAGEN 1) */}
+        <section id="video-modules" className="mt-12 rounded-3xl border border-white/10 bg-black/50 p-6 shadow-xl shadow-violet-500/10">
+            
+            {/* Título y Subtítulo de Image-to-Video */}
+            <h2 className="text-xl font-semibold text.white mb-4">
+              ⭐ Image-to-Video: Bring Your Art to Life
+            </h2>
+            
+            {/* Contenedor de la Secuencia de Transformación (3 Columnas) */}
+            <div className="grid gap-6 md:grid-cols-[1fr_0.1fr_1fr_0.1fr_1fr] items-center">
+                
+                {/* 1. Foto Estática / Input */}
                 <div className="flex flex-col items-center text-center">
-                    <img src="/gallery/img1.png?v=2" alt="Foto Base" className="w-full max-w-[200px] h-auto rounded-xl object-cover border border-white/10 shadow-lg shadow-cyan-500/20" />
-                    <p className="mt-2 text-xs text-neutral-300">1. Foto Estática Base (BodySync)</p>
+                    <img src="/gallery/img1.png?v=2" alt="Foto Base" className="w-full max-w-[150px] h-auto rounded-xl object-cover border border-white/10" />
+                    <p className="mt-2 text-[10px] text-neutral-300">1. Base Static Image (BODY)</p>
+                    <p className="text-[9px] text-neutral-500">Based on prompt or uploaded static image.</p>
                 </div>
 
                 {/* Flecha Neón (Gráfico 1) */}
                 <div className="flex flex-col items-center text-center text-cyan-400">
-                    <span className="text-4xl font-bold">→</span>
-                    <p className="text-[10px] text-neutral-500 mt-1">APLICAR PROMPT</p>
+                    <span className="text-3xl font-bold">→</span>
                 </div>
                 
-                {/* Columna 2: Aplicación del Modelo / Motion Prompt */}
+                {/* 2. Aplicación del Modelo / WAN V2.2 */}
                 <div className="flex flex-col items-center text-center">
-                    <div className="w-full max-w-[200px] h-auto rounded-xl border border-fuchsia-400 shadow-lg shadow-fuchsia-500/20 p-2">
+                    <div className="w-full max-w-[150px] h-auto rounded-xl border border-fuchsia-400 shadow-lg shadow-fuchsia-500/20 p-2">
                         <p className="text-xs text-fuchsia-200 font-semibold">AI Motion (WAN V2.2)</p>
                         <p className="text-[10px] text-neutral-400 mt-1">Our exclusive WAN model, fine-tuned to create fluid, realistic motion from a static image.</p>
                     </div>
-                    
+                </div>
+                
+                {/* Flecha Neón (Gráfico 2) */}
+                <div className="flex flex-col items-center text-center text-cyan-400">
+                    <span className="text-3xl font-bold">→</span>
+                </div>
+
+                {/* 3. Resultado Final (Video Placeholder) */}
+                <div className="flex flex-col items-center text-center">
+                    <div className="w-full max-w-[150px] h-[150px] rounded-xl bg-black/70 border border-cyan-400 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
+                        {/* Placeholder de Video con el icono de Play */}
+                        <span className="text-cyan-400 text-5xl">▶</span>
+                    </div>
+                    <p className="mt-2 text-[10px] text-neutral-300">Cinematic 720P Video</p>
+                    <p className="text-[9px] text-neutral-500">With smooth, consistent motion.</p>
                 </div>
             </div>
 
-            {/* Separador */}
-            <div className="mt-8 border-t border-white/5 pt-6">
+            {/* Subsección: Video-to-Video Clips */}
+            <div className="mt-10 border-t border-white/5 pt-6">
                 <h3 className="text-lg font-semibold text.white mb-4">
                   Video-to-Video: Transform Existing Clips
                 </h3>
-                {/* Esta es la galería de videos a videos (o clips) que estaba en el fondo de la imagen */}
+                
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <img src="/gallery/img2.png?v=2" alt="Video Clip 1" className="w-full h-auto rounded-xl object-cover border border-white/10" />
                     <img src="/gallery/img3.png?v=2" alt="Video Clip 2" className="w-full h-auto rounded-xl object-cover border border-white/10" />
@@ -2296,93 +2358,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
         </section>
 
-        {/* Hero Principal (Se mueve a debajo del Video-to-Video para replicar la Imagen 1) */}
-        <section className="mt-10 grid gap-10 lg:grid-cols-[1.4fr_1fr]">
-          
-          {/* Columna de Galería (Imagen grande sobre fondo neón) */}
-          <div className="relative order-first lg:order-last">
-            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
-            <h2 className="text-sm font-semibold text.white mb-3">
-              Calidad de estudio · Renderizado con el motor actual
-            </h2>
-            <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
-                {/* Usamos la imagen grande de la Landing */}
-                <img
-                  src="/gallery/img1.png?v=2" 
-                  alt="Imagen generada principal"
-                  className="w-full h-auto object-cover"
-                />
-              </div>
-          </div>
-          
-          {/* Columna de Texto Principal (reubicada) */}
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg.white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
-              <span className="h-1 w-1 rounded-full bg-cyan-300" />
-              <span>Beta privada · Motor de imagen de estudio</span>
-            </p>
-            <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              Genera imágenes fotorrealistas{" "}
-              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                con IA en la nube.
-              </span>
-            </h1>
 
-            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
-
-            <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              IsabelaOS Studio es el primer sistema de generación visual con IA
-              desarrollado desde Guatemala para creadores, estudios y agencias
-              de modelos virtuales. Escribe un prompt y obtén imágenes con
-              calidad de estudio en segundos.
-            </p>
-
-            <p className="mt-3 max-w-xl text-xs text-neutral-400">
-              Durante la beta puedes usar nuestro motor de imágenes y, más
-              adelante, acceder a módulos exclusivos como BodySync (movimiento
-              corporal IA), Script2Film, CineCam y generador de video desde
-              texto. Además, hemos añadido un módulo especial de{" "}
-              <span className="font-semibold text.white">
-                Foto Navideña IA
-              </span>{" "}
-              para transformar una foto real de tu familia en un retrato
-              navideño de estudio con fondo totalmente generado por IA.
-            </p>
-
-            <p className="mt-2 max-w-xl text-xs text-neutral-400">
-              También puedes activar la opción{" "}
-              <span className="font-semibold text.white">
-                “Optimizar mi prompt con IA (OpenAI)”
-              </span>{" "}
-              para que el sistema mejore automáticamente el texto que escribes
-              antes de enviarlo al motor en la nube, tal como funciona en tu
-              versión local.
-            </p>
-
-            <div className="mt-6 flex flex-wrap items-center gap-4">
-              <button
-                onClick={onStartDemo}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text.white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
-              >
-                Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
-              </button>
-              <p className="max-w-xs text-[11px] text-neutral-400">
-                Prueba la calidad del motor antes de crear tu cuenta y
-                desbloquea {DAILY_LIMIT} imágenes diarias registrándote.
-              </p>
-            </div>
-
-            <p className="mt-4 text-xs text-neutral-500">
-              Próximamente: módulos de video y nuestro motor propio de realismo
-              corporal{" "}
-              <span className="font-semibold text.white">BodySync v1</span>.
-            </p>
-          </div>
-
-        </section>
-        
-        {/* Showcase BodySync (Reducido y reubicado) */}
-        <section className="mt-12 grid gap-6 lg:grid-cols-2">
+        {/* Showcase BodySync (Reubicado y simplificado) */}
+        <section className="mt-12 grid gap-6 lg:grid-cols-[1.5fr_1fr]">
             <div className="rounded-3xl border border.white/10 bg-black/50 p-5 text-xs text-neutral-300">
                 <h2 className="text-sm font-semibold text.white mb-2">
                   BodySync · Movimiento corporal IA
@@ -2418,8 +2396,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 </div>
             </div>
         </section>
-        
-        {/* Módulos de Navidad, Plan de Pago y Contacto se mantienen al final... */}
         
         {/* Sección especial Foto Navideña IA */}
         <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
@@ -2488,7 +2464,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         </section>
 
         {/* Plan de pago */}
-        <section className="mt-14 max-w-xl border-t border.white/10 pt-8">
+        <section className="mt-14 max-w-xl border-t border.white/10 pt-8" id="pricing">
           <h2 className="text-sm font-semibold text.white">
             Plan beta para creadores
           </h2>
@@ -2661,14 +2637,15 @@ export default function App() {
     return (
       <>
         <div id="top" className="pt-10">
-          {/* Se usa el antiguo CreatorPanel para mantener la compatibilidad con el modo demo */}
+          {/* Se usa el CreatorPanel (GenerateImageFromPromptPanel) para el modo demo */}
           <GenerateImageFromPromptPanel isDemo={true} onAuthRequired={openAuth} />
         </div>
         <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
         <AuthModal open={showAuthModal} onClose={closeAuth} />
       </>
     );
-  }
+  );
+}
 
   return (
     <>
@@ -2676,4 +2653,4 @@ export default function App() {
       <AuthModal open={showAuthModal} onClose={closeAuth} />
     </>
   );
-  }
+}
