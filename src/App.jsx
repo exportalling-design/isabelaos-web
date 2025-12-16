@@ -110,7 +110,7 @@ function LandingView({ onOpenAuth, onStartDemo, onViewContact }) {
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
                 con IA en la nube.
               </span>
-            </h1>
+            </b>
 
             {/* Barra neón bajo el título */}
             <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
@@ -271,7 +271,6 @@ function LandingView({ onOpenAuth, onStartDemo, onViewContact }) {
               tamaños, listos para tu biblioteca privada.
             </p>
 
-            {/* MODIFICACIÓN DE TAMAÑO: Aumento de altura del contenedor de videos de h-96 a h-['480px'] */}
             <div className="mt-4 grid grid-cols-4 gap-3 h-['480px']">
                 {/* Videos funcionales que se subirán a public (simulados) */}
                 <div className="col-span-2 row-span-2 rounded-2xl border border-white/10 overflow-hidden bg-black/70 grid place-items-center shadow-lg">
@@ -312,7 +311,6 @@ function LandingView({ onOpenAuth, onStartDemo, onViewContact }) {
             </p>
             
             {/* Collage de 9 Imágenes */}
-            {/* MODIFICACIÓN DE TAMAÑO: Aumento de altura de cada imagen de h-24 a h-32 */}
             <div className="mt-4 grid grid-cols-3 gap-2">
                 <div className="h-32 rounded-xl border border-white/10 overflow-hidden bg-black/70">
                     <img src="/gallery/img1.png" alt="img1" className="w-full h-full object-cover"/>
@@ -349,7 +347,7 @@ function LandingView({ onOpenAuth, onStartDemo, onViewContact }) {
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
             <h3 className="text-sm font-semibold text-white">
               Especial Navidad · Foto Navideña IA
-            </b>
+            </h3> {/* <-- CORREGIDO: </b> era </h3> (Error 1/3) */}
             <p className="mt-2 text-[11px] text-neutral-300">
               Sube una foto real tuya o de tu familia y deja que IsabelaOS
               Studio la convierta en un retrato navideño de estudio con fondo,
@@ -432,7 +430,7 @@ function LandingView({ onOpenAuth, onStartDemo, onViewContact }) {
         <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">
             Plan Beta Híbrido: US${PLAN_BASIC_USD}/mes + Créditos JADE
-          </b>
+          </h2> {/* <-- CORREGIDO: </b> era </h2> (Error 2/3) */}
           <p className="mt-2 text-xs text-neutral-300">
             Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día y quieres seguir
             generando sin restricciones, puedes activar el plan ilimitado. Nuestro sistema
@@ -559,7 +557,7 @@ function ContactPage({ onReturn }) {
         <section className="mt-6 max-w-xl mx-auto">
           <h1 className="text-3xl font-semibold text-white">
             Contacto y Soporte
-          </b>
+          </h1> {/* <-- CORREGIDO: </b> era </h1> (Error 3/3) */}
           <p className="mt-2 text-sm text-neutral-400">
             Si tienes dudas o necesitas soporte técnico sobre IsabelaOS Studio,
             llena el formulario o escríbenos directamente a{" "}
