@@ -1,64 +1,47 @@
 // /api/generate-video.js
-// ============================================================
-// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
-//
-// Qué hace este endpoint:
-// 1) Usa un LOCK en Supabase para evitar 2 requests simultáneos que intenten
-//    encender/usar el mismo pod a la vez.
-// 2) Si existe RUNPOD_POD_ID + RUNPOD_API_KEY, puede:
-//    - consultar el estado del pod
-//    - encenderlo (START/RESUME) si está STOPPED
-//    - esperar hasta que esté RUNNING
-// 3) Valida RP_ENDPOINT (URL pública del worker/pod proxy).
-// 4) Guarda/actualiza en Supabase el estado del pod:
-//    - status, worker_url, pod_id, last_used_at
-// 5) Proxy: reenvía el payload al worker (/api/video) y devuelve su respuesta.
-// ============================================================
-
 import { createClient } from "@supabase/supabase-js";
 
 // =====================
-// ENV (Vercel)
+// ENV
 // =====================
-// Supabase (SERVICE ROLE SOLO backend)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Worker URL pública del pod (proxy), ejemplo:
-// https://xxxxxx-8000.proxy.runpod.net  <-- OJO: debe ser el PUERTO del worker, no Jupyter 8888
+// Para validar el JWT del usuario (NO service role)
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+// Worker URL pública del pod (puerto del worker, ej :8000)
 const RP_ENDPOINT = process.env.RP_ENDPOINT;
 
-// Pod ID de RunPod (ej: "jjepg9cgioqlea") para poder START/STOP
+// Pod control (opcional si quieres start/stop)
 const RUNPOD_POD_ID = process.env.RUNPOD_POD_ID || null;
-
-// API Key de RunPod (Bearer token)
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || null;
 
-// =====================
-// Supabase Tables (row id=1)
-// =====================
+// Storage bucket
+const VIDEO_BUCKET = process.env.VIDEO_BUCKET || "videos";
+
+// Supabase tables
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
+const VIDEO_JOBS_TABLE = "video_jobs";
 
-// =====================
 // Lock settings
-// =====================
 const LOCK_SECONDS = 90;
 
-// =====================
 // Start polling settings
-// =====================
-// Importante: 3 minutos suele ser poco. Subimos a 10 min para evitar falsos timeouts.
-const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
+const READY_TIMEOUT_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
 
-// =====================
-// Helpers
-// =====================
 function sbAdmin() {
-  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
-  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (backend only)");
+  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function sbPublic() {
+  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+  if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY (o VITE_SUPABASE_ANON_KEY)");
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -69,54 +52,31 @@ async function setPodState(sb, patch) {
 }
 
 // ============================================================
-// waitForWorkerReady
-// - El pod puede estar RUNNING pero tu API dentro todavía NO está lista.
-// - Esta función espera a que el worker responda antes de proxyear.
-// - Intenta /health y si no existe, intenta /api/video como ping.
+// Worker readiness
 // ============================================================
 async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
   const start = Date.now();
-
-  // Normalizamos base sin doble slash al final
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
 
-  // Endpoints de prueba (en orden)
-  const candidates = [
-    `${base}/health`,      // ideal si lo implementas
-    `${base}/api/health`,  // alternativa común
-    `${base}/api/video`,   // ping directo (puede fallar si solo acepta POST, pero igual nos sirve para ver si está vivo)
-  ];
+  const candidates = [`${base}/health`, `${base}/api/health`, `${base}/api/video`];
 
   while (Date.now() - start < maxMs) {
     for (const url of candidates) {
       try {
-        // Usamos GET; si tu /api/video solo acepta POST, puede devolver 405 y eso AUN así indica que el server está vivo.
         const r = await fetch(url, { method: "GET" });
-
-        // Si responde 200 -> listo
         if (r.ok) return true;
-
-        // Si responde 405 (Method Not Allowed) -> también es señal de que el worker está arriba (solo no acepta GET)
         if (r.status === 405) return true;
-
-        // Si responde 401/403 -> también indica que está vivo, solo protegido (si fuera el caso)
         if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {
-        // Si falla, seguimos intentando
-      }
+      } catch {}
     }
-
-    // Esperamos un poco y reintentamos
     await sleep(2500);
   }
-
-  throw new Error("Worker not ready: no respondió a health/ping a tiempo (revisa RP_ENDPOINT y el puerto del worker)");
+  throw new Error("Worker not ready: no respondió a tiempo");
 }
 
-// =====================
-// SUPABASE LOCK
-// Evita colisiones: 2 requests no deben encender/usar el pod a la vez
-// =====================
+// ============================================================
+// Supabase lock
+// ============================================================
 async function acquireLock(sb) {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
@@ -130,18 +90,9 @@ async function acquireLock(sb) {
   if (readErr) throw new Error("No existe pod_lock id=1 (crea row en Supabase)");
 
   const current = row.locked_until ? new Date(row.locked_until) : null;
+  if (current && current > now) return { ok: false, locked_until: row.locked_until };
 
-  // Si el lock sigue activo, no lo podemos tomar
-  if (current && current > now) {
-    return { ok: false, locked_until: row.locked_until };
-  }
-
-  // Tomar lock
-  const { error: updErr } = await sb
-    .from(POD_LOCK_TABLE)
-    .update({ locked_until: lockedUntil })
-    .eq("id", 1);
-
+  const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
   if (updErr) return { ok: false, locked_until: row.locked_until };
 
   return { ok: true, locked_until: lockedUntil };
@@ -161,151 +112,226 @@ async function waitForUnlock(sb) {
 }
 
 // ============================================================
-// RUNPOD REST HELPERS
+// RunPod REST helpers (opcional)
 // ============================================================
-
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY");
   return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
 }
 
 async function runpodGetPod(podId) {
-  // GET Find a Pod by ID
   const url = `https://rest.runpod.io/v1/pods/${podId}`;
   const r = await fetch(url, { headers: runpodHeaders() });
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`RunPod GET pod failed (${r.status}): ${t}`);
-  }
+  if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${await r.text().catch(() => "")}`);
   return await r.json();
 }
 
 async function runpodStartOrResumePod(podId) {
-  // Intentamos /start y /resume (según versión del API)
   const candidates = [
     `https://rest.runpod.io/v1/pods/${podId}/start`,
     `https://rest.runpod.io/v1/pods/${podId}/resume`,
   ];
-
   let lastErr = null;
 
   for (const url of candidates) {
     const r = await fetch(url, { method: "POST", headers: runpodHeaders() });
     if (r.ok) return true;
-
-    const t = await r.text().catch(() => "");
-    lastErr = new Error(`RunPod start/resume failed (${r.status}) at ${url}: ${t}`);
+    lastErr = new Error(`RunPod start/resume failed (${r.status}) at ${url}: ${await r.text().catch(() => "")}`);
   }
-
   throw lastErr || new Error("RunPod start/resume failed");
 }
 
 async function waitUntilRunning(podId) {
   const start = Date.now();
-
   while (Date.now() - start < READY_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
     const status = (pod?.status || "").toUpperCase();
-
     if (status === "RUNNING") return pod;
-
     await sleep(POLL_MS);
   }
-
-  throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
+  throw new Error("Timeout: el pod no llegó a RUNNING");
 }
 
-// =====================
-// ensurePodRunning
-// - Si no tienes RUNPOD_POD_ID/RUNPOD_API_KEY, modo “manual”
-// - Si sí los tienes, puede ENCENDER el pod si estaba STOPPED
-// - Luego espera a que el WORKER esté listo (no solo RUNNING)
-// =====================
 async function ensurePodRunning(sb) {
-  // 1) Lock global
   const got = await acquireLock(sb);
   if (!got.ok) {
     await waitForUnlock(sb);
     return await ensurePodRunning(sb);
   }
 
-  // 2) Validación RP_ENDPOINT (necesario para proxyear)
   if (!RP_ENDPOINT) {
     await setPodState(sb, { status: "ERROR" });
-    throw new Error("Falta RP_ENDPOINT en Vercel (URL pública del pod/worker)");
+    throw new Error("Falta RP_ENDPOINT (URL pública del worker)");
   }
 
-  // 3) Guardamos estado base (observabilidad)
   await setPodState(sb, {
     worker_url: RP_ENDPOINT,
     pod_id: RUNPOD_POD_ID,
     last_used_at: new Date().toISOString(),
   });
 
-  // 4) Si tenemos pod_id + api_key, aseguramos RUNNING real
   if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
     const pod = await runpodGetPod(RUNPOD_POD_ID);
     const status = (pod?.status || "").toUpperCase();
 
-    // Si no está RUNNING, encendemos
     if (status !== "RUNNING") {
       await setPodState(sb, { status: "STARTING" });
-
       await runpodStartOrResumePod(RUNPOD_POD_ID);
       await waitUntilRunning(RUNPOD_POD_ID);
-
-      await setPodState(sb, {
-        status: "RUNNING",
-        last_used_at: new Date().toISOString(),
-      });
+      await setPodState(sb, { status: "RUNNING", last_used_at: new Date().toISOString() });
     } else {
       await setPodState(sb, { status: "RUNNING" });
     }
   } else {
-    // Modo manual: marcamos RUNNING (pero igual haremos health-check abajo)
     await setPodState(sb, { status: "RUNNING" });
   }
 
-  // 5) CLAVE: esperar a que el WORKER responda (no solo pod RUNNING)
-  await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000); // 5 min para “warm up” del servicio
-
+  await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000);
   return RP_ENDPOINT;
 }
 
-// =====================
-// API ROUTE
-// =====================
+// ============================================================
+// Auth: extrae usuario del JWT que manda el frontend
+// ============================================================
+async function requireUser(req) {
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  if (!token) throw new Error("Missing Authorization Bearer token");
+
+  const sb = sbPublic();
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data?.user) throw new Error("Invalid token");
+  return data.user;
+}
+
+// ============================================================
+// MAIN API ROUTE
+// ============================================================
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Método no permitido" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
 
   try {
+    const user = await requireUser(req);
     const sb = sbAdmin();
 
-    // 1) Asegura pod RUNNING + worker listo
+    // 1) Crea job en Supabase (QUEUED)
+    const body = req.body || {};
+    const mode = body.mode || "t2v"; // "t2v" o "i2v"
+
+    const {
+      prompt,
+      negative_prompt,
+      width = 1280,
+      height = 704,
+      num_frames = 121,
+      fps = 24,
+      steps = 50,
+      guidance_scale = 5.0,
+      // i2v: la imagen NO se sube al pod como archivo; la mandas como URL/base64 al worker
+      // (lo veremos en el worker)
+      input_image_url = null,
+      input_image_base64 = null,
+    } = body;
+
+    // Path único por usuario/job
+    const safeUser = user.id;
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const storagePath = `${safeUser}/${ts}.mp4`;
+
+    const { data: job, error: jobErr } = await sb
+      .from(VIDEO_JOBS_TABLE)
+      .insert({
+        user_id: user.id,
+        status: "QUEUED",
+        mode,
+        prompt: prompt || null,
+        negative_prompt: negative_prompt || null,
+        width,
+        height,
+        num_frames,
+        fps,
+        steps,
+        guidance_scale,
+        storage_bucket: VIDEO_BUCKET,
+        storage_path: storagePath,
+      })
+      .select("*")
+      .single();
+
+    if (jobErr) throw jobErr;
+
+    // 2) Asegura pod RUNNING + worker listo
     const workerBase = await ensurePodRunning(sb);
 
-    // 2) Construye URL final del worker
-    const url = workerBase.endsWith("/")
-      ? `${workerBase}api/video`
-      : `${workerBase}/api/video`;
+    // 3) Signed Upload URL para que el POD suba el MP4 directo a Supabase Storage
+    // Nota: En supabase-js v2: createSignedUploadUrl(path)
+    const { data: up, error: upErr } = await sb.storage
+      .from(VIDEO_BUCKET)
+      .createSignedUploadUrl(storagePath);
 
-    // 3) Proxy al worker (POST real para generar video)
-    const r = await fetch(url, {
+    if (upErr) throw upErr;
+
+    // 4) Mandar job al worker (ASYNC)
+    const workerUrl = (workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase) + "/api/video";
+
+    const payload = {
+      job_id: job.id,
+      mode,
+
+      prompt,
+      negative_prompt,
+      width,
+      height,
+      num_frames,
+      fps,
+      steps,
+      guidance_scale,
+
+      // i2v inputs (uno u otro)
+      input_image_url,
+      input_image_base64,
+
+      // Upload target (signed)
+      upload: {
+        bucket: VIDEO_BUCKET,
+        path: storagePath,
+        signed_upload_url: up.signedUrl,
+        token: up.token, // algunos flows lo usan; pásalo por si tu worker lo necesita
+        content_type: "video/mp4",
+      },
+
+      // Importante: el worker debe:
+      // - generar el mp4 en /tmp o /workspace/tmp
+      // - subirlo a signed_upload_url
+      // - borrar el mp4 local
+      async: true,
+    };
+
+    // Marcamos RUNNING temprano
+    await sb.from(VIDEO_JOBS_TABLE).update({ status: "RUNNING", updated_at: new Date().toISOString() }).eq("id", job.id);
+
+    // Dispara sin bloquear demasiado (igual hacemos fetch; el worker debe responder rápido)
+    const r = await fetch(workerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(payload),
     });
 
-    // 4) Leemos respuesta
-    const data = await r.json().catch(() => ({}));
+    const resp = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      await sb
+        .from(VIDEO_JOBS_TABLE)
+        .update({ status: "ERROR", error: resp?.error || `Worker error ${r.status}`, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
 
-    // 5) last_used_at para autosleep
+      return res.status(500).json({ ok: false, job_id: job.id, error: resp?.error || "Worker error" });
+    }
+
+    // last_used_at para autosleep
     await setPodState(sb, { last_used_at: new Date().toISOString() });
 
-    return res.status(r.status).json(data);
+    // 5) Respuesta inmediata al frontend
+    return res.status(200).json({ ok: true, job_id: job.id });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
