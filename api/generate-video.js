@@ -1,32 +1,29 @@
 // /api/generate-video.js
-// ============================================================
-// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
-//
-// Flujo:
-// 1) Usa un LOCK en Supabase (pod_lock) para evitar requests simultáneos.
-// 2) Asegura estado del pod y worker URL en Supabase (pod_state).
-// 3) (Opcional) Si hay RUNPOD_POD_ID + RUNPOD_API_KEY, intenta START/RESUME y espera RUNNING.
-// 4) Verifica que el worker responda (GET /health o 405 en /api/video).
-// 5) Proxy: reenvía el POST al worker (/api/video) y devuelve su respuesta.
-// ============================================================
-
 import { createClient } from "@supabase/supabase-js";
+
+/**
+ * Este endpoint vive en Vercel y hace 3 cosas:
+ * 1) Usa un LOCK en Supabase para evitar requests simultáneos.
+ * 2) (Opcional) Enciende/espera el pod por RunPod REST si hay POD_ID + API_KEY.
+ * 3) Proxy: reenvía el POST al worker FastAPI en RunPod:  RP_ENDPOINT + /api/video
+ */
 
 // =====================
 // ENV (Vercel)
 // =====================
-// Nota: SUPABASE_URL puede venir como SUPABASE_URL o como VITE_SUPABASE_URL.
-// (El segundo es común si lo dejaste también para frontend; aquí solo lo reutilizamos)
+
+// URL del proyecto Supabase (ej: https://xxxx.supabase.co)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 
-// Service role KEY: SOLO backend. Nunca debe estar expuesta al frontend.
+// Service role key (SOLO backend; nunca en frontend)
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// URL público del worker (puerto 8000) tipo:
-// https://xxxxxx-8000.proxy.runpod.net
+// URL pública del worker (puerto 8000 proxy). EJ:
+// https://8vay2rng2rejch-8000.proxy.runpod.net
+// (IMPORTANTE: SIN /api/video al final)
 const RP_ENDPOINT = process.env.RP_ENDPOINT;
 
-// Opcionales: si quieres encender/apagar pod automático desde Vercel
+// Si quieres auto-start/auto-resume del pod:
 const RUNPOD_POD_ID = process.env.RUNPOD_POD_ID || null;
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || null;
 
@@ -34,10 +31,9 @@ const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || null;
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 
-// Ajustes
-const LOCK_SECONDS = 180;               // tiempo de lock
-const READY_TIMEOUT_MS = 10 * 60 * 1000;// timeout esperando RUNNING
-const POLL_MS = 3000;                   // polling runpod status
+const LOCK_SECONDS = 180;        // lock por 3 min
+const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
+const POLL_MS = 3000;
 
 // =====================
 // Supabase Admin client
@@ -48,13 +44,8 @@ function sbAdmin() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-// helpers
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// =====================
-// Pod State update
-// =====================
-// Espera que exista row id=1 en pod_state
 async function setPodState(sb, patch) {
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
@@ -63,42 +54,42 @@ async function setPodState(sb, patch) {
 // =====================
 // Worker readiness check
 // =====================
-// - Si /health devuelve 200 => listo
-// - Si /api/video devuelve 405 (Method Not Allowed) => listo (significa que existe pero es POST)
-// - Si devuelve 401/403 => listo (existe pero está protegido)
 async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
   const start = Date.now();
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
 
+  // Rutas típicas de FastAPI (seguras para “ping”)
   const candidates = [
-    `${base}/health`,
-    `${base}/api/video`,
+    `${base}/health`,        // si la implementas
+    `${base}/docs`,          // FastAPI Swagger
+    `${base}/openapi.json`,  // FastAPI OpenAPI
+    `${base}/api/video`,     // si devuelve 405 en GET, también sirve
   ];
 
   while (Date.now() - start < maxMs) {
     for (const url of candidates) {
       try {
         const r = await fetch(url, { method: "GET" });
+
+        // 200 OK => listo
         if (r.ok) return true;
+
+        // 405 Method Not Allowed => existe endpoint pero requiere POST => listo
         if (r.status === 405) return true;
+
+        // 401/403 => endpoint protegido pero respondió => listo
         if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {
-        // sigue intentando
-      }
+      } catch (e) {}
     }
     await sleep(2500);
   }
 
-  throw new Error("Worker not ready: no respondió a /health a tiempo (revisa RP_ENDPOINT puerto 8000)");
+  throw new Error("Worker not ready: no respondió a tiempo. Revisa RP_ENDPOINT + puerto 8000.");
 }
 
 // =====================
 // Lock (Supabase)
 // =====================
-// IMPORTANTE:
-// - Debe existir pod_lock con id=1
-// - Este lock es "best-effort". Evita la mayoría de colisiones.
-//   (Si quieres lock 100% atómico, lo hacemos con RPC/SQL; por ahora sirve.)
 async function acquireLock(sb) {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
@@ -114,11 +105,7 @@ async function acquireLock(sb) {
   const current = row.locked_until ? new Date(row.locked_until) : null;
   if (current && current > now) return { ok: false, locked_until: row.locked_until };
 
-  const { error: updErr } = await sb
-    .from(POD_LOCK_TABLE)
-    .update({ locked_until: lockedUntil })
-    .eq("id", 1);
-
+  const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
   if (updErr) return { ok: false, locked_until: row.locked_until };
 
   return { ok: true, locked_until: lockedUntil };
@@ -183,32 +170,27 @@ async function waitUntilRunning(podId) {
   throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
 }
 
-// =====================
-// Ensure pod + worker ready
-// =====================
 async function ensurePodRunning(sb) {
-  // 1) Lock global
+  // lock global para no encender/consultar pod duplicado
   const got = await acquireLock(sb);
   if (!got.ok) {
     await waitForUnlock(sb);
     return await ensurePodRunning(sb);
   }
 
-  // 2) Validar endpoint del worker
   if (!RP_ENDPOINT) {
     await setPodState(sb, { status: "ERROR" });
     throw new Error("Falta RP_ENDPOINT en Vercel (URL pública del worker en puerto 8000)");
   }
 
-  // 3) Guardar estado base
+  // guarda referencia en DB
   await setPodState(sb, {
     worker_url: RP_ENDPOINT,
     pod_id: RUNPOD_POD_ID,
     last_used_at: new Date().toISOString(),
   });
 
-  // 4) Si tengo credenciales RunPod, intento encender
-  //    Si NO, asumo que el pod ya está activo (modo manual)
+  // Si hay Pod ID + API Key => auto-start
   if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
     const pod = await runpodGetPod(RUNPOD_POD_ID);
     const status = (pod?.status || "").toUpperCase();
@@ -222,47 +204,11 @@ async function ensurePodRunning(sb) {
       await setPodState(sb, { status: "RUNNING" });
     }
   } else {
+    // modo manual: asume que el pod ya está encendido
     await setPodState(sb, { status: "RUNNING" });
   }
 
-  // 5) Confirmar que el worker responde
+  // espera a que el worker responda
   await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000);
   return RP_ENDPOINT;
-}
-
-// =====================
-// API route (Vercel)
-// =====================
-export default async function handler(req, res) {
-  // Solo POST
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Método no permitido" });
-  }
-
-  try {
-    const sb = sbAdmin();
-
-    // 1) Asegurar pod + worker listos
-    const workerBase = await ensurePodRunning(sb);
-
-    // 2) Proxy: reenviar el payload tal cual al worker
-    const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
-    const url = `${base}/api/video`;
-
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
-    });
-
-    // 3) Respuesta del worker
-    const data = await r.json().catch(() => ({}));
-
-    // 4) Actualizar last_used_at
-    await setPodState(sb, { last_used_at: new Date().toISOString() });
-
-    return res.status(r.status).json(data);
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
 }
