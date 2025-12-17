@@ -1,42 +1,44 @@
 // /api/generate-video.js
-import { createClient } from "@supabase/supabase-js";
+// ============================================================
+// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
+//
+// Qué hace este endpoint:
+// 1) Usa un LOCK en Supabase para evitar 2 requests simultáneos usando el pod.
+// 2) Valida el endpoint público del worker (VIDEO_RP_ENDPOINT).
+// 3) (Opcional) Si hay POD_ID + API_KEY, intenta START/RESUME el mismo pod.
+// 4) Espera que el worker responda (/health o /api/video).
+// 5) Proxy: reenvía el payload al worker (/api/video) y devuelve su respuesta.
+// ============================================================
 
-/**
- * Este endpoint vive en Vercel y hace 3 cosas:
- * 1) Usa un LOCK en Supabase para evitar requests simultáneos.
- * 2) (Opcional) Enciende/espera el pod por RunPod REST si hay POD_ID + API_KEY.
- * 3) Proxy: reenvía el POST al worker FastAPI en RunPod:  RP_ENDPOINT + /api/video
- */
+import { createClient } from "@supabase/supabase-js";
 
 // =====================
 // ENV (Vercel)
 // =====================
-
-// URL del proyecto Supabase (ej: https://xxxx.supabase.co)
+// ✅ Admin (solo backend): para escribir/leer tablas de lock/state en Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-
-// Service role key (SOLO backend; nunca en frontend)
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// URL pública del worker (puerto 8000 proxy). EJ:
-// https://8vay2rng2rejch-8000.proxy.runpod.net
-// (IMPORTANTE: SIN /api/video al final)
-const RP_ENDPOINT = process.env.RP_ENDPOINT;
+// ✅ VIDEO aislado (NO pisar RP_ENDPOINT de imágenes)
+const RP_ENDPOINT = process.env.VIDEO_RP_ENDPOINT; // ej: https://xxxx-8000.proxy.runpod.net
 
-// Si quieres auto-start/auto-resume del pod:
-const RUNPOD_POD_ID = process.env.RUNPOD_POD_ID || null;
-const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || null;
+// ✅ Opcional: solo si vas a REUSAR el MISMO pod (stop/resume). Si tú "TERMINATE" y creas otro nuevo, esto cambia.
+const RUNPOD_POD_ID = process.env.VIDEO_RUNPOD_POD_ID || null;
+
+// ✅ API Key: si definiste VIDEO_RUNPOD_API_KEY úsala; si no, cae a RUNPOD_API_KEY global si existe.
+const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
 // Tablas en Supabase
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 
-const LOCK_SECONDS = 180;        // lock por 3 min
-const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
+// Timing
+const LOCK_SECONDS = 180;            // lock para evitar colisiones
+const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min esperando pod RUNNING
 const POLL_MS = 3000;
 
 // =====================
-// Supabase Admin client
+// Helpers
 // =====================
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
@@ -47,23 +49,20 @@ function sbAdmin() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function setPodState(sb, patch) {
+  // Requiere que exista row id=1 en pod_state
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
 }
 
-// =====================
-// Worker readiness check
-// =====================
+// Espera que el worker responda en el endpoint público
 async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
   const start = Date.now();
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
 
-  // Rutas típicas de FastAPI (seguras para “ping”)
+  // Candidatos: /health ideal, /api/video puede devolver 405 en GET y eso vale.
   const candidates = [
-    `${base}/health`,        // si la implementas
-    `${base}/docs`,          // FastAPI Swagger
-    `${base}/openapi.json`,  // FastAPI OpenAPI
-    `${base}/api/video`,     // si devuelve 405 en GET, también sirve
+    `${base}/health`,
+    `${base}/api/video`,
   ];
 
   while (Date.now() - start < maxMs) {
@@ -71,20 +70,22 @@ async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
       try {
         const r = await fetch(url, { method: "GET" });
 
-        // 200 OK => listo
+        // OK => listo
         if (r.ok) return true;
 
-        // 405 Method Not Allowed => existe endpoint pero requiere POST => listo
+        // 405 (Method Not Allowed) => significa que existe la ruta y el server está vivo
         if (r.status === 405) return true;
 
-        // 401/403 => endpoint protegido pero respondió => listo
+        // 401/403 también sirve como “está arriba” (si luego proteges)
         if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {}
+      } catch (e) {
+        // ignorar y seguir intentando
+      }
     }
     await sleep(2500);
   }
 
-  throw new Error("Worker not ready: no respondió a tiempo. Revisa RP_ENDPOINT + puerto 8000.");
+  throw new Error("Worker not ready: no respondió a /health o /api/video a tiempo. Revisa VIDEO_RP_ENDPOINT (puerto 8000).");
 }
 
 // =====================
@@ -105,7 +106,11 @@ async function acquireLock(sb) {
   const current = row.locked_until ? new Date(row.locked_until) : null;
   if (current && current > now) return { ok: false, locked_until: row.locked_until };
 
-  const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
+  const { error: updErr } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: lockedUntil })
+    .eq("id", 1);
+
   if (updErr) return { ok: false, locked_until: row.locked_until };
 
   return { ok: true, locked_until: lockedUntil };
@@ -125,10 +130,10 @@ async function waitForUnlock(sb) {
 }
 
 // =====================
-// RunPod REST helpers
+// RunPod REST helpers (solo si REUSAS el mismo pod)
 // =====================
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
   return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
 }
 
@@ -143,6 +148,7 @@ async function runpodGetPod(podId) {
 }
 
 async function runpodStartOrResumePod(podId) {
+  // Algunos pods usan /start, otros /resume según estado/config
   const candidates = [
     `https://rest.runpod.io/v1/pods/${podId}/start`,
     `https://rest.runpod.io/v1/pods/${podId}/resume`,
@@ -170,27 +176,32 @@ async function waitUntilRunning(podId) {
   throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
 }
 
+// =====================
+// Main: asegura worker arriba
+// =====================
 async function ensurePodRunning(sb) {
-  // lock global para no encender/consultar pod duplicado
+  // 1) Lock global
   const got = await acquireLock(sb);
   if (!got.ok) {
     await waitForUnlock(sb);
     return await ensurePodRunning(sb);
   }
 
+  // 2) Debe existir endpoint público
   if (!RP_ENDPOINT) {
     await setPodState(sb, { status: "ERROR" });
-    throw new Error("Falta RP_ENDPOINT en Vercel (URL pública del worker en puerto 8000)");
+    throw new Error("Falta VIDEO_RP_ENDPOINT en Vercel (URL pública del worker en puerto 8000)");
   }
 
-  // guarda referencia en DB
+  // 3) Guarda info en pod_state (audit / debug)
   await setPodState(sb, {
     worker_url: RP_ENDPOINT,
     pod_id: RUNPOD_POD_ID,
     last_used_at: new Date().toISOString(),
   });
 
-  // Si hay Pod ID + API Key => auto-start
+  // 4) Si tenemos POD_ID + API_KEY => intentamos arrancar/reanudar ese MISMO pod
+  //    Si NO tenemos, asumimos que el pod ya está RUNNING y solo probamos worker.
   if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
     const pod = await runpodGetPod(RUNPOD_POD_ID);
     const status = (pod?.status || "").toUpperCase();
@@ -204,11 +215,47 @@ async function ensurePodRunning(sb) {
       await setPodState(sb, { status: "RUNNING" });
     }
   } else {
-    // modo manual: asume que el pod ya está encendido
+    // Sin POD_ID/API => no podemos arrancar nada desde Vercel, solo verificar que está vivo
     await setPodState(sb, { status: "RUNNING" });
   }
 
-  // espera a que el worker responda
+  // 5) Esperar que el worker responda
   await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000);
+
   return RP_ENDPOINT;
+}
+
+// =====================
+// API route
+// =====================
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Método no permitido" });
+  }
+
+  try {
+    const sb = sbAdmin();
+
+    // 1) pod/worker ready
+    const workerBase = await ensurePodRunning(sb);
+
+    // 2) proxy a /api/video del worker
+    const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
+    const url = `${base}/api/video`;
+
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+
+    const data = await r.json().catch(() => ({}));
+
+    // 3) update last_used_at
+    await setPodState(sb, { last_used_at: new Date().toISOString() });
+
+    return res.status(r.status).json(data);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
 }
