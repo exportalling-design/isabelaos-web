@@ -42,6 +42,9 @@ const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspa
 // ✅ Si quieres terminar el pod automáticamente al terminar el job
 const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
+// ✅ Modo “prueba rápida” (para que el mp4 salga rápido y no muera por timeout)
+const VIDEO_FAST_TEST = (process.env.VIDEO_FAST_TEST || "0") === "1";
+
 // Tablas en Supabase
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
@@ -55,13 +58,10 @@ const POLL_MS = 3000;
 const WORKER_READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 const HEALTH_FETCH_TIMEOUT_MS = 8000;
 
-// ✅ Antes: esperar respuesta de video completa (esto causaba 524)
-// const VIDEO_FETCH_TIMEOUT_MS = 12 * 60 * 1000;
+// ✅ Mantengo tu timeout largo (si el video se hace corto, ya no se llega a necesitar tanto)
+const VIDEO_FETCH_TIMEOUT_MS = 12 * 60 * 1000; // 12 min
 
-// ✅ NUEVO: timeout corto SOLO para DISPATCH (enviar job y salir)
-const DISPATCH_TIMEOUT_MS = 20 * 1000; // 20s para que el worker "acepte" el job
-
-// ✅ CAMBIO #2 (solo esto): bajar steps sin tocar frames
+// ✅ Clamp steps (ya lo tenías)
 const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10); // solo steps
 
 // =====================
@@ -351,21 +351,52 @@ export default async function handler(req, res) {
     const payloadRaw =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
-    // ✅ Inyecta user_id requerido por el worker
-    // ✅ Y limita SOLO steps (NO TOCA frames)
+    // ✅ Steps clamp (ya lo tenías)
     const requestedSteps =
       typeof payloadRaw.steps === "number"
         ? payloadRaw.steps
         : (typeof payloadRaw.num_inference_steps === "number" ? payloadRaw.num_inference_steps : null);
 
-    const safeSteps =
-      requestedSteps == null ? MAX_STEPS : Math.min(requestedSteps, MAX_STEPS);
+    const safeSteps = requestedSteps == null ? MAX_STEPS : Math.min(requestedSteps, MAX_STEPS);
 
+    // ==========================================================
+    // ✅ CAMBIO MINIMO REAL: FAST TEST (para que termine rápido)
+    // No asumo nombres exactos: solo clampo si existen.
+    // ==========================================================
     const payload = {
       user_id: payloadRaw.user_id || "web-user",
       ...payloadRaw,
       steps: safeSteps,
     };
+
+    if (VIDEO_FAST_TEST) {
+      // frames
+      if (typeof payload.num_frames === "number") payload.num_frames = Math.min(payload.num_frames, 8);
+      if (typeof payload.frames === "number") payload.frames = Math.min(payload.frames, 8);
+
+      // fps
+      if (typeof payload.fps === "number") payload.fps = Math.min(payload.fps, 8);
+      if (typeof payload.frame_rate === "number") payload.frame_rate = Math.min(payload.frame_rate, 8);
+
+      // duración (segundos)
+      if (typeof payload.duration === "number") payload.duration = Math.min(payload.duration, 2);
+      if (typeof payload.duration_seconds === "number") payload.duration_seconds = Math.min(payload.duration_seconds, 2);
+      if (typeof payload.seconds === "number") payload.seconds = Math.min(payload.seconds, 2);
+
+      // resolución
+      if (typeof payload.width === "number") payload.width = Math.min(payload.width, 384);
+      if (typeof payload.height === "number") payload.height = Math.min(payload.height, 640);
+
+      // si tu worker usa quality / upscale flags
+      if (typeof payload.upscale === "boolean") payload.upscale = false;
+      if (typeof payload.enable_upscale === "boolean") payload.enable_upscale = false;
+      if (typeof payload.quality === "string") payload.quality = "test";
+      if (typeof payload.mode === "string") payload.mode = "test";
+
+      // steps aún más bajos para test (sin romper tu env)
+      payload.steps = Math.min(payload.steps, 8);
+      console.log("[GV] FAST_TEST=1 -> clamp frames/fps/res/seconds/steps");
+    }
 
     console.log("[GV] payload steps=", payload.steps, "MAX_STEPS=", MAX_STEPS);
 
@@ -380,11 +411,6 @@ export default async function handler(req, res) {
     // marca BUSY mientras genera
     await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
 
-    // ============================================================
-    // ✅ CAMBIO MINIMO AQUÍ:
-    // - SOLO DISPATCH (no esperamos mp4)
-    // - evita 524, responde rápido
-    // ============================================================
     const r = await fetchWithTimeout(
       url,
       {
@@ -392,36 +418,56 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       },
-      DISPATCH_TIMEOUT_MS
+      VIDEO_FETCH_TIMEOUT_MS
     );
 
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     console.log("[GV] step=CALL_API_VIDEO_RESPONSE status=", r.status, "ct=", ct);
 
-    // si el worker devolvió error inmediato, lo mostramos
-    if (r.status >= 400) {
-      const t = await r.text().catch(() => "");
-      console.log("[GV] worker_error status=", r.status, "body=", t.slice(0, 800));
-      await setPodState(sb, { status: "ERROR", last_error: `worker ${r.status}` });
-      return res.status(500).json({ ok: false, error: `worker ${r.status}`, podId });
-    }
-
-    // dejamos RUNNING (el render sigue en background)
     await setPodState(sb, { last_used_at: new Date().toISOString(), status: "RUNNING" });
 
-    if (TERMINATE_AFTER_JOB) {
-      console.log("[GV] NOTE: TERMINATE_AFTER_JOB=1 pero en modo DISPATCH no se termina aquí (el render sigue).");
+    // ✅ JSON response + log error 4xx/5xx del worker
+    if (ct.includes("application/json")) {
+      const data = await r.json().catch(() => ({}));
+
+      if (r.status >= 400) {
+        console.log(
+          "[GV] worker_error status=",
+          r.status,
+          "data=",
+          JSON.stringify(data).slice(0, 2000)
+        );
+      }
+
+      if (TERMINATE_AFTER_JOB && podId) {
+        console.log("[GV] step=TERMINATE_BEGIN");
+        await setPodState(sb, { status: "TERMINATING" });
+        await runpodTerminatePod(podId);
+        await setPodState(sb, { status: "TERMINATED", worker_url: null, pod_id: null });
+        console.log("[GV] step=TERMINATE_OK");
+      }
+
+      console.log("[GV] step=DONE_JSON");
+      return res.status(r.status).json(data);
     }
 
-    console.log("[GV] step=DONE_DISPATCH");
-    return res.status(200).json({
-      ok: true,
-      status: "PROCESSING",
-      podId,
-      workerUrl: fresh.workerUrl,
-      steps: payload.steps,
-      note: "No se devuelve mp4 por HTTP (evita 524). El video sigue generándose en el pod.",
-    });
+    // ✅ Binary response (mp4)
+    const ab = await r.arrayBuffer();
+    const buf = Buffer.from(ab);
+
+    res.setHeader("Content-Type", ct || "application/octet-stream");
+    res.setHeader("Content-Length", String(buf.length));
+
+    if (TERMINATE_AFTER_JOB && podId) {
+      console.log("[GV] step=TERMINATE_BEGIN");
+      await setPodState(sb, { status: "TERMINATING" });
+      await runpodTerminatePod(podId);
+      await setPodState(sb, { status: "TERMINATED", worker_url: null, pod_id: null });
+      console.log("[GV] step=TERMINATE_OK");
+    }
+
+    console.log("[GV] step=DONE_BINARY bytes=", buf.length);
+    return res.status(r.status).send(buf);
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] ERROR:", msg);
@@ -436,6 +482,20 @@ export default async function handler(req, res) {
       }
     } catch {}
 
+    try {
+      if (considerTerminateOnError() && podId) {
+        console.log("[GV] step=TERMINATE_ON_ERROR_BEGIN");
+        await runpodTerminatePod(podId);
+        console.log("[GV] step=TERMINATE_ON_ERROR_OK");
+      }
+    } catch (err) {
+      console.error("[GV] terminate on error failed:", String(err));
+    }
+
     return res.status(500).json({ ok: false, error: msg, podId });
   }
+}
+
+function considerTerminateOnError() {
+  return TERMINATE_AFTER_JOB;
 }
