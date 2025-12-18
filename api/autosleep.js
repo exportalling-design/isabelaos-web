@@ -94,3 +94,97 @@ export default async function handler(req, res) {
       .from(POD_STATE_TABLE)
       .select("*")
       .eq("id", 1)
+      .single();
+    if (error) throw error;
+
+    // Si no hay pod_id, no hay nada que terminar
+    if (!state?.pod_id) {
+      return res.json({ ok: true, action: "noop", reason: "pod_state.pod_id vacío" });
+    }
+
+    // Si no hay last_used_at, no tocamos nada
+    if (!state.last_used_at) {
+      return res.json({ ok: true, action: "noop", reason: "no last_used_at" });
+    }
+
+    const last = new Date(state.last_used_at);
+    const now = new Date();
+    const idleMinutes = (now.getTime() - last.getTime()) / 60000;
+
+    // Si aún no está idle
+    if (idleMinutes < IDLE_MINUTES) {
+      return res.json({ ok: true, action: "noop", idleMinutes });
+    }
+
+    // Protección 1: si tu estado de app dice "ocupado", NO terminar
+    if (isBusyStatus(state.status)) {
+      return res.json({
+        ok: true,
+        action: "noop",
+        reason: `busy_by_state:${state.status}`,
+        idleMinutes,
+      });
+    }
+
+    // Protección 2: confirmación en RunPod (si está RUNNING, y tu app no lo marcó busy,
+    // igual podrías estar a punto de llamar al worker. Para ser conservadores, solo terminamos
+    // si NO está RUNNING, o si está RUNNING pero realmente idle según tu marca.
+    let pod;
+    try {
+      pod = await runpodGetPod(state.pod_id);
+    } catch (e) {
+      // Si ya no existe en RunPod, limpiamos estado en Supabase
+      if (Number(e?.status) === 404) {
+        await sb
+          .from(POD_STATE_TABLE)
+          .update({
+            status: "TERMINATED",
+            pod_id: null,
+            worker_url: null,
+          })
+          .eq("id", 1);
+
+        return res.json({ ok: true, action: "cleaned", reason: "pod_not_found_404" });
+      }
+      throw e;
+    }
+
+    const rpStatus = String(pod?.status || "").toUpperCase();
+
+    // Si RunPod dice RUNNING, somos conservadores y NO terminamos
+    // (a menos que tú explícitamente quieras matar RUNNING también).
+    if (rpStatus === "RUNNING") {
+      return res.json({
+        ok: true,
+        action: "noop",
+        reason: `runpod_running:${rpStatus}`,
+        idleMinutes,
+      });
+    }
+
+    // Terminar por inactividad
+    await sb.from(POD_STATE_TABLE).update({ status: "TERMINATING" }).eq("id", 1);
+
+    await runpodTerminatePod(state.pod_id);
+
+    // Limpia estado
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({
+        status: "TERMINATED",
+        pod_id: null,
+        worker_url: null,
+        last_used_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    return res.json({
+      ok: true,
+      action: "terminated",
+      idleMinutes,
+      runpodStatus: rpStatus,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+}
