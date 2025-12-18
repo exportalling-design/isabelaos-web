@@ -55,13 +55,13 @@ const POLL_MS = 3000;
 const WORKER_READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 const HEALTH_FETCH_TIMEOUT_MS = 8000;
 
-// ✅ CAMBIO #1 (solo esto): Más tiempo para esperar respuesta del worker
-// (Wan2.2 puede tardar varios minutos; 60s te lo aborta)
-const VIDEO_FETCH_TIMEOUT_MS = 12 * 60 * 1000; // 12 min
+// ✅ Antes: esperar respuesta de video completa (esto causaba 524)
+// const VIDEO_FETCH_TIMEOUT_MS = 12 * 60 * 1000;
+
+// ✅ NUEVO: timeout corto SOLO para DISPATCH (enviar job y salir)
+const DISPATCH_TIMEOUT_MS = 20 * 1000; // 20s para que el worker "acepte" el job
 
 // ✅ CAMBIO #2 (solo esto): bajar steps sin tocar frames
-// Si el frontend no manda "steps", usamos este.
-// Si manda "steps", lo limitamos a este máximo.
 const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10); // solo steps
 
 // =====================
@@ -364,7 +364,6 @@ export default async function handler(req, res) {
     const payload = {
       user_id: payloadRaw.user_id || "web-user",
       ...payloadRaw,
-      // fuerza la key esperada por tu worker (steps)
       steps: safeSteps,
     };
 
@@ -381,6 +380,11 @@ export default async function handler(req, res) {
     // marca BUSY mientras genera
     await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
 
+    // ============================================================
+    // ✅ CAMBIO MINIMO AQUÍ:
+    // - SOLO DISPATCH (no esperamos mp4)
+    // - evita 524, responde rápido
+    // ============================================================
     const r = await fetchWithTimeout(
       url,
       {
@@ -388,56 +392,36 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       },
-      VIDEO_FETCH_TIMEOUT_MS
+      DISPATCH_TIMEOUT_MS
     );
 
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     console.log("[GV] step=CALL_API_VIDEO_RESPONSE status=", r.status, "ct=", ct);
 
+    // si el worker devolvió error inmediato, lo mostramos
+    if (r.status >= 400) {
+      const t = await r.text().catch(() => "");
+      console.log("[GV] worker_error status=", r.status, "body=", t.slice(0, 800));
+      await setPodState(sb, { status: "ERROR", last_error: `worker ${r.status}` });
+      return res.status(500).json({ ok: false, error: `worker ${r.status}`, podId });
+    }
+
+    // dejamos RUNNING (el render sigue en background)
     await setPodState(sb, { last_used_at: new Date().toISOString(), status: "RUNNING" });
 
-    // ✅ JSON response + log error 4xx/5xx del worker
-    if (ct.includes("application/json")) {
-      const data = await r.json().catch(() => ({}));
-
-      if (r.status >= 400) {
-        console.log(
-          "[GV] worker_error status=",
-          r.status,
-          "data=",
-          JSON.stringify(data).slice(0, 2000)
-        );
-      }
-
-      if (TERMINATE_AFTER_JOB && podId) {
-        console.log("[GV] step=TERMINATE_BEGIN");
-        await setPodState(sb, { status: "TERMINATING" });
-        await runpodTerminatePod(podId);
-        await setPodState(sb, { status: "TERMINATED", worker_url: null, pod_id: null });
-        console.log("[GV] step=TERMINATE_OK");
-      }
-
-      console.log("[GV] step=DONE_JSON");
-      return res.status(r.status).json(data);
+    if (TERMINATE_AFTER_JOB) {
+      console.log("[GV] NOTE: TERMINATE_AFTER_JOB=1 pero en modo DISPATCH no se termina aquí (el render sigue).");
     }
 
-    // ✅ Binary response (mp4)
-    const ab = await r.arrayBuffer();
-    const buf = Buffer.from(ab);
-
-    res.setHeader("Content-Type", ct || "application/octet-stream");
-    res.setHeader("Content-Length", String(buf.length));
-
-    if (TERMINATE_AFTER_JOB && podId) {
-      console.log("[GV] step=TERMINATE_BEGIN");
-      await setPodState(sb, { status: "TERMINATING" });
-      await runpodTerminatePod(podId);
-      await setPodState(sb, { status: "TERMINATED", worker_url: null, pod_id: null });
-      console.log("[GV] step=TERMINATE_OK");
-    }
-
-    console.log("[GV] step=DONE_BINARY bytes=", buf.length);
-    return res.status(r.status).send(buf);
+    console.log("[GV] step=DONE_DISPATCH");
+    return res.status(200).json({
+      ok: true,
+      status: "PROCESSING",
+      podId,
+      workerUrl: fresh.workerUrl,
+      steps: payload.steps,
+      note: "No se devuelve mp4 por HTTP (evita 524). El video sigue generándose en el pod.",
+    });
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] ERROR:", msg);
@@ -452,20 +436,6 @@ export default async function handler(req, res) {
       }
     } catch {}
 
-    try {
-      if (considerTerminateOnError() && podId) {
-        console.log("[GV] step=TERMINATE_ON_ERROR_BEGIN");
-        await runpodTerminatePod(podId);
-        console.log("[GV] step=TERMINATE_ON_ERROR_OK");
-      }
-    } catch (err) {
-      console.error("[GV] terminate on error failed:", String(err));
-    }
-
     return res.status(500).json({ ok: false, error: msg, podId });
   }
-}
-
-function considerTerminateOnError() {
-  return TERMINATE_AFTER_JOB;
 }
