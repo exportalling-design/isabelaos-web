@@ -42,26 +42,27 @@ const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspa
 // ✅ Si quieres terminar el pod automáticamente al terminar el job
 const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
-// ✅ (NUEVO MINIMO) Inyectar user_id si falta (por defecto: true)
-const INJECT_USER_ID = (process.env.INJECT_USER_ID || "1") === "1";
-const FALLBACK_USER_ID = process.env.FALLBACK_USER_ID || "web-user";
-
 // Tablas en Supabase
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 
 // Timing
 const LOCK_SECONDS = 180;
-const READY_TIMEOUT_MS = 12 * 60 * 1000; // 12 min (cold start + descarga + boot)
+const READY_TIMEOUT_MS = 12 * 60 * 1000; // 12 min (cold start + boot)
 const POLL_MS = 3000;
 
 // Worker checks / proxy
-const WORKER_READY_TIMEOUT_MS = 8 * 60 * 1000;
+const WORKER_READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 const HEALTH_FETCH_TIMEOUT_MS = 8000;
 
-// OJO: esto NO es el tiempo real de generación del video.
-// Es solo el tiempo para que /api/video responda ALGO.
-const VIDEO_FETCH_TIMEOUT_MS = 60 * 1000;
+// ✅ CAMBIO #1 (solo esto): Más tiempo para esperar respuesta del worker
+// (Wan2.2 puede tardar varios minutos; 60s te lo aborta)
+const VIDEO_FETCH_TIMEOUT_MS = 12 * 60 * 1000; // 12 min
+
+// ✅ CAMBIO #2 (solo esto): bajar steps sin tocar frames
+// Si el frontend no manda "steps", usamos este.
+// Si manda "steps", lo limitamos a este máximo.
+const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10); // solo steps
 
 // =====================
 // Helpers
@@ -76,7 +77,6 @@ function sbAdmin() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function setPodState(sb, patch) {
-  // ⚠️ No uses columnas que no existan en tu tabla
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
 }
@@ -347,14 +347,28 @@ export default async function handler(req, res) {
     console.log("[GV] step=START");
     sb = sbAdmin();
 
-    // ✅ Normaliza body (a veces Vercel lo entrega como string)
+    // ✅ Normaliza body
     const payloadRaw =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
-    // ✅ Inyecta user_id SOLO si falta y si está habilitado
-    const payload = INJECT_USER_ID
-      ? { user_id: payloadRaw.user_id || FALLBACK_USER_ID, ...payloadRaw }
-      : payloadRaw;
+    // ✅ Inyecta user_id requerido por el worker
+    // ✅ Y limita SOLO steps (NO TOCA frames)
+    const requestedSteps =
+      typeof payloadRaw.steps === "number"
+        ? payloadRaw.steps
+        : (typeof payloadRaw.num_inference_steps === "number" ? payloadRaw.num_inference_steps : null);
+
+    const safeSteps =
+      requestedSteps == null ? MAX_STEPS : Math.min(requestedSteps, MAX_STEPS);
+
+    const payload = {
+      user_id: payloadRaw.user_id || "web-user",
+      ...payloadRaw,
+      // fuerza la key esperada por tu worker (steps)
+      steps: safeSteps,
+    };
+
+    console.log("[GV] payload steps=", payload.steps, "MAX_STEPS=", MAX_STEPS);
 
     // 1) Crea pod nuevo + worker ready
     const fresh = await ensureFreshPod(sb);
@@ -363,6 +377,9 @@ export default async function handler(req, res) {
     // 2) Proxy a /api/video del worker
     const url = `${fresh.workerUrl}/api/video`;
     console.log("[GV] step=CALL_API_VIDEO_BEGIN url=", url);
+
+    // marca BUSY mientras genera
+    await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
 
     const r = await fetchWithTimeout(
       url,
@@ -377,7 +394,7 @@ export default async function handler(req, res) {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     console.log("[GV] step=CALL_API_VIDEO_RESPONSE status=", r.status, "ct=", ct);
 
-    await setPodState(sb, { last_used_at: new Date().toISOString() });
+    await setPodState(sb, { last_used_at: new Date().toISOString(), status: "RUNNING" });
 
     // ✅ JSON response + log error 4xx/5xx del worker
     if (ct.includes("application/json")) {
