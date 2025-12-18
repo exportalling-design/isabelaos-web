@@ -908,13 +908,13 @@ function VideoPanel() {
   };
 
   const handleGenerateVideo = async () => {
-    setError("");
-    setVideoUrl(null);
+  setError("");
+  setVideoUrl(null);
 
-    if (!user) {
-      setError("Debes iniciar sesión para generar video.");
-      return;
-    }
+  if (!user) {
+    setError("Debes iniciar sesión para generar video.");
+    return;
+  }
 
     // 1) Optimizar prompts si está activado
     let promptToUse = prompt;
