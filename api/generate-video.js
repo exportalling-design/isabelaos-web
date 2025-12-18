@@ -2,12 +2,12 @@
 // ============================================================
 // IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
 //
-// FIX REAL: Cloudflare/RunPod proxy corta HTTP largo (524).
-// Solución mínima: DISPARAR JOB async y hacer polling de estado.
+// MODO B: crear pod nuevo por job
+// FIX: Evitar 524 del proxy (Cloudflare/RunPod) => no esperar MP4 por HTTP.
+// Guardar un registro en video_jobs usando columnas existentes.
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
 
 // =====================
 // ENV (Vercel)
@@ -29,28 +29,23 @@ const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspa
 
 const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
-// Config mínima para pruebas rápidas
-const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10);
-const TEST_MIN_STEPS = parseInt(process.env.VIDEO_TEST_MIN_STEPS || "8", 10);
-const TEST_W = parseInt(process.env.VIDEO_TEST_W || "256", 10);
-const TEST_H = parseInt(process.env.VIDEO_TEST_H || "256", 10);
-
-// Tablas Supabase
+// Tablas
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
-const VIDEO_JOBS_TABLE = "video_jobs"; // ← crear esta tabla (ver abajo)
+const VIDEO_JOBS_TABLE = "video_jobs";
 
 // Timing
 const LOCK_SECONDS = 180;
-const READY_TIMEOUT_MS = 12 * 60 * 1000; // 12 min
+const READY_TIMEOUT_MS = 12 * 60 * 1000;
 const POLL_MS = 3000;
 
-// Worker checks
 const WORKER_READY_TIMEOUT_MS = 10 * 60 * 1000;
 const HEALTH_FETCH_TIMEOUT_MS = 8000;
 
-// Para el POST async: no debería tardar
-const DISPATCH_TIMEOUT_MS = 25000;
+// ✅ Modo prueba rápida (mínimo)
+const TEST_MIN_STEPS = parseInt(process.env.VIDEO_TEST_MIN_STEPS || "8", 10);
+const TEST_W = parseInt(process.env.VIDEO_TEST_W || "256", 10);
+const TEST_H = parseInt(process.env.VIDEO_TEST_H || "256", 10);
 
 // =====================
 // Helpers
@@ -63,6 +58,11 @@ function sbAdmin() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function setPodState(sb, patch) {
+  const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
+  if (error) throw error;
+}
 
 function runpodHeaders() {
   if (!RUNPOD_API_KEY)
@@ -83,42 +83,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-function makeJobId() {
-  return crypto.randomBytes(10).toString("hex"); // 20 chars
-}
-
-function normalizeStatus(s) {
-  return String(s || "").toUpperCase();
-}
-
-// =====================
-// Supabase helpers
-// =====================
-async function setPodState(sb, patch) {
-  const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
-  if (error) throw error;
-}
-
-async function createJob(sb, job) {
-  const { error } = await sb.from(VIDEO_JOBS_TABLE).insert(job);
-  if (error) throw error;
-}
-
-async function updateJob(sb, job_id, patch) {
-  const { error } = await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("job_id", job_id);
-  if (error) throw error;
-}
-
-async function getJob(sb, job_id) {
-  const { data, error } = await sb
-    .from(VIDEO_JOBS_TABLE)
-    .select("*")
-    .eq("job_id", job_id)
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 // =====================
 // Worker readiness
 // =====================
@@ -126,25 +90,31 @@ async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
   const start = Date.now();
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
 
-  // Solo health aquí
-  const url = `${base}/health`;
+  const candidates = [`${base}/health`, `${base}/api/video`];
   let lastInfo = "no-attempt";
 
   while (Date.now() - start < maxMs) {
-    try {
-      const r = await fetchWithTimeout(url, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
-      const txt = await r.text().catch(() => "");
-      console.log("[GV] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
-      if (r.ok) return true;
-      lastInfo = `${r.status} ${txt.slice(0, 120)}`;
-    } catch (e) {
-      lastInfo = `ERR ${String(e)}`;
-      console.log("[GV] waitWorker error url=", url, "err=", String(e));
+    for (const url of candidates) {
+      try {
+        const r = await fetchWithTimeout(url, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+        const txt = await r.text().catch(() => "");
+
+        console.log("[GV] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
+
+        if (r.ok) return true;
+        if (r.status === 405) return true;
+        if (r.status === 401 || r.status === 403) return true;
+
+        lastInfo = `${url} -> ${r.status} ${txt.slice(0, 120)}`;
+      } catch (e) {
+        lastInfo = `${url} -> ERR ${String(e)}`;
+        console.log("[GV] waitWorker error url=", url, "err=", String(e));
+      }
     }
     await sleep(2500);
   }
 
-  throw new Error("Worker not ready. Last: " + lastInfo);
+  throw new Error("Worker not ready. Último: " + lastInfo);
 }
 
 // =====================
@@ -179,20 +149,23 @@ async function waitForUnlock(sb) {
   while (true) {
     const { data, error } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
     if (error) throw error;
+
     const until = data.locked_until ? new Date(data.locked_until) : null;
     const now = new Date();
+
     if (!until || until <= now) return true;
     await sleep(1500);
   }
 }
 
 // =====================
-// RunPod REST
+// RunPod: crear pod (modo B)
 // =====================
 async function runpodCreatePodFromTemplate() {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) {
     throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID en Vercel");
   }
+
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) {
     throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID en Vercel");
   }
@@ -212,6 +185,7 @@ async function runpodCreatePodFromTemplate() {
 
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`RunPod create pod failed (${r.status}): ${JSON.stringify(data)}`);
+
   if (!data?.id) throw new Error("RunPod create pod: no devolvió id");
   return data;
 }
@@ -220,8 +194,10 @@ async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
     headers: runpodHeaders(),
   });
+
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${JSON.stringify(data)}`);
+
   return data?.pod || data;
 }
 
@@ -233,31 +209,23 @@ function pickPodStatus(pod) {
     pod?.runtime?.status ??
     pod?.pod?.status ??
     "";
+
   return String(raw || "").toUpperCase();
 }
 
 async function runpodWaitUntilRunning(podId) {
   const start = Date.now();
+
   while (Date.now() - start < READY_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
     const status = pickPodStatus(pod);
     console.log("[GV] waitRunning status=", status || "EMPTY", "podId=", podId);
+
     if (status === "RUNNING" || status === "READY" || status === "ACTIVE") return pod;
     await sleep(POLL_MS);
   }
-  throw new Error("Timeout: el pod no llegó a RUNNING/READY a tiempo");
-}
 
-async function runpodTerminatePod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-    method: "DELETE",
-    headers: runpodHeaders(),
-  });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`RunPod terminate failed (${r.status}): ${t}`);
-  }
-  return true;
+  throw new Error("Timeout: el pod no llegó a RUNNING/READY a tiempo.");
 }
 
 function buildProxyUrl(podId) {
@@ -265,7 +233,23 @@ function buildProxyUrl(podId) {
 }
 
 // =====================
-// Ensure pod & worker
+// Guardar job SIN asumir columnas
+// =====================
+// ✅ No usamos "job_id" porque tu tabla no lo tiene.
+// Insertamos un row y tomamos el "id" que exista (uuid/serial).
+async function createVideoJobRow(sb, row) {
+  const { data, error } = await sb
+    .from(VIDEO_JOBS_TABLE)
+    .insert(row)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data; // incluye id real
+}
+
+// =====================
+// Main: crea pod y asegura worker arriba
 // =====================
 async function ensureFreshPod(sb) {
   console.log("[GV] step=LOCK_BEGIN");
@@ -314,29 +298,14 @@ async function ensureFreshPod(sb) {
 }
 
 // =====================
-// Main handler
+// API route
 // =====================
 export default async function handler(req, res) {
-  // ✅ GET => status
-  if (req.method === "GET") {
-    try {
-      const sb = sbAdmin();
-      const job_id = req.query?.job_id;
-      if (!job_id) return res.status(400).json({ ok: false, error: "missing job_id" });
-      const job = await getJob(sb, job_id);
-      return res.status(200).json({ ok: true, job });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  }
-
-  // ✅ POST => create job
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Método no permitido" });
   }
 
   let sb = null;
-  let podId = null;
 
   try {
     console.log("[GV] step=START");
@@ -345,59 +314,46 @@ export default async function handler(req, res) {
     const payloadRaw =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
-    // -----------------------
-    // CONFIG MINIMA DE PRUEBA
-    // -----------------------
-    const requestedSteps =
-      typeof payloadRaw.steps === "number"
-        ? payloadRaw.steps
-        : (typeof payloadRaw.num_inference_steps === "number" ? payloadRaw.num_inference_steps : null);
-
-    // para pruebas: si no mandan steps, usamos TEST_MIN_STEPS (más rápido)
-    const baseSteps = requestedSteps == null ? TEST_MIN_STEPS : requestedSteps;
-    const safeSteps = Math.min(baseSteps, MAX_STEPS);
-
+    // ✅ Forzar config mínima de prueba
     const payload = {
       user_id: payloadRaw.user_id || "web-user",
       ...payloadRaw,
-      steps: safeSteps,
-
-      // si tu worker soporta width/height, forzamos mínimos si no vienen
+      steps: TEST_MIN_STEPS,
       width: payloadRaw.width || TEST_W,
       height: payloadRaw.height || TEST_H,
-
-      // hint async (si tu worker lo soporta)
-      async: true,
     };
 
-    console.log("[GV] payload steps=", payload.steps, "MAX_STEPS=", MAX_STEPS, "w/h=", payload.width, payload.height);
+    console.log("[GV] payload steps=", payload.steps, "w/h=", payload.width, payload.height);
 
-    // 1) Pod + worker listo
+    // 1) Pod nuevo + worker ready
     const fresh = await ensureFreshPod(sb);
-    podId = fresh.podId;
 
-    // 2) Crear job en Supabase
-    const job_id = makeJobId();
-    const createdAt = new Date().toISOString();
-
-    await createJob(sb, {
-      job_id,
-      status: "QUEUED",
-      pod_id: podId,
+    // 2) Crear registro en video_jobs SIN job_id
+    // Metemos lo básico y agarramos el id real devuelto
+    const jobRow = await createVideoJobRow(sb, {
+      status: "PROCESSING",
+      pod_id: fresh.podId,
       worker_url: fresh.workerUrl,
-      created_at: createdAt,
-      updated_at: createdAt,
-      payload: payload, // jsonb
-      output_path: `/workspace/outputs/${job_id}.mp4`,
-      error: null,
+      payload: payload, // si tu tabla tiene jsonb "payload"
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
 
-    // 3) DISPATCH async (rápido)
+    const realId = jobRow?.id ?? null; // este es tu job real
+
+    console.log("[GV] jobRow id=", realId);
+
+    // 3) DISPATCH (NO esperar MP4)
     const url = `${fresh.workerUrl}/api/video`;
-    console.log("[GV] step=DISPATCH_BEGIN url=", url, "job_id=", job_id);
+    console.log("[GV] step=DISPATCH_BEGIN url=", url);
 
-    const dispatchBody = { ...payload, job_id };
+    // Si tu worker acepta job_id, mandamos uno; si no, da igual.
+    // Mandamos el id real como "job_id" por si el worker lo usa.
+    const dispatchBody = { ...payload, job_id: realId || undefined };
 
+    // No ponemos timeout corto aquí; si tarda el POST, igual puede 524.
+    // La idea es que el worker responda rápido al DISPATCH (202/200).
+    // Si tu worker no responde rápido, el FIX real es endpoint async en worker.
     const r = await fetchWithTimeout(
       url,
       {
@@ -405,43 +361,38 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dispatchBody),
       },
-      DISPATCH_TIMEOUT_MS
+      25000
     );
 
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     const txt = await r.text().catch(() => "");
-    console.log("[GV] step=DISPATCH_RESPONSE status=", r.status, "ct=", ct, "body=", txt.slice(0, 250));
+    console.log("[GV] step=DISPATCH_RESPONSE status=", r.status, "ct=", ct, "body=", txt.slice(0, 200));
 
-    // Si el worker aceptó, marcamos PROCESSING aunque responda 200/202
-    if (r.ok) {
-      await updateJob(sb, job_id, {
-        status: "PROCESSING",
-        updated_at: new Date().toISOString(),
-      });
-    } else {
-      await updateJob(sb, job_id, {
-        status: "ERROR",
-        error: `dispatch_failed_${r.status}: ${txt.slice(0, 500)}`,
-        updated_at: new Date().toISOString(),
-      });
-    }
+    // Actualiza updated_at
+    try {
+      if (realId) {
+        await sb
+          .from(VIDEO_JOBS_TABLE)
+          .update({
+            updated_at: new Date().toISOString(),
+            // si quieres guardar el dispatch_status y tu tabla lo tiene, lo agregamos luego
+          })
+          .eq("id", realId);
+      }
+    } catch {}
 
-    // 4) Responder rápido (sin esperar MP4)
-    console.log("[GV] step=DONE_ASYNC job_id=", job_id);
-
+    console.log("[GV] step=DONE_ASYNC");
     return res.status(200).json({
       ok: true,
       mode: "async",
-      job_id,
-      podId,
+      job_id: realId, // usamos el id real de tu tabla
+      podId: fresh.podId,
       workerUrl: fresh.workerUrl,
-      poll_url: `/api/generate-video?job_id=${job_id}`,
-      output_hint: `/workspace/outputs/${job_id}.mp4`,
-      terminate_after_job: TERMINATE_AFTER_JOB ? 1 : 0,
+      note: "No esperamos MP4 para evitar 524 del proxy. Revisa RunPod/GPU y outputs en volumen.",
     });
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] ERROR:", msg);
-    return res.status(500).json({ ok: false, error: msg, podId });
+    return res.status(500).json({ ok: false, error: msg });
   }
 }
