@@ -29,8 +29,12 @@ const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_AP
 // ✅ Template del pod de VIDEO (OBLIGATORIO en modo B)
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID;
 
-// ✅ Network Volume (opcional, pero en tu caso lo quieres SIEMPRE)
-const VIDEO_NETWORK_VOLUME_ID = process.env.VIDEO_NETWORK_VOLUME_ID || null;
+// ✅ Network Volume (EN TU CASO: SIEMPRE)
+// OJO: aquí estaba el bug: estabas leyendo VIDEO_NETWORK_VOLUME_ID pero tú ya tienes VIDEO_RUNPOD_NETWORK_VOLUME_ID
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
+  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || process.env.VIDEO_NETWORK_VOLUME_ID || null;
+
+// En tu caso debe ser /workspace para que encuentre /workspace/start.sh
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 // ✅ Si quieres terminar el pod automáticamente al terminar el job
@@ -85,16 +89,19 @@ async function waitForWorkerReady(workerBase, maxMs = 8 * 60 * 1000) {
         // 200 OK => listo
         if (r.ok) return true;
 
-        // 405 => existe ruta pero requiere POST (esto nos sirve para confirmar que el server está vivo)
+        // 405 => existe ruta pero requiere POST (server vivo)
         if (r.status === 405) return true;
 
-        // 401/403 => también confirma server arriba
+        // 401/403 => server arriba
         if (r.status === 401 || r.status === 403) return true;
       } catch (e) {}
     }
     await sleep(2500);
   }
-  throw new Error("Worker not ready: no respondió a /health o /api/video a tiempo (puerto 8000).");
+  throw new Error(
+    "Worker not ready: no respondió a /health o /api/video a tiempo (puerto 8000). " +
+      "Si manual funciona, revisa que este pod esté montando el Network Volume en /workspace."
+  );
 }
 
 // =====================
@@ -142,21 +149,24 @@ async function runpodCreatePodFromTemplate() {
     throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID en Vercel (templateId del pod de video)");
   }
 
-  // NOTA: RunPod REST: POST https://rest.runpod.io/v1/pods (soporta templateId). :contentReference[oaicite:1]{index=1}
-  // En modo template, RunPod aplica la configuración del template automáticamente.
-  // Si tu template ya define puertos y start command, perfecto.
+  // En tu caso: queremos SIEMPRE el volumen (porque start.sh está ahí)
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) {
+    throw new Error(
+      "Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID en Vercel. " +
+        "Este pod necesita el Network Volume para encontrar /workspace/start.sh"
+    );
+  }
 
   const body = {
     name: `isabela-video-${Date.now()}`,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
 
-    // Si quieres forzar el volumen en cada pod:
-    ...(VIDEO_NETWORK_VOLUME_ID
-      ? {
-          networkVolumeId: VIDEO_NETWORK_VOLUME_ID,
-          volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-        }
-      : {}),
+    // ✅ Forzar SIEMPRE el Network Volume en /workspace
+    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
+    volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
+
+    // Opcional: asegurar puertos (si tu template ya los trae, no estorba)
+    // ports: ["8000/http", "8888/http"],
   };
 
   const r = await fetch("https://rest.runpod.io/v1/pods", {
@@ -170,7 +180,6 @@ async function runpodCreatePodFromTemplate() {
     throw new Error(`RunPod create pod failed (${r.status}): ${JSON.stringify(data)}`);
   }
 
-  // data.id es el podId
   if (!data?.id) throw new Error("RunPod create pod: no devolvió id");
   return data;
 }
@@ -194,7 +203,6 @@ async function runpodWaitUntilRunning(podId) {
 }
 
 async function runpodTerminatePod(podId) {
-  // DELETE /v1/pods/{id} (termina)
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
     method: "DELETE",
     headers: runpodHeaders(),
@@ -215,7 +223,6 @@ function buildProxyUrl(podId) {
 // Main: crea pod y asegura worker arriba
 // =====================
 async function ensureFreshPod(sb) {
-  // 1) Lock global
   const got = await acquireLock(sb);
   if (!got.ok) {
     await waitForUnlock(sb);
@@ -224,7 +231,6 @@ async function ensureFreshPod(sb) {
 
   await setPodState(sb, { status: "CREATING", last_used_at: new Date().toISOString() });
 
-  // 2) Crear pod nuevo desde template
   const created = await runpodCreatePodFromTemplate();
   const podId = created.id;
 
@@ -235,10 +241,8 @@ async function ensureFreshPod(sb) {
     last_used_at: new Date().toISOString(),
   });
 
-  // 3) Esperar RUNNING
   await runpodWaitUntilRunning(podId);
 
-  // 4) Construir endpoint público del worker
   const workerUrl = buildProxyUrl(podId);
 
   await setPodState(sb, {
@@ -248,7 +252,6 @@ async function ensureFreshPod(sb) {
     last_used_at: new Date().toISOString(),
   });
 
-  // 5) Esperar que el worker responda
   await waitForWorkerReady(workerUrl);
 
   return { podId, workerUrl };
@@ -296,12 +299,10 @@ export default async function handler(req, res) {
   } catch (e) {
     const msg = String(e?.message || e);
 
-    // Intentar limpiar estado si alcanzamos a crear pod
     try {
       if (sb) await setPodState(sb, { status: "ERROR", last_error: msg, last_used_at: new Date().toISOString() });
     } catch {}
 
-    // Si quieres ser agresivo y terminar pod también en error:
     try {
       if (TERMINATE_AFTER_JOB && podId) await runpodTerminatePod(podId);
     } catch {}
