@@ -207,7 +207,6 @@ async function runpodCreatePodFromTemplate() {
   return data;
 }
 
-// ✅ FIX: RunPod a veces devuelve { pod: {...} }
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
     headers: runpodHeaders(),
@@ -216,10 +215,10 @@ async function runpodGetPod(podId) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${JSON.stringify(data)}`);
 
+  // ✅ RunPod a veces devuelve { pod: {...} }
   return data?.pod || data;
 }
 
-// ✅ FIX: status puede venir en otros campos
 function pickPodStatus(pod) {
   const raw =
     pod?.status ??
@@ -232,7 +231,6 @@ function pickPodStatus(pod) {
   return String(raw || "").toUpperCase();
 }
 
-// ✅ FIX: aceptar RUNNING/READY/ACTIVE
 async function runpodWaitUntilRunning(podId) {
   const start = Date.now();
   let lastSample = "";
@@ -344,9 +342,15 @@ export default async function handler(req, res) {
     console.log("[GV] step=START");
     sb = sbAdmin();
 
-    // ✅ Normaliza body (a veces Vercel lo entrega como string)
-    const payload =
+    // ✅ (NUEVO) Normaliza body (a veces Vercel lo entrega como string)
+    const payloadRaw =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+
+    // ✅ (NUEVO) Inyecta user_id requerido por el worker (sin tocar lo demás)
+    const payload = {
+      user_id: payloadRaw.user_id || "web-user",
+      ...payloadRaw,
+    };
 
     // 1) Crea pod nuevo + worker ready
     const fresh = await ensureFreshPod(sb);
@@ -356,7 +360,7 @@ export default async function handler(req, res) {
     const url = `${fresh.workerUrl}/api/video`;
     console.log("[GV] step=CALL_API_VIDEO_BEGIN url=", url);
 
-    // Opcional: si usas autosleep que no mate mientras genera
+    // Opcional: marca BUSY mientras genera
     await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
 
     const r = await fetchWithTimeout(
@@ -378,6 +382,7 @@ export default async function handler(req, res) {
     if (ct.includes("application/json")) {
       const data = await r.json().catch(() => ({}));
 
+      // ✅ (YA LO TENÍAS) log explícito de errores del worker
       if (r.status >= 400) {
         console.log(
           "[GV] worker_error status=",
