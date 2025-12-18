@@ -1,51 +1,40 @@
 // /api/autosleep.js
-// ============================================================
-// IsabelaOS Studio - AutoSleep (Vercel Cron)
-//
-// Qué hace:
-// 1) Lee pod_state.last_used_at y pod_state.busy en Supabase
-// 2) Si el pod lleva X minutos sin uso y NO está busy:
-//    - TERMINATE del pod (para no cobrar)
-//    - Actualiza pod_state.status = "TERMINATED", pod_id=null, worker_url=null
-//
-// Requisitos:
-// - Env Vars en Vercel: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// - Env Vars en Vercel: RUNPOD_API_KEY
-// - En Supabase: tabla pod_state con row id=1 y campo pod_id
-// - pod_state.busy (boolean) recomendado
-// ============================================================
-
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
+const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// Minutos sin uso antes de TERMINATE (tu pedido: 3)
-const IDLE_MINUTES = Number(process.env.POD_IDLE_MINUTES || 3);
+// ✅ más tiempo (default 60 min)
+const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "60", 10);
 
+// Tablas
 const POD_STATE_TABLE = "pod_state";
+const POD_LOCK_TABLE = "pod_lock";
+const VIDEO_JOBS_TABLE = "video_jobs";
 
 function sbAdmin() {
-  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
+  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
-  return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY");
+  return {
+    Authorization: `Bearer ${RUNPOD_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
 async function runpodTerminatePod(podId) {
-  const url = `https://rest.runpod.io/v1/pods/${podId}`;
-  const r = await fetch(url, { method: "DELETE", headers: runpodHeaders() });
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`RunPod TERMINATE failed (${r.status}): ${t}`);
-  }
+  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+    method: "DELETE",
+    headers: runpodHeaders(),
+  });
+  const t = await r.text().catch(() => "");
+  if (!r.ok) throw new Error(`RunPod terminate failed (${r.status}): ${t}`);
   return true;
 }
 
@@ -53,53 +42,77 @@ export default async function handler(req, res) {
   try {
     const sb = sbAdmin();
 
-    const { data: state, error } = await sb
+    // 1) leer pod_state
+    const { data: podState, error: psErr } = await sb
       .from(POD_STATE_TABLE)
       .select("*")
       .eq("id", 1)
       .single();
 
-    if (error) throw error;
+    if (psErr) throw psErr;
 
-    // Si no hay pod_id no hay nada que matar
-    if (!state?.pod_id) {
-      return res.json({ ok: true, action: "noop", reason: "pod_state.pod_id vacío" });
+    const status = String(podState?.status || "").toUpperCase();
+    const podId = podState?.pod_id || null;
+    const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
+
+    // 2) si está BUSY/RUNNING, no dormir
+    if (status === "BUSY" || status === "RUNNING" || status === "STARTING" || status === "CREATING") {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: `pod_state.status=${status}` });
     }
 
-    // Si está busy, NO TERMINAR
-    if (state?.busy === true) {
-      return res.json({ ok: true, action: "noop", reason: "busy=true (pod trabajando)" });
+    // 3) si el lock está activo, no dormir
+    const { data: lockRow } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
+    const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
+    if (lockedUntil && lockedUntil > new Date()) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "lock active", locked_until: lockRow.locked_until });
     }
 
-    // Si nunca se usó, no apagues
-    if (!state.last_used_at) {
-      return res.json({ ok: true, action: "noop", reason: "no last_used_at" });
+    // 4) si hay jobs activos, no dormir
+    const { data: activeJobs, error: ajErr } = await sb
+      .from(VIDEO_JOBS_TABLE)
+      .select("job_id,status,updated_at")
+      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS"])
+      .limit(1);
+
+    if (ajErr) throw ajErr;
+
+    if (activeJobs && activeJobs.length > 0) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "active video job exists", sample: activeJobs[0] });
     }
 
-    const last = new Date(state.last_used_at);
+    // 5) si no hay podId, nada que hacer
+    if (!podId) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "no pod_id in pod_state" });
+    }
+
+    // 6) idle check
     const now = new Date();
-    const idleMinutes = (now.getTime() - last.getTime()) / 60000;
+    const idleMs = lastUsedAt ? (now - lastUsedAt) : Number.POSITIVE_INFINITY;
+    const idleMin = idleMs / 60000;
 
-    if (idleMinutes < IDLE_MINUTES) {
-      return res.json({ ok: true, action: "noop", idleMinutes });
+    if (idleMin < AUTOSLEEP_IDLE_MINUTES) {
+      return res.status(200).json({
+        ok: true,
+        action: "SKIP",
+        reason: "not idle enough",
+        idle_minutes: idleMin,
+        threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
+      });
     }
 
-    // TERMINATE por inactividad
-    await runpodTerminatePod(state.pod_id);
+    // 7) terminar pod
+    await runpodTerminatePod(podId);
 
-    // Limpia estado
-    await sb
-      .from(POD_STATE_TABLE)
-      .update({
-        status: "TERMINATED",
-        pod_id: null,
-        worker_url: null,
-        busy: false,
-      })
-      .eq("id", 1);
+    // 8) actualizar pod_state
+    await sb.from(POD_STATE_TABLE).update({
+      status: "SLEEPING",
+      last_used_at: now.toISOString(),
+    }).eq("id", 1);
 
-    return res.json({ ok: true, action: "terminated", idleMinutes });
+    return res.status(200).json({ ok: true, action: "TERMINATED", podId });
+
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    const msg = String(e?.message || e);
+    return res.status(500).json({ ok: false, error: msg });
   }
 }
