@@ -1,29 +1,33 @@
+// /api/generate-video.js
+// ============================================================
+// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
+//
+// MODO B (correcto para pods efímeros TERMINATE):
+// - NO usa VIDEO_RP_ENDPOINT fijo.
+// - Usa RunPod SERVERLESS ENDPOINT (RUNPOD_ENDPOINT_ID) => URL estable.
+// - RunPod se encarga de crear/usar pods por detrás.
+// - Tú solo haces proxy a RunPod.
+// ============================================================
+
 import { createClient } from "@supabase/supabase-js";
 
 // =====================
 // ENV (Vercel)
 // =====================
-// ✅ Admin (solo backend): para escribir/leer tablas de lock/state en Supabase
+// Admin (backend) para lock/state en Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// ✅ VIDEO aislado (NO pisar RP_ENDPOINT de imágenes)
-const RP_ENDPOINT = process.env.VIDEO_RP_ENDPOINT; // ej: https://xxxx-8000.proxy.runpod.net
-
-// ✅ Opcional: solo si vas a REUSAR el MISMO pod (stop/resume). Si tú "TERMINATE" y creas otro nuevo, esto cambia.
-const RUNPOD_POD_ID = process.env.VIDEO_RUNPOD_POD_ID || null;
-
-// ✅ API Key: si definiste VIDEO_RUNPOD_API_KEY úsala; si no, cae a RUNPOD_API_KEY global si existe.
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
+// RunPod (Serverless)
+const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || process.env.RP_API_KEY || null;
+const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || null;
 
 // Tablas en Supabase
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 
 // Timing
-const LOCK_SECONDS = 180;            // lock para evitar colisiones
-const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min esperando pod RUNNING
-const POLL_MS = 3000;
+const LOCK_SECONDS = 180;
 
 // =====================
 // Helpers
@@ -37,36 +41,9 @@ function sbAdmin() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function setPodState(sb, patch) {
+  // Requiere row id=1 en pod_state
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
-}
-
-// Espera que el worker responda en el endpoint público
-async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
-  const start = Date.now();
-  const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
-
-  const candidates = [
-    `${base}/health`,
-    `${base}/api/video`,
-  ];
-
-  while (Date.now() - start < maxMs) {
-    for (const url of candidates) {
-      try {
-        const r = await fetch(url, { method: "GET" });
-
-        if (r.ok) return true;
-        if (r.status === 405) return true;
-        if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {
-        // ignorar y seguir intentando
-      }
-    }
-    await sleep(2500);
-  }
-
-  throw new Error("Worker not ready: no respondió a /health o /api/video a tiempo.");
 }
 
 // =====================
@@ -106,96 +83,40 @@ async function waitForUnlock(sb) {
     const now = new Date();
 
     if (!until || until <= now) return true;
-    await sleep(1500);
+    await sleep(1200);
   }
 }
 
 // =====================
-// RunPod REST helpers (solo si REUSAS el mismo pod)
+// RunPod Serverless call
 // =====================
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
-  return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
+  return {
+    Authorization: `Bearer ${RUNPOD_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
-async function runpodGetPod(podId) {
-  const url = `https://rest.runpod.io/v1/pods/${podId}`;
-  const r = await fetch(url, { headers: runpodHeaders() });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`RunPod GET pod failed (${r.status}): ${t}`);
-  }
-  return await r.json();
-}
+// NOTA:
+// En RunPod serverless, normalmente el endpoint es:
+// POST https://api.runpod.ai/v2/{ENDPOINT_ID}/run
+// (Dependiendo de tu configuración puede variar, pero este es el patrón típico.)
+async function runServerless(payload) {
+  if (!RUNPOD_ENDPOINT_ID) throw new Error("Missing RUNPOD_ENDPOINT_ID in Vercel");
 
-async function runpodStartOrResumePod(podId) {
-  const candidates = [
-    `https://rest.runpod.io/v1/pods/${podId}/start`,
-    `https://rest.runpod.io/v1/pods/${podId}/resume`,
-  ];
-
-  let lastErr = null;
-  for (const url of candidates) {
-    const r = await fetch(url, { method: "POST", headers: runpodHeaders() });
-    if (r.ok) return true;
-
-    const t = await r.text().catch(() => "");
-    lastErr = new Error(`RunPod start/resume failed (${r.status}) at ${url}: ${t}`);
-  }
-  throw lastErr || new Error("RunPod start/resume failed");
-}
-
-async function waitUntilRunning(podId) {
-  const start = Date.now();
-  while (Date.now() - start < READY_TIMEOUT_MS) {
-    const pod = await runpodGetPod(podId);
-    const status = (pod?.status || "").toUpperCase();
-    if (status === "RUNNING") return pod;
-    await sleep(POLL_MS);
-  }
-  throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
-}
-
-// =====================
-// Main: asegura worker arriba
-// =====================
-async function ensurePodRunning(sb) {
-  const got = await acquireLock(sb);
-  if (!got.ok) {
-    await waitForUnlock(sb);
-    return await ensurePodRunning(sb);
-  }
-
-  if (!RP_ENDPOINT) {
-    await setPodState(sb, { status: "ERROR" });
-    throw new Error("Falta VIDEO_RP_ENDPOINT en Vercel (URL pública del worker en puerto 8000)");
-  }
-
-  await setPodState(sb, {
-    worker_url: RP_ENDPOINT,
-    pod_id: RUNPOD_POD_ID,
-    last_used_at: new Date().toISOString(),
+  const url = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/run`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: runpodHeaders(),
+    body: JSON.stringify({ input: payload }),
   });
 
-  if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
-    const pod = await runpodGetPod(RUNPOD_POD_ID);
-    const status = (pod?.status || "").toUpperCase();
-
-    if (status !== "RUNNING") {
-      await setPodState(sb, { status: "STARTING" });
-      await runpodStartOrResumePod(RUNPOD_POD_ID);
-      await waitUntilRunning(RUNPOD_POD_ID);
-      await setPodState(sb, { status: "RUNNING", last_used_at: new Date().toISOString() });
-    } else {
-      await setPodState(sb, { status: "RUNNING" });
-    }
-  } else {
-    await setPodState(sb, { status: "RUNNING" });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw new Error(`RunPod serverless /run failed (${r.status}): ${JSON.stringify(data)}`);
   }
-
-  await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000);
-
-  return RP_ENDPOINT;
+  return data;
 }
 
 // =====================
@@ -209,25 +130,32 @@ export default async function handler(req, res) {
   try {
     const sb = sbAdmin();
 
-    // 1) pod/worker ready
-    const workerBase = await ensurePodRunning(sb);
+    // Lock global
+    const got = await acquireLock(sb);
+    if (!got.ok) {
+      await waitForUnlock(sb);
+      // reintenta una vez
+      return handler(req, res);
+    }
 
-    // 2) proxy a /api/video del worker
-    const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
-    const url = `${base}/api/video`;
-
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
+    // Marcar estado
+    await setPodState(sb, {
+      status: "QUEUED",
+      last_used_at: new Date().toISOString(),
+      // En serverless no hay pod_id fijo ni worker_url fijo
+      pod_id: null,
+      worker_url: null,
     });
 
-    const data = await r.json().catch(() => ({}));
+    // Llamar a RunPod serverless
+    await setPodState(sb, { status: "RUNNING" });
 
-    // 3) update last_used_at
-    await setPodState(sb, { last_used_at: new Date().toISOString() });
+    const rp = await runServerless(req.body);
 
-    return res.status(r.status).json(data);
+    await setPodState(sb, { last_used_at: new Date().toISOString(), status: "DONE" });
+
+    // rp normalmente trae { id, status, ... } y luego haces poll /status si tu worker es async.
+    return res.status(200).json({ ok: true, runpod: rp });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
