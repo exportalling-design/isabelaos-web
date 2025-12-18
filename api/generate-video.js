@@ -416,6 +416,31 @@ export default async function handler(req, res) {
       throw new Error(`Worker dispatch failed: ${r.status}`);
     }
 
+    // ============================
+    // ✅ CAMBIO ÚNICO:
+    // Normaliza respuesta del worker:
+    // - A veces devuelve JSON tipo: [ {ok:true,...}, 202 ]
+    // - A veces devuelve objeto normal
+    // Guardamos el "reply" normalizado en Supabase para debugging/polling.
+    // ============================
+    let workerReply = null;
+    try {
+      const raw = txt ? JSON.parse(txt) : null;
+      workerReply = Array.isArray(raw) ? raw[0] : raw;
+    } catch {
+      workerReply = { raw_text: txt?.slice(0, 500) || "" };
+    }
+
+    try {
+      await updateVideoJob(sb, job_id, {
+        status: workerReply?.status || "IN_PROGRESS",
+        worker_reply: workerReply,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.log("[GV] warn: no pude guardar worker_reply en video_jobs:", String(e));
+    }
+
     // 4) Respuesta inmediata al frontend (sin esperar MP4)
     console.log("[GV] step=DISPATCH_OK job_id=", job_id);
 
