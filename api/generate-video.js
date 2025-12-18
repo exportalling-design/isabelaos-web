@@ -1,22 +1,3 @@
-// /api/generate-video.js
-// ============================================================
-// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
-//
-// OBJETIVO REAL (tu caso):
-// - El pod NO es fijo. Se TERMINA y se crea otro.
-// - Por eso NO podemos guardar VIDEO_RP_ENDPOINT fijo en Vercel.
-// - En su lugar: creamos/obtenemos POD_ID y derivamos el endpoint:
-//
-//    RP_ENDPOINT = `https://${POD_ID}-8000.proxy.runpod.net`
-//
-// Flujo:
-// 1) Lock en Supabase (evitar 2 pods creados a la vez).
-// 2) Si no hay pod activo (o murió), CREAR POD por API (desde template).
-// 3) Derivar endpoint del POD_ID.
-// 4) Esperar worker listo (/health o /api/video con 405).
-// 5) Proxy POST -> {endpoint}/api/video
-// ============================================================
-
 import { createClient } from "@supabase/supabase-js";
 
 // =====================
@@ -26,28 +7,22 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// ✅ RunPod API Key (backend only)
-const RUNPOD_API_KEY =
-  process.env.VIDEO_RUNPOD_API_KEY ||
-  process.env.RUNPOD_API_KEY ||
-  process.env.RP_API_KEY ||
-  null;
+// ✅ VIDEO aislado (NO pisar RP_ENDPOINT de imágenes)
+const RP_ENDPOINT = process.env.VIDEO_RP_ENDPOINT; // ej: https://xxxx-8000.proxy.runpod.net
 
-// ✅ (Tu caso) Creación dinámica desde Template
-// Debes poner esto en Vercel:
-const VIDEO_TEMPLATE_ID = process.env.VIDEO_TEMPLATE_ID || null;
+// ✅ Opcional: solo si vas a REUSAR el MISMO pod (stop/resume). Si tú "TERMINATE" y creas otro nuevo, esto cambia.
+const RUNPOD_POD_ID = process.env.VIDEO_RUNPOD_POD_ID || null;
 
-// Opcional: fuerza GPU (para evitar A6000). Depende de cómo creas pod.
-// Si tu template ya fuerza A100-SXM, no necesitas esto.
-const VIDEO_GPU_ID = process.env.VIDEO_GPU_ID || null;
+// ✅ API Key: si definiste VIDEO_RUNPOD_API_KEY úsala; si no, cae a RUNPOD_API_KEY global si existe.
+const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
 // Tablas en Supabase
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 
 // Timing
-const LOCK_SECONDS = 180;                 // lock para evitar colisiones
-const READY_TIMEOUT_MS = 10 * 60 * 1000;  // 10 min esperando ready
+const LOCK_SECONDS = 180;            // lock para evitar colisiones
+const READY_TIMEOUT_MS = 10 * 60 * 1000; // 10 min esperando pod RUNNING
 const POLL_MS = 3000;
 
 // =====================
@@ -62,21 +37,8 @@ function sbAdmin() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function setPodState(sb, patch) {
-  // Requiere que exista row id=1 en pod_state
   const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
   if (error) throw error;
-}
-
-async function getPodState(sb) {
-  const { data, error } = await sb.from(POD_STATE_TABLE).select("*").eq("id", 1).single();
-  if (error) throw error;
-  return data;
-}
-
-// Deriva endpoint dinámico desde pod_id (clave para tu caso TERMINATE)
-function deriveRpEndpointFromPodId(podId) {
-  if (!podId) return null;
-  return `https://${podId}-8000.proxy.runpod.net`;
 }
 
 // Espera que el worker responda en el endpoint público
@@ -84,8 +46,10 @@ async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
   const start = Date.now();
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
 
-  // /health ideal, /api/video puede devolver 405 (Method Not Allowed) y eso ES OK
-  const candidates = [`${base}/health`, `${base}/api/video`];
+  const candidates = [
+    `${base}/health`,
+    `${base}/api/video`,
+  ];
 
   while (Date.now() - start < maxMs) {
     for (const url of candidates) {
@@ -95,15 +59,14 @@ async function waitForWorkerReady(workerBase, maxMs = 5 * 60 * 1000) {
         if (r.ok) return true;
         if (r.status === 405) return true;
         if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {}
+      } catch (e) {
+        // ignorar y seguir intentando
+      }
     }
     await sleep(2500);
   }
 
-  throw new Error(
-    "Worker not ready: no respondió a /health o /api/video. " +
-    "Revisa: que el pod abra el puerto 8000 y que tu server arranque en 0.0.0.0:8000."
-  );
+  throw new Error("Worker not ready: no respondió a /health o /api/video a tiempo.");
 }
 
 // =====================
@@ -148,14 +111,11 @@ async function waitForUnlock(sb) {
 }
 
 // =====================
-// RunPod API helpers
+// RunPod REST helpers (solo si REUSAS el mismo pod)
 // =====================
 function runpodHeaders() {
   if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
-  return {
-    Authorization: `Bearer ${RUNPOD_API_KEY}`,
-    "Content-Type": "application/json",
-  };
+  return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
 }
 
 async function runpodGetPod(podId) {
@@ -168,6 +128,23 @@ async function runpodGetPod(podId) {
   return await r.json();
 }
 
+async function runpodStartOrResumePod(podId) {
+  const candidates = [
+    `https://rest.runpod.io/v1/pods/${podId}/start`,
+    `https://rest.runpod.io/v1/pods/${podId}/resume`,
+  ];
+
+  let lastErr = null;
+  for (const url of candidates) {
+    const r = await fetch(url, { method: "POST", headers: runpodHeaders() });
+    if (r.ok) return true;
+
+    const t = await r.text().catch(() => "");
+    lastErr = new Error(`RunPod start/resume failed (${r.status}) at ${url}: ${t}`);
+  }
+  throw lastErr || new Error("RunPod start/resume failed");
+}
+
 async function waitUntilRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < READY_TIMEOUT_MS) {
@@ -176,120 +153,49 @@ async function waitUntilRunning(podId) {
     if (status === "RUNNING") return pod;
     await sleep(POLL_MS);
   }
-  throw new Error("Timeout: el pod no llegó a RUNNING a tiempo");
-}
-
-/**
- * Crea un POD NUEVO desde TEMPLATE (tu arquitectura TERMINATE).
- *
- * NOTA:
- * - Hay varias formas (REST o GraphQL).
- * - Tú preguntaste “GraphQL create pod”: perfecto, lo pones aquí.
- *
- * Si ya tienes tu mutation lista, pégala aquí y listo.
- * Este stub devuelve { id } que luego usamos para derivar el endpoint.
- */
-async function runpodCreatePodFromTemplate() {
-  if (!VIDEO_TEMPLATE_ID) throw new Error("Missing VIDEO_TEMPLATE_ID in Vercel");
-
-  // =========================================================
-  // OPCIÓN 1 (si usas GraphQL):
-  // POST https://api.runpod.io/graphql
-  //
-  // const query = `mutation ($input: Pod...){ ... }`
-  // const variables = { input: { templateId: VIDEO_TEMPLATE_ID, gpuId: VIDEO_GPU_ID, ... } }
-  // =========================================================
-  //
-  // IMPORTANTE: como el schema exacto varía, aquí lo dejo como “bloque adaptable”.
-  // Si me pegas tu mutation real (la que estabas usando), te lo dejo 100% exacto.
-  //
-  // Ejemplo de estructura:
-  //
-  // const gqlRes = await fetch("https://api.runpod.io/graphql", {
-  //   method: "POST",
-  //   headers: runpodHeaders(),
-  //   body: JSON.stringify({ query, variables }),
-  // });
-  // const out = await gqlRes.json();
-  // const podId = out?.data?.createPod?.id;  // <- AJUSTAR A TU RESPUESTA
-  // if (!podId) throw new Error("Create pod failed: no id returned");
-  // return { id: podId };
-
-  // =========================================================
-  // OPCIÓN 2 (si tu setup usa REST “deploy from template”):
-  // Si tú ya tienes el endpoint REST exacto, lo pones aquí.
-  // =========================================================
-
-  throw new Error(
-    "CreatePod not implemented: pega aquí tu mutation GraphQL (create pod from template) " +
-    "para que devuelva el podId. Este paso es el que te falta para que NO dependas de VIDEO_RP_ENDPOINT."
-  );
+  throw new Error("Timeout: el pod no llegó a RUNNING dentro del tiempo configurado");
 }
 
 // =====================
-// Main: asegura worker arriba (pod dinámico)
+// Main: asegura worker arriba
 // =====================
 async function ensurePodRunning(sb) {
-  // 1) Lock global
   const got = await acquireLock(sb);
   if (!got.ok) {
     await waitForUnlock(sb);
     return await ensurePodRunning(sb);
   }
 
-  // 2) Lee estado actual
-  let state = await getPodState(sb);
-  let podId = state?.pod_id || null;
-
-  // 3) Si existe pod_id, verificamos si sigue vivo
-  //    Si no existe o ya murió, creamos uno nuevo.
-  let needNewPod = false;
-
-  if (!podId) {
-    needNewPod = true;
-  } else {
-    try {
-      const pod = await runpodGetPod(podId);
-      const status = (pod?.status || "").toUpperCase();
-      if (!status || status === "TERMINATED" || status === "STOPPED") needNewPod = true;
-    } catch (e) {
-      // si GET falla, asumimos que ya no existe
-      needNewPod = true;
-    }
+  if (!RP_ENDPOINT) {
+    await setPodState(sb, { status: "ERROR" });
+    throw new Error("Falta VIDEO_RP_ENDPOINT en Vercel (URL pública del worker en puerto 8000)");
   }
-
-  if (needNewPod) {
-    await setPodState(sb, { status: "CREATING", last_used_at: new Date().toISOString() });
-
-    const created = await runpodCreatePodFromTemplate(); // <<< AQUÍ va tu GraphQL real
-    podId = created?.id;
-
-    if (!podId) throw new Error("Create pod failed: no podId");
-
-    // Guarda pod_id en Supabase
-    await setPodState(sb, {
-      pod_id: podId,
-      status: "STARTING",
-      last_used_at: new Date().toISOString(),
-    });
-  }
-
-  // 4) Espera RUNNING
-  await waitUntilRunning(podId);
-
-  // 5) Deriva endpoint dinámico por podId (clave)
-  const rpEndpoint = deriveRpEndpointFromPodId(podId);
 
   await setPodState(sb, {
-    worker_url: rpEndpoint,
-    status: "RUNNING",
+    worker_url: RP_ENDPOINT,
+    pod_id: RUNPOD_POD_ID,
     last_used_at: new Date().toISOString(),
   });
 
-  // 6) Espera que el worker responda
-  await waitForWorkerReady(rpEndpoint, 5 * 60 * 1000);
+  if (RUNPOD_POD_ID && RUNPOD_API_KEY) {
+    const pod = await runpodGetPod(RUNPOD_POD_ID);
+    const status = (pod?.status || "").toUpperCase();
 
-  return rpEndpoint;
+    if (status !== "RUNNING") {
+      await setPodState(sb, { status: "STARTING" });
+      await runpodStartOrResumePod(RUNPOD_POD_ID);
+      await waitUntilRunning(RUNPOD_POD_ID);
+      await setPodState(sb, { status: "RUNNING", last_used_at: new Date().toISOString() });
+    } else {
+      await setPodState(sb, { status: "RUNNING" });
+    }
+  } else {
+    await setPodState(sb, { status: "RUNNING" });
+  }
+
+  await waitForWorkerReady(RP_ENDPOINT, 5 * 60 * 1000);
+
+  return RP_ENDPOINT;
 }
 
 // =====================
@@ -303,7 +209,10 @@ export default async function handler(req, res) {
   try {
     const sb = sbAdmin();
 
+    // 1) pod/worker ready
     const workerBase = await ensurePodRunning(sb);
+
+    // 2) proxy a /api/video del worker
     const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
     const url = `${base}/api/video`;
 
@@ -315,6 +224,7 @@ export default async function handler(req, res) {
 
     const data = await r.json().catch(() => ({}));
 
+    // 3) update last_used_at
     await setPodState(sb, { last_used_at: new Date().toISOString() });
 
     return res.status(r.status).json(data);
