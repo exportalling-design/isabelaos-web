@@ -38,7 +38,8 @@ const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
   null;
 
 // En tu caso debe ser /workspace para que encuentre /workspace/start.sh
-const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
+const VIDEO_VOLUME_MOUNT_PATH =
+  process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 // ✅ Si quieres terminar el pod automáticamente al terminar el job
 const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
@@ -61,8 +62,10 @@ const VIDEO_FETCH_TIMEOUT_MS = 60 * 1000; // respuesta inicial de /api/video (si
 // Helpers
 // =====================
 function sbAdmin() {
-  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
-  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (backend only)");
+  if (!SUPABASE_URL)
+    throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
+  if (!SUPABASE_SERVICE_ROLE_KEY)
+    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (backend only)");
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
@@ -75,7 +78,8 @@ async function setPodState(sb, patch) {
 }
 
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
+  if (!RUNPOD_API_KEY)
+    throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
   return {
     Authorization: `Bearer ${RUNPOD_API_KEY}`,
     "Content-Type": "application/json",
@@ -106,11 +110,22 @@ async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
   while (Date.now() - start < maxMs) {
     for (const url of candidates) {
       try {
-        const r = await fetchWithTimeout(url, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+        const r = await fetchWithTimeout(
+          url,
+          { method: "GET" },
+          HEALTH_FETCH_TIMEOUT_MS
+        );
         const txt = await r.text().catch(() => "");
 
         // Logs útiles (cortos)
-        console.log("[GV] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
+        console.log(
+          "[GV] waitWorker url=",
+          url,
+          "status=",
+          r.status,
+          "body=",
+          txt.slice(0, 120)
+        );
 
         // 200 OK => listo
         if (r.ok) return true;
@@ -155,7 +170,10 @@ async function acquireLock(sb) {
   const current = row.locked_until ? new Date(row.locked_until) : null;
   if (current && current > now) return { ok: false, locked_until: row.locked_until };
 
-  const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
+  const { error: updErr } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: lockedUntil })
+    .eq("id", 1);
   if (updErr) return { ok: false, locked_until: row.locked_until };
 
   return { ok: true, locked_until: lockedUntil };
@@ -218,7 +236,9 @@ async function runpodCreatePodFromTemplate() {
 }
 
 async function runpodGetPod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, { headers: runpodHeaders() });
+  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+    headers: runpodHeaders(),
+  });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${JSON.stringify(data)}`);
   return data;
@@ -324,6 +344,14 @@ export default async function handler(req, res) {
     const url = `${fresh.workerUrl}/api/video`;
     console.log("[GV] step=CALL_API_VIDEO_BEGIN url=", url);
 
+    // ============================
+    // ✅ NUEVO: marcar BUSY antes de llamar /api/video
+    // ============================
+    await setPodState(sb, {
+      status: "BUSY",
+      last_used_at: new Date().toISOString(),
+    });
+
     const r = await fetchWithTimeout(
       url,
       {
@@ -343,6 +371,14 @@ export default async function handler(req, res) {
     if (ct.includes("application/json")) {
       const data = await r.json().catch(() => ({}));
 
+      // ============================
+      // ✅ NUEVO: volver a RUNNING (ya no está trabajando)
+      // ============================
+      await setPodState(sb, {
+        status: "RUNNING",
+        last_used_at: new Date().toISOString(),
+      });
+
       // 3) (Opcional) Terminar pod al final
       if (TERMINATE_AFTER_JOB && podId) {
         console.log("[GV] step=TERMINATE_BEGIN");
@@ -359,6 +395,14 @@ export default async function handler(req, res) {
     // ✅ Si el worker devolvió binario (mp4 / octet-stream), lo retornamos tal cual
     const ab = await r.arrayBuffer();
     const buf = Buffer.from(ab);
+
+    // ============================
+    // ✅ NUEVO: volver a RUNNING (ya no está trabajando)
+    // ============================
+    await setPodState(sb, {
+      status: "RUNNING",
+      last_used_at: new Date().toISOString(),
+    });
 
     // Importante: no mandes JSON aquí
     res.setHeader("Content-Type", ct || "application/octet-stream");
