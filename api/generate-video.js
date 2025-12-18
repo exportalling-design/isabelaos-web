@@ -1,172 +1,58 @@
 // /api/generate-video.js
-// ============================================================
-// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
-//
-// MODO B (TU CASO): "TERMINATE y crear pod nuevo por job"
-//
-// Flujo:
-// 1) Lock en Supabase para evitar 2 requests simultáneos.
-// 2) Crea un Pod NUEVO usando templateId (RunPod REST).
-// 3) Espera a RUNNING.
-// 4) Construye el endpoint público del pod: https://{podId}-8000.proxy.runpod.net
-// 5) Espera que el worker responda (/health o /api/video).
-// 6) Proxy: reenvía el payload al worker (/api/video).
-// 7) (Opcional) Termina el pod al final si TERMINATE_AFTER_JOB=1.
-// ============================================================
-
 import { createClient } from "@supabase/supabase-js";
 
 // =====================
-// ENV (Vercel)
+// ENV
 // =====================
-// ✅ Admin (solo backend)
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL =
+  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// ✅ RunPod
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
+const RUNPOD_API_KEY =
+  process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
 
-// ✅ Template del pod de VIDEO (OBLIGATORIO en modo B)
-const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID;
+const VIDEO_RUNPOD_TEMPLATE_ID =
+  process.env.VIDEO_RUNPOD_TEMPLATE_ID;
 
-// ✅ Network Volume (EN TU CASO: SIEMPRE)
-// OJO: aquí estaba el bug: estabas leyendo VIDEO_NETWORK_VOLUME_ID pero tú ya tienes VIDEO_RUNPOD_NETWORK_VOLUME_ID
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
-  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || process.env.VIDEO_NETWORK_VOLUME_ID || null;
+// 🔴 OBLIGATORIO PARA TU CASO
+const VIDEO_NETWORK_VOLUME_ID =
+  process.env.VIDEO_NETWORK_VOLUME_ID;
 
-// En tu caso debe ser /workspace para que encuentre /workspace/start.sh
-const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
+const VIDEO_VOLUME_MOUNT_PATH =
+  process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
-// ✅ Si quieres terminar el pod automáticamente al terminar el job
-const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
+const TERMINATE_AFTER_JOB =
+  (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
-// Tablas en Supabase
-const POD_STATE_TABLE = "pod_state";
-const POD_LOCK_TABLE = "pod_lock";
-
-// Timing
-const LOCK_SECONDS = 180;
-const READY_TIMEOUT_MS = 12 * 60 * 1000; // 12 min (cold start + descarga + boot)
+const READY_TIMEOUT_MS = 12 * 60 * 1000;
 const POLL_MS = 3000;
 
 // =====================
-// Helpers
-// =====================
 function sbAdmin() {
-  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
-  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (backend only)");
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function setPodState(sb, patch) {
-  // Requiere row id=1 en pod_state
-  const { error } = await sb.from(POD_STATE_TABLE).update(patch).eq("id", 1);
-  if (error) throw error;
-}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY in Vercel");
   return {
     Authorization: `Bearer ${RUNPOD_API_KEY}`,
     "Content-Type": "application/json",
   };
 }
 
-// Espera que el worker responda
-async function waitForWorkerReady(workerBase, maxMs = 8 * 60 * 1000) {
-  const start = Date.now();
-  const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
-
-  const candidates = [`${base}/health`, `${base}/api/video`];
-
-  while (Date.now() - start < maxMs) {
-    for (const url of candidates) {
-      try {
-        const r = await fetch(url, { method: "GET" });
-
-        // 200 OK => listo
-        if (r.ok) return true;
-
-        // 405 => existe ruta pero requiere POST (server vivo)
-        if (r.status === 405) return true;
-
-        // 401/403 => server arriba
-        if (r.status === 401 || r.status === 403) return true;
-      } catch (e) {}
-    }
-    await sleep(2500);
-  }
-  throw new Error(
-    "Worker not ready: no respondió a /health o /api/video a tiempo (puerto 8000). " +
-      "Si manual funciona, revisa que este pod esté montando el Network Volume en /workspace."
-  );
-}
-
 // =====================
-// Lock (Supabase)
+// RUNPOD
 // =====================
-async function acquireLock(sb) {
-  const now = new Date();
-  const lockedUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
-
-  const { data: row, error: readErr } = await sb
-    .from(POD_LOCK_TABLE)
-    .select("*")
-    .eq("id", 1)
-    .single();
-
-  if (readErr) throw new Error("No existe pod_lock id=1 (crea row en Supabase)");
-
-  const current = row.locked_until ? new Date(row.locked_until) : null;
-  if (current && current > now) return { ok: false, locked_until: row.locked_until };
-
-  const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
-  if (updErr) return { ok: false, locked_until: row.locked_until };
-
-  return { ok: true, locked_until: lockedUntil };
-}
-
-async function waitForUnlock(sb) {
-  while (true) {
-    const { data, error } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
-    if (error) throw error;
-
-    const until = data.locked_until ? new Date(data.locked_until) : null;
-    const now = new Date();
-
-    if (!until || until <= now) return true;
-    await sleep(1500);
-  }
-}
-
-// =====================
-// RunPod: crear pod (modo B)
-// =====================
-async function runpodCreatePodFromTemplate() {
-  if (!VIDEO_RUNPOD_TEMPLATE_ID) {
-    throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID en Vercel (templateId del pod de video)");
-  }
-
-  // En tu caso: queremos SIEMPRE el volumen (porque start.sh está ahí)
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) {
-    throw new Error(
-      "Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID en Vercel. " +
-        "Este pod necesita el Network Volume para encontrar /workspace/start.sh"
-    );
-  }
-
+async function createPod() {
   const body = {
     name: `isabela-video-${Date.now()}`,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
 
-    // ✅ Forzar SIEMPRE el Network Volume en /workspace
-    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
+    // 🔴 ESTO ES LO QUE FALTABA
+    networkVolumeId: VIDEO_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-
-    // Opcional: asegurar puertos (si tu template ya los trae, no estorba)
-    // ports: ["8000/http", "8888/http"],
   };
 
   const r = await fetch("https://rest.runpod.io/v1/pods", {
@@ -175,138 +61,90 @@ async function runpodCreatePodFromTemplate() {
     body: JSON.stringify(body),
   });
 
-  const data = await r.json().catch(() => ({}));
+  const data = await r.json();
   if (!r.ok) {
-    throw new Error(`RunPod create pod failed (${r.status}): ${JSON.stringify(data)}`);
+    throw new Error(`RunPod create failed: ${JSON.stringify(data)}`);
   }
 
-  if (!data?.id) throw new Error("RunPod create pod: no devolvió id");
-  return data;
+  return data.id;
 }
 
-async function runpodGetPod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, { headers: runpodHeaders() });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${JSON.stringify(data)}`);
-  return data;
+async function getPod(podId) {
+  const r = await fetch(
+    `https://rest.runpod.io/v1/pods/${podId}`,
+    { headers: runpodHeaders() }
+  );
+  return r.json();
 }
 
-async function runpodWaitUntilRunning(podId) {
+async function waitForRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < READY_TIMEOUT_MS) {
-    const pod = await runpodGetPod(podId);
-    const status = String(pod?.status || "").toUpperCase();
-    if (status === "RUNNING") return pod;
+    const pod = await getPod(podId);
+    if (String(pod.status).toUpperCase() === "RUNNING") return;
     await sleep(POLL_MS);
   }
-  throw new Error("Timeout: el pod no llegó a RUNNING a tiempo");
+  throw new Error("Pod no llegó a RUNNING");
 }
 
-async function runpodTerminatePod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-    method: "DELETE",
-    headers: runpodHeaders(),
-  });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`RunPod terminate failed (${r.status}): ${t}`);
-  }
-  return true;
-}
-
-// Construye el proxy URL estándar de RunPod para el puerto 8000
-function buildProxyUrl(podId) {
+function proxyUrl(podId) {
   return `https://${podId}-8000.proxy.runpod.net`;
 }
 
-// =====================
-// Main: crea pod y asegura worker arriba
-// =====================
-async function ensureFreshPod(sb) {
-  const got = await acquireLock(sb);
-  if (!got.ok) {
-    await waitForUnlock(sb);
-    return await ensureFreshPod(sb);
+async function waitForWorker(url) {
+  const start = Date.now();
+  while (Date.now() - start < READY_TIMEOUT_MS) {
+    try {
+      const r = await fetch(`${url}/health`);
+      if (r.ok || r.status === 404 || r.status === 405) return;
+    } catch {}
+    await sleep(2500);
   }
+  throw new Error("Worker no respondió");
+}
 
-  await setPodState(sb, { status: "CREATING", last_used_at: new Date().toISOString() });
-
-  const created = await runpodCreatePodFromTemplate();
-  const podId = created.id;
-
-  await setPodState(sb, {
-    status: "STARTING",
-    pod_id: podId,
-    worker_url: null,
-    last_used_at: new Date().toISOString(),
-  });
-
-  await runpodWaitUntilRunning(podId);
-
-  const workerUrl = buildProxyUrl(podId);
-
-  await setPodState(sb, {
-    status: "RUNNING",
-    pod_id: podId,
-    worker_url: workerUrl,
-    last_used_at: new Date().toISOString(),
-  });
-
-  await waitForWorkerReady(workerUrl);
-
-  return { podId, workerUrl };
+async function terminatePod(podId) {
+  await fetch(
+    `https://rest.runpod.io/v1/pods/${podId}`,
+    { method: "DELETE", headers: runpodHeaders() }
+  );
 }
 
 // =====================
-// API route
+// API
 // =====================
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Método no permitido" });
+    return res.status(405).json({ ok: false });
   }
 
-  let sb = null;
   let podId = null;
 
   try {
-    sb = sbAdmin();
+    podId = await createPod();
+    await waitForRunning(podId);
 
-    // 1) Crea pod nuevo + worker ready
-    const fresh = await ensureFreshPod(sb);
-    podId = fresh.podId;
+    const worker = proxyUrl(podId);
+    await waitForWorker(worker);
 
-    // 2) Proxy a /api/video del worker
-    const url = `${fresh.workerUrl}/api/video`;
-
-    const r = await fetch(url, {
+    const r = await fetch(`${worker}/api/video`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req.body),
     });
 
-    const data = await r.json().catch(() => ({}));
+    const data = await r.json();
 
-    await setPodState(sb, { last_used_at: new Date().toISOString() });
-
-    // 3) (Opcional) Terminar pod al final
-    if (TERMINATE_AFTER_JOB && podId) {
-      await setPodState(sb, { status: "TERMINATING" });
-      await runpodTerminatePod(podId);
-      await setPodState(sb, { status: "TERMINATED", worker_url: null });
+    if (TERMINATE_AFTER_JOB) {
+      await terminatePod(podId);
     }
 
-    return res.status(r.status).json(data);
+    res.status(r.status).json(data);
+
   } catch (e) {
-    const msg = String(e?.message || e);
-
-    try {
-      if (sb) await setPodState(sb, { status: "ERROR", last_error: msg, last_used_at: new Date().toISOString() });
-    } catch {}
-
-    try {
-      if (TERMINATE_AFTER_JOB && podId) await runpodTerminatePod(podId);
-    } catch {}
-
-    return res.status(500).json({ ok: false, error: msg });
+    if (TERMINATE_AFTER_JOB && podId) {
+      try { await terminatePod(podId); } catch {}
+    }
+    res.status(500).json({ ok: false, error: String(e.message) });
   }
 }
