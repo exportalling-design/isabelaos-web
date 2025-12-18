@@ -1,16 +1,31 @@
 // /api/autosleep.js
+// ============================================================
+// IsabelaOS Studio - AutoSleep (Vercel Cron)
+//
+// Qué hace:
+// 1) Lee pod_state.last_used_at y pod_state.busy en Supabase
+// 2) Si el pod lleva X minutos sin uso y NO está busy:
+//    - TERMINATE del pod (para no cobrar)
+//    - Actualiza pod_state.status = "TERMINATED", pod_id=null, worker_url=null
+//
+// Requisitos:
+// - Env Vars en Vercel: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// - Env Vars en Vercel: RUNPOD_API_KEY
+// - En Supabase: tabla pod_state con row id=1 y campo pod_id
+// - pod_state.busy (boolean) recomendado
+// ============================================================
+
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// usa el key de video si existe
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
+const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
+
+// Minutos sin uso antes de TERMINATE (tu pedido: 3)
+const IDLE_MINUTES = Number(process.env.POD_IDLE_MINUTES || 3);
 
 const POD_STATE_TABLE = "pod_state";
-
-// 3 minutos por defecto
-const IDLE_MINUTES = Number(process.env.POD_IDLE_MINUTES || 3);
 
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
@@ -19,23 +34,14 @@ function sbAdmin() {
 }
 
 function runpodHeaders() {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
-  return {
-    Authorization: `Bearer ${RUNPOD_API_KEY}`,
-    "Content-Type": "application/json",
-  };
-}
-
-function isBusyStatus(statusRaw) {
-  const s = String(statusRaw || "").toUpperCase();
-  return s === "CREATING" || s === "STARTING" || s === "BUSY" || s === "TERMINATING";
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY in Vercel");
+  return { Authorization: `Bearer ${RUNPOD_API_KEY}` };
 }
 
 async function runpodTerminatePod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-    method: "DELETE",
-    headers: runpodHeaders(),
-  });
+  const url = `https://rest.runpod.io/v1/pods/${podId}`;
+  const r = await fetch(url, { method: "DELETE", headers: runpodHeaders() });
+
   if (!r.ok) {
     const t = await r.text().catch(() => "");
     throw new Error(`RunPod TERMINATE failed (${r.status}): ${t}`);
@@ -55,10 +61,17 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
+    // Si no hay pod_id no hay nada que matar
     if (!state?.pod_id) {
       return res.json({ ok: true, action: "noop", reason: "pod_state.pod_id vacío" });
     }
 
+    // Si está busy, NO TERMINAR
+    if (state?.busy === true) {
+      return res.json({ ok: true, action: "noop", reason: "busy=true (pod trabajando)" });
+    }
+
+    // Si nunca se usó, no apagues
     if (!state.last_used_at) {
       return res.json({ ok: true, action: "noop", reason: "no last_used_at" });
     }
@@ -71,28 +84,17 @@ export default async function handler(req, res) {
       return res.json({ ok: true, action: "noop", idleMinutes });
     }
 
-    // NO matar si está trabajando
-    if (isBusyStatus(state.status)) {
-      return res.json({
-        ok: true,
-        action: "noop",
-        reason: `busy_by_state:${state.status}`,
-        idleMinutes,
-      });
-    }
-
-    // Terminar pod por inactividad
-    await sb.from(POD_STATE_TABLE).update({ status: "TERMINATING" }).eq("id", 1);
-
+    // TERMINATE por inactividad
     await runpodTerminatePod(state.pod_id);
 
+    // Limpia estado
     await sb
       .from(POD_STATE_TABLE)
       .update({
         status: "TERMINATED",
         pod_id: null,
         worker_url: null,
-        last_used_at: new Date().toISOString(),
+        busy: false,
       })
       .eq("id", 1);
 
