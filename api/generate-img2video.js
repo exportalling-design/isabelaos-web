@@ -273,4 +273,99 @@ export default async function handler(req, res) {
 
     // Payload final para worker
     const payload = {
-      user_id:
+      user_id: payloadRaw.user_id || "web-user",
+      prompt: payloadRaw.prompt || "",
+      negative_prompt: payloadRaw.negative_prompt || "",
+      image_b64,
+      image_url,
+      // bandera para que tu worker sepa que es I2V
+      action: "img2video",
+      kind: "vid_img2vid",
+      ...payloadRaw,
+      ...maybeFast,
+    };
+
+    // 1) Pod + worker ready
+    const fresh = await ensureFreshPod(sb);
+    podId = fresh.podId;
+
+    // 2) Crea job en Supabase
+    const job_id = crypto.randomUUID();
+
+    await createVideoJob(sb, {
+      job_id,
+      user_id: payloadRaw.user_id || null,
+      status: "QUEUED",
+      payload,
+      pod_id: podId,
+      worker_url: fresh.workerUrl,
+      updated_at: new Date().toISOString(),
+    });
+
+    // 3) Dispatch async al worker
+    const dispatchUrl = `${fresh.workerUrl}/api/video_async`;
+    console.log("[I2V] dispatchUrl=", dispatchUrl);
+
+    await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
+    await updateVideoJob(sb, job_id, { status: "DISPATCHED", updated_at: new Date().toISOString() });
+
+    const r = await fetchWithTimeout(
+      dispatchUrl,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id, ...payload }),
+      },
+      DISPATCH_TIMEOUT_MS
+    );
+
+    const txt = await r.text().catch(() => "");
+    console.log("[I2V] dispatch response status=", r.status, "body=", txt.slice(0, 200));
+
+    if (r.status !== 202 && r.status !== 200) {
+      await updateVideoJob(sb, job_id, {
+        status: "ERROR",
+        error: `Worker dispatch failed: ${r.status} ${txt.slice(0, 200)}`,
+        updated_at: new Date().toISOString(),
+      });
+      return res.status(500).json({ ok: false, error: `Worker dispatch failed: ${r.status}`, podId });
+    }
+
+    // Guardar respuesta normalizada (debug)
+    let workerReply = null;
+    try {
+      const raw = txt ? JSON.parse(txt) : null;
+      workerReply = Array.isArray(raw) ? raw[0] : raw;
+    } catch {
+      workerReply = { raw_text: txt?.slice(0, 500) || "" };
+    }
+
+    try {
+      await updateVideoJob(sb, job_id, {
+        status: workerReply?.status || "IN_PROGRESS",
+        worker_reply: workerReply,
+        updated_at: new Date().toISOString(),
+      });
+    } catch {}
+
+    return res.status(200).json({
+      ok: true,
+      job_id,
+      status: "IN_PROGRESS",
+      podId,
+      worker: fresh.workerUrl,
+      note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=...",
+    });
+  } catch (e) {
+    const msg = String(e?.message || e);
+    console.error("[I2V] ERROR:", msg);
+
+    try {
+      if (sb) {
+        await setPodState(sb, { status: "ERROR", last_error: msg, last_used_at: new Date().toISOString() });
+      }
+    } catch {}
+
+    return res.status(500).json({ ok: false, error: msg, podId });
+  }
+}
