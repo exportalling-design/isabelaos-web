@@ -1,32 +1,31 @@
-import { useState, useEffect, useMemo } from "react";
+// App.jsx
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
-  getTodayGenerationCount,
   deleteGenerationFromSupabase,
 } from "./lib/generations";
 
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
-const DEMO_LIMIT = 3; // invitados
-const DAILY_LIMIT = 5; // (solo mientras tengas beta gratis; opcional)
+const DEMO_LIMIT = 3; // invitados (demo)
 
 // ---------------------------------------------------------
-// Jades / Planes (nuevo modelo)
+// Jades / Planes (modelo actual)
 // ---------------------------------------------------------
-const JADE_VALUE_USD = 0.10;
+const JADE_VALUE_USD = 0.1;
 
 const PLANS = {
-  basic: { name: "Plan Basic", price: 19, includedJades: 100 },
-  pro: { name: "Plan Pro", price: 39, includedJades: 300 },
+  basic: { key: "basic", name: "Plan Basic", price: 19, includedJades: 100 },
+  pro: { key: "pro", name: "Plan Pro", price: 39, includedJades: 300 },
 };
 
 const JADE_PACKS = [
-  { jades: 100, price: 10 },
-  { jades: 300, price: 27 },
+  { key: "pack100", jades: 100, price: 10 },
+  { key: "pack300", jades: 300, price: 27 },
 ];
 
 const GENERATION_COSTS = {
@@ -55,12 +54,7 @@ function scrollToId(id) {
 // ---------------------------------------------------------
 // Botón PayPal reutilizable
 // ---------------------------------------------------------
-function PayPalButton({
-  amount = "10.00",
-  description = "IsabelaOS Studio",
-  containerId,
-  onPaid,
-}) {
+function PayPalButton({ amount = "10.00", description = "IsabelaOS Studio", containerId, onPaid }) {
   const divId = containerId || "paypal-button-container";
 
   useEffect(() => {
@@ -75,26 +69,17 @@ function PayPalButton({
       if (cancelled) return;
       if (!window.paypal) return;
 
-      // evita duplicar botones
       const mount = document.getElementById(divId);
       if (mount) mount.innerHTML = "";
 
       window.paypal
         .Buttons({
-          style: {
-            layout: "horizontal",
-            color: "black",
-            shape: "pill",
-            label: "paypal",
-          },
+          style: { layout: "horizontal", color: "black", shape: "pill", label: "paypal" },
           createOrder: (data, actions) =>
             actions.order.create({
               purchase_units: [
                 {
-                  amount: {
-                    value: String(amount),
-                    currency_code: "USD",
-                  },
+                  amount: { value: String(amount), currency_code: "USD" },
                   description,
                 },
               ],
@@ -104,11 +89,7 @@ function PayPalButton({
               const details = await actions.order.capture();
               console.log("Pago PayPal completado:", details);
               if (typeof onPaid === "function") onPaid(details);
-              else {
-                alert(
-                  "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
-                );
-              }
+              else alert("Pago completado con PayPal.");
             } catch (err) {
               console.error("Error al capturar pago PayPal:", err);
               alert("Ocurrió un error al confirmar el pago con PayPal.");
@@ -122,9 +103,7 @@ function PayPalButton({
         .render(`#${divId}`);
     };
 
-    const existingScript = document.querySelector(
-      'script[src*="https://www.paypal.com/sdk/js"]'
-    );
+    const existingScript = document.querySelector('script[src*="https://www.paypal.com/sdk/js"]');
 
     if (existingScript) {
       if (window.paypal) renderButtons();
@@ -165,6 +144,12 @@ function AuthModal({ open, onClose }) {
   const [localLoading, setLocalLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setLocalLoading(false);
+  }, [open]);
+
   if (!open) return null;
 
   const handleSubmit = async (e) => {
@@ -176,13 +161,11 @@ function AuthModal({ open, onClose }) {
         await signInWithEmail(email, password);
       } else {
         await signUpWithEmail(email, password);
-        alert(
-          "Cuenta creada. Si Supabase lo requiere, revisa tu correo para confirmar la cuenta."
-        );
+        alert("Cuenta creada. Si Supabase lo requiere, revisa tu correo para confirmar la cuenta.");
       }
       onClose();
     } catch (err) {
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     } finally {
       setLocalLoading(false);
     }
@@ -194,7 +177,7 @@ function AuthModal({ open, onClose }) {
     try {
       await signInWithGoogle();
     } catch (err) {
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
       setLocalLoading(false);
     }
   };
@@ -203,20 +186,13 @@ function AuthModal({ open, onClose }) {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm px-4">
       <div className="w-full max-w-md rounded-3xl border border-white/10 bg-black/90 p-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white">
-            {mode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
-          </h3>
-          <button
-            onClick={onClose}
-            className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10"
-          >
+          <h3 className="text-lg font-semibold text-white">{mode === "login" ? "Inicia sesión" : "Crea tu cuenta"}</h3>
+          <button onClick={onClose} className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10">
             ✕
           </button>
         </div>
 
-        <p className="mt-2 text-xs text-neutral-400">
-          Usa tu correo o entra con Google para usar IsabelaOS Studio.
-        </p>
+        <p className="mt-2 text-xs text-neutral-400">Usa tu correo o entra con Google para usar IsabelaOS Studio.</p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <div>
@@ -240,20 +216,14 @@ function AuthModal({ open, onClose }) {
             />
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
 
           <button
             type="submit"
             disabled={localLoading}
             className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {localLoading
-              ? "Procesando..."
-              : mode === "login"
-              ? "Entrar"
-              : "Registrarme"}
+            {localLoading ? "Procesando..." : mode === "login" ? "Entrar" : "Registrarme"}
           </button>
         </form>
 
@@ -269,22 +239,14 @@ function AuthModal({ open, onClose }) {
           {mode === "login" ? (
             <>
               ¿No tienes cuenta?{" "}
-              <button
-                type="button"
-                onClick={() => setMode("register")}
-                className="text-cyan-300 underline"
-              >
+              <button type="button" onClick={() => setMode("register")} className="text-cyan-300 underline">
                 Regístrate aquí
               </button>
             </>
           ) : (
             <>
               ¿Ya tienes cuenta?{" "}
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className="text-cyan-300 underline"
-              >
+              <button type="button" onClick={() => setMode("login")} className="text-cyan-300 underline">
                 Inicia sesión
               </button>
             </>
@@ -296,41 +258,36 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (generador de imágenes)
-// MODELO: JADES + DEMO + OPTIMIZACIÓN PROMPT
+// Panel: Generador de imágenes (Jades + Demo)
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
-  const userLoggedIn = !isDemo && user;
+  const userLoggedIn = !isDemo && !!user;
 
-  const [prompt, setPrompt] = useState(
-    "Cinematic portrait, ultra detailed, soft light, 8k"
-  );
-  const [negative, setNegative] = useState(
-    "blurry, low quality, deformed, watermark, text"
-  );
+  const [prompt, setPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
+  const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
 
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  // Prompt optimizer
+  // Prompt optimizer (OpenAI)
   const [autoPrompt, setAutoPrompt] = useState(false);
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
 
-  // Estado render
+  // Estado
   const [status, setStatus] = useState("IDLE"); // IDLE | OPTIMIZING | IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
   const [statusText, setStatusText] = useState("");
   const [imageB64, setImageB64] = useState(null);
   const [error, setError] = useState("");
 
-  // Jades (temporal en localStorage)
+  // Demo count
+  const [demoCount, setDemoCount] = useState(0);
+
+  // Jades (temporal en localStorage por usuario)
   const jadeKey = userLoggedIn ? `isabelaos_jades_${user.id}` : null;
   const [jades, setJades] = useState(0);
-
-  // DEMO
-  const [demoCount, setDemoCount] = useState(0);
 
   useEffect(() => {
     if (!isDemo) return;
@@ -349,7 +306,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [userLoggedIn, jadeKey]);
 
-  const costPerImage = GENERATION_COSTS.img_prompt;
+  const cost = GENERATION_COSTS.img_prompt;
+  const remaining = isDemo ? Math.max(0, DEMO_LIMIT - demoCount) : 0;
 
   const optimizeOne = async (label, text, setter) => {
     if (!autoPrompt || !text?.trim()) {
@@ -365,21 +323,23 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),
       });
-
       const data = await res.json().catch(() => null);
+
       if (!res.ok || !data?.ok || !data.optimizedPrompt) {
         setter("");
         return text;
       }
-      const optimized = String(data.optimizedPrompt).trim();
+
+      const optimized = String(data.optimizedPrompt || "").trim();
       if (!optimized) {
         setter("");
         return text;
       }
+
       setter(optimized);
       return optimized;
-    } catch (err) {
-      console.error("Error optimizando:", err);
+    } catch (e) {
+      console.error("Error optimizando:", e);
       setter("");
       return text;
     }
@@ -390,37 +350,29 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setImageB64(null);
 
     // DEMO
-    if (isDemo) {
-      if (demoCount >= DEMO_LIMIT) {
-        alert(
-          `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Regístrate para continuar.`
-        );
-        onAuthRequired && onAuthRequired();
-        return;
-      }
-    }
-
-    // JADES
-    if (userLoggedIn && jades < costPerImage) {
+    if (isDemo && demoCount >= DEMO_LIMIT) {
       setStatus("ERROR");
-      setStatusText("Jades insuficientes.");
-      setError(
-        `No tienes jades suficientes. Cada imagen cuesta ${costPerImage} jade(s).`
-      );
+      setStatusText("Límite demo alcanzado.");
+      alert(`Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Regístrate para continuar.`);
+      onAuthRequired && onAuthRequired();
       return;
     }
 
-    // Optimizar
+    // LOGUEADO: validar jades
+    if (userLoggedIn && Number(jades || 0) < cost) {
+      setStatus("ERROR");
+      setStatusText("Jades insuficientes.");
+      setError(`No tienes jades suficientes. Esta generación cuesta ${cost} jade(s).`);
+      return;
+    }
+
+    // Optimizar (si aplica)
     let promptToUse = prompt;
     let negativeToUse = negative;
 
     if (autoPrompt) {
       promptToUse = await optimizeOne("prompt", prompt, setOptimizedPrompt);
-      negativeToUse = await optimizeOne(
-        "negative prompt",
-        negative,
-        setOptimizedNegative
-      );
+      negativeToUse = await optimizeOne("negative", negative, setOptimizedNegative);
     } else {
       setOptimizedPrompt("");
       setOptimizedNegative("");
@@ -439,39 +391,39 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
-          optimize_prompt: autoPrompt,
+          optimize_prompt: !!autoPrompt,
         }),
       });
 
       const data = await res.json().catch(() => null);
-
       if (!res.ok || !data?.output?.image_b64) {
         throw new Error(data?.error || "Error al generar la imagen.");
       }
 
-      setImageB64(data.output.image_b64);
+      const b64 = data.output.image_b64;
+      setImageB64(b64);
       setStatus("COMPLETED");
       setStatusText("Imagen generada correctamente.");
 
-      // DEMO COUNT
+      // DEMO count
       if (isDemo) {
         const next = demoCount + 1;
         setDemoCount(next);
         localStorage.setItem("isabelaos_demo_count", String(next));
       }
 
-      // DESCONTAR JADES
+      // Descontar jades
       if (userLoggedIn && jadeKey) {
-        const remaining = Math.max(0, Number(jades || 0) - costPerImage);
-        setJades(remaining);
-        localStorage.setItem(jadeKey, String(remaining));
+        const next = Math.max(0, Number(jades || 0) - cost);
+        setJades(next);
+        localStorage.setItem(jadeKey, String(next));
       }
 
       // Guardar en Supabase
-      if (userLoggedIn) {
+      if (userLoggedIn && user?.id) {
         saveGenerationInSupabase({
           userId: user.id,
-          imageUrl: `data:image/png;base64,${data.output.image_b64}`,
+          imageUrl: `data:image/png;base64,${b64}`,
           prompt: promptToUse,
           negativePrompt: negativeToUse,
           width: Number(width),
@@ -483,13 +435,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar la imagen.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
   };
 
   const handleDownload = () => {
     if (isDemo) {
-      alert("Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión.");
+      alert("Para descargar tu imagen, por favor crea tu cuenta o inicia sesión.");
       onAuthRequired && onAuthRequired();
       return;
     }
@@ -502,44 +454,38 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     document.body.removeChild(link);
   };
 
-  const remaining = isDemo ? Math.max(0, DEMO_LIMIT - demoCount) : 0;
-
-  const busy =
-    status === "OPTIMIZING" ||
-    status === "IN_QUEUE" ||
-    status === "IN_PROGRESS";
-
+  // Gate: si NO es demo y NO hay user
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">Debes iniciar sesión para usar el generador.</p>
+        <p className="font-medium">Debes iniciar sesión para usar el generador de imágenes.</p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás generar imágenes con nuestro motor conectado a RunPod,
-          guardar tu historial y descargar. El sistema funciona con{" "}
-          <span className="font-semibold text-white">Jades</span> (créditos).
+          Desde tu cuenta podrás generar imágenes, guardar historial y descargar. El sistema usa{" "}
+          <span className="font-semibold text-white">Jades</span> (créditos) y planes que incluyen jades.
         </p>
       </div>
     );
   }
 
+  const busy = status === "OPTIMIZING" || status === "IN_QUEUE" || status === "IN_PROGRESS";
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
+      {/* Form */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Generador desde prompt</h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo demo: te quedan {remaining} imágenes de prueba. La descarga requiere
-            crear cuenta.
+            Modo demo: te quedan {remaining} / {DEMO_LIMIT} imágenes gratuitas.
           </div>
         )}
 
         {userLoggedIn && (
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-[11px] text-neutral-200">
-            <span className="font-semibold text-white">Saldo:</span>{" "}
-            {Number(jades || 0)} jade(s) ·{" "}
+            <span className="font-semibold text-white">Saldo:</span> {Number(jades || 0)} jade(s) ·{" "}
             <span className="text-neutral-400">
-              Esta generación cuesta {GENERATION_COSTS.img_prompt} jade(s).
+              1 imagen = {cost} jade (${(cost * JADE_VALUE_USD).toFixed(2)})
             </span>
           </div>
         )}
@@ -555,12 +501,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             />
             {autoPrompt && optimizedPrompt && (
               <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
-                <span className="font-semibold">Prompt optimizado:</span>{" "}
-                {optimizedPrompt}
+                <span className="font-semibold">Prompt optimizado:</span> {optimizedPrompt}
               </div>
             )}
           </div>
 
+          {/* Toggle optimizer */}
           <div className="flex items-start justify-between gap-3 text-xs">
             <label className="flex items-center gap-2 text-neutral-300">
               <input
@@ -573,7 +519,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <span>Optimizar mi prompt con IA (OpenAI)</span>
             </label>
             <span className="text-[10px] text-neutral-500 text-right">
-              Si está activado, el sistema ajusta tu texto antes de enviar el render.
+              Ajusta tu texto antes de enviarlo al motor.
             </span>
           </div>
 
@@ -587,8 +533,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             />
             {autoPrompt && optimizedNegative && (
               <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
-                <span className="font-semibold">Negative optimizado:</span>{" "}
-                {optimizedNegative}
+                <span className="font-semibold">Negative optimizado:</span> {optimizedNegative}
               </div>
             )}
           </div>
@@ -600,9 +545,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 type="number"
                 min={5}
                 max={50}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
                 onChange={(e) => setSteps(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 disabled={busy}
               />
             </div>
@@ -613,9 +558,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 min={256}
                 max={1024}
                 step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={width}
                 onChange={(e) => setWidth(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 disabled={busy}
               />
             </div>
@@ -626,26 +571,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 min={256}
                 max={1024}
                 step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={height}
                 onChange={(e) => setHeight(e.target.value)}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 disabled={busy}
               />
             </div>
           </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo para generar."}
-            <br />
-            <span className="text-[11px] text-neutral-400">
-              {isDemo && `Uso de prueba: ${demoCount} / ${DEMO_LIMIT}. `}
-              {userLoggedIn && (
-                <>
-                  Saldo: {Number(jades || 0)} jade(s) · Costo:{" "}
-                  {GENERATION_COSTS.img_prompt} jade(s).
-                </>
-              )}
-            </span>
+          <div className="rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado: {statusText || "Listo para generar."}
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
@@ -654,23 +589,31 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             onClick={handleGenerate}
             disabled={
               busy ||
-              (isDemo ? demoCount >= DEMO_LIMIT : Number(jades || 0) < GENERATION_COSTS.img_prompt)
+              (isDemo ? demoCount >= DEMO_LIMIT : userLoggedIn && Number(jades || 0) < cost)
             }
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {isDemo && demoCount >= DEMO_LIMIT
               ? "Límite demo alcanzado (Crea cuenta)"
-              : !isDemo && userLoggedIn && Number(jades || 0) < GENERATION_COSTS.img_prompt
+              : !isDemo && userLoggedIn && Number(jades || 0) < cost
               ? "Jades insuficientes (Compra plan o pack)"
-              : status === "OPTIMIZING"
-              ? "Optimizando..."
-              : status === "IN_QUEUE" || status === "IN_PROGRESS"
+              : busy
               ? "Generando..."
-              : "Generar imagen desde prompt"}
+              : `Generar imagen (${cost} jade)`}
           </button>
+
+          {imageB64 && (
+            <button
+              onClick={handleDownload}
+              className="w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+            >
+              {isDemo ? "Descargar (Requiere cuenta)" : "Descargar imagen"}
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
@@ -684,48 +627,36 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <p>Aquí verás el resultado en cuanto se complete el render.</p>
           )}
         </div>
-
-        {imageB64 && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
-          >
-            {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------
-// NUEVO: Panel de generación de video (Prompt + Imagen→Video)
+// Panel de generación de video (Prompt + Imagen→Video)
 // ---------------------------------------------------------
 function VideoPanel() {
   const { user } = useAuth();
 
-  const [mode, setMode] = useState("prompt");
+  const [mode, setMode] = useState("prompt"); // "prompt" | "img2vid"
 
   const [prompt, setPrompt] = useState(
-    "beautiful person in an elegant outfit, confident runway walk towards the camera, studio background, ultra detailed, 8k"
+    "beautiful woman in an elegant blue dress, confident runway walk towards the camera, studio background, ultra detailed, 8k"
   );
-  const [negative, setNegative] = useState(
-    "low quality, blurry, deformed, glitch, watermark, noisy, pixelated"
-  );
+  const [negative, setNegative] = useState("low quality, blurry, deformed, watermark, noisy, pixelated");
 
   const [autoPrompt, setAutoPrompt] = useState(false);
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
 
-  const [aspectRatio, setAspectRatio] = useState("9:16");
-  const [quality, setQuality] = useState("HD");
-  const [duration, setDuration] = useState(5);
+  const [aspectRatio, setAspectRatio] = useState("9:16"); // "1:1" | "9:16" | "16:9"
+  const [quality, setQuality] = useState("HD"); // "HD" | "MAX"
+  const [duration, setDuration] = useState(5); // 5 | 10
 
-  const [initImageFile, setInitImageFile] = useState(null);
   const [initImagePreviewUrl, setInitImagePreviewUrl] = useState(null);
   const [initImageB64, setInitImageB64] = useState("");
 
-  const [status, setStatus] = useState("IDLE");
+  const [status, setStatus] = useState("IDLE"); // IDLE | OPTIMIZING | GENERATING | DONE | ERROR
   const [statusText, setStatusText] = useState("");
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
@@ -734,8 +665,7 @@ function VideoPanel() {
     return () => {
       if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initImagePreviewUrl]);
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -755,7 +685,6 @@ function VideoPanel() {
     setVideoUrl(null);
 
     if (!file) {
-      setInitImageFile(null);
       setInitImageB64("");
       if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
       setInitImagePreviewUrl(null);
@@ -777,12 +706,10 @@ function VideoPanel() {
       setInitImagePreviewUrl(preview);
 
       const b64 = await fileToBase64(file);
-      setInitImageFile(file);
       setInitImageB64(b64);
     } catch (e) {
       console.error("Error leyendo imagen:", e);
-      setError(e.message || String(e));
-      setInitImageFile(null);
+      setError(e?.message || String(e));
       setInitImageB64("");
       if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
       setInitImagePreviewUrl(null);
@@ -807,7 +734,6 @@ function VideoPanel() {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-        console.warn(`No se pudo optimizar ${label}, usando original.`, data);
         setter("");
         return text;
       }
@@ -846,11 +772,7 @@ function VideoPanel() {
 
     if (autoPrompt) {
       promptToUse = await optimizeOne("prompt", prompt, setOptimizedPrompt);
-      negativeToUse = await optimizeOne(
-        "negative prompt",
-        negative,
-        setOptimizedNegative
-      );
+      negativeToUse = await optimizeOne("negative", negative, setOptimizedNegative);
     } else {
       setOptimizedPrompt("");
       setOptimizedNegative("");
@@ -868,14 +790,14 @@ function VideoPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
+          mode, // "prompt" | "img2vid"
           init_image_b64: mode === "img2vid" ? initImageB64 : undefined,
           prompt: promptToUse,
           negative_prompt: negativeToUse,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           quality,
-          optimize_prompt: autoPrompt,
+          optimize_prompt: !!autoPrompt,
         }),
       });
 
@@ -883,7 +805,7 @@ function VideoPanel() {
 
       if (!res.ok || !data || !data.ok || !data.videoUrl) {
         console.error("Respuesta /api/generate-video:", data);
-        throw new Error(data?.error || "Error en /api/generate-video.");
+        throw new Error(data?.error || "Error en /api/generate-video. Revisa los logs.");
       }
 
       setVideoUrl(data.videoUrl);
@@ -893,27 +815,23 @@ function VideoPanel() {
       console.error("Error handleGenerateVideo:", err);
       setStatus("ERROR");
       setStatusText("Error al generar el video.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
-  };
-
-  const handleDownloadVideo = () => {
-    if (!videoUrl) return;
-    window.open(videoUrl, "_blank");
   };
 
   const busy = status === "GENERATING" || status === "OPTIMIZING";
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
+      {/* Configuración */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-white">
-              {mode === "prompt" ? "Generar video desde prompt" : "Imagen → Video"}
+              {mode === "prompt" ? "Generar video desde prompt" : "Generar video desde imagen"}
             </h2>
             <p className="mt-1 text-xs text-neutral-400">
-              Genera clips cortos optimizados para reels.
+              Clips cortos listos para reels/anuncios. (Beta)
             </p>
           </div>
 
@@ -926,7 +844,7 @@ function VideoPanel() {
                 mode === "prompt"
                   ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "text-neutral-200 hover:bg-white/5"
-              }`}
+              } ${busy ? "opacity-60" : ""}`}
             >
               Prompt
             </button>
@@ -938,7 +856,7 @@ function VideoPanel() {
                 mode === "img2vid"
                   ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "text-neutral-200 hover:bg-white/5"
-              }`}
+              } ${busy ? "opacity-60" : ""}`}
             >
               Imagen → Video
             </button>
@@ -948,7 +866,7 @@ function VideoPanel() {
         <div className="mt-4 space-y-4 text-sm">
           {mode === "img2vid" && (
             <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
-              <p className="text-xs text-neutral-300 mb-2">Imagen base</p>
+              <p className="text-xs text-neutral-300 mb-2">Imagen base (PNG/JPG/WebP)</p>
 
               <div className="flex items-start gap-4">
                 <div className="flex-1">
@@ -960,21 +878,15 @@ function VideoPanel() {
                     className="w-full rounded-2xl border border-white/10 bg-black/60 px-3 py-2 text-xs text-neutral-200"
                   />
                   <p className="mt-2 text-[11px] text-neutral-500">
-                    Recomendado: 512–1024px.
+                    Tip: sujeto centrado y bien iluminado. Recomendado 512–1024px.
                   </p>
                 </div>
 
                 <div className="w-28 h-28 rounded-2xl bg-black/60 border border-white/10 overflow-hidden flex items-center justify-center">
                   {initImagePreviewUrl ? (
-                    <img
-                      src={initImagePreviewUrl}
-                      alt="Preview"
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={initImagePreviewUrl} alt="Preview" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-[10px] text-neutral-500 px-2 text-center">
-                      Sin imagen
-                    </span>
+                    <span className="text-[10px] text-neutral-500 px-2 text-center">Sin imagen</span>
                   )}
                 </div>
               </div>
@@ -991,8 +903,7 @@ function VideoPanel() {
             />
             {autoPrompt && optimizedPrompt && (
               <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
-                <span className="font-semibold">Prompt optimizado:</span>{" "}
-                {optimizedPrompt}
+                <span className="font-semibold">Prompt optimizado:</span> {optimizedPrompt}
               </div>
             )}
           </div>
@@ -1006,10 +917,10 @@ function VideoPanel() {
                 className="h-4 w-4 rounded border-white/30 bg-black/70"
                 disabled={busy}
               />
-              <span>Optimizar mis prompts con IA</span>
+              <span>Optimizar mis prompts con IA (OpenAI)</span>
             </label>
             <span className="text-[10px] text-neutral-500 text-right">
-              Ajusta tu texto antes de enviarlo al motor.
+              Ajusta tus textos antes de enviar al motor.
             </span>
           </div>
 
@@ -1023,35 +934,34 @@ function VideoPanel() {
             />
             {autoPrompt && optimizedNegative && (
               <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
-                <span className="font-semibold">Negative optimizado:</span>{" "}
-                {optimizedNegative}
+                <span className="font-semibold">Negative optimizado:</span> {optimizedNegative}
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="col-span-3">
-              <p className="text-neutral-300 text-xs mb-1">Relación de aspecto</p>
-              <div className="flex gap-2">
-                {["1:1", "9:16", "16:9"].map((ar) => (
-                  <button
-                    key={ar}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setAspectRatio(ar)}
-                    className={`flex-1 rounded-2xl px-3 py-2 ${
-                      aspectRatio === ar
-                        ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                        : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                    } ${busy ? "opacity-60" : ""}`}
-                  >
-                    {ar}
-                  </button>
-                ))}
-              </div>
+          {/* Aspect ratio */}
+          <div className="text-xs">
+            <p className="text-neutral-300 text-xs mb-1">Relación de aspecto</p>
+            <div className="flex gap-2">
+              {["1:1", "9:16", "16:9"].map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setAspectRatio(r)}
+                  className={`flex-1 rounded-2xl px-3 py-2 ${
+                    aspectRatio === r
+                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+                  } ${busy ? "opacity-60" : ""}`}
+                >
+                  {r === "1:1" ? "1:1 (cuadrado)" : r === "9:16" ? "9:16 (vertical)" : "16:9 (horizontal)"}
+                </button>
+              ))}
             </div>
           </div>
 
+          {/* Calidad y duración */}
           <div className="grid gap-3 md:grid-cols-2 text-xs">
             <div>
               <p className="text-neutral-300 mb-1">Calidad</p>
@@ -1089,16 +999,15 @@ function VideoPanel() {
                         : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                     } ${busy ? "opacity-60" : ""}`}
                   >
-                    {d}s
+                    {d} segundos
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual:{" "}
-            {statusText || "Listo para generar un clip."}
+          <div className="rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado: {statusText || "Listo para generar un clip de video (beta)."}
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
@@ -1107,7 +1016,7 @@ function VideoPanel() {
             type="button"
             onClick={handleGenerateVideo}
             disabled={busy}
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="mt-2 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {status === "OPTIMIZING"
               ? "Optimizando..."
@@ -1117,26 +1026,27 @@ function VideoPanel() {
               ? "Generar video desde prompt"
               : "Generar video desde imagen"}
           </button>
+
+          <p className="text-[11px] text-neutral-400">
+            Nota: el backend debe devolver <span className="text-neutral-200">videoUrl</span>.
+          </p>
         </div>
       </div>
 
+      {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
           ) : (
-            <p>Aquí verás tu clip cuando termine.</p>
+            <p>Aquí verás tu clip en cuanto termine el proceso.</p>
           )}
         </div>
         {videoUrl && (
           <button
             type="button"
-            onClick={handleDownloadVideo}
+            onClick={() => window.open(videoUrl, "_blank")}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             Abrir / descargar video
@@ -1148,7 +1058,7 @@ function VideoPanel() {
 }
 
 // ---------------------------------------------------------
-// Biblioteca (LibraryView) – usa Supabase
+// Biblioteca – Supabase
 // ---------------------------------------------------------
 function LibraryView() {
   const { user } = useAuth();
@@ -1169,7 +1079,7 @@ function LibraryView() {
       setLoading(true);
       try {
         const rows = await loadGenerationsForUser(user.id);
-        const mapped = rows.map((row) => ({
+        const mapped = (rows || []).map((row) => ({
           id: row.id,
           createdAt: row.created_at,
           src: row.image_url,
@@ -1221,15 +1131,13 @@ function LibraryView() {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
         <p className="mt-1 text-xs text-neutral-400">
-          Aquí aparecen tus imágenes guardadas en Supabase.
+          Aquí aparecen tus imágenes guardadas. Selecciona una para verla en grande.
         </p>
 
         {loading ? (
           <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
         ) : items.length === 0 ? (
-          <p className="mt-4 text-xs text-neutral-400">
-            Aún no tienes imágenes guardadas.
-          </p>
+          <p className="mt-4 text-xs text-neutral-400">Aún no tienes imágenes guardadas.</p>
         ) : (
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {items.map((item) => (
@@ -1238,16 +1146,10 @@ function LibraryView() {
                 type="button"
                 onClick={() => setSelected(item)}
                 className={`group relative overflow-hidden rounded-xl border ${
-                  selected && selected.id === item.id
-                    ? "border-cyan-400"
-                    : "border-white/10"
+                  selected && selected.id === item.id ? "border-cyan-400" : "border-white/10"
                 } bg-black/60`}
               >
-                <img
-                  src={item.src}
-                  alt="Generación"
-                  className="h-24 w-full object-cover group-hover:opacity-80"
-                />
+                <img src={item.src} alt="Generación" className="h-24 w-full object-cover group-hover:opacity-80" />
                 <div className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-[10px] text-neutral-300">
                   {new Date(item.createdAt).toLocaleString()}
                 </div>
@@ -1261,15 +1163,12 @@ function LibraryView() {
         <h2 className="text-lg font-semibold text-white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
-            <img
-              src={selected.src}
-              alt="Imagen seleccionada"
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <img src={selected.src} alt="Imagen seleccionada" className="h-full w-full rounded-2xl object-contain" />
           ) : (
-            <p>Selecciona una imagen para verla en grande.</p>
+            <p>Selecciona una imagen para verla aquí.</p>
           )}
         </div>
+
         {selected && (
           <button
             onClick={handleDeleteSelected}
@@ -1285,7 +1184,7 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// Módulo Foto IA (Premium)
+// Módulo Foto Navideña IA (Premium)
 // ---------------------------------------------------------
 function XmasPhotoPanel() {
   const { user } = useAuth();
@@ -1293,7 +1192,8 @@ function XmasPhotoPanel() {
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
   const [extraPrompt, setExtraPrompt] = useState("");
-  const [status, setStatus] = useState("IDLE");
+
+  const [status, setStatus] = useState("IDLE"); // IDLE | IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
   const [statusText, setStatusText] = useState("");
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
@@ -1307,6 +1207,7 @@ function XmasPhotoPanel() {
       return;
     }
     const premiumKey = `isabelaos_premium_${user.id}`;
+    // (admin override opcional)
     if (user.email === "exportalling@gmail.com") {
       setIsPremium(true);
       try {
@@ -1323,11 +1224,6 @@ function XmasPhotoPanel() {
   }, [user]);
 
   const fileInputId = "xmas-file-input";
-
-  const handlePickFile = () => {
-    const input = document.getElementById(fileInputId);
-    if (input) input.click();
-  };
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -1375,9 +1271,7 @@ function XmasPhotoPanel() {
     }
 
     if (!isPremium) {
-      setError(
-        `Este módulo forma parte del Plan Basic (US$${PLANS.basic.price}/mes). Activa tu plan para usarlo.`
-      );
+      setError(`Este módulo requiere Plan Basic (US$${PLANS.basic.price}/mes).`);
       return;
     }
 
@@ -1388,35 +1282,31 @@ function XmasPhotoPanel() {
 
     setResultB64(null);
     setStatus("IN_QUEUE");
-    setStatusText("Enviando imagen a RunPod...");
+    setStatusText("Enviando foto navideña al motor...");
 
     try {
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_b64: pureB64,
-          description: extraPrompt || "",
-        }),
+        body: JSON.stringify({ image_b64: pureB64, description: extraPrompt || "" }),
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok || !data.jobId) {
-        throw new Error(data?.error || "Error lanzando job en RunPod.");
+      if (!res.ok || !data?.ok || !data?.jobId) {
+        throw new Error(data?.error || "Error lanzando job navideño.");
       }
 
-      setStatusText(`Enviado. ID: ${data.jobId}. Consultando estado...`);
+      const jobId = data.jobId;
+      setStatusText(`Foto enviada. ID: ${jobId}. Consultando estado...`);
 
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusRes = await fetch(`/api/status?id=${data.jobId}`);
+        const statusRes = await fetch(`/api/status?id=${encodeURIComponent(jobId)}`);
         const statusData = await statusRes.json().catch(() => null);
 
-        if (!statusRes.ok || !statusData) {
-          throw new Error(statusData?.error || "Error al consultar /api/status.");
-        }
+        if (!statusRes.ok || !statusData) throw new Error(statusData?.error || "Error consultando /api/status.");
 
         const st = statusData.status;
         setStatus(st);
@@ -1428,16 +1318,16 @@ function XmasPhotoPanel() {
 
         if (st === "COMPLETED" && statusData.output?.image_b64) {
           setResultB64(statusData.output.image_b64);
-          setStatusText("Generado con éxito.");
+          setStatusText("Foto navideña generada con éxito.");
         } else {
-          throw new Error(statusData?.error || "Job terminó sin imagen.");
+          throw new Error(statusData?.error || "Job terminado pero sin imagen.");
         }
       }
     } catch (err) {
-      console.error("Error:", err);
+      console.error("Error handleGenerateXmas:", err);
       setStatus("ERROR");
-      setStatusText("Error al generar.");
-      setError(err.message || String(err));
+      setStatusText("Error al generar la foto navideña.");
+      setError(err?.message || String(err));
     }
   };
 
@@ -1445,7 +1335,7 @@ function XmasPhotoPanel() {
     if (!resultB64) return;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${resultB64}`;
-    link.download = "isabelaos-photo.png";
+    link.download = "isabelaos-xmas-photo.png";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1456,49 +1346,48 @@ function XmasPhotoPanel() {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Foto IA (Premium)</h2>
+        <h2 className="text-lg font-semibold text-white">Foto Navideña IA (Premium)</h2>
+
+        <p className="mt-2 text-sm text-neutral-300">
+          Convierte tu foto en un retrato navideño estilo estudio profesional.
+        </p>
 
         {!isPremium && user && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Requiere <span className="font-semibold">Plan Basic</span>.
+            Este módulo requiere <span className="font-semibold">Plan Basic</span>.
           </div>
         )}
 
         <div className="mt-5 space-y-4 text-sm">
-          <button
-            type="button"
-            onClick={handlePickFile}
-            disabled={!user || busy}
-            className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300 disabled:opacity-60"
-          >
-            {dataUrl ? "Cambiar foto" : "Sube una foto"}
-          </button>
+          <div>
+            <p className="text-xs text-neutral-300">1) Sube tu foto (JPG/PNG/WebP)</p>
 
-          <input
-            id={fileInputId}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
+            <label className="mt-2 flex h-40 w-full cursor-pointer items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300">
+              {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
+              <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            </label>
 
-          {dataUrl && (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-              <img src={dataUrl} alt="Foto base" className="w-full object-cover" />
-            </div>
-          )}
+            {dataUrl && (
+              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+                <img src={dataUrl} alt="Foto base" className="w-full object-cover" />
+              </div>
+            )}
+          </div>
 
-          <input
-            type="text"
-            value={extraPrompt}
-            onChange={(e) => setExtraPrompt(e.target.value)}
-            disabled={!user || busy}
-            placeholder="Opcional: describe la escena"
-            className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400 disabled:opacity-60"
-          />
+          <div>
+            <p className="text-xs text-neutral-300">2) Opcional: describe la escena</p>
+            <input
+              type="text"
+              value={extraPrompt}
+              onChange={(e) => setExtraPrompt(e.target.value)}
+              disabled={!user || busy}
+              placeholder="Ejemplo: familia en sala acogedora junto al árbol, luces cálidas."
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400 disabled:opacity-60"
+            />
+          </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo."}
+          <div className="rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado: {statusText || "Listo para generar."}
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
@@ -1507,10 +1396,14 @@ function XmasPhotoPanel() {
             type="button"
             onClick={handleGenerateXmas}
             disabled={busy || !pureB64 || !user || !isPremium}
-            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {busy ? "Generando..." : "Generar"}
+            {busy ? "Generando..." : "Generar foto navideña IA"}
           </button>
+
+          <p className="text-[11px] text-neutral-400">
+            Premium: Plan Basic (incluye módulos especiales).
+          </p>
         </div>
       </div>
 
@@ -1520,11 +1413,11 @@ function XmasPhotoPanel() {
           {resultB64 ? (
             <img
               src={`data:image/png;base64,${resultB64}`}
-              alt="Generado"
+              alt="Foto navideña generada"
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Aquí verás el resultado.</p>
+            <p>Aquí verás tu foto navideña cuando termine.</p>
           )}
         </div>
 
@@ -1533,7 +1426,7 @@ function XmasPhotoPanel() {
             onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
-            Descargar
+            Descargar foto navideña
           </button>
         )}
       </div>
@@ -1542,11 +1435,18 @@ function XmasPhotoPanel() {
 }
 
 // ---------------------------------------------------------
-// Dashboard (logueado) con sidebar de vistas
+// Dashboard (logueado) con sidebar
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
-  const [appViewMode, setAppViewMode] = useState("generator");
+  const [appViewMode, setAppViewMode] = useState("generator"); // generator | video | library | xmas
+
+  const menu = [
+    { key: "generator", label: "Generar imágenes" },
+    { key: "video", label: "Video (beta)" },
+    { key: "library", label: "Biblioteca" },
+    { key: "xmas", label: "Foto Navideña IA" },
+  ];
 
   return (
     <div
@@ -1556,48 +1456,66 @@ function DashboardView() {
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_650px_at_-10%_0%,rgba(0,229,255,0.14),transparent_55%),radial-gradient(900px_700px_at_50%_120%,rgba(140,90,255,0.18),transparent_60%),linear-gradient(180deg,#0b0f17 0%, #070a12 60%, #05060a 100%)",
       }}
     >
-      <header className="mx-auto max-w-6xl px-4 pt-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold">IsabelaOS Studio</h1>
-            <p className="text-xs text-neutral-400">
-              Panel del creador · {user?.email}
-            </p>
+      {/* Top bar */}
+      <div className="sticky top-0 z-30 border-b border-white/10 bg-black/40 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-cyan-500/80 to-fuchsia-500/80" />
+            <div>
+              <p className="text-sm font-semibold leading-tight">IsabelaOS Studio</p>
+              <p className="text-[11px] text-neutral-400 leading-tight">
+                {isAdmin ? "Admin" : "Usuario"} · {user?.email}
+              </p>
+            </div>
           </div>
+
           <button
             onClick={signOut}
-            className="rounded-2xl border border-white/20 px-4 py-2 text-xs text-white hover:bg-white/10"
+            className="rounded-2xl border border-white/15 bg-black/40 px-4 py-2 text-xs text-white hover:bg-white/5"
           >
             Cerrar sesión
           </button>
         </div>
-      </header>
+      </div>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="flex gap-6">
-          <aside className="w-56 shrink-0 rounded-3xl border border-white/10 bg-black/30 p-4">
-            <p className="text-[11px] text-neutral-400 mb-3">Módulos</p>
+        <div className="mb-6">
+          <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
+          <p className="mt-1 text-xs text-neutral-400">
+            Genera imágenes, usa video beta, administra tu biblioteca y prueba módulos premium.
+          </p>
+        </div>
 
-            {[
-              ["generator", "Generador"],
-              ["video", "Video"],
-              ["library", "Biblioteca"],
-              ["xmas", "Foto IA Premium"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setAppViewMode(key)}
-                className={`w-full rounded-2xl px-3 py-2 text-left text-sm mb-2 ${
-                  appViewMode === key
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "text-neutral-200 hover:bg-white/5 border border-white/10"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </aside>
+        <section className="flex flex-col gap-6 lg:flex-row">
+          {/* Sidebar */}
+          <div className="w-full lg:w-64">
+            <div className="rounded-3xl border border-white/10 bg-black/40 p-3">
+              {menu.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => setAppViewMode(m.key)}
+                  className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${
+                    appViewMode === m.key
+                      ? "bg-gradient-to-r from-cyan-500/30 to-fuchsia-500/30 border border-white/10"
+                      : "hover:bg-white/5"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
 
+            <div className="mt-4 rounded-3xl border border-white/10 bg-black/30 p-4">
+              <p className="text-xs text-neutral-300">
+                Estado beta: <span className="font-semibold text-white">Plan Basic activo (sin límite)</span> (texto neutro).
+              </p>
+              <p className="mt-2 text-[11px] text-neutral-500">
+                (Luego lo conectamos a Supabase/Stripe/PayPal real.)
+              </p>
+            </div>
+          </div>
+
+          {/* Contenido */}
           <div className="flex-1 space-y-6">
             {appViewMode === "generator" && <CreatorPanel />}
             {appViewMode === "video" && <VideoPanel />}
@@ -1611,39 +1529,38 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (no sesión)
+// Landing (sin sesión): estilo neon + 2 hero + secciones
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactMessage, setContactMessage] = useState("");
-
-  const handlePaddleCheckout = async () => {
-    try {
-      const res = await fetch("/api/paddle-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json().catch(() => null);
-      if (data?.url) window.location.href = data.url;
-      else alert("No se pudo abrir el pago con Paddle. Intenta con PayPal.");
-    } catch (err) {
-      console.error("Error Paddle:", err);
-      alert("Error al conectar con Paddle.");
-    }
-  };
-
-  const handleContactSubmit = (e) => {
-    e.preventDefault();
-    const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
-    const body = encodeURIComponent(
-      `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
-    );
-    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
-  };
-
+  // Assets (ponlos en /public/landing/)
   const HERO_MAIN = "/landing/hero_main.jpg";
   const HERO_SIDE = "/landing/hero_side.jpg";
+
+  const IMG2VIDEO_IMG = "/landing/img2video.jpg";
+  const IMG2VIDEO_DEMO = "/landing/img2video_demo.mp4";
+
+  const MOSAIC_VIDEOS = [
+    "/landing/mosaic/video1.mp4",
+    "/landing/mosaic/video2.mp4",
+    "/landing/mosaic/video3.mp4",
+    "/landing/mosaic/video4.mp4",
+    "/landing/mosaic/video5.mp4",
+    "/landing/mosaic/video6.mp4",
+    "/landing/mosaic/video7.mp4",
+    "/landing/mosaic/video8.mp4",
+  ];
+
+  const PROMPT_GALLERY = [
+    "/landing/prompts/img1.jpg",
+    "/landing/prompts/img2.jpg",
+    "/landing/prompts/img3.jpg",
+    "/landing/prompts/img4.jpg",
+    "/landing/prompts/img5.jpg",
+    "/landing/prompts/img6.jpg",
+    "/landing/prompts/img7.jpg",
+    "/landing/prompts/img8.jpg",
+    "/landing/prompts/img9.jpg",
+  ];
 
   return (
     <div
@@ -1653,13 +1570,37 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_650px_at_-10%_0%,rgba(0,229,255,0.14),transparent_55%),radial-gradient(900px_700px_at_50%_120%,rgba(140,90,255,0.18),transparent_60%),linear-gradient(180deg,#0b0f17 0%, #070a12 60%, #05060a 100%)",
       }}
     >
-      <header className="mx-auto max-w-6xl px-4 pt-10">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">IsabelaOS Studio</h1>
-          <div className="flex gap-2">
+      {/* Neon side graphics */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-40 bg-gradient-to-r from-cyan-500/10 to-transparent blur-2xl" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-fuchsia-500/10 to-transparent blur-2xl" />
+
+      {/* Top nav */}
+      <div className="sticky top-0 z-30 border-b border-white/10 bg-black/35 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-cyan-500/80 to-fuchsia-500/80" />
+            <div>
+              <p className="text-sm font-semibold leading-tight">IsabelaOS Studio</p>
+              <p className="text-[11px] text-neutral-400 leading-tight">Generación visual con IA</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => scrollToId("pricing")}
+              className="hidden sm:inline-flex rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-xs text-neutral-200 hover:bg-white/5"
+            >
+              Planes
+            </button>
+            <button
+              onClick={() => scrollToId("gallery")}
+              className="hidden sm:inline-flex rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-xs text-neutral-200 hover:bg-white/5"
+            >
+              Galería
+            </button>
             <button
               onClick={onStartDemo}
-              className="rounded-2xl border border-white/20 px-4 py-2 text-xs text-white hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-xs text-neutral-200 hover:bg-white/5"
             >
               Probar demo
             </button>
@@ -1667,111 +1608,303 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               onClick={onOpenAuth}
               className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white"
             >
-              Iniciar sesión
+              Entrar / Crear cuenta
             </button>
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* HERO */}
-        <section className="grid gap-6 lg:grid-cols-2">
-          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/40">
-            <img
-              src={HERO_MAIN}
-              alt="Hero"
-              className="h-[360px] w-full object-cover opacity-90"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-            <div className="absolute bottom-0 p-6">
-              <h2 className="text-2xl font-semibold">Crea contenido visual con IA</h2>
-              <p className="mt-2 text-sm text-neutral-200 max-w-md">
-                Genera imágenes y video desde prompts, con módulos premium y biblioteca.
+      {/* HERO */}
+      <div className="mx-auto max-w-6xl px-4 pt-10">
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Hero left (big) */}
+          <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-black/40">
+            <img src={HERO_MAIN} alt="Hero" className="h-[320px] w-full object-cover opacity-90" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/20" />
+            <div className="absolute bottom-0 left-0 right-0 p-6">
+              <div className="inline-flex rounded-2xl bg-black/45 px-3 py-1 text-[11px] text-neutral-200 ring-1 ring-white/10 backdrop-blur">
+                Beta privada · Motor en la nube
+              </div>
+              <h1 className="mt-3 text-2xl font-semibold leading-tight">
+                Genera imágenes y video IA con estética cinematográfica
+              </h1>
+              <p className="mt-2 text-sm text-neutral-300 max-w-xl">
+                Un solo lugar para crear contenido visual: prompt, imagen→video, biblioteca y módulos premium.
               </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={onStartDemo}
+                  className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-white"
+                >
+                  Probar demo (3 imágenes)
+                </button>
+                <button
+                  onClick={() => scrollToId("img2video")}
+                  className="rounded-2xl border border-white/15 bg-black/30 px-5 py-2 text-sm text-white hover:bg-white/5"
+                >
+                  Ver imagen → video
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/40">
-            <img
-              src={HERO_SIDE}
-              alt="Hero side"
-              className="h-[360px] w-full object-cover opacity-90"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-            <div className="absolute bottom-0 p-6">
-              <h3 className="text-xl font-semibold">Beta para creadores</h3>
-              <p className="mt-2 text-sm text-neutral-200">
-                Optimización de prompts, video en beta y funciones premium.
+          {/* Hero right (secondary) */}
+          <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-black/40">
+            <img src={HERO_SIDE} alt="Hero side" className="h-[320px] w-full object-cover opacity-90" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/20" />
+            <div className="absolute bottom-0 left-0 right-0 p-6">
+              <div className="inline-flex rounded-2xl bg-black/45 px-3 py-1 text-[11px] text-neutral-200 ring-1 ring-white/10 backdrop-blur">
+                Control creativo · Jades
+              </div>
+              <h2 className="mt-3 text-xl font-semibold leading-tight">Planes con jades incluidos</h2>
+              <p className="mt-2 text-sm text-neutral-300">
+                Paga mensual y genera con créditos. Packs disponibles si necesitas más.
               </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => scrollToId("pricing")}
+                  className="rounded-2xl border border-white/15 bg-black/30 px-5 py-2 text-sm text-white hover:bg-white/5"
+                >
+                  Ver planes
+                </button>
+                <button
+                  onClick={onOpenAuth}
+                  className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-white"
+                >
+                  Crear cuenta
+                </button>
+              </div>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* PLAN */}
-        <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
-          <h2 className="text-sm font-semibold text-white">Plan beta para creadores</h2>
-
-          <p className="mt-2 text-xs text-neutral-300">
-            Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día y quieres
-            seguir generando, activa un plan.
-          </p>
-
-          <div className="mt-4 flex flex-wrap items-center gap-4">
+        {/* Imagen -> Video section (1 imagen + flecha + video) */}
+        <section id="img2video" className="mt-10">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">Imagen → Video</h3>
+              <p className="mt-1 text-xs text-neutral-400">Convierte una imagen en un clip corto (beta).</p>
+            </div>
             <button
-              onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              onClick={onOpenAuth}
+              className="rounded-2xl border border-white/15 bg-black/30 px-4 py-2 text-xs text-white hover:bg-white/5"
             >
-              {PLANS.basic.name} – US${PLANS.basic.price}/mes (tarjeta / Paddle)
+              Probar en mi cuenta
             </button>
+          </div>
 
-            <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
-              <span className="text-neutral-300">
-                o pagar con <span className="font-semibold">PayPal</span>:
-              </span>
-              <PayPalButton
-                amount={String(PLANS.basic.price)}
-                containerId="paypal-button-landing"
-              />
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_120px_1.2fr]">
+            <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/40">
+              <img src={IMG2VIDEO_IMG} alt="Input" className="h-[260px] w-full object-cover" />
+              <div className="p-3 text-xs text-neutral-400">Imagen base</div>
+            </div>
+
+            <div className="hidden lg:flex items-center justify-center">
+              <div className="h-14 w-14 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 grid place-items-center shadow-lg">
+                <span className="text-xl font-bold">→</span>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/40">
+              <video src={IMG2VIDEO_DEMO} controls className="h-[260px] w-full object-cover" />
+              <div className="p-3 text-xs text-neutral-400">Salida (demo)</div>
+            </div>
+          </div>
+        </section>
+
+        {/* Video mosaic */}
+        <section className="mt-10">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">Video desde prompt</h3>
+              <p className="mt-1 text-xs text-neutral-400">Biblioteca estilo collage (pon tus videos en /public/landing/mosaic/).</p>
             </div>
           </div>
 
-          <p className="mt-3 text-[11px] text-neutral-400">
-            Usuarios beta:{" "}
-            <span className="font-semibold text-white">
-              Plan Basic activo (sin límite)
-            </span>{" "}
-            mientras se mantenga la suscripción.
-          </p>
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            {MOSAIC_VIDEOS.map((v, idx) => (
+              <div
+                key={v}
+                className={`overflow-hidden rounded-3xl border border-white/10 bg-black/40 ${
+                  idx === 0 ? "md:col-span-2 md:row-span-2" : ""
+                }`}
+              >
+                <video src={v} controls className={`w-full object-cover ${idx === 0 ? "h-[360px] md:h-[420px]" : "h-[180px]"}`} />
+              </div>
+            ))}
+          </div>
         </section>
 
-        {/* CONTACTO */}
-        <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
-          <h2 className="text-sm font-semibold text-white">Contacto</h2>
-          <form onSubmit={handleContactSubmit} className="mt-4 space-y-3">
-            <input
-              className="w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-              placeholder="Nombre"
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-            />
-            <input
-              className="w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-              placeholder="Correo"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-            />
-            <textarea
-              className="w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 h-28"
-              placeholder="Mensaje"
-              value={contactMessage}
-              onChange={(e) => setContactMessage(e.target.value)}
-            />
-            <button className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text-white">
-              Enviar por correo
-            </button>
-          </form>
+        {/* Prompt image gallery (9 images) */}
+        <section id="gallery" className="mt-10">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">Imágenes generadas desde prompt</h3>
+              <p className="mt-1 text-xs text-neutral-400">Galería 3×3 (pon tus imágenes en /public/landing/prompts/).</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {PROMPT_GALLERY.map((img) => (
+              <div key={img} className="overflow-hidden rounded-3xl border border-white/10 bg-black/40">
+                <img src={img} alt="Prompt" className="h-44 w-full object-cover" />
+              </div>
+            ))}
+          </div>
         </section>
-      </main>
+
+        {/* Xmas highlight */}
+        <section className="mt-10">
+          <div className="rounded-[28px] border border-white/10 bg-black/40 p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Foto Navideña IA (Premium)</h3>
+                <p className="mt-1 text-xs text-neutral-400">
+                  Convierte tu foto en un retrato navideño estilo estudio (Plan Basic).
+                </p>
+              </div>
+              <button
+                onClick={onOpenAuth}
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-white"
+              >
+                Activar y usar
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-3xl border border-white/10 bg-black/40 p-4">
+                <p className="text-sm font-semibold">✨ Estilo estudio</p>
+                <p className="mt-1 text-xs text-neutral-400">Iluminación cuidada + fondo temático.</p>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-black/40 p-4">
+                <p className="text-sm font-semibold">⚡ Rápido</p>
+                <p className="mt-1 text-xs text-neutral-400">Proceso automatizado por job.</p>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-black/40 p-4">
+                <p className="text-sm font-semibold">🔒 Premium</p>
+                <p className="mt-1 text-xs text-neutral-400">Disponible con Plan Basic.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing */}
+        <section id="pricing" className="mt-12 pb-16">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">Planes y Jades</h3>
+              <p className="mt-1 text-xs text-neutral-400">
+                Cada acción cuesta jades. 1 jade = ${JADE_VALUE_USD.toFixed(2)}.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {/* Plan Basic */}
+            <div className="rounded-[28px] border border-white/10 bg-black/40 p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold">{PLANS.basic.name}</p>
+                  <p className="mt-1 text-xs text-neutral-400">Incluye {PLANS.basic.includedJades} jades/mes</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-semibold">${PLANS.basic.price}</p>
+                  <p className="text-[11px] text-neutral-400">USD / mes</p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-xs text-neutral-300">
+                <p>✅ Generación de imágenes</p>
+                <p>✅ Biblioteca</p>
+                <p>✅ Módulos premium (ej. Foto Navideña IA)</p>
+                <p className="mt-2 text-[11px] text-neutral-500">
+                  Texto beta: <span className="text-neutral-200">Usuario beta – Plan Basic activo (sin límite)</span>
+                </p>
+              </div>
+
+              <div className="mt-4">
+                <p className="text-xs text-neutral-400">Pagar con PayPal:</p>
+                <PayPalButton
+                  amount={String(PLANS.basic.price)}
+                  description={`Suscripción ${PLANS.basic.name}`}
+                  containerId="paypal-plan-basic"
+                />
+              </div>
+
+              <button
+                onClick={onOpenAuth}
+                className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+              >
+                Activar en mi cuenta
+              </button>
+            </div>
+
+            {/* Plan Pro */}
+            <div className="rounded-[28px] border border-white/10 bg-black/40 p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold">{PLANS.pro.name}</p>
+                  <p className="mt-1 text-xs text-neutral-400">Incluye {PLANS.pro.includedJades} jades/mes</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-semibold">${PLANS.pro.price}</p>
+                  <p className="text-[11px] text-neutral-400">USD / mes</p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-xs text-neutral-300">
+                <p>✅ Todo lo de Basic</p>
+                <p>✅ Más jades por mes</p>
+                <p>✅ Prioridad (cuando se conecte el scheduler)</p>
+              </div>
+
+              <div className="mt-4">
+                <p className="text-xs text-neutral-400">Pagar con PayPal:</p>
+                <PayPalButton
+                  amount={String(PLANS.pro.price)}
+                  description={`Suscripción ${PLANS.pro.name}`}
+                  containerId="paypal-plan-pro"
+                />
+              </div>
+
+              <button
+                onClick={onOpenAuth}
+                className="mt-4 w-full rounded-2xl border border-white/15 bg-black/30 py-3 text-sm font-semibold text-white hover:bg-white/5"
+              >
+                Activar en mi cuenta
+              </button>
+            </div>
+          </div>
+
+          {/* Jade packs */}
+          <div className="mt-6 rounded-[28px] border border-white/10 bg-black/40 p-6">
+            <h4 className="text-sm font-semibold">Packs de jades</h4>
+            <p className="mt-1 text-xs text-neutral-400">Compra créditos extra cuando los necesites.</p>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {JADE_PACKS.map((p) => (
+                <div key={p.key} className="rounded-3xl border border-white/10 bg-black/30 p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">{p.jades} jades</p>
+                    <p className="text-sm text-neutral-200">${p.price} USD</p>
+                  </div>
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    Aproximado: ${((p.jades * JADE_VALUE_USD) / 1).toFixed(2)} en valor de jade
+                  </p>
+                  <PayPalButton
+                    amount={String(p.price)}
+                    description={`Pack ${p.jades} jades`}
+                    containerId={`paypal-pack-${p.key}`}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 text-[11px] text-neutral-500">
+              Costos típicos: imagen {GENERATION_COSTS.img_prompt} jade · video {GENERATION_COSTS.vid_prompt} jades.
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -1782,7 +1915,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 export default function App() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [viewMode, setViewMode] = useState("landing");
+  const [viewMode, setViewMode] = useState("landing"); // landing | demo | dashboard
 
   useEffect(() => {
     const bg =
@@ -1810,8 +1943,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (user && viewMode !== "dashboard") setViewMode("dashboard");
-  }, [user, viewMode]);
+    if (user) setViewMode("dashboard");
+  }, [user]);
 
   if (loading) {
     return (
@@ -1821,12 +1954,12 @@ export default function App() {
     );
   }
 
-  if (user) return <DashboardView />;
+  if (user || viewMode === "dashboard") return <DashboardView />;
 
   if (viewMode === "demo") {
     return (
       <>
-        <div id="top" className="pt-10 mx-auto max-w-6xl px-4">
+        <div id="top" className="mx-auto max-w-6xl px-4 pt-10">
           <CreatorPanel isDemo={true} onAuthRequired={openAuth} />
         </div>
         <div className="mt-10">
