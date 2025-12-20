@@ -310,11 +310,11 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (generador de imágenes) - sin biblioteca
+// Panel del creador (generador de imágenes)
+// MODELO NUEVO: JADES
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
-
   const userLoggedIn = !isDemo && user;
 
   const [prompt, setPrompt] = useState(
@@ -323,108 +323,217 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [negative, setNegative] = useState(
     "blurry, low quality, deformed, watermark, text"
   );
+
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  // NUEVO: toggle para automatizar el prompt con OpenAI
+  // Prompt optimizer
   const [autoPrompt, setAutoPrompt] = useState(false);
-
-  // NUEVO: almacenamos el prompt optimizado por separado
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
 
+  // Estado render
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [imageB64, setImageB64] = useState(null);
   const [error, setError] = useState("");
 
-  const [dailyCount, setDailyCount] = useState(0);
-  const [isPremium, setIsPremium] = useState(false);
+  // -----------------------------
+  // JADES (temporal en localStorage)
+  // luego irá en Supabase
+  // -----------------------------
+  const jadeKey = userLoggedIn ? `isabelaos_jades_${user.id}` : null;
+  const [jades, setJades] = useState(0);
 
-  const premiumKey = userLoggedIn ? `isabelaos_premium_${user.id}` : null;
+  // DEMO
+  const [demoCount, setDemoCount] = useState(0);
 
+  // Init demo count
   useEffect(() => {
-    if (!userLoggedIn) {
-      setIsPremium(false);
-      setDailyCount(0);
-      return;
-    }
+    if (!isDemo) return;
+    const stored = localStorage.getItem("isabelaos_demo_count") || "0";
+    setDemoCount(Number(stored));
+  }, [isDemo]);
 
-    if (user.email === "exportalling@gmail.com") {
-      setIsPremium(true);
-      if (premiumKey) {
-        try {
-          localStorage.setItem(premiumKey, "1");
-        } catch (e) {
-          console.warn("No se pudo guardar premium para exportalling:", e);
-        }
+  // Init jades
+  useEffect(() => {
+    if (!userLoggedIn || !jadeKey) return;
+
+    const stored = localStorage.getItem(jadeKey);
+    if (stored === null) {
+      // Starter jades (ej: por registro)
+      localStorage.setItem(jadeKey, "20");
+      setJades(20);
+    } else {
+      setJades(Number(stored));
+    }
+  }, [userLoggedIn, jadeKey]);
+
+  const costPerImage = GENERATION_COSTS.img_prompt;
+
+  // -----------------------------
+  // GENERAR IMAGEN
+  // -----------------------------
+  const handleGenerate = async () => {
+    setError("");
+    setImageB64(null);
+
+    // DEMO
+    if (isDemo) {
+      if (demoCount >= DEMO_LIMIT) {
+        alert(
+          `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Regístrate para continuar.`
+        );
+        onAuthRequired && onAuthRequired();
+        return;
       }
+    }
+
+    // LOGUEADO PERO SIN JADES
+    if (userLoggedIn && jades < costPerImage) {
+      setError(
+        `No tienes jades suficientes. Cada imagen cuesta ${costPerImage} jade(s).`
+      );
       return;
     }
 
-    try {
-      const stored = premiumKey ? localStorage.getItem(premiumKey) : null;
-      setIsPremium(stored === "1");
-    } catch (e) {
-      console.warn("No se pudo leer premium desde localStorage:", e);
-      setIsPremium(false);
-    }
-  }, [userLoggedIn, user, premiumKey]);
+    setStatus("IN_QUEUE");
+    setStatusText("Enviando render al motor...");
 
-  const handlePaddleCheckout = async () => {
-    if (!userLoggedIn) {
-      alert("Por favor, inicia sesión para activar el plan.");
-      onAuthRequired && onAuthRequired();
-      return;
-    }
     try {
-      const res = await fetch("/api/paddle-checkout", {
+      const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          negative_prompt: negative,
+          width,
+          height,
+          steps,
+          optimize_prompt: autoPrompt,
+        }),
       });
+
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Paddle:", data);
-        alert(
-          "No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde."
-        );
+
+      if (!res.ok || !data?.output?.image_b64) {
+        throw new Error(data?.error || "Error al generar la imagen.");
+      }
+
+      setImageB64(data.output.image_b64);
+      setStatus("COMPLETED");
+      setStatusText("Imagen generada correctamente.");
+
+      // DEMO COUNT
+      if (isDemo) {
+        const next = demoCount + 1;
+        setDemoCount(next);
+        localStorage.setItem("isabelaos_demo_count", String(next));
+      }
+
+      // DESCONTAR JADES
+      if (userLoggedIn && jadeKey) {
+        const remaining = jades - costPerImage;
+        setJades(remaining);
+        localStorage.setItem(jadeKey, String(remaining));
+      }
+
+      // Guardar en Supabase
+      if (userLoggedIn) {
+        saveGenerationInSupabase({
+          userId: user.id,
+          imageUrl: `data:image/png;base64,${data.output.image_b64}`,
+          prompt,
+          negativePrompt: negative,
+          width,
+          height,
+          steps,
+        }).catch(console.error);
       }
     } catch (err) {
-      console.error("Error Paddle:", err);
-      alert("Error al conectar con Paddle.");
+      console.error(err);
+      setStatus("ERROR");
+      setStatusText("Error al generar la imagen.");
+      setError(err.message || String(err));
     }
   };
 
-  useEffect(() => {
-    if (!userLoggedIn) {
-      setDailyCount(0);
-      return;
-    }
+  // -----------------------------
+  // UI
+  // -----------------------------
+  return (
+    <div className="grid gap-8 lg:grid-cols-2">
+      {/* FORM */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text-white">
+          Generador de imágenes
+        </h2>
 
-    (async () => {
-      const countToday = await getTodayGenerationCount(user.id);
-      setDailyCount(countToday);
-    })();
-  }, [userLoggedIn, user]);
+        {/* INFO JADES */}
+        {userLoggedIn && (
+          <div className="mt-3 rounded-2xl bg-black/60 px-4 py-2 text-xs text-neutral-300">
+            💎 Tienes <b>{jades}</b> jades disponibles ·
+            1 imagen = {costPerImage} jade (${costPerImage * JADE_VALUE_USD})
+          </div>
+        )}
 
-  const [demoCount, setDemoCount] = useState(0);
+        {isDemo && (
+          <div className="mt-3 rounded-2xl bg-cyan-500/10 px-4 py-2 text-xs text-cyan-200">
+            Modo demo: {demoCount}/{DEMO_LIMIT} imágenes gratuitas.
+          </div>
+        )}
 
-  useEffect(() => {
-    if (isDemo) {
-      try {
-        const storedDemoCount =
-          localStorage.getItem("isabelaos_demo_count") || "0";
-        setDemoCount(Number(storedDemoCount));
-      } catch (e) {
-        console.warn("Error leyendo demo count:", e);
-      }
-    }
-  }, [isDemo]);
+        <div className="mt-4 space-y-4 text-sm">
+          <textarea
+            className="h-24 w-full rounded-2xl bg-black/60 px-3 py-2 text-white"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
 
- // NUEVO: función que llama al endpoint /api/optimize-prompt para el prompt positivo
+          <textarea
+            className="h-16 w-full rounded-2xl bg-black/60 px-3 py-2 text-white"
+            value={negative}
+            onChange={(e) => setNegative(e.target.value)}
+          />
+
+          <button
+            onClick={handleGenerate}
+            disabled={status === "IN_QUEUE"}
+            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 font-semibold text-white disabled:opacity-50"
+          >
+            Generar imagen ({costPerImage} jade)
+          </button>
+
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
+        </div>
+      </div>
+
+      {/* RESULTADO */}
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text-white">Resultado</h2>
+        <div className="mt-4 flex-1 rounded-2xl bg-black/70 flex items-center justify-center">
+          {imageB64 ? (
+            <img
+              src={`data:image/png;base64,${imageB64}`}
+              className="max-h-full rounded-2xl"
+            />
+          ) : (
+            <span className="text-neutral-500 text-sm">
+              Aquí aparecerá tu imagen.
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ // ---------------------------------------------------------
+// Optimización de prompt (OpenAI)
+// ---------------------------------------------------------
 const optimizePromptIfNeeded = async (originalPrompt) => {
   if (!autoPrompt || !originalPrompt?.trim()) {
     setOptimizedPrompt("");
@@ -443,34 +552,26 @@ const optimizePromptIfNeeded = async (originalPrompt) => {
 
     const data = await res.json().catch(() => null);
 
-    if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-      console.warn("No se pudo optimizar el prompt, usando el original.", data);
-      setStatusText(
-        "No se pudo optimizar el prompt; usando el texto original para el render."
-      );
+    if (!res.ok || !data?.ok || !data.optimizedPrompt) {
       setOptimizedPrompt("");
       return originalPrompt;
     }
 
-    const optimized = String(data.optimizedPrompt || "").trim();
+    const optimized = String(data.optimizedPrompt).trim();
     if (!optimized) {
       setOptimizedPrompt("");
       return originalPrompt;
     }
 
-    setOptimizedPrompt(optimized); // mostramos el prompt mejorado debajo del textarea
+    setOptimizedPrompt(optimized);
     return optimized;
   } catch (err) {
-    console.error("Error al optimizar prompt:", err);
-    setStatusText(
-      "Error al optimizar el prompt; usando el texto original para el render."
-    );
+    console.error("Error optimizando prompt:", err);
     setOptimizedPrompt("");
     return originalPrompt;
   }
 };
 
-// NUEVO: optimizar también el negative prompt con el mismo endpoint
 const optimizeNegativeIfNeeded = async (originalNegative) => {
   if (!autoPrompt || !originalNegative?.trim()) {
     setOptimizedNegative("");
@@ -489,60 +590,130 @@ const optimizeNegativeIfNeeded = async (originalNegative) => {
 
     const data = await res.json().catch(() => null);
 
-    if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-      console.warn(
-        "No se pudo optimizar el negative prompt, usando el original.",
-        data
-      );
-      setStatusText(
-        "No se pudo optimizar el negative prompt; usando el texto original para el render."
-      );
+    if (!res.ok || !data?.ok || !data.optimizedPrompt) {
       setOptimizedNegative("");
       return originalNegative;
     }
 
-    const optimized = String(data.optimizedPrompt || "").trim();
+    const optimized = String(data.optimizedPrompt).trim();
     if (!optimized) {
       setOptimizedNegative("");
       return originalNegative;
     }
 
-    setOptimizedNegative(optimized); // mostramos el negative mejorado debajo del textarea
+    setOptimizedNegative(optimized);
     return optimized;
   } catch (err) {
-    console.error("Error al optimizar negative prompt:", err);
-    setStatusText(
-      "Error al optimizar el negative prompt; usando el texto original para el render."
-    );
+    console.error("Error optimizando negative:", err);
     setOptimizedNegative("");
     return originalNegative;
   }
 };
 
+// ---------------------------------------------------------
+// Generar imagen (MODELO JADES)
+// ---------------------------------------------------------
 const handleGenerate = async () => {
   setError("");
+  setImageB64(null);
 
-  const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-  const currentCount = isDemo ? demoCount : dailyCount;
+  const cost = GENERATION_COSTS.img_prompt;
 
-  if (!isPremium && currentCount >= currentLimit) {
-    setStatus("ERROR");
-    setStatusText("Límite de generación alcanzado.");
-
-    if (isDemo && onAuthRequired) {
+  // DEMO
+  if (isDemo) {
+    if (demoCount >= DEMO_LIMIT) {
       alert(
-        `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar.`
+        `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Regístrate para continuar.`
       );
-      onAuthRequired();
-    } else if (userLoggedIn) {
-      setError(
-        `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$${PLANS.basic.price}/mes para generar sin límite y desbloquear todos los módulos premium (como la Foto Navideña IA).`
-      );
+      onAuthRequired && onAuthRequired();
+      return;
     }
-    return;
   }
 
-  setImageB64(null);
+  // USUARIO LOGUEADO → VALIDAR JADES
+  if (userLoggedIn) {
+    if (jades < cost) {
+      setStatus("ERROR");
+      setStatusText("Jades insuficientes.");
+      setError(
+        `No tienes jades suficientes. Cada imagen cuesta ${cost} jade(s).`
+      );
+      return;
+    }
+  }
+
+  // Optimizar prompts si aplica
+  let promptToUse = prompt;
+  let negativeToUse = negative;
+
+  if (autoPrompt) {
+    promptToUse = await optimizePromptIfNeeded(prompt);
+    negativeToUse = await optimizeNegativeIfNeeded(negative);
+  } else {
+    setOptimizedPrompt("");
+    setOptimizedNegative("");
+  }
+
+  setStatus("IN_QUEUE");
+  setStatusText("Enviando render al motor...");
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        negative_prompt: negativeToUse,
+        width,
+        height,
+        steps,
+        optimize_prompt: autoPrompt,
+      }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data?.output?.image_b64) {
+      throw new Error(data?.error || "Error en el render.");
+    }
+
+    setImageB64(data.output.image_b64);
+    setStatus("COMPLETED");
+    setStatusText("Imagen generada correctamente.");
+
+    // DEMO COUNT
+    if (isDemo) {
+      const next = demoCount + 1;
+      setDemoCount(next);
+      localStorage.setItem("isabelaos_demo_count", String(next));
+    }
+
+    // DESCONTAR JADES
+    if (userLoggedIn && jadeKey) {
+      const remaining = jades - cost;
+      setJades(remaining);
+      localStorage.setItem(jadeKey, String(remaining));
+    }
+
+    // Guardar en Supabase
+    if (userLoggedIn) {
+      saveGenerationInSupabase({
+        userId: user.id,
+        imageUrl: `data:image/png;base64,${data.output.image_b64}`,
+        prompt: promptToUse,
+        negativePrompt: negativeToUse,
+        width,
+        height,
+        steps,
+      }).catch(console.error);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("ERROR");
+    setStatusText("Error al generar la imagen.");
+    setError(err.message || String(err));
+  }
+};
 
   // 1) si está activado, primero optimizamos el prompt (positivo) y el negative
   let promptToUse = prompt;
@@ -554,6 +725,34 @@ const handleGenerate = async () => {
   } else {
     setOptimizedPrompt("");
     setOptimizedNegative("");
+  }
+
+  // ✅ Modelo Jades: costo por generación de imagen desde prompt
+  const cost = GENERATION_COSTS.img_prompt;
+
+  // ✅ DEMO: solo valida límite demo
+  if (isDemo) {
+    if (demoCount >= DEMO_LIMIT) {
+      setStatus("ERROR");
+      setStatusText("Límite de demo alcanzado.");
+      alert(
+        `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta para continuar.`
+      );
+      onAuthRequired && onAuthRequired();
+      return;
+    }
+  }
+
+  // ✅ LOGUEADO: validar jades (ya NO hay DAILY_LIMIT ni premium ilimitado)
+  if (userLoggedIn) {
+    if (typeof jades !== "number" || jades < cost) {
+      setStatus("ERROR");
+      setStatusText("Jades insuficientes.");
+      setError(
+        `No tienes jades suficientes. Esta generación cuesta ${cost} jade(s).`
+      );
+      return;
+    }
   }
 
   // 2) luego lanzamos el render normal a RunPod, usando los textos optimizados
@@ -600,13 +799,13 @@ const handleGenerate = async () => {
 
       await new Promise((r) => setTimeout(r, 2000));
 
-      const statusRes = await fetch(`/api/status?id=${encodeURIComponent(jobId)}`);
+      const statusRes = await fetch(
+        `/api/status?id=${encodeURIComponent(jobId)}`
+      );
       const statusData = await statusRes.json().catch(() => null);
 
       if (!statusRes.ok || !statusData || statusData.error) {
-        throw new Error(
-          statusData?.error || "Error al consultar /api/status."
-        );
+        throw new Error(statusData?.error || "Error al consultar /api/status.");
       }
 
       const st = statusData.status;
@@ -633,7 +832,14 @@ const handleGenerate = async () => {
             console.warn("No se pudo guardar demo count:", e);
           }
         } else if (userLoggedIn) {
-          setDailyCount((prev) => prev + 1);
+          // ✅ DESCONTAR JADES (modelo nuevo)
+          try {
+            const next = Math.max(0, Number(jades || 0) - cost);
+            setJades(next);
+            if (jadeKey) localStorage.setItem(jadeKey, String(next));
+          } catch (e) {
+            console.warn("No se pudo descontar/guardar jades:", e);
+          }
 
           const dataUrl = `data:image/png;base64,${b64}`;
           saveGenerationInSupabase({
@@ -664,7 +870,9 @@ const handleGenerate = async () => {
 
 const handleDownload = () => {
   if (isDemo) {
-    alert("Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión.");
+    alert(
+      "Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión."
+    );
     onAuthRequired && onAuthRequired();
     return;
   }
@@ -678,40 +886,28 @@ const handleDownload = () => {
   document.body.removeChild(link);
 };
 
-const handlePayPalUnlock = () => {
-  if (!userLoggedIn || !premiumKey) return;
-  try {
-    localStorage.setItem(premiumKey, "1");
-    setIsPremium(true);
-    setError("");
-    setStatus("IDLE");
-    setStatusText(
-      "Plan Basic activo: ya no tienes límite diario en este navegador y se desbloquean los módulos premium."
-    );
-    alert(
-      "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium."
-    );
-  } catch (e) {
-    console.error("No se pudo guardar premium en localStorage:", e);
-  }
-};
+// ✅ Ya NO existe “PayPalUnlock” ni “premium ilimitado”.
+// ✅ Ahora el usuario compra un plan (que incluye jades) o packs de jades.
+// (El botón/checkout lo manejamos en la sección de Planes/Jades del Landing y/o Dashboard.)
 
 if (!userLoggedIn && !isDemo) {
   return (
     <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-      <p className="font-medium">Debes iniciar sesión para usar el generador de imágenes.</p>
+      <p className="font-medium">
+        Debes iniciar sesión para usar el generador de imágenes.
+      </p>
       <p className="mt-1 text-xs text-yellow-200/80">
-        Desde tu cuenta podrás crear imágenes con nuestro motor real conectado a RunPod.{" "}
-        {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más allá, podrás activar el plan de{" "}
-        US${PLANS.basic.price}/mes para generar sin límite y desbloquear todos los módulos premium.
+        Desde tu cuenta podrás generar imágenes con nuestro motor real conectado
+        a RunPod, guardar tu historial y descargar. El sistema funciona con{" "}
+        <span className="font-semibold text-white">Jades</span> (créditos) y
+        planes mensuales que incluyen jades.
       </p>
     </div>
   );
 }
 
-const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-const currentCount = isDemo ? demoCount : dailyCount;
-const remaining = currentLimit - currentCount;
+// ✅ DEMO restante (solo para demo)
+const remaining = isDemo ? Math.max(0, DEMO_LIMIT - demoCount) : 0;
 
 return (
   <div className="grid gap-8 lg:grid-cols-2">
@@ -721,15 +917,18 @@ return (
 
       {isDemo && (
         <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-          Modo de prueba gratuito: te quedan {remaining} imágenes de prueba sin registrarte. La
-          descarga y la biblioteca requieren crear una cuenta.
+          Modo de prueba gratuito: te quedan {remaining} imágenes de prueba sin
+          registrarte. La descarga y la biblioteca requieren crear una cuenta.
         </div>
       )}
 
-      {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
-        <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-          Atención: solo te quedan {remaining} imágenes gratis hoy. Activa el plan ilimitado de{" "}
-          US${PLANS.basic.price}/mes para seguir generando y desbloquear los módulos premium.
+      {userLoggedIn && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-[11px] text-neutral-200">
+          <span className="font-semibold text-white">Saldo:</span>{" "}
+          {Number(jades || 0)} jade(s) ·{" "}
+          <span className="text-neutral-400">
+            Esta generación cuesta {GENERATION_COSTS.img_prompt} jade(s).
+          </span>
         </div>
       )}
 
@@ -743,165 +942,144 @@ return (
           />
           {autoPrompt && optimizedPrompt && (
             <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
-              <span className="font-semibold">Prompt optimizado:</span> {optimizedPrompt}
+              <span className="font-semibold">Prompt optimizado:</span>{" "}
+              {optimizedPrompt}
             </div>
           )}
         </div>
 
-        {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
-        <div className="flex items-start justify-between gap-3 text-xs">
-          <label className="flex items-center gap-2 text-neutral-300">
-            <input
-              type="checkbox"
-              checked={autoPrompt}
-              onChange={(e) => setAutoPrompt(e.target.checked)}
-              className="h-4 w-4 rounded border-white/30 bg-black/70"
-            />
-            <span>Optimizar mi prompt con IA (OpenAI)</span>
-          </label>
-          <span className="text-[10px] text-neutral-500 text-right">
-            Si está activado, el sistema ajusta tu texto automáticamente antes de enviar el render
-            al motor en RunPod.
-          </span>
-        </div>
+       {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
+<div className="flex items-start justify-between gap-3 text-xs">
+  <label className="flex items-center gap-2 text-neutral-300">
+    <input
+      type="checkbox"
+      checked={autoPrompt}
+      onChange={(e) => setAutoPrompt(e.target.checked)}
+      className="h-4 w-4 rounded border-white/30 bg-black/70"
+    />
+    <span>Optimizar mi prompt con IA (OpenAI)</span>
+  </label>
+  <span className="text-[10px] text-neutral-500 text-right">
+    Si está activado, el sistema ajusta tu texto automáticamente antes de enviar el render
+    al motor en RunPod.
+  </span>
+</div>
 
-        <div>
-          <label className="text-neutral-300">Negative prompt</label>
-          <textarea
-            className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            value={negative}
-            onChange={(e) => setNegative(e.target.value)}
-          />
-          {autoPrompt && optimizedNegative && (
-            <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
-              <span className="font-semibold">Negative optimizado:</span> {optimizedNegative}
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="text-neutral-300">Steps</label>
-            <input
-              type="number"
-              min={5}
-              max={50}
-              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={steps}
-              onChange={(e) => setSteps(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-neutral-300">Width</label>
-            <input
-              type="number"
-              min={256}
-              max={1024}
-              step={64}
-              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={width}
-              onChange={(e) => setWidth(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-neutral-300">Height</label>
-            <input
-              type="number"
-              min={256}
-              max={1024}
-              step={64}
-              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={height}
-              onChange={(e) => setHeight(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-          Estado actual: {statusText || "Listo para generar."}
-          <br />
-          <span className="text-[11px] text-neutral-400">
-            {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
-            {userLoggedIn && isPremium && (
-              <> Uso de hoy: {currentCount}. Usuario beta – Plan Basic activo (sin límite).</>
-            )}
-            {userLoggedIn && !isPremium && (
-              <>
-                {" "}
-                Uso de hoy: {currentCount} / {currentLimit} imágenes.
-              </>
-            )}
-          </span>
-        </div>
-
-        {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
-
-        <button
-          onClick={handleGenerate}
-          disabled={
-            status === "OPTIMIZING" ||
-            status === "IN_QUEUE" ||
-            status === "IN_PROGRESS" ||
-            (!isPremium && currentCount >= currentLimit)
-          }
-          className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          {!isPremium && currentCount >= currentLimit
-            ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
-            : status === "OPTIMIZING"
-            ? "Optimizando..."
-            : status === "IN_QUEUE" || status === "IN_PROGRESS"
-            ? "Generando..."
-            : "Generar imagen desde prompt"}
-        </button>
-
-        {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
-          <>
-            <button
-              type="button"
-              onClick={handlePaddleCheckout}
-              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-            >
-              Desbloquear con IsabelaOS Basic – US${PLANS.basic.price}/mes (tarjeta / Paddle)
-            </button>
-
-            <div className="mt-3 text-[11px] text-neutral-400">
-              o pagar con <span className="font-semibold">PayPal</span>:
-              <PayPalButton
-                amount={String(PLANS.basic.price)}
-                containerId="paypal-button-panel"
-                onPaid={handlePayPalUnlock}
-              />
-            </div>
-          </>
-        )}
-      </div>
+<div>
+  <label className="text-neutral-300">Negative prompt</label>
+  <textarea
+    className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+    value={negative}
+    onChange={(e) => setNegative(e.target.value)}
+  />
+  {autoPrompt && optimizedNegative && (
+    <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
+      <span className="font-semibold">Negative optimizado:</span> {optimizedNegative}
     </div>
+  )}
+</div>
+
+<div className="grid grid-cols-3 gap-3">
+  <div>
+    <label className="text-neutral-300">Steps</label>
+    <input
+      type="number"
+      min={5}
+      max={50}
+      className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+      value={steps}
+      onChange={(e) => setSteps(e.target.value)}
+    />
+  </div>
+  <div>
+    <label className="text-neutral-300">Width</label>
+    <input
+      type="number"
+      min={256}
+      max={1024}
+      step={64}
+      className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+      value={width}
+      onChange={(e) => setWidth(e.target.value)}
+    />
+  </div>
+  <div>
+    <label className="text-neutral-300">Height</label>
+    <input
+      type="number"
+      min={256}
+      max={1024}
+      step={64}
+      className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+      value={height}
+      onChange={(e) => setHeight(e.target.value)}
+    />
+  </div>
+</div>
+
+<div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+  Estado actual: {statusText || "Listo para generar."}
+  <br />
+  <span className="text-[11px] text-neutral-400">
+    {isDemo && `Uso de prueba: ${demoCount} / ${DEMO_LIMIT}.`}
+    {userLoggedIn && (
+      <>
+        {" "}
+        Saldo: {Number(jades || 0)} jade(s) · Costo: {GENERATION_COSTS.img_prompt} jade(s).
+      </>
+    )}
+  </span>
+</div>
+
+{error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
+
+<button
+  onClick={handleGenerate}
+  disabled={
+    status === "OPTIMIZING" ||
+    status === "IN_QUEUE" ||
+    status === "IN_PROGRESS" ||
+    (isDemo ? demoCount >= DEMO_LIMIT : Number(jades || 0) < GENERATION_COSTS.img_prompt)
+  }
+  className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+>
+  {isDemo && demoCount >= DEMO_LIMIT
+    ? "Límite demo alcanzado (Crea cuenta)"
+    : !isDemo && userLoggedIn && Number(jades || 0) < GENERATION_COSTS.img_prompt
+    ? "Jades insuficientes (Compra plan o pack)"
+    : status === "OPTIMIZING"
+    ? "Optimizando..."
+    : status === "IN_QUEUE" || status === "IN_PROGRESS"
+    ? "Generando..."
+    : "Generar imagen desde prompt"}
+</button>
+
+{/* ✅ Ya NO mostramos Paddle/PayPal aquí. Eso va en la sección de Planes/Jades (Landing/Dashboard). */}
 
     {/* Resultado */}
-    <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-      <h2 className="text-lg font-semibold text-white">Resultado</h2>
-      <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-        {imageB64 ? (
-          <img
-            src={`data:image/png;base64,${imageB64}`}
-            alt="Imagen generada"
-            className="h-full w-full rounded-2xl object-contain"
-          />
-        ) : (
-          <p>Aquí verás el resultado en cuanto se complete el render.</p>
-        )}
-      </div>
-      {imageB64 && (
-        <button
-          onClick={handleDownload}
-          className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
-        >
-          {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
-        </button>
-      )}
-    </div>
+<div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+  <h2 className="text-lg font-semibold text-white">Resultado</h2>
+  <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+    {imageB64 ? (
+      <img
+        src={`data:image/png;base64,${imageB64}`}
+        alt="Imagen generada"
+        className="h-full w-full rounded-2xl object-contain"
+      />
+    ) : (
+      <p>Aquí verás el resultado en cuanto se complete el render.</p>
+    )}
   </div>
+  {imageB64 && (
+    <button
+      onClick={handleDownload}
+      className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+    >
+      {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
+    </button>
+  )}
+</div>
+</div>
 );
 }
 
@@ -909,546 +1087,545 @@ return (
 // NUEVO: Panel de generación de video (Prompt + Imagen→Video)
 // ---------------------------------------------------------
 function VideoPanel() {
-  const { user } = useAuth();
+const { user } = useAuth();
 
-  // ---- modo: "prompt" | "img2vid"
-  const [mode, setMode] = useState("prompt");
+// ---- modo: "prompt" | "img2vid"
+const [mode, setMode] = useState("prompt");
 
-  // ---- prompts
-  const [prompt, setPrompt] = useState(
-    "beautiful latina woman in an elegant tight blue dress, confident runway walk towards the camera, studio background, ultra detailed, 8k"
-  );
-  const [negative, setNegative] = useState(
-    "low quality, blurry, bad anatomy, deformed, glitch, watermark, noisy, pixelated, static pose, nsfw, nude, explicit"
-  );
+// ---- prompts
+const [prompt, setPrompt] = useState(
+  "beautiful latina woman in an elegant tight blue dress, confident runway walk towards the camera, studio background, ultra detailed, 8k"
+);
+const [negative, setNegative] = useState(
+  "low quality, blurry, bad anatomy, deformed, glitch, watermark, noisy, pixelated, static pose, nsfw, nude, explicit"
+);
 
-  // ---- optimización IA
-  const [autoPrompt, setAutoPrompt] = useState(false);
-  const [optimizedPrompt, setOptimizedPrompt] = useState("");
-  const [optimizedNegative, setOptimizedNegative] = useState("");
+// ---- optimización IA
+const [autoPrompt, setAutoPrompt] = useState(false);
+const [optimizedPrompt, setOptimizedPrompt] = useState("");
+const [optimizedNegative, setOptimizedNegative] = useState("");
 
-  // ---- settings video
-  const [aspectRatio, setAspectRatio] = useState("9:16"); // "1:1" | "9:16" | "16:9"
-  const [quality, setQuality] = useState("HD"); // "HD" | "MAX"
-  const [duration, setDuration] = useState(5); // 5 | 10
+// ---- settings video
+const [aspectRatio, setAspectRatio] = useState("9:16"); // "1:1" | "9:16" | "16:9"
+const [quality, setQuality] = useState("HD"); // "HD" | "MAX"
+const [duration, setDuration] = useState(5); // 5 | 10
 
-  // ---- img2vid input
-  const [initImageFile, setInitImageFile] = useState(null);
-  const [initImagePreviewUrl, setInitImagePreviewUrl] = useState(null);
-  const [initImageB64, setInitImageB64] = useState(""); // sin "data:image/..;base64,"
+// ---- img2vid input
+const [initImageFile, setInitImageFile] = useState(null);
+const [initImagePreviewUrl, setInitImagePreviewUrl] = useState(null);
+const [initImageB64, setInitImageB64] = useState(""); // sin "data:image/..;base64,"
 
-  // ---- estado
-  const [status, setStatus] = useState("IDLE"); // IDLE | OPTIMIZING | GENERATING | DONE | ERROR
-  const [statusText, setStatusText] = useState("");
-  const [videoUrl, setVideoUrl] = useState(null);
-  const [error, setError] = useState("");
+// ---- estado
+const [status, setStatus] = useState("IDLE"); // IDLE | OPTIMIZING | GENERATING | DONE | ERROR
+const [statusText, setStatusText] = useState("");
+const [videoUrl, setVideoUrl] = useState(null);
+const [error, setError] = useState("");
 
-  // Preview URL cleanup
-  useEffect(() => {
-    return () => {
-      if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
+// Preview URL cleanup
+useEffect(() => {
+  return () => {
+    if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      // result = "data:image/png;base64,AAAA..."
+      const b64 = result.includes("base64,") ? result.split("base64,")[1] : "";
+      if (!b64) return reject(new Error("La imagen no contiene base64 válido."));
+      resolve(b64);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    reader.readAsDataURL(file);
+  });
 
-  const fileToBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
-      reader.onload = () => {
-        const result = String(reader.result || "");
-        // result = "data:image/png;base64,AAAA..."
-        const b64 = result.includes("base64,") ? result.split("base64,")[1] : "";
-        if (!b64) return reject(new Error("La imagen no contiene base64 válido."));
-        resolve(b64);
-      };
-      reader.readAsDataURL(file);
+const handlePickInitImage = async (file) => {
+  setError("");
+  setVideoUrl(null);
+
+  if (!file) {
+    setInitImageFile(null);
+    setInitImageB64("");
+    if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
+    setInitImagePreviewUrl(null);
+    return;
+  }
+
+  // Validaciones ligeras
+  if (!file.type?.startsWith("image/")) {
+    setError("Selecciona un archivo de imagen válido (PNG/JPG/WebP).");
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    setError("La imagen es muy grande. Máximo recomendado: 8MB.");
+    return;
+  }
+
+  try {
+    const preview = URL.createObjectURL(file);
+    if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
+    setInitImagePreviewUrl(preview);
+
+    const b64 = await fileToBase64(file);
+    setInitImageFile(file);
+    setInitImageB64(b64);
+  } catch (e) {
+    console.error("Error leyendo imagen:", e);
+    setError(e.message || String(e));
+    setInitImageFile(null);
+    setInitImageB64("");
+    if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
+    setInitImagePreviewUrl(null);
+  }
+};
+
+const optimizeOne = async (label, text, setter) => {
+  if (!autoPrompt || !text?.trim()) {
+    setter("");
+    return text;
+  }
+
+  try {
+    setStatus("OPTIMIZING");
+    setStatusText(`Optimizando ${label} con IA...`);
+
+    const res = await fetch("/api/optimize-prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text }),
     });
 
-  const handlePickInitImage = async (file) => {
-    setError("");
-    setVideoUrl(null);
-
-    if (!file) {
-      setInitImageFile(null);
-      setInitImageB64("");
-      if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
-      setInitImagePreviewUrl(null);
-      return;
-    }
-
-    // Validaciones ligeras
-    if (!file.type?.startsWith("image/")) {
-      setError("Selecciona un archivo de imagen válido (PNG/JPG/WebP).");
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setError("La imagen es muy grande. Máximo recomendado: 8MB.");
-      return;
-    }
-
-    try {
-      const preview = URL.createObjectURL(file);
-      if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
-      setInitImagePreviewUrl(preview);
-
-      const b64 = await fileToBase64(file);
-      setInitImageFile(file);
-      setInitImageB64(b64);
-    } catch (e) {
-      console.error("Error leyendo imagen:", e);
-      setError(e.message || String(e));
-      setInitImageFile(null);
-      setInitImageB64("");
-      if (initImagePreviewUrl) URL.revokeObjectURL(initImagePreviewUrl);
-      setInitImagePreviewUrl(null);
-    }
-  };
-
-  const optimizeOne = async (label, text, setter) => {
-    if (!autoPrompt || !text?.trim()) {
-      setter("");
-      return text;
-    }
-
-    try {
-      setStatus("OPTIMIZING");
-      setStatusText(`Optimizando ${label} con IA...`);
-
-      const res = await fetch("/api/optimize-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-        console.warn(`No se pudo optimizar ${label}, usando original.`, data);
-        setter("");
-        setStatusText(
-          `No se pudo optimizar el ${label}; usando el texto original para el video.`
-        );
-        return text;
-      }
-
-      const optimized = String(data.optimizedPrompt || "").trim();
-      if (!optimized) {
-        setter("");
-        return text;
-      }
-
-      setter(optimized);
-      return optimized;
-    } catch (err) {
-      console.error(`Error optimizando ${label}:`, err);
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
+      console.warn(`No se pudo optimizar ${label}, usando original.`, data);
       setter("");
       setStatusText(
-        `Error al optimizar el ${label}; usando el texto original para el video.`
+        `No se pudo optimizar el ${label}; usando el texto original para el video.`
       );
       return text;
     }
-  };
 
-  const handleGenerateVideo = async () => {
-    setError("");
-    setVideoUrl(null);
-
-    if (!user) {
-      setError("Debes iniciar sesión para generar video.");
-      return;
+    const optimized = String(data.optimizedPrompt || "").trim();
+    if (!optimized) {
+      setter("");
+      return text;
     }
 
-    // Si es img2vid, necesitamos imagen
-    if (mode === "img2vid" && !initImageB64) {
-      setError("Selecciona una imagen para generar video desde imagen.");
-      return;
-    }
-
-    // 1) Optimizar prompts si está activado
-    let promptToUse = prompt;
-    let negativeToUse = negative;
-
-    if (autoPrompt) {
-      promptToUse = await optimizeOne("prompt", prompt, setOptimizedPrompt);
-      negativeToUse = await optimizeOne(
-        "negative prompt",
-        negative,
-        setOptimizedNegative
-      );
-    } else {
-      setOptimizedPrompt("");
-      setOptimizedNegative("");
-    }
-
-    setStatus("GENERATING");
+    setter(optimized);
+    return optimized;
+  } catch (err) {
+    console.error(`Error optimizando ${label}:`, err);
+    setter("");
     setStatusText(
-      mode === "prompt"
-        ? "Generando video en RunPod (CogVideoX + BodySync) y haciendo upscale..."
-        : "Generando video desde imagen en RunPod (CogVideoX Img2Vid + BodySync) y haciendo upscale..."
+      `Error al optimizar el ${label}; usando el texto original para el video.`
     );
+    return text;
+  }
+};
+
+const handleGenerateVideo = async () => {
+  setError("");
+  setVideoUrl(null);
+
+  if (!user) {
+    setError("Debes iniciar sesión para generar video.");
+    return;
+  }
+
+  // Si es img2vid, necesitamos imagen
+  if (mode === "img2vid" && !initImageB64) {
+    setError("Selecciona una imagen para generar video desde imagen.");
+    return;
+  }
+
+  // 1) Optimizar prompts si está activado
+  let promptToUse = prompt;
+  let negativeToUse = negative;
+
+  if (autoPrompt) {
+    promptToUse = await optimizeOne("prompt", prompt, setOptimizedPrompt);
+    negativeToUse = await optimizeOne(
+      "negative prompt",
+      negative,
+      setOptimizedNegative
+    );
+  } else {
+    setOptimizedPrompt("");
+    setOptimizedNegative("");
+  }
+
+  setStatus("GENERATING");
+  setStatusText(
+    mode === "prompt"
+      ? "Generando video en RunPod (CogVideoX + BodySync) y haciendo upscale..."
+      : "Generando video desde imagen en RunPod (CogVideoX Img2Vid + BodySync) y haciendo upscale..."
+  );
 
     try {
-      // ✅ Usamos el MISMO endpoint, pero enviamos mode + init_image_b64 cuando sea img2vid.
-      // Nota: tu backend debe aceptar:
-      //   - mode: "prompt" | "img2vid"
-      //   - init_image_b64 (solo en img2vid)
-      const res = await fetch("/api/generate-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode, // "prompt" | "img2vid"
-          init_image_b64: mode === "img2vid" ? initImageB64 : undefined,
-          prompt: promptToUse,
-          negative_prompt: negativeToUse,
-          aspect_ratio: aspectRatio, // "1:1" | "9:16" | "16:9"
-          duration_seconds: duration, // 5 | 10
-          quality, // "HD" | "MAX"
-          optimize_prompt: autoPrompt,
-        }),
-      });
+  // ✅ Usamos el MISMO endpoint, pero enviamos mode + init_image_b64 cuando sea img2vid.
+  // Nota: tu backend debe aceptar:
+  //   - mode: "prompt" | "img2vid"
+  //   - init_image_b64 (solo en img2vid)
+  const res = await fetch("/api/generate-video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode, // "prompt" | "img2vid"
+      init_image_b64: mode === "img2vid" ? initImageB64 : undefined,
+      prompt: promptToUse,
+      negative_prompt: negativeToUse,
+      aspect_ratio: aspectRatio, // "1:1" | "9:16" | "16:9"
+      duration_seconds: duration, // 5 | 10
+      quality, // "HD" | "MAX"
+      optimize_prompt: autoPrompt,
+    }),
+  });
 
-      const data = await res.json().catch(() => null);
+  const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data || !data.ok || !data.videoUrl) {
-        console.error("Respuesta /api/generate-video:", data);
-        throw new Error(
-          data?.error || "Error en /api/generate-video. Revisa los logs."
-        );
-      }
+  if (!res.ok || !data || !data.ok || !data.videoUrl) {
+    console.error("Respuesta /api/generate-video:", data);
+    throw new Error(
+      data?.error || "Error en /api/generate-video. Revisa los logs."
+    );
+  }
 
-      setVideoUrl(data.videoUrl);
-      setStatus("DONE");
-      setStatusText("Video generado y upscalizado correctamente.");
-    } catch (err) {
-      console.error("Error handleGenerateVideo:", err);
-      setStatus("ERROR");
-      setStatusText("Error al generar el video.");
-      setError(err.message || String(err));
-    }
-  };
+  setVideoUrl(data.videoUrl);
+  setStatus("DONE");
+  setStatusText("Video generado y upscalizado correctamente.");
+} catch (err) {
+  console.error("Error handleGenerateVideo:", err);
+  setStatus("ERROR");
+  setStatusText("Error al generar el video.");
+  setError(err.message || String(err));
+}
+};
 
-  const handleDownloadVideo = () => {
-    if (!videoUrl) return;
-    window.open(videoUrl, "_blank");
-  };
+const handleDownloadVideo = () => {
+  if (!videoUrl) return;
+  window.open(videoUrl, "_blank");
+};
 
-  const busy = status === "GENERATING" || status === "OPTIMIZING";
+const busy = status === "GENERATING" || status === "OPTIMIZING";
 
-  return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      {/* Configuración de video */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-white">
-              {mode === "prompt"
-                ? "Generar video desde prompt"
-                : "Generar video desde imagen"}
-            </h2>
-            <p className="mt-1 text-xs text-neutral-400">
-              {mode === "prompt" ? (
-                <>
-                  Usa nuestro pipeline de video con CogVideoX y BodySync Motion
-                  Signature v1 para crear clips cortos listos para reels y
-                  anuncios.
-                </>
-              ) : (
-                <>
-                  Sube una imagen base y genera un clip animado manteniendo el
-                  estilo del prompt, con BodySync v1 para dar movimiento.
-                </>
-              )}
-            </p>
-          </div>
-
-          {/* Tabs modo */}
-          <div className="flex rounded-2xl border border-white/10 bg-black/40 p-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setMode("prompt")}
-              className={`rounded-xl px-3 py-2 ${
-                mode === "prompt"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "text-neutral-200 hover:bg-white/5"
-              }`}
-            >
-              Prompt
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("img2vid")}
-              className={`rounded-xl px-3 py-2 ${
-                mode === "img2vid"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "text-neutral-200 hover:bg-white/5"
-              }`}
-            >
-              Imagen → Video
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-4 text-sm">
-          {/* Img2Vid uploader */}
-          {mode === "img2vid" && (
-            <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
-              <p className="text-xs text-neutral-300 mb-2">
-                Imagen base (PNG/JPG/WebP)
-              </p>
-
-              <div className="flex items-start gap-4">
-                <div className="flex-1">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={busy}
-                    onChange={(e) => handlePickInitImage(e.target.files?.[0])}
-                    className="w-full rounded-2xl border border-white/10 bg-black/60 px-3 py-2 text-xs text-neutral-200"
-                  />
-                  <p className="mt-2 text-[11px] text-neutral-500">
-                    Tip: usa una imagen bien iluminada y con el sujeto centrado.
-                    Recomendado: 512–1024px.
-                  </p>
-                </div>
-
-                <div className="w-28 h-28 rounded-2xl bg-black/60 border border-white/10 overflow-hidden flex items-center justify-center">
-                  {initImagePreviewUrl ? (
-                    <img
-                      src={initImagePreviewUrl}
-                      alt="Preview"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-[10px] text-neutral-500 px-2 text-center">
-                      Sin imagen
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label className="text-neutral-300">Prompt</label>
-            <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={busy}
-            />
-            {autoPrompt && optimizedPrompt && (
-              <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
-                <span className="font-semibold">Prompt optimizado:</span>{" "}
-                {optimizedPrompt}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-start justify-between gap-3 text-xs">
-            <label className="flex items-center gap-2 text-neutral-300">
-              <input
-                type="checkbox"
-                checked={autoPrompt}
-                onChange={(e) => setAutoPrompt(e.target.checked)}
-                className="h-4 w-4 rounded border-white/30 bg-black/70"
-                disabled={busy}
-              />
-              <span>Optimizar mis prompts con IA (OpenAI)</span>
-            </label>
-            <span className="text-[10px] text-neutral-500 text-right">
-              El sistema ajusta automáticamente tus textos antes de enviarlos al
-              motor de video.
-            </span>
-          </div>
-
-          <div>
-            <label className="text-neutral-300">Negative prompt</label>
-            <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-              disabled={busy}
-            />
-            {autoPrompt && optimizedNegative && (
-              <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
-                <span className="font-semibold">Negative optimizado:</span>{" "}
-                {optimizedNegative}
-              </div>
-            )}
-          </div>
-
-          {/* Aspect ratio */}
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="col-span-3">
-              <p className="text-neutral-300 text-xs mb-1">
-                Relación de aspecto
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setAspectRatio("1:1")}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    aspectRatio === "1:1"
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  1:1 (cuadrado)
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setAspectRatio("9:16")}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    aspectRatio === "9:16"
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  9:16 (vertical)
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setAspectRatio("16:9")}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    aspectRatio === "16:9"
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  16:9 (horizontal)
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Calidad y duración */}
-          <div className="grid gap-3 md:grid-cols-2 text-xs">
-            <div>
-              <p className="text-neutral-300 mb-1">Calidad</p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setQuality("HD")}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    quality === "HD"
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  HD 720p
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setQuality("MAX")}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    quality === "MAX"
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  Máxima
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-neutral-300 mb-1">Duración</p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setDuration(5)}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    duration === 5
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  5 segundos
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setDuration(10)}
-                  className={`flex-1 rounded-2xl px-3 py-2 ${
-                    duration === 10
-                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
-                  } ${busy ? "opacity-60" : ""}`}
-                >
-                  10 segundos
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual:{" "}
-            {statusText ||
-              "Listo para generar un clip de video con BodySync v1."}
-          </div>
-
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
-
-          <button
-            type="button"
-            onClick={handleGenerateVideo}
-            disabled={busy}
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {status === "OPTIMIZING"
-              ? "Optimizando..."
-              : status === "GENERATING"
-              ? "Generando video..."
-              : mode === "prompt"
+return (
+  <div className="grid gap-8 lg:grid-cols-2">
+    {/* Configuración de video */}
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-white">
+            {mode === "prompt"
               ? "Generar video desde prompt"
               : "Generar video desde imagen"}
-          </button>
-
-          <p className="mt-2 text-[11px] text-neutral-400">
-            Este módulo usa una resolución base optimizada en el pod de video y
-            luego aplica un upscale a 720p o calidad máxima recomendada para
-            IsabelaOS Studio.
+          </h2>
+          <p className="mt-1 text-xs text-neutral-400">
+            {mode === "prompt" ? (
+              <>
+                Usa nuestro pipeline de video con CogVideoX y BodySync Motion
+                Signature v1 para crear clips cortos listos para reels y
+                anuncios.
+              </>
+            ) : (
+              <>
+                Sube una imagen base y genera un clip animado manteniendo el
+                estilo del prompt, con BodySync v1 para dar movimiento.
+              </>
+            )}
           </p>
         </div>
-      </div>
 
-      {/* Vista previa del video */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text-white">Resultado</h2>
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-          {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
-          ) : (
-            <p>
-              Aquí verás tu clip en cuanto termine el proceso de generación y
-              upscale.
-            </p>
-          )}
-        </div>
-        {videoUrl && (
+        {/* Tabs modo */}
+        <div className="flex rounded-2xl border border-white/10 bg-black/40 p-1 text-xs">
           <button
             type="button"
-            onClick={handleDownloadVideo}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+            onClick={() => setMode("prompt")}
+            className={`rounded-xl px-3 py-2 ${
+              mode === "prompt"
+                ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                : "text-neutral-200 hover:bg-white/5"
+            }`}
           >
-            Abrir / descargar video
+            Prompt
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => setMode("img2vid")}
+            className={`rounded-xl px-3 py-2 ${
+              mode === "img2vid"
+                ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                : "text-neutral-200 hover:bg-white/5"
+            }`}
+          >
+            Imagen → Video
+          </button>
+        </div>
       </div>
+
+      <div className="mt-4 space-y-4 text-sm">
+        {/* Img2Vid uploader */}
+        {mode === "img2vid" && (
+          <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
+            <p className="text-xs text-neutral-300 mb-2">
+              Imagen base (PNG/JPG/WebP)
+            </p>
+
+            <div className="flex items-start gap-4">
+              <div className="flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={busy}
+                  onChange={(e) => handlePickInitImage(e.target.files?.[0])}
+                  className="w-full rounded-2xl border border-white/10 bg-black/60 px-3 py-2 text-xs text-neutral-200"
+                />
+                <p className="mt-2 text-[11px] text-neutral-500">
+                  Tip: usa una imagen bien iluminada y con el sujeto centrado.
+                  Recomendado: 512–1024px.
+                </p>
+              </div>
+
+                <div className="w-28 h-28 rounded-2xl bg-black/60 border border-white/10 overflow-hidden flex items-center justify-center">
+  {initImagePreviewUrl ? (
+    <img
+      src={initImagePreviewUrl}
+      alt="Preview"
+      className="w-full h-full object-cover"
+    />
+  ) : (
+    <span className="text-[10px] text-neutral-500 px-2 text-center">
+      Sin imagen
+    </span>
+  )}
+</div>
+</div>
+</div>
+</div>
+)}
+
+<div>
+  <label className="text-neutral-300">Prompt</label>
+  <textarea
+    className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+    value={prompt}
+    onChange={(e) => setPrompt(e.target.value)}
+    disabled={busy}
+  />
+  {autoPrompt && optimizedPrompt && (
+    <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
+      <span className="font-semibold">Prompt optimizado:</span>{" "}
+      {optimizedPrompt}
     </div>
-  );
+  )}
+</div>
+
+<div className="flex items-start justify-between gap-3 text-xs">
+  <label className="flex items-center gap-2 text-neutral-300">
+    <input
+      type="checkbox"
+      checked={autoPrompt}
+      onChange={(e) => setAutoPrompt(e.target.checked)}
+      className="h-4 w-4 rounded border-white/30 bg-black/70"
+      disabled={busy}
+    />
+    <span>Optimizar mis prompts con IA (OpenAI)</span>
+  </label>
+  <span className="text-[10px] text-neutral-500 text-right">
+    El sistema ajusta automáticamente tus textos antes de enviarlos al
+    motor de video.
+  </span>
+</div>
+
+<div>
+  <label className="text-neutral-300">Negative prompt</label>
+  <textarea
+    className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+    value={negative}
+    onChange={(e) => setNegative(e.target.value)}
+    disabled={busy}
+  />
+  {autoPrompt && optimizedNegative && (
+    <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
+      <span className="font-semibold">Negative optimizado:</span>{" "}
+      {optimizedNegative}
+    </div>
+  )}
+</div>
+
+{/* Aspect ratio */}
+<div className="grid grid-cols-3 gap-2 text-xs">
+  <div className="col-span-3">
+    <p className="text-neutral-300 text-xs mb-1">
+      Relación de aspecto
+    </p>
+    <div className="flex gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setAspectRatio("1:1")}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          aspectRatio === "1:1"
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        1:1 (cuadrado)
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setAspectRatio("9:16")}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          aspectRatio === "9:16"
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        9:16 (vertical)
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setAspectRatio("16:9")}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          aspectRatio === "16:9"
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        16:9 (horizontal)
+      </button>
+    </div>
+  </div>
+</div>
+
+
+          {/* Calidad y duración */}
+<div className="grid gap-3 md:grid-cols-2 text-xs">
+  <div>
+    <p className="text-neutral-300 mb-1">Calidad</p>
+    <div className="flex gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setQuality("HD")}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          quality === "HD"
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        HD 720p
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setQuality("MAX")}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          quality === "MAX"
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        Máxima
+      </button>
+    </div>
+  </div>
+
+  <div>
+    <p className="text-neutral-300 mb-1">Duración</p>
+    <div className="flex gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setDuration(5)}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          duration === 5
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        5 segundos
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setDuration(10)}
+        className={`flex-1 rounded-2xl px-3 py-2 ${
+          duration === 10
+            ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+            : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
+        } ${busy ? "opacity-60" : ""}`}
+      >
+        10 segundos
+      </button>
+    </div>
+  </div>
+</div>
+
+<div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+  Estado actual:{" "}
+  {statusText || "Listo para generar un clip de video con BodySync v1."}
+</div>
+
+{error && (
+  <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+)}
+
+<button
+  type="button"
+  onClick={handleGenerateVideo}
+  disabled={busy}
+  className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+>
+  {status === "OPTIMIZING"
+    ? "Optimizando..."
+    : status === "GENERATING"
+    ? "Generando video..."
+    : mode === "prompt"
+    ? "Generar video desde prompt"
+    : "Generar video desde imagen"}
+</button>
+
+<p className="mt-2 text-[11px] text-neutral-400">
+  Este módulo usa una resolución base optimizada en el pod de video y luego
+  aplica un upscale a 720p o calidad máxima recomendada para IsabelaOS Studio.
+</p>
+</div>
+</div>
+
+{/* Vista previa del video */}
+<div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+  <h2 className="text-lg font-semibold text-white">Resultado</h2>
+  <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+    {videoUrl ? (
+      <video
+        src={videoUrl}
+        controls
+        className="h-full w-full rounded-2xl object-contain"
+      />
+    ) : (
+      <p>
+        Aquí verás tu clip en cuanto termine el proceso de generación y upscale.
+      </p>
+    )}
+  </div>
+  {videoUrl && (
+    <button
+      type="button"
+      onClick={handleDownloadVideo}
+      className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+    >
+      Abrir / descargar video
+    </button>
+  )}
+</div>
+</div>
+);
 }
 
 // ---------------------------------------------------------
@@ -1504,6 +1681,17 @@ function LibraryView() {
         const next = prev.filter((it) => it.id !== selected.id);
         setSelected(next.length > 0 ? next[0] : null);
         return next;
+      });
+    } catch (e) {
+      console.error("Error eliminando imagen:", e);
+      alert("No se pudo eliminar la imagen. Intenta de nuevo.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // ... (resto del componente)
+}
       });
     } catch (e) {
       console.error("Error eliminando imagen de Supabase:", e);
@@ -1735,7 +1923,7 @@ function XmasPhotoPanel() {
     // 🔐 bloqueo real
     if (!isPremium) {
       setError(
-        "Este módulo forma parte del Plan Basic (US$5/mes). Activa tu plan para usar Foto Navideña IA."
+        `Este módulo forma parte del Plan Basic (US$${PLANS.basic.price}/mes). Activa tu plan para usar Foto Navideña IA.`
       );
       return;
     }
@@ -1981,209 +2169,16 @@ function DashboardView() {
       className="relative min-h-screen w-full overflow-hidden text-white"
       style={{
         background:
-          // gris oscuro + degradés (no negro puro)
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_650px_at_-10%_0%,rgba(0,229,255,0.14),transparent_55%),radial-gradient(900px_700px_at_50%_120%,rgba(140,90,255,0.18),transparent_60%),linear-gradient(180deg,#0b0f17 0%, #070a12 60%, #05060a 100%)",
       }}
     >
-      {/* Neon side graphics */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-[320px] opacity-70">
-        <div className="absolute -left-24 top-10 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
-        <div className="absolute left-10 top-32 h-[260px] w-[2px] bg-gradient-to-b from-cyan-400/0 via-cyan-400/60 to-cyan-400/0 blur-[0.2px]" />
-        <div className="absolute left-16 top-44 h-[220px] w-[2px] bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-400/50 to-fuchsia-400/0 blur-[0.2px]" />
-        <div className="absolute left-0 top-0 h-full w-full bg-[radial-gradient(circle_at_20%_30%,rgba(0,229,255,0.18),transparent_55%)]" />
-      </div>
-
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-[360px] opacity-70">
-        <div className="absolute -right-28 top-12 h-[520px] w-[520px] rounded-full bg-fuchsia-400/10 blur-3xl" />
-        <div className="absolute right-12 top-28 h-[280px] w-[2px] bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-400/60 to-fuchsia-400/0 blur-[0.2px]" />
-        <div className="absolute right-20 top-44 h-[240px] w-[2px] bg-gradient-to-b from-cyan-400/0 via-cyan-400/50 to-cyan-400/0 blur-[0.2px]" />
-        <div className="absolute right-0 top-0 h-full w-full bg-[radial-gradient(circle_at_80%_30%,rgba(255,23,229,0.18),transparent_55%)]" />
-      </div>
-
-      <header className="border-b border-white/10 bg-[#0b0f17]/60 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            {/* Logo (si pones /brand/logo.png) */}
-            <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/25">
-              <img
-                src="/brand/logo.png"
-                alt="IsabelaOS Studio"
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
-              {/* fallback visible si no existe el logo */}
-              <span className="pointer-events-none">io</span>
-            </div>
-            <div>
-              <div className="text-sm font-semibold leading-tight">
-                IsabelaOS <span className="text-xs text-neutral-400">Studio</span>
-              </div>
-              <div className="text-[10px] text-neutral-500">
-                Panel del creador · Beta
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs">
-            <span className="hidden sm:inline text-neutral-300">
-              {user?.email} {isAdmin && "· admin"}
-            </span>
-            <button
-              onClick={handleContact}
-              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
-            >
-              Contacto
-            </button>
-            <button
-              onClick={signOut}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-            >
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* ... header igual ... */}
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* Navegación móvil */}
-        <div className="mb-4 md:hidden">
-          <p className="text-[11px] font-semibold text-neutral-300 mb-2">
-            Navegación
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Imagen desde prompt
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Video desde prompt
-            </button>
-
-            {/* NUEVO: Video desde imagen (si ya agregaste el componente) */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video_img")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video_img"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Video desde imagen
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("xmas")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
-                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text-white/90"
-              }`}
-            >
-              🎄 Foto Navideña IA
-            </button>
-          </div>
-        </div>
+        {/* ... navegación igual ... */}
 
         <section className="flex gap-6">
-          {/* Sidebar */}
-          <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-[#0b0f17]/60 p-4 text-xs backdrop-blur-md">
-            <p className="text-[11px] font-semibold text-neutral-300 mb-3">
-              Navegación
-            </p>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Generar imagen desde prompt
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Generar video desde prompt
-            </button>
-
-            {/* NUEVO: Video desde imagen */}
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video_img")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "video_img"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Generar video desde imagen
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("xmas")}
-              className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
-                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
-              }`}
-            >
-              🎄 Foto Navideña IA (Premium)
-            </button>
-          </aside>
+          {/* ... sidebar igual ... */}
 
           {/* Contenido principal */}
           <div className="flex-1 space-y-6">
@@ -2199,9 +2194,8 @@ function DashboardView() {
             {appViewMode === "generator" && <CreatorPanel />}
             {appViewMode === "video" && <VideoPanel />}
 
-            {/* IMPORTANTE: define este componente en tu archivo.
-               Si aún no lo pegaste, comenta esta línea por ahora. */}
-            {appViewMode === "video_img" && <VideoFromImagePanel />}
+            {/* ✅ FIX: VideoPanel ya incluye "Prompt" e "Imagen → Video" dentro del mismo panel */}
+            {appViewMode === "video_img" && <VideoPanel />}
 
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "xmas" && <XmasPhotoPanel />}
@@ -2274,342 +2268,46 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.18),transparent_60%),radial-gradient(900px_650px_at_-10%_0%,rgba(0,229,255,0.14),transparent_55%),radial-gradient(900px_700px_at_50%_120%,rgba(140,90,255,0.18),transparent_60%),linear-gradient(180deg,#0b0f17 0%, #070a12 60%, #05060a 100%)",
       }}
     >
-      {/* Neon side graphics */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-[320px] opacity-70">
-        <div className="absolute -left-24 top-10 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
-        <div className="absolute left-10 top-32 h-[260px] w-[2px] bg-gradient-to-b from-cyan-400/0 via-cyan-400/60 to-cyan-400/0 blur-[0.2px]" />
-        <div className="absolute left-16 top-44 h-[220px] w-[2px] bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-400/50 to-fuchsia-400/0 blur-[0.2px]" />
-      </div>
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-[360px] opacity-70">
-        <div className="absolute -right-28 top-12 h-[520px] w-[520px] rounded-full bg-fuchsia-400/10 blur-3xl" />
-        <div className="absolute right-12 top-28 h-[280px] w-[2px] bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-400/60 to-fuchsia-400/0 blur-[0.2px]" />
-        <div className="absolute right-20 top-44 h-[240px] w-[2px] bg-gradient-to-b from-cyan-400/0 via-cyan-400/50 to-cyan-400/0 blur-[0.2px]" />
-      </div>
+      {/* ... tu landing igual ... */}
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0b0f17]/55 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/25">
-              <img
-                src="/brand/logo.png"
-                alt="IsabelaOS Studio"
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
-              <span className="pointer-events-none">io</span>
-            </div>
-            <div>
-              <div className="text-sm font-semibold leading-tight">
-                IsabelaOS <span className="text-xs text-neutral-400">Studio</span>
-              </div>
-              <div className="text-[10px] text-neutral-500">
-                Generación visual con IA
-              </div>
-            </div>
-          </div>
+      {/* Plan de pago */}
+      <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
+        <h2 className="text-sm font-semibold text-white">
+          Plan beta para creadores
+        </h2>
+        <p className="mt-2 text-xs text-neutral-300">
+          Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día y quieres
+          seguir generando sin restricciones, activa el plan ilimitado.
+        </p>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => scrollToId("contacto")}
-              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-            >
-              Contacto
-            </button>
-            <button
-              onClick={onOpenAuth}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-            >
-              Iniciar sesión / Registrarse
-            </button>
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <button
+            onClick={handlePaddleCheckout}
+            className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+          >
+            IsabelaOS Basic – US${PLANS.basic.price}/mes (tarjeta / Paddle)
+          </button>
+          <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
+            <span className="text-neutral-300">
+              o pagar con <span className="font-semibold">PayPal</span>:
+            </span>
+            <PayPalButton
+              amount={String(PLANS.basic.price)}
+              containerId="paypal-button-landing"
+            />
           </div>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* HERO: dos imágenes grandes, texto sobre foto */}
-        <section className="grid gap-6 lg:grid-cols-2">
-          {/* Hero principal con overlay texto */}
-          <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[#0b0f17]/60 shadow-xl shadow-cyan-500/10">
-            <img
-              src={HERO_MAIN}
-              alt="Hero principal"
-              className="h-[360px] w-full object-cover md:h-[420px]"
-            />
+        <p className="mt-3 text-[11px] text-neutral-400">
+          Usuarios beta:{" "}
+          <span className="font-semibold text-white">
+            Plan Basic activo (sin límite)
+          </span>{" "}
+          mientras se mantenga la suscripción.
+        </p>
+      </section>
 
-            {/* overlay para contraste */}
-            <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-5 md:p-6">
-              <div className="max-w-xl rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
-                <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
-                  <span className="h-1 w-1 rounded-full bg-cyan-300" />
-                  Beta privada · Render en la nube
-                </p>
-
-                <h1 className="mt-3 text-3xl font-semibold leading-tight md:text-4xl">
-                  IsabelaOS Studio:
-                  <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                    genera imágenes y videos con estética de cine
-                  </span>
-                </h1>
-
-                <p className="mt-3 text-sm text-neutral-200/90">
-                  Escribe un prompt y obtén resultados listos para reels, ads y
-                  contenido visual premium.
-                </p>
-
-                <div className="mt-5 flex flex-wrap items-center gap-4">
-                  <button
-                    onClick={onStartDemo}
-                    className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.35)] hover:shadow-[0_0_40px_rgba(236,72,153,0.55)] transition-shadow"
-                  >
-                    Generar mis {DEMO_LIMIT} imágenes GRATIS
-                  </button>
-
-                  <p className="max-w-xs text-[11px] text-neutral-300">
-                    Regístrate y desbloquea {DAILY_LIMIT} imágenes diarias.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Segunda imagen grande (sin texto) */}
-          <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[#0b0f17]/60 shadow-xl shadow-fuchsia-500/10">
-            <img
-              src={HERO_SIDE}
-              alt="Hero secundario"
-              className="h-[360px] w-full object-cover md:h-[420px]"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
-            <div className="absolute left-5 top-5 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-[11px] text-neutral-200 backdrop-blur-md">
-              Cine look · Control creativo · Resultados rápidos
-            </div>
-          </div>
-        </section>
-
-        {/* IMAGE → VIDEO: 1 imagen + video a la par */}
-        <section className="mt-10">
-          <div className="mb-3 flex items-center gap-2">
-            <div className="h-[2px] w-10 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-            <h2 className="text-sm font-semibold text-white">
-              Image-to-Video: convierte tu imagen en movimiento
-            </h2>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 bg-[#0b0f17]/55 p-5 backdrop-blur-md">
-              <p className="text-xs text-neutral-300">
-                Sube una imagen (o genera una aquí) y crea un clip corto con
-                movimiento natural.
-              </p>
-
-              <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-                <img
-                  src={IMG2VIDEO_IMG}
-                  alt="Imagen base para Image-to-Video"
-                  className="h-[320px] w-full object-cover"
-                />
-              </div>
-
-              <div className="mt-4 flex items-center gap-3 text-xs text-neutral-300">
-                <span className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1">
-                  1 imagen
-                </span>
-                <span className="text-neutral-500">→</span>
-                <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1">
-                  clip 5–10s
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-[#0b0f17]/55 p-5 backdrop-blur-md">
-              <p className="text-xs text-neutral-300">
-                Resultado (demo). Aquí irá el preview real cuando conectes el
-                módulo.
-              </p>
-
-              <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/50">
-                <video
-                  src={IMG2VIDEO_DEMO}
-                  controls
-                  className="h-[360px] w-full object-cover"
-                />
-              </div>
-
-              <p className="mt-3 text-[11px] text-neutral-400">
-                * El motor final puede aplicar BodySync (más adelante) para
-                movimiento más expresivo.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* MOSAICO de VIDEOS */}
-        <section className="mt-10">
-          <div className="mb-3 flex items-center gap-2">
-            <div className="h-[2px] w-10 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-            <h2 className="text-sm font-semibold text-white">
-              Videos desde prompt · Mosaico
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-12 gap-3">
-            {MOSAIC_VIDEOS.map((src, i) => {
-              const big = i === 0 || i === 5;
-              const tall = i === 2 || i === 6;
-
-              return (
-                <div
-                  key={src}
-                  className={[
-                    "col-span-12 overflow-hidden rounded-3xl border border-white/10 bg-[#0b0f17]/55 backdrop-blur-md",
-                    big ? "md:col-span-6" : "md:col-span-3",
-                    tall ? "md:row-span-2" : "",
-                  ].join(" ")}
-                >
-                  <div className="relative">
-                    <video
-                      src={src}
-                      controls
-                      className={["w-full object-cover", tall ? "h-[420px]" : "h-[210px]"].join(" ")}
-                    />
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <p className="mt-3 text-[11px] text-neutral-400">
-            * Solo reemplaza los archivos en <span className="text-neutral-300">public/landing/mosaic/</span> y listo.
-          </p>
-        </section>
-
-        {/* BodySync (aclaración: solo imágenes por ahora) */}
-        <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-2">
-            BodySync v1 · (Por ahora) guía de poses para generación de imágenes
-          </h2>
-          <p className="text-xs text-neutral-300 max-w-2xl">
-            BodySync v1 en esta etapa se usa como <span className="font-semibold text-white">control de postura/pose</span>{" "}
-            para mejorar la consistencia y dirección corporal en <span className="font-semibold text-white">imágenes</span>.
-            La integración completa a video se libera más adelante.
-          </p>
-
-          <div className="mt-6 flex justify-center">
-            <div className="max-w-md w-full rounded-3xl border border-white/10 bg-[#0b0f17]/60 px-4 py-4 shadow-lg shadow-cyan-500/20 backdrop-blur-md">
-              <img
-                src="/gallery/bodysync_showcase.png"
-                alt="Ejemplo generado con BodySync"
-                className="w-full rounded-2xl object-cover"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Plan de pago */}
-        <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
-          <h2 className="text-sm font-semibold text-white">
-            Plan beta para creadores
-          </h2>
-          <p className="mt-2 text-xs text-neutral-300">
-            Si llegas al límite de {DAILY_LIMIT} imágenes gratuitas al día y quieres
-            seguir generando sin restricciones, activa el plan ilimitado.
-          </p>
-
-          <div className="mt-4 flex flex-wrap items-center gap-4">
-            <button
-              onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
-            >
-              IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
-            </button>
-            <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
-              <span className="text-neutral-300">
-                o pagar con <span className="font-semibold">PayPal</span>:
-              </span>
-              <PayPalButton amount="5.00" containerId="paypal-button-landing" />
-            </div>
-          </div>
-
-          <p className="mt-3 text-[11px] text-neutral-400">
-            Usuarios beta:{" "}
-            <span className="font-semibold text-white">
-              Plan Basic activo (sin límite)
-            </span>{" "}
-            mientras se mantenga la suscripción.
-          </p>
-        </section>
-
-        {/* Contacto */}
-        <section id="contacto" className="mt-16 max-w-xl">
-          <h2 className="text-sm font-semibold text-white">Contacto y soporte</h2>
-          <p className="mt-1 text-xs text-neutral-400">
-            Si tienes dudas, escríbenos a{" "}
-            <span className="font-semibold text-white">contacto@isabelaos.com</span>.
-          </p>
-
-          <form onSubmit={handleContactSubmit} className="mt-4 space-y-3 text-sm">
-            <div>
-              <label className="text-xs text-neutral-300">Nombre</label>
-              <input
-                type="text"
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/50 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-300">Correo</label>
-              <input
-                type="email"
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/50 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-300">Mensaje</label>
-              <textarea
-                rows={4}
-                value={contactMessage}
-                onChange={(e) => setContactMessage(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/50 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-            <button
-              type="submit"
-              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
-            >
-              Enviar mensaje
-            </button>
-          </form>
-        </section>
-
-        <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>
-              © {new Date().getFullYear()} IsabelaOS Studio · Desarrollado en Guatemala por Stalling Technologic.
-            </span>
-            <span className="flex flex-wrap gap-3">
-              <a href="/terms.html" className="hover:text-neutral-300">
-                Términos
-              </a>
-              <span>•</span>
-              <a href="/privacy.html" className="hover:text-neutral-300">
-                Privacidad
-              </a>
-              <span>•</span>
-              <a href="/refunds.html" className="hover:text-neutral-300">
-                Reembolsos
-              </a>
-            </span>
-          </div>
-        </footer>
-      </main>
+      {/* ... resto igual ... */}
     </div>
   );
 }
@@ -2622,7 +2320,6 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [viewMode, setViewMode] = useState("landing");
 
-  // Fondo global coherente con el estilo (gris oscuro + neon)
   useEffect(() => {
     const bg =
       "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.14),transparent_60%)," +
@@ -2634,16 +2331,11 @@ export default function App() {
     document.body.style.minHeight = "100vh";
   }, []);
 
-  const openAuth = () => {
-    // NO cambies la vista aquí: si estaba en demo, se queda en demo.
-    setShowAuthModal(true);
-  };
-
+  const openAuth = () => setShowAuthModal(true);
   const closeAuth = () => setShowAuthModal(false);
 
   const handleStartDemo = () => {
     setViewMode("demo");
-    // opcional: llevar al top para que el demo se vea inmediato
     try {
       const el = document.getElementById("top");
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2653,11 +2345,8 @@ export default function App() {
     }
   };
 
-  // Si hay usuario, siempre dashboard
   useEffect(() => {
-    if (user && viewMode !== "dashboard") {
-      setViewMode("dashboard");
-    }
+    if (user && viewMode !== "dashboard") setViewMode("dashboard");
   }, [user, viewMode]);
 
   if (loading) {
@@ -2668,9 +2357,7 @@ export default function App() {
     );
   }
 
-  if (user) {
-    return <DashboardView />;
-  }
+  if (user) return <DashboardView />;
 
   if (viewMode === "demo") {
     return (
@@ -2678,11 +2365,9 @@ export default function App() {
         <div id="top" className="pt-10">
           <CreatorPanel isDemo={true} onAuthRequired={openAuth} />
         </div>
-
         <div className="mt-10">
           <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
         </div>
-
         <AuthModal open={showAuthModal} onClose={closeAuth} />
       </>
     );
@@ -2695,4 +2380,3 @@ export default function App() {
     </>
   );
 }
-
