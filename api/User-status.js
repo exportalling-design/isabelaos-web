@@ -21,7 +21,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 1️⃣ Obtener suscripción
+    // 1️⃣ Suscripción
     const { data: sub, error: subErr } = await supabaseAdmin
       .from("user_subscription")
       .select("plan, status")
@@ -29,7 +29,6 @@ export default async function handler(req, res) {
       .single();
 
     if (subErr && subErr.code !== "PGRST116") {
-      // PGRST116 = no rows found (usuario sin plan)
       return res.status(500).json({
         ok: false,
         error: "SUBSCRIPTION_ERROR",
@@ -37,25 +36,26 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2️⃣ Obtener balance de jades
-    const { data: balanceData, error: balErr } = await supabaseAdmin
-      .rpc("get_jade_balance", { p_user_id: user_id });
+    // 2️⃣ Wallet (jades)
+    const { data: wallet, error: walletErr } = await supabaseAdmin
+      .from("user_wallet")
+      .select("balance")
+      .eq("user_id", user_id)
+      .single();
 
-    if (balErr) {
+    if (walletErr && walletErr.code !== "PGRST116") {
       return res.status(500).json({
         ok: false,
-        error: "BALANCE_ERROR",
-        detail: balErr.message,
+        error: "WALLET_ERROR",
+        detail: walletErr.message,
       });
     }
-
-    const jades = balanceData?.[0]?.balance ?? 0;
 
     return res.status(200).json({
       ok: true,
       plan: sub?.status === "active" ? sub.plan : null,
       subscription_status: sub?.status || "none",
-      jades,
+      jades: wallet?.balance ?? 0,
     });
   } catch (e) {
     return res.status(500).json({
