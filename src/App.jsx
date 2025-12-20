@@ -35,8 +35,18 @@ function scrollToId(id) {
 // ---------------------------------------------------------
 // Botón PayPal reutilizable
 // ---------------------------------------------------------
-function PayPalButton({ amount = "5.00", containerId, onPaid }) {
+function PayPalButton({
+  amount = "5.00",
+  currency = "USD",
+  containerId,
+  description = "IsabelaOS Studio – Purchase",
+  metadata = {}, // { kind: "plan"|"jades", planId, jadePackId, ... }
+  onPaid,
+}) {
   const divId = containerId || "paypal-button-container";
+
+  // ✅ AGREGADO: key estable para dependencias (evita re-render infinito por objetos)
+  const metadataKey = JSON.stringify(metadata || {});
 
   useEffect(() => {
     if (!PAYPAL_CLIENT_ID) {
@@ -46,6 +56,21 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
 
     const renderButtons = () => {
       if (!window.paypal) return;
+
+      // Limpia render previo si existe
+      const el = document.getElementById(divId);
+      if (el) el.innerHTML = "";
+
+      // ✅ AGREGADO: metadata compacta para enviar en custom_id (PayPal lo retorna en capture)
+      // Nota: PayPal limita longitudes; lo dejamos compacto.
+      const customId = (() => {
+        try {
+          const s = JSON.stringify(metadata || {});
+          return s.length > 120 ? s.slice(0, 120) : s;
+        } catch {
+          return "";
+        }
+      })();
 
       window.paypal
         .Buttons({
@@ -60,12 +85,17 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
               purchase_units: [
                 {
                   amount: {
-                    value: amount,
-                    currency_code: "USD",
+                    value: String(amount),
+                    currency_code: currency,
                   },
-                  description: "IsabelaOS Studio – Plan Basic",
+                  description,
+                  // ✅ AGREGADO: aquí es donde guardamos metadata para recuperarla en el capture
+                  custom_id: customId,
                 },
               ],
+              application_context: {
+                shipping_preference: "NO_SHIPPING",
+              },
             });
           },
           onApprove: async (data, actions) => {
@@ -74,15 +104,9 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
               console.log("Pago PayPal completado:", details);
 
               if (typeof onPaid === "function") {
-                try {
-                  onPaid(details);
-                } catch (cbErr) {
-                  console.error("Error en onPaid PayPal:", cbErr);
-                }
+                await onPaid(details, metadata);
               } else {
-                alert(
-                  "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
-                );
+                alert("Pago completado con PayPal.");
               }
             } catch (err) {
               console.error("Error al capturar pago PayPal:", err);
@@ -102,22 +126,19 @@ function PayPalButton({ amount = "5.00", containerId, onPaid }) {
     );
 
     if (existingScript) {
-      if (window.paypal) {
-        renderButtons();
-      } else {
-        existingScript.addEventListener("load", renderButtons);
-      }
+      if (window.paypal) renderButtons();
+      else existingScript.addEventListener("load", renderButtons);
       return;
     }
 
     const script = document.createElement("script");
-    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
+    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=${currency}`;
     script.async = true;
     script.onload = renderButtons;
     document.body.appendChild(script);
 
     return () => {};
-  }, [amount, divId, onPaid]);
+  }, [amount, currency, divId, onPaid, description, metadataKey]); // ✅ CAMBIO: metadataKey
 
   return (
     <div className="mt-2 w-full flex justify-center">
@@ -332,6 +353,24 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [userLoggedIn, user, premiumKey]);
 
+  // ✅ AGREGADO: helper central para activar premium (reutilizable por PayPal/Paddle)
+  const activatePremiumLocal = () => {
+    if (!userLoggedIn || !premiumKey) return false;
+    try {
+      localStorage.setItem(premiumKey, "1");
+      setIsPremium(true);
+      setError("");
+      setStatus("IDLE");
+      setStatusText(
+        "Plan Basic activado: ya no tienes límite diario en este navegador y se desbloquean los módulos premium mientras dure la beta."
+      );
+      return true;
+    } catch (e) {
+      console.error("No se pudo guardar premium en localStorage:", e);
+      return false;
+    }
+  };
+
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
       alert("Por favor, inicia sesión para activar el plan.");
@@ -357,6 +396,29 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       alert("Error al conectar con Paddle.");
     }
   };
+
+  // ✅ AGREGADO: al volver desde Paddle, si viene ?premium=1, activamos el plan local
+  // (tu backend puede redirigir a /?premium=1 tras webhook/validación)
+  useEffect(() => {
+    if (!userLoggedIn) return;
+    try {
+      const url = new URL(window.location.href);
+      const premium = url.searchParams.get("premium");
+      if (premium === "1") {
+        const ok = activatePremiumLocal();
+        if (ok) {
+          // limpiamos query param sin recargar
+          url.searchParams.delete("premium");
+          window.history.replaceState({}, "", url.toString());
+          alert(
+            "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium (como la Foto Navideña IA) mientras dure la beta."
+          );
+        }
+      }
+    } catch (e) {
+      // no-op
+    }
+  }, [userLoggedIn]); // ✅ FIX: no dependemos de premiumKey para evitar loops
 
   useEffect(() => {
     if (!userLoggedIn) {
@@ -425,422 +487,409 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   };
 
   // NUEVO: optimizar también el negative prompt con el mismo endpoint
-  const optimizeNegativeIfNeeded = async (originalNegative) => {
-    if (!autoPrompt || !originalNegative?.trim()) {
-      setOptimizedNegative("");
-      return originalNegative;
-    }
-
-    try {
-      setStatus("OPTIMIZING");
-      setStatusText("Optimizando negative prompt con IA...");
-
-      const res = await fetch("/api/optimize-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: originalNegative }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
-        console.warn(
-          "No se pudo optimizar el negative prompt, usando el original.",
-          data
-        );
-        setStatusText(
-          "No se pudo optimizar el negative prompt; usando el texto original para el render."
-        );
-        setOptimizedNegative("");
-        return originalNegative;
-      }
-
-      const optimized = data.optimizedPrompt;
-      setOptimizedNegative(optimized); // mostramos el negative mejorado debajo del textarea
-      return optimized;
-    } catch (err) {
-      console.error("Error al optimizar negative prompt:", err);
-      setStatusText(
-        "Error al optimizar el negative prompt; usando el texto original para el render."
-      );
-      setOptimizedNegative("");
-      return originalNegative;
-    }
-  };
-
-  const handleGenerate = async () => {
-    setError("");
-
-    const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-    const currentCount = isDemo ? demoCount : dailyCount;
-
-    if (!isPremium && currentCount >= currentLimit) {
-      setStatus("ERROR");
-      setStatusText("Límite de generación alcanzado.");
-
-      if (isDemo && onAuthRequired) {
-        alert(
-          `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar.`
-        );
-        onAuthRequired();
-      } else if (userLoggedIn) {
-        setError(
-          `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 para generar sin límite y desbloquear todos los módulos premium (como la Foto Navideña IA).`
-        );
-      }
-      return;
-    }
-
-    setImageB64(null);
-
-    // 1) si está activado, primero optimizamos el prompt (positivo) y el negative
-    let promptToUse = prompt;
-    let negativeToUse = negative;
-
-    if (autoPrompt) {
-      promptToUse = await optimizePromptIfNeeded(prompt);
-      negativeToUse = await optimizeNegativeIfNeeded(negative);
-    } else {
-      setOptimizedPrompt("");
-      setOptimizedNegative("");
-    }
-
-    // 2) luego lanzamos el render normal a RunPod, usando los textos optimizados
-    setStatus("IN_QUEUE");
-    setStatusText("Enviando job a RunPod...");
-
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptToUse,
-          negative_prompt: negativeToUse,
-          width: Number(width),
-          height: Number(height),
-          steps: Number(steps),
-          // se mantiene por compatibilidad, aunque ya optimizamos antes
-          optimize_prompt: autoPrompt,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Error en /api/generate, revisa los logs.");
-      }
-
-      const jobId = data.jobId;
-      setStatusText(`Job enviado. ID: ${jobId}. Consultando estado...`);
-
-      let finished = false;
-      while (!finished) {
-        await new Promise((r) => setTimeout(r, 2000));
-
-        const statusRes = await fetch(`/api/status?id=${jobId}`);
-        const statusData = await statusRes.json();
-
-        if (!statusRes.ok || statusData.error) {
-          throw new Error(statusData.error || "Error al consultar /api/status.");
-        }
-
-        const st = statusData.status;
-        setStatus(st);
-        setStatusText(`Estado actual: ${st}...`);
-
-        if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
-
-        finished = true;
-
-        if (st === "COMPLETED" && statusData.output?.image_b64) {
-          const b64 = statusData.output.image_b64;
-          setImageB64(b64);
-          setStatusText("Render completado.");
-
-          if (isDemo) {
-            const newDemoCount = demoCount + 1;
-            setDemoCount(newDemoCount);
-            localStorage.setItem("isabelaos_demo_count", String(newDemoCount));
-          } else if (userLoggedIn) {
-            setDailyCount((prev) => prev + 1);
-
-            const dataUrl = `data:image/png;base64,${b64}`;
-            saveGenerationInSupabase({
-              userId: user.id,
-              imageUrl: dataUrl,
-              prompt: "", // si quieres, aquí luego podemos guardar promptToUse
-              negativePrompt: "",
-              width: Number(width),
-              height: Number(height),
-              steps: Number(steps),
-            }).catch((e) => {
-              console.error("Error guardando en Supabase:", e);
-            });
-          }
-        } else {
-          throw new Error("Job terminado pero sin imagen en la salida.");
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      setStatus("ERROR");
-      setStatusText("Error al generar la imagen.");
-      setError(err.message || String(err));
-    }
-  };
-
-  const handleDownload = () => {
-    if (isDemo) {
-      alert(
-        "Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión."
-      );
-      onAuthRequired && onAuthRequired();
-      return;
-    }
-
-    if (!imageB64) return;
-    const link = document.createElement("a");
-    link.href = `data:image/png;base64,${imageB64}`;
-    link.download = "isabelaos-image.png";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handlePayPalUnlock = () => {
-    if (!userLoggedIn || !premiumKey) return;
-    try {
-      localStorage.setItem(premiumKey, "1");
-      setIsPremium(true);
-      setError("");
-      setStatus("IDLE");
-      setStatusText(
-        "Plan Basic activado: ya no tienes límite diario en este navegador y se desbloquean los módulos premium mientras dure la beta."
-      );
-      alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium (como la Foto Navideña IA) mientras dure la beta."
-      );
-    } catch (e) {
-      console.error("No se pudo guardar premium en localStorage:", e);
-    }
-  };
-
-  if (!userLoggedIn && !isDemo) {
-    return (
-      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">
-          Debes iniciar sesión para usar el generador de imágenes.
-        </p>
-        <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
-          a RunPod. {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más
-          allá, podrás activar el plan de US$5/mes para generar sin límite y
-          desbloquear todos los módulos premium.
-        </p>
-      </div>
-    );
+const optimizeNegativeIfNeeded = async (originalNegative) => {
+  if (!autoPrompt || !originalNegative?.trim()) {
+    setOptimizedNegative("");
+    return originalNegative;
   }
+
+  try {
+    setStatus("OPTIMIZING");
+    setStatusText("Optimizando negative prompt con IA...");
+
+    const res = await fetch("/api/optimize-prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: originalNegative }),
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.ok || !data.optimizedPrompt) {
+      console.warn(
+        "No se pudo optimizar el negative prompt, usando el original.",
+        data
+      );
+      setStatusText(
+        "No se pudo optimizar el negative prompt; usando el texto original para el render."
+      );
+      setOptimizedNegative("");
+      return originalNegative;
+    }
+
+    const optimized = data.optimizedPrompt;
+    setOptimizedNegative(optimized); // mostramos el negative mejorado debajo del textarea
+    return optimized;
+  } catch (err) {
+    console.error("Error al optimizar negative prompt:", err);
+    setStatusText(
+      "Error al optimizar el negative prompt; usando el texto original para el render."
+    );
+    setOptimizedNegative("");
+    return originalNegative;
+  }
+};
+
+const handleGenerate = async () => {
+  setError("");
 
   const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
   const currentCount = isDemo ? demoCount : dailyCount;
-  const remaining = currentLimit - currentCount;
 
+  if (!isPremium && currentCount >= currentLimit) {
+    setStatus("ERROR");
+    setStatusText("Límite de generación alcanzado.");
+
+    if (isDemo && onAuthRequired) {
+      alert(
+        `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar.`
+      );
+      onAuthRequired();
+    } else if (userLoggedIn) {
+      setError(
+        `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa la suscripción mensual de US$5 para generar sin límite y desbloquear todos los módulos premium (como la Foto Navideña IA).`
+      );
+    }
+    return;
+  }
+
+  setImageB64(null);
+
+  // 1) si está activado, primero optimizamos el prompt (positivo) y el negative
+  let promptToUse = prompt;
+  let negativeToUse = negative;
+
+  if (autoPrompt) {
+    promptToUse = await optimizePromptIfNeeded(prompt);
+    negativeToUse = await optimizeNegativeIfNeeded(negative);
+  } else {
+    setOptimizedPrompt("");
+    setOptimizedNegative("");
+  }
+
+  // 2) luego lanzamos el render normal a RunPod, usando los textos optimizados
+  setStatus("IN_QUEUE");
+  setStatusText("Enviando job a RunPod...");
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptToUse,
+        negative_prompt: negativeToUse,
+        width: Number(width),
+        height: Number(height),
+        steps: Number(steps),
+        // se mantiene por compatibilidad, aunque ya optimizamos antes
+        optimize_prompt: autoPrompt,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data?.error || "Error en /api/generate, revisa los logs.");
+    }
+
+    const jobId = data.jobId;
+    setStatusText(`Job enviado. ID: ${jobId}. Consultando estado...`);
+
+    let finished = false;
+    while (!finished) {
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const statusRes = await fetch(`/api/status?id=${jobId}`);
+      const statusData = await statusRes.json();
+
+      if (!statusRes.ok || statusData.error) {
+        throw new Error(statusData.error || "Error al consultar /api/status.");
+      }
+
+      const st = statusData.status;
+      setStatus(st);
+      setStatusText(`Estado actual: ${st}...`);
+
+      if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
+
+      finished = true;
+
+      if (st === "COMPLETED" && statusData.output?.image_b64) {
+        const b64 = statusData.output.image_b64;
+        setImageB64(b64);
+        setStatusText("Render completado.");
+
+        if (isDemo) {
+          const newDemoCount = demoCount + 1;
+          setDemoCount(newDemoCount);
+          localStorage.setItem("isabelaos_demo_count", String(newDemoCount));
+        } else if (userLoggedIn) {
+          setDailyCount((prev) => prev + 1);
+
+          const dataUrl = `data:image/png;base64,${b64}`;
+          saveGenerationInSupabase({
+            userId: user.id,
+            imageUrl: dataUrl,
+            prompt: promptToUse, // ✅ FIX: guardamos el prompt usado
+            negativePrompt: negativeToUse, // ✅ FIX: guardamos el negative usado
+            width: Number(width),
+            height: Number(height),
+            steps: Number(steps),
+          }).catch((e) => {
+            console.error("Error guardando en Supabase:", e);
+          });
+        }
+      } else {
+        throw new Error("Job terminado pero sin imagen en la salida.");
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("ERROR");
+    setStatusText("Error al generar la imagen.");
+    setError(err.message || String(err));
+  }
+};
+
+const handleDownload = () => {
+  if (isDemo) {
+    alert("Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión.");
+    onAuthRequired && onAuthRequired();
+    return;
+  }
+
+  if (!imageB64) return;
+  const link = document.createElement("a");
+  link.href = `data:image/png;base64,${imageB64}`;
+  link.download = "isabelaos-image.png";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+const handlePayPalUnlock = () => {
+  if (!userLoggedIn || !premiumKey) return;
+  try {
+    localStorage.setItem(premiumKey, "1");
+    setIsPremium(true);
+    setError("");
+    setStatus("IDLE");
+    setStatusText(
+      "Plan Basic activado: ya no tienes límite diario en este navegador y se desbloquean los módulos premium mientras dure la beta."
+    );
+    alert(
+      "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium (como la Foto Navideña IA) mientras dure la beta."
+    );
+  } catch (e) {
+    console.error("No se pudo guardar premium en localStorage:", e);
+  }
+};
+
+if (!userLoggedIn && !isDemo) {
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      {/* Formulario */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Generador desde prompt
-        </h2>
-
-        {isDemo && (
-          <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo de prueba gratuito: te quedan {remaining} imágenes de prueba
-            sin registrarte. La descarga y la biblioteca requieren crear una
-            cuenta.
-          </div>
-        )}
-
-        {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
-          <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Atención: solo te quedan {remaining} imágenes gratis hoy. Activa el
-            plan ilimitado de US$5/mes para seguir generando y desbloquear los
-            módulos premium.
-          </div>
-        )}
-
-        <div className="mt-4 space-y-4 text-sm">
-          <div>
-            <label className="text-neutral-300">Prompt</label>
-            <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-            {autoPrompt && optimizedPrompt && (
-              <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
-                <span className="font-semibold">Prompt optimizado:</span>{" "}
-                {optimizedPrompt}
-              </div>
-            )}
-          </div>
-
-          {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
-          <div className="flex items-start justify-between gap-3 text-xs">
-            <label className="flex items-center gap-2 text-neutral-300">
-              <input
-                type="checkbox"
-                checked={autoPrompt}
-                onChange={(e) => setAutoPrompt(e.target.checked)}
-                className="h-4 w-4 rounded border-white/30 bg-black/70"
-              />
-              <span>Optimizar mi prompt con IA (OpenAI)</span>
-            </label>
-            <span className="text-[10px] text-neutral-500 text-right">
-              Si está activado, el sistema ajusta tu texto automáticamente antes
-              de enviar el render al motor en RunPod.
-            </span>
-          </div>
-
-          <div>
-            <label className="text-neutral-300">Negative prompt</label>
-            <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-            />
-            {autoPrompt && optimizedNegative && (
-              <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
-                <span className="font-semibold">Negative optimizado:</span>{" "}
-                {optimizedNegative}
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="text-neutral-300">Steps</label>
-              <input
-                type="number"
-                min={5}
-                max={50}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                value={steps}
-                onChange={(e) => setSteps(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-neutral-300">Width</label>
-              <input
-                type="number"
-                min={256}
-                max={1024}
-                step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                value={width}
-                onChange={(e) => setWidth(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-neutral-300">Height</label>
-              <input
-                type="number"
-                min={256}
-                max={1024}
-                step={64}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                value={height}
-                onChange={(e) => setHeight(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo para generar."}
-            <br />
-            <span className="text-[11px] text-neutral-400">
-              {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
-              {userLoggedIn && isPremium && (
-                <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y
-                  con acceso a módulos premium).
-                </>
-              )}
-              {userLoggedIn && !isPremium && (
-                <>
-                  Uso de hoy: {currentCount} / {currentLimit} imágenes.
-                </>
-              )}
-            </span>
-          </div>
-
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
-
-          <button
-            onClick={handleGenerate}
-            disabled={
-              status === "IN_QUEUE" ||
-              status === "IN_PROGRESS" ||
-              (!isPremium && currentCount >= currentLimit)
-            }
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
-          >
-            {!isPremium && currentCount >= currentLimit
-              ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
-              : status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando..."
-              : "Generar imagen desde prompt"}
-          </button>
-
-          {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
-            <>
-              <button
-                type="button"
-                onClick={handlePaddleCheckout}
-                className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-              >
-                Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
-              </button>
-
-              <div className="mt-3 text-[11px] text-neutral-400">
-                o pagar con <span className="font-semibold">PayPal</span>:
-                <PayPalButton
-                  amount="5.00"
-                  containerId="paypal-button-panel"
-                  onPaid={handlePayPalUnlock}
-                />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Resultado */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado</h2>
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-          {imageB64 ? (
-            <img
-              src={`data:image/png;base64,${imageB64}`}
-              alt="Imagen generada"
-              className="h-full w-full rounded-2xl object-contain"
-            />
-          ) : (
-            <p>Aquí verás el resultado en cuanto se complete el render.</p>
-          )}
-        </div>
-        {imageB64 && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
-          >
-            {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
-          </button>
-        )}
-      </div>
+    <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+      <p className="font-medium">Debes iniciar sesión para usar el generador de imágenes.</p>
+      <p className="mt-1 text-xs text-yellow-200/80">
+        Desde tu cuenta podrás crear imágenes con nuestro motor real conectado a RunPod.{" "}
+        {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más allá, podrás activar el
+        plan de US$5/mes para generar sin límite y desbloquear todos los módulos premium.
+      </p>
     </div>
   );
 }
+
+const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
+const currentCount = isDemo ? demoCount : dailyCount;
+const remaining = Math.max(0, currentLimit - currentCount); // ✅ FIX: evita negativos
+
+return (
+  <div className="grid gap-8 lg:grid-cols-2">
+    {/* Formulario */}
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <h2 className="text-lg font-semibold text-white">Generador desde prompt</h2>
+
+      {isDemo && (
+        <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
+          Modo de prueba gratuito: te quedan {remaining} imágenes de prueba sin registrarte.
+          La descarga y la biblioteca requieren crear una cuenta.
+        </div>
+      )}
+
+      {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
+        <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
+          Atención: solo te quedan {remaining} imágenes gratis hoy. Activa el plan ilimitado
+          de US$5/mes para seguir generando y desbloquear los módulos premium.
+        </div>
+      )}
+
+      <div className="mt-4 space-y-4 text-sm">
+        <div>
+          <label className="text-neutral-300">Prompt</label>
+          <textarea
+            className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+          {autoPrompt && optimizedPrompt && (
+            <div className="mt-2 rounded-2xl border border-cyan-400/40 bg-black/60 px-3 py-2 text-[11px] text-cyan-200">
+              <span className="font-semibold">Prompt optimizado:</span> {optimizedPrompt}
+            </div>
+          )}
+        </div>
+
+        {/* NUEVO: toggle de optimización de prompt con IA (OpenAI) */}
+        <div className="flex items-start justify-between gap-3 text-xs">
+          <label className="flex items-center gap-2 text-neutral-300">
+            <input
+              type="checkbox"
+              checked={autoPrompt}
+              onChange={(e) => setAutoPrompt(e.target.checked)}
+              className="h-4 w-4 rounded border-white/30 bg-black/70"
+            />
+            <span>Optimizar mi prompt con IA (OpenAI)</span>
+          </label>
+          <span className="text-[10px] text-neutral-500 text-right">
+            Si está activado, el sistema ajusta tu texto automáticamente antes de enviar el
+            render al motor en RunPod.
+          </span>
+        </div>
+
+        <div>
+          <label className="text-neutral-300">Negative prompt</label>
+          <textarea
+            className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            value={negative}
+            onChange={(e) => setNegative(e.target.value)}
+          />
+          {autoPrompt && optimizedNegative && (
+            <div className="mt-2 rounded-2xl border border-fuchsia-400/40 bg-black/60 px-3 py-2 text-[11px] text-fuchsia-100">
+              <span className="font-semibold">Negative optimizado:</span> {optimizedNegative}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="text-neutral-300">Steps</label>
+            <input
+              type="number"
+              min={5}
+              max={50}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={steps}
+              onChange={(e) => setSteps(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-neutral-300">Width</label>
+            <input
+              type="number"
+              min={256}
+              max={1024}
+              step={64}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={width}
+              onChange={(e) => setWidth(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-neutral-300">Height</label>
+            <input
+              type="number"
+              min={256}
+              max={1024}
+              step={64}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={height}
+              onChange={(e) => setHeight(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+          Estado actual: {statusText || "Listo para generar."}
+          <br />
+          <span className="text-[11px] text-neutral-400">
+            {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
+            {userLoggedIn && isPremium && (
+              <>
+                Uso de hoy: {currentCount}. Usuario beta – Plan Basic activo (sin límite).
+              </>
+            )}
+            {userLoggedIn && !isPremium && (
+              <>
+                Uso de hoy: {currentCount} / {currentLimit} imágenes.
+              </>
+            )}
+          </span>
+        </div>
+
+        {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
+
+        <button
+          onClick={handleGenerate}
+          disabled={
+            status === "IN_QUEUE" ||
+            status === "IN_PROGRESS" ||
+            (!isPremium && currentCount >= currentLimit)
+          }
+          className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {!isPremium && currentCount >= currentLimit
+            ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
+            : status === "IN_QUEUE" || status === "IN_PROGRESS"
+            ? "Generando..."
+            : "Generar imagen desde prompt"}
+        </button>
+
+        {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
+          <>
+            <button
+              type="button"
+              onClick={handlePaddleCheckout}
+              className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+            >
+              Desbloquear con IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
+            </button>
+
+            <div className="mt-3 text-[11px] text-neutral-400">
+              o pagar con <span className="font-semibold">PayPal</span>:
+              <PayPalButton
+                amount="5.00"
+                containerId="paypal-button-panel"
+                // ✅ FIX: pasamos metadata para que quede registrado en PayPal (si agregas custom_id en PayPalButton)
+                metadata={{ kind: "plan", planId: "basic_monthly_usd_5" }}
+                onPaid={handlePayPalUnlock}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+
+    {/* Resultado */}
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+      <h2 className="text-lg font-semibold text-white">Resultado</h2>
+      <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+        {imageB64 ? (
+          <img
+            src={`data:image/png;base64,${imageB64}`}
+            alt="Imagen generada"
+            className="h-full w-full rounded-2xl object-contain"
+          />
+        ) : (
+          <p>Aquí verás el resultado en cuanto se complete el render.</p>
+        )}
+      </div>
+      {imageB64 && (
+        <button
+          onClick={handleDownload}
+          className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+        >
+          {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
+        </button>
+      )}
+    </div>
+  </div>
+);
 
 // ---------------------------------------------------------
 // NUEVO: Panel de generación de video
@@ -980,7 +1029,7 @@ function VideoPanel() {
     <div className="grid gap-8 lg:grid-cols-2">
       {/* Configuración de video */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">
+        <h2 className="text-lg font-semibold text-white">
           Generar video desde prompt
         </h2>
         <p className="mt-1 text-xs text-neutral-400">
@@ -993,7 +1042,7 @@ function VideoPanel() {
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -1024,7 +1073,7 @@ function VideoPanel() {
           <div>
             <label className="text-neutral-300">Negative prompt</label>
             <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
@@ -1060,7 +1109,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     aspectRatio === "9:16"
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   9:16 (vertical)
@@ -1071,7 +1120,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     aspectRatio === "16:9"
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   16:9 (horizontal)
@@ -1091,7 +1140,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     quality === "HD"
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   HD 720p
@@ -1102,7 +1151,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     quality === "MAX"
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   Máxima
@@ -1119,7 +1168,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     duration === 5
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   5 segundos
@@ -1130,7 +1179,7 @@ function VideoPanel() {
                   className={`flex-1 rounded-2xl px-3 py-2 ${
                     duration === 10
                       ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                      : "bg-black/60 text-neutral-200 border border.white/10 hover:bg.white/5"
+                      : "bg-black/60 text-neutral-200 border border-white/10 hover:bg-white/5"
                   }`}
                 >
                   10 segundos
@@ -1152,10 +1201,10 @@ function VideoPanel() {
           <button
             type="button"
             onClick={handleGenerateVideo}
-            disabled={status === "GENERATING"}
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+            disabled={status === "GENERATING" || status === "OPTIMIZING"} {/* ✅ FIX */}
+            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {status === "GENERATING"
+            {status === "GENERATING" || status === "OPTIMIZING"
               ? "Generando video..."
               : "Generar video desde prompt"}
           </button>
@@ -1170,7 +1219,7 @@ function VideoPanel() {
 
       {/* Vista previa del video */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
             <video
@@ -1189,7 +1238,7 @@ function VideoPanel() {
           <button
             type="button"
             onClick={handleDownloadVideo}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             Abrir / descargar video
           </button>
@@ -1248,10 +1297,12 @@ function LibraryView() {
     try {
       setDeleting(true);
       await deleteGenerationFromSupabase(selected.id);
-      setItems((prev) => prev.filter((it) => it.id !== selected.id));
-      setSelected((prevSelected) => {
-        const remaining = items.filter((it) => it.id !== prevSelected.id);
-        return remaining.length > 0 ? remaining[0] : null;
+
+      // ✅ FIX: evitar usar `items` stale y asegurar selección correcta
+      setItems((prev) => {
+        const next = prev.filter((it) => it.id !== selected.id);
+        setSelected(next.length > 0 ? next[0] : null);
+        return next;
       });
     } catch (e) {
       console.error("Error eliminando imagen de Supabase:", e);
@@ -1272,7 +1323,7 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
         <p className="mt-1 text-xs text-neutral-400">
           Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
           RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
@@ -1313,7 +1364,7 @@ function LibraryView() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Vista previa</h2>
+        <h2 className="text-lg font-semibold text-white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
             <img
@@ -1345,7 +1396,7 @@ function LibraryView() {
 function VideoPlaceholderPanel() {
   return (
     <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-      <h2 className="text-lg font-semibold text.white">
+      <h2 className="text-lg font-semibold text-white">
         Generador de video desde prompt (próximamente)
       </h2>
       <p className="mt-2 text-sm text-neutral-300">
@@ -1359,9 +1410,7 @@ function VideoPlaceholderPanel() {
       </p>
       <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text.white">
-            ¿Qué podrás hacer?
-          </h3>
+          <h3 className="text-sm font-semibold text-white">¿Qué podrás hacer?</h3>
           <ul className="mt-2 space-y-1 list-disc list-inside">
             <li>Clips cortos desde texto (5–10 segundos).</li>
             <li>Escenas con cámara cinematográfica.</li>
@@ -1369,7 +1418,7 @@ function VideoPlaceholderPanel() {
           </ul>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text.white">
+          <h3 className="text-sm font-semibold text-white">
             Integración con BodySync
           </h3>
           <p className="mt-2">
@@ -1552,7 +1601,7 @@ function XmasPhotoPanel() {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text.white">
+        <h2 className="text-lg font-semibold text-white">
           Foto Navideña IA (Premium)
         </h2>
         <p className="mt-2 text-sm text-neutral-300">
@@ -1623,7 +1672,7 @@ function XmasPhotoPanel() {
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
               placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
             <p className="mt-1 text-[11px] text-neutral-400">
               Este texto ayuda a la IA a adaptar mejor el fondo y los detalles
@@ -1650,7 +1699,7 @@ function XmasPhotoPanel() {
               !pureB64 ||
               !user
             }
-            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando foto navideña..."
@@ -1667,7 +1716,7 @@ function XmasPhotoPanel() {
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {resultB64 ? (
             <img
@@ -1682,7 +1731,7 @@ function XmasPhotoPanel() {
         {resultB64 && (
           <button
             onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
             Descargar foto navideña
           </button>
@@ -1723,7 +1772,7 @@ function DashboardView() {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs{" "}
+                IsabelaOS{" "}
                 <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
@@ -1738,13 +1787,13 @@ function DashboardView() {
             </span>
             <button
               onClick={handleContact}
-              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text.white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Contacto
             </button>
             <button
               onClick={signOut}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text.white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Cerrar sesión
             </button>
@@ -1764,7 +1813,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("generator")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1775,7 +1824,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("video")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1786,7 +1835,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("library")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1798,8 +1847,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("xmas")}
               className={`rounded-2xl px-3 py-1.5 ${
                 appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text.white"
-                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text.white/90"
+                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
+                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text-white/90"
               }`}
             >
               🎄 Foto Navideña IA
@@ -1818,7 +1867,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("generator")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1829,7 +1878,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("video")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1840,7 +1889,7 @@ function DashboardView() {
               onClick={() => setAppViewMode("library")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
@@ -1852,8 +1901,8 @@ function DashboardView() {
               onClick={() => setAppViewMode("xmas")}
               className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
                 appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text.white"
-                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text.white/90"
+                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
+                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
               }`}
             >
               🎄 Foto Navideña IA (Premium)
@@ -1863,7 +1912,7 @@ function DashboardView() {
           {/* Contenido principal */}
           <div className="flex-1 space-y-6">
             <div>
-              <h1 className="text-xl font-semibold text.white">
+              <h1 className="text-xl font-semibold text-white">
                 Panel del creador
               </h1>
               <p className="mt-1 text-xs text-neutral-400">
@@ -1923,7 +1972,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
   return (
     <div
-      className="min-h-screen w-full text.white"
+      className="min-h-screen w-full text-white"
       style={{
         background:
           "radial-gradient(1200px_800px_at_110%_-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at_-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
@@ -1938,7 +1987,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
-                isabelaOs{" "}
+                IsabelaOS{" "}
                 <span className="text-xs text-neutral-400">Studio</span>
               </div>
               <div className="text-[10px] text-neutral-500">
@@ -1950,13 +1999,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="flex items-center gap-3">
             <button
               onClick={() => scrollToId("contacto")}
-              className="hidden sm:inline rounded-xl border border.white/20 px-4 py-1.5 text-xs text.white hover:bg.white/10"
+              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Contacto
             </button>
             <button
               onClick={onOpenAuth}
-              className="rounded-xl border border.white/20 px-4 py-1.5 text-xs text.white hover:bg.white/10"
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Iniciar sesión / Registrarse
             </button>
@@ -1969,7 +2018,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           {/* Columna texto */}
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg.white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
+            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
               <span className="h-1 w-1 rounded-full bg-cyan-300" />
               <span>Beta privada · Motor de imagen de estudio</span>
             </p>
@@ -1995,9 +2044,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               adelante, acceder a módulos exclusivos como BodySync (movimiento
               corporal IA), Script2Film, CineCam y generador de video desde
               texto. Además, hemos añadido un módulo especial de{" "}
-              <span className="font-semibold text.white">
-                Foto Navideña IA
-              </span>{" "}
+              <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
               para transformar una foto real de tu familia en un retrato
               navideño de estudio con fondo totalmente generado por IA.
             </p>
@@ -2005,7 +2052,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             {/* NUEVO: descripción del sistema de prompts optimizados */}
             <p className="mt-2 max-w-xl text-xs text-neutral-400">
               También puedes activar la opción{" "}
-              <span className="font-semibold text.white">
+              <span className="font-semibold text-white">
                 “Optimizar mi prompt con IA (OpenAI)”
               </span>{" "}
               para que el sistema mejore automáticamente el texto que escribes
@@ -2016,7 +2063,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={onStartDemo}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text.white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
                 Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
               </button>
@@ -2028,8 +2075,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
             <p className="mt-4 text-xs text-neutral-500">
               Próximamente: módulos de video y nuestro motor propio de realismo
-              corporal{" "}
-              <span className="font-semibold text.white">BodySync v1</span>.
+              corporal <span className="font-semibold text-white">BodySync v1</span>.
             </p>
           </div>
 
@@ -2038,33 +2084,33 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             {/* Halo neón detrás de la galería */}
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text.white mb-3">
+            <h2 className="text-sm font-semibold text-white mb-3">
               Calidad de estudio · Renderizado con el motor actual
             </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img1.png?v=2"
                   alt="Imagen generada 1"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img2.png?v=2"
                   alt="Imagen generada 2"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
                 <img
                   src="/gallery/img3.png?v=2"
                   alt="Imagen generada 3"
                   className="w-full h-auto object-cover"
                 />
               </div>
-              <div className="rounded-2xl border border.white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
+              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
                 <img
                   src="/gallery/img4.png?v=2"
                   alt="Imagen generada 4"
@@ -2074,7 +2120,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
 
             <p className="mt-3 text-[10px] text-neutral-500">
-              isabelaOs Studio es el primer sistema de generación visual con IA
+              IsabelaOS Studio es el primer sistema de generación visual con IA
               desarrollado en Guatemala pensando en creadores, estudios y
               agencias de modelos virtuales.
             </p>
@@ -2083,8 +2129,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Sección especial Foto Navideña IA */}
         <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-          <div className="rounded-3xl border border.white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text.white">
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <h3 className="text-sm font-semibold text-white">
               Especial Navidad · Foto Navideña IA
             </h3>
             <p className="mt-2 text-[11px] text-neutral-300">
@@ -2105,7 +2151,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </ul>
             <p className="mt-3 text-[11px] text-neutral-400">
               Dentro del panel del creador encontrarás la sección{" "}
-              <span className="font-semibold text.white">
+              <span className="font-semibold text-white">
                 “Foto Navideña IA (Premium)”
               </span>{" "}
               donde se explica con detalle qué tipo de foto subir y cómo
@@ -2113,7 +2159,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
           </div>
 
-          <div className="rounded-3xl border border.white/10 bg-black/60 p-4 flex items-center justify-center">
+          <div className="rounded-3xl border border-white/10 bg-black/60 p-4 flex items-center justify-center">
             <img
               src="/gallery/xmas_family_before_after.png"
               alt="Ejemplo de familia antes y después con fondo navideño"
@@ -2126,21 +2172,21 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="mt-12">
           {/* Línea separadora con gradiente */}
           <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text.white mb-4">
+          <h2 className="text-sm font-semibold text-white mb-4">
             Flujo de trabajo simple y potente
           </h2>
-          <div className="rounded-3xl border border.white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text.white">
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <h3 className="text-sm font-semibold text-white">
               Vista previa del panel del creador
             </h3>
             <p className="mt-2 text-[11px] text-neutral-400">
               Interfaz simple para escribir un prompt, ajustar resolución y ver
               el resultado generado por el motor conectado a RunPod.
             </p>
-            <div className="mt-4 rounded-2xl border border.white/10 overflow-hidden bg-black/60">
+            <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img
                 src="/preview/panel.png"
-                alt="Vista previa del panel de isabelaOs Studio"
+                alt="Vista previa del panel de IsabelaOS Studio"
                 className="w-full object-cover"
               />
             </div>
@@ -2149,7 +2195,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text.white mb-2">
+          <h2 className="text-sm font-semibold text-white mb-2">
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
@@ -2177,7 +2223,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
           {/* Imagen BodySync centrada */}
           <div className="mt-6 flex justify-center">
-            <div className="max-w-md w-full rounded-3xl border border.white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
+            <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
               <img
                 src="/gallery/bodysync_showcase.png"
                 alt="Ejemplo generado con BodySync"
@@ -2188,8 +2234,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         </section>
 
         {/* Plan de pago */}
-        <section className="mt-14 max-w-xl border-t border.white/10 pt-8">
-          <h2 className="text-sm font-semibold text.white">
+        <section className="mt-14 max-w-xl border-t border-white/10 pt-8">
+          <h2 className="text-sm font-semibold text-white">
             Plan beta para creadores
           </h2>
           <p className="mt-2 text-xs text-neutral-300">
@@ -2212,9 +2258,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <button
               onClick={handlePaddleCheckout}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
-              isabelaOs Basic – US$5/mes (tarjeta / Paddle)
+              IsabelaOS Basic – US$5/mes (tarjeta / Paddle)
             </button>
             <div className="flex flex-col gap-1 text-[11px] text-neutral-400">
               <span className="text-neutral-300">
@@ -2227,7 +2273,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <p className="mt-3 text-[11px] text-neutral-400">
             Los usuarios que se registren y activen el plan durante la beta
             serán considerados{" "}
-            <span className="font-semibold text.white">usuarios beta</span> con
+            <span className="font-semibold text-white">usuarios beta</span> con
             un Plan Basic activo (sin límite de imágenes) mientras se mantenga
             la suscripción.
           </p>
@@ -2235,13 +2281,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Contacto */}
         <section id="contacto" className="mt-16 max-w-xl">
-          <h2 className="text-sm font-semibold text.white">
+          <h2 className="text-sm font-semibold text-white">
             Contacto y soporte
           </h2>
           <p className="mt-1 text-xs text-neutral-400">
             Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de
             soporte responderá desde{" "}
-            <span className="font-semibold text.white">
+            <span className="font-semibold text-white">
               contacto@isabelaos.com
             </span>
             .
@@ -2257,7 +2303,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="text"
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
@@ -2266,7 +2312,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 type="email"
                 value={contactEmail}
                 onChange={(e) => setContactEmail(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <div>
@@ -2275,22 +2321,22 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 rows={4}
                 value={contactMessage}
                 onChange={(e) => setContactMessage(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
             <button
               type="submit"
-              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text.white"
+              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
             >
               Enviar mensaje
             </button>
           </form>
         </section>
 
-        <footer className="mt-16 border-t border.white/10 pt-6 text-[11px] text-neutral-500">
+        <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
+              © {new Date().getFullYear()} IsabelaOS Studio · Desarrollado en
               Guatemala, Cobán Alta Verapaz por Stalling Technologic.
             </span>
             <span className="flex flex-wrap gap-3">
@@ -2333,6 +2379,14 @@ export default function App() {
 
   const handleStartDemo = () => {
     setViewMode("demo");
+    // NUEVO: al iniciar demo, sube arriba para ver el panel inmediatamente
+    try {
+      const el = document.getElementById("top");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      else window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      window.scrollTo(0, 0);
+    }
   };
 
   useEffect(() => {
@@ -2343,7 +2397,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center bg-black text.white">
+      <div className="min-h-screen grid place-items-center bg-black text-white">
         <p className="text-sm text-neutral-400">Cargando sesión...</p>
       </div>
     );
