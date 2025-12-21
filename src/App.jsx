@@ -2276,10 +2276,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             Preparándonos para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
-            Esta imagen fue generada con nuestro modelo de pruebas BodySync,
-            pensado para aplicar poses y movimiento corporal realista a tus
-            personajes IA. Muy pronto podrás combinar IsabelaOS Studio con
-            BodySync para crear escenas completas en movimiento.
+            Esta imagen fue generada con nuestro modelo de pruebas BodySync.
           </p>
 
           <div className="mt-6 flex justify-center">
