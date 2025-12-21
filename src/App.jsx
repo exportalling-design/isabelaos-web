@@ -1011,7 +1011,7 @@ function VideoFromPromptPanel({ userStatus }) {
         <h2 className="text-lg font-semibold text-white">Video desde prompt</h2>
         <p className="mt-2 text-sm text-neutral-300">
           Escribe un prompt y genera un clip corto usando nuestro motor en
-          RunPod. Este módulo consume jades según la configuración del backend.
+          GPU.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1325,8 +1325,7 @@ function Img2VideoPanel({ userStatus }) {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Imagen → Video</h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Sube una imagen (o usa una URL) y genera un clip. Este módulo consume
-          jades según la configuración del backend.
+          Sube una imagen (o usa una URL) y genera un clip.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -2130,9 +2129,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
               Puedes usar nuestro motor de imágenes, Generadores de vido desde
               prompts o imagen a video. y mas adelante, acceder a módulos exclusivos 
-              como BodySync (movimiento corporal IA), Script2Film, CineCam y generador de video desde
-              texto. Además, hemos añadido un módulo especial de{" "}
-              <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
+              como BodySync (movimiento corporal IA), Script2Film, CineCam. Además, 
+              Usa nuestro módulo especial de{" "} <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
               para transformar una foto real de tu familia en un retrato
               navideño de estudio con fondo totalmente generado por IA.
             </p>
@@ -2146,13 +2144,13 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
                 Prueba la calidad del motor antes de crear tu cuenta y
-                desbloquea {DAILY_LIMIT} imágenes diarias registrándote.
+                desbloquea {DAILY_LIMIT} registrándote.
               </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-500">
               Próximamente: módulos de video y nuestro motor propio de realismo
-              corporal <span className="font-semibold text-white">BodySync v1</span>.
+              corporal en imagenes <span className="font-semibold text-white">BodySync v1</span>.
             </p>
           </div>
 
@@ -2192,9 +2190,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <h3 className="text-sm font-semibold text-white">Video desde prompt (módulo en el panel)</h3>
             <p className="mt-2 text-[11px] text-neutral-300">
               Dentro del panel del creador podrás escribir un prompt y generar
-              clips cortos usando nuestro motor en RunPod. Este módulo se
-              habilita en tu cuenta y utiliza jades según la configuración
-              activa.
+              clips cortos usando nuestro motor en GPU. Este módulo se
+              habilita en tu cuenta y utiliza jades para la generacion.
             </p>
             <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
               <li>Clips cortos listos para reels.</li>
@@ -2202,8 +2199,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               <li>Seguimiento de estado en tiempo real.</li>
             </ul>
             <p className="mt-3 text-[11px] text-neutral-400">
-              Nota: en el Home solo mostramos información. El uso real está
-              dentro de tu panel al iniciar sesión.
             </p>
           </div>
 
@@ -2219,9 +2214,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               <li>Control de estilo por prompt opcional.</li>
               <li>Integración futura con BodySync.</li>
             </ul>
-            <p className="mt-3 text-[11px] text-neutral-400">
-              Nota: en el Home solo mostramos información. El uso real está
-              dentro de tu panel al iniciar sesión.
+            <p className="mt-3 text-[11px] text-neutral-400">              
             </p>
           </div>
         </section>
@@ -2261,7 +2254,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <h3 className="text-sm font-semibold text-white">Vista previa del panel del creador</h3>
             <p className="mt-2 text-[11px] text-neutral-400">
               Interfaz simple para escribir un prompt, ajustar resolución y ver
-              el resultado generado por el motor conectado a RunPod.
+              el resultado generado por el motor conectado a GPU.
             </p>
             <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img src="/preview/panel.png" alt="Vista previa del panel de isabelaOs Studio" className="w-full object-cover" />
@@ -2293,7 +2286,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="mt-14 max-w-6xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">Planes de suscripción</h2>
           <p className="mt-2 text-xs text-neutral-300 max-w-2xl">
-            Solo manejamos 2 planes. Los jades se gestionan dentro del panel (no en esta página).
+            Nuestros planes.
           </p>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -2307,9 +2300,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 Para creadores que quieren generar sin estar contando límites y acceder a módulos premium base.
               </p>
               <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Generación de imágenes desde prompt sin límite diario.</li>
-                <li>Acceso a módulos premium actuales (ej. Foto Navideña IA).</li>
-                <li>Acceso anticipado a mejoras durante la beta.</li>
+                <li>Generación de imágenes desde prompt.</li>
+                <li>Acceso a módulos premium video desde prompt.</li>
+                <li>Acceso a modulos premium generacion de foto navideña.</li>
+                <li>Acceso a modulos premium video desde imagen.</li>
+                <li>Obten 100 Jades mensuales</li>
               </ul>
 
               <div className="mt-4">
@@ -2340,9 +2335,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 Para creadores avanzados y estudios que quieren lo mejor del sistema y prioridad en funciones nuevas.
               </p>
               <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Todo lo incluido en Basic.</li>
-                <li>Prioridad en nuevos módulos y upgrades durante la beta.</li>
-                <li>Mayor capacidad/beneficios internos (según se active en el panel).</li>
+                <li>Optimizacion de prompts automatica.</li>
+                <li>Generacion de imagenes desde prompts.</li>
+                <li>Generacion de video desde prompts o Imagen.</li>
+                <li>Generacion de imagen con fondo navideño</li>
+                <li>Proximamente creacion de Avatar, y otros modulos en face de creacion</li>
+                <li>Obtienes 300 jades mensuales</li>
               </ul>
 
               <div className="mt-4">
@@ -2365,8 +2363,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
 
           <p className="mt-4 text-[11px] text-neutral-400">
-            Al activar tu plan durante la beta, tu cuenta aparecerá como{" "}
-            <span className="font-semibold text-white">usuario beta</span> con el plan activo.
+            Te quedaste sin jade, no te preocupes existe la opcion de comprar mas jade. 
           </p>
         </section>
 
