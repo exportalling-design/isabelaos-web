@@ -1,30 +1,35 @@
 // pages/api/buy-jades.js
-import { requireUser } from "../../lib/apiAuth";
-
-const PACKS = { "100": 100, "300": 300 };
+import { sbAdmin } from "../../lib/supabaseAdmin";
+import { JADE_PACKS } from "../../lib/pricing";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+  if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
 
   try {
-    const { sb, user } = await requireUser(req);
-    const { pack, ref } = req.body || {};
+    const { user_id, pack, ref } = req.body || {};
+    if (!user_id || !pack) return res.status(400).json({ error: "MISSING_FIELDS" });
 
-    const amount = PACKS[String(pack)];
-    if (!amount) return res.status(400).json({ ok: false, error: "INVALID_PACK" });
+    const p = JADE_PACKS[String(pack)];
+    if (!p) return res.status(400).json({ error: "INVALID_PACK" });
+
+    const sb = sbAdmin();
 
     const { data, error } = await sb.rpc("add_jades", {
-      p_user_id: user.id,
-      p_amount: amount,
-      p_reason: `jade_pack:${amount}`,
+      p_user_id: user_id,
+      p_amount: p.jades,
+      p_reason: `jade_pack:${p.jades}`,
       p_ref: ref || null,
     });
 
-    if (error) return res.status(500).json({ ok: false, error: "CREDIT_ERROR", detail: error.message });
+    if (error) return res.status(500).json({ error: "CREDIT_ERROR", detail: error.message });
 
-    return res.status(200).json({ ok: true, pack: amount, new_balance: data?.[0]?.new_balance ?? null });
+    return res.status(200).json({
+      ok: true,
+      pack: String(pack),
+      credited: p.jades,
+      new_balance: data?.[0]?.new_balance ?? null,
+    });
   } catch (e) {
-    const code = e.statusCode || 500;
-    return res.status(code).json({ ok: false, error: String(e.message || e) });
+    return res.status(500).json({ error: "SERVER_ERROR", detail: String(e) });
   }
 }
