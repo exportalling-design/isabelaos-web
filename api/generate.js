@@ -1,51 +1,113 @@
 // /api/generate.js
 // ============================================================
-// IMAGEN desde prompt.
-// - candado + gratis del día + cobro 1 jade si no hay gratis.
-// - RunPod endpoint (run) => devuelve jobId
+// IsabelaOS Studio - IMAGEN desde prompt (RunPod Endpoint)
+// - NO ES pages/api (esto es Vercel Serverless Functions /api)
+// - NO ES Edge runtime (Edge rompe imports tipo supabaseAdmin/pricing)
+// - Responde JSON SIEMPRE (para evitar: Unexpected token 'A' ... not valid JSON)
+//
+// Flujo:
+// 1) Valida input (prompt + user_id)
+// 2) Lee suscripción (user_subscription) para saber si está active
+// 3) Aplica "gratis del día" con checkAndConsumeFreeImage()
+// 4) Si no hay gratis, cobra jades con RPC spend_jades (COSTS.img_prompt)
+// 5) Lanza RunPod Endpoint /run
+// 6) Devuelve { ok:true, jobId, billing, remaining_free_images }
+//
+// ENV esperadas:
+// - RP_API_KEY (RunPod API Key)
+// - RUNPOD_ENDPOINT_ID  (id del endpoint)  o  RP_ENDPOINT  (si ahí guardas el id)
+// - SUPABASE_URL
+// - SUPABASE_SERVICE_ROLE_KEY
 // ============================================================
 
 import { sbAdmin } from "../lib/supabaseAdmin";
 import { COSTS } from "../lib/pricing";
 import { checkAndConsumeFreeImage } from "../lib/dailyUsage";
 
-export default async function handler(req, res) {
-  // CORS
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "POST, OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
+// ---------- CORS ----------
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
+// ---------- JSON helpers ----------
+function safeJson(res, status, payload) {
+  setCors(res);
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req) {
+  // Vercel a veces ya lo trae en req.body, a veces no.
+  if (req.body && typeof req.body === "object") return req.body;
+
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+
+  if (!raw) return null;
 
   try {
-    // Body robusto (Vercel suele parsear JSON, pero por si viene string)
-    let body = req.body;
-    if (typeof body === "string") {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        body = null;
-      }
+    return JSON.parse(raw);
+  } catch (e) {
+    // devolvemos algo útil para debug
+    return { __invalid_json: true, raw };
+  }
+}
+
+export default async function handler(req, res) {
+  setCors(res);
+
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    return res.end();
+  }
+
+  if (req.method !== "POST") {
+    return safeJson(res, 405, { ok: false, error: "METHOD_NOT_ALLOWED" });
+  }
+
+  try {
+    const body = await readJsonBody(req);
+
+    if (!body) {
+      return safeJson(res, 400, { ok: false, error: "EMPTY_BODY" });
     }
-
-    if (!body || !body.prompt) {
-      return res.status(400).json({ error: "Missing prompt" });
-    }
-
-    const user_id = body.user_id || null;
-
-    // Para tracking real de gratis del día (server-side) exigimos user_id
-    if (!user_id) {
-      return res.status(401).json({
-        error: "LOGIN_REQUIRED",
-        note: "Para controlar gratis del día en servidor, requiere user_id.",
+    if (body.__invalid_json) {
+      return safeJson(res, 400, {
+        ok: false,
+        error: "INVALID_JSON",
+        detail: "Body no es JSON válido",
+        raw_preview: String(body.raw || "").slice(0, 200),
       });
     }
 
+    const prompt = (body.prompt || "").trim();
+    if (!prompt) {
+      return safeJson(res, 400, { ok: false, error: "MISSING_PROMPT" });
+    }
+
+    // IMPORTANTE: tú pediste tracking real server-side => requiere user_id
+    const user_id = body.user_id || null;
+    if (!user_id) {
+      return safeJson(res, 401, {
+        ok: false,
+        error: "LOGIN_REQUIRED",
+        note: "Para controlar gratis del día + cobros en servidor se requiere user_id.",
+      });
+    }
+
+    const negative_prompt = body.negative_prompt || "";
+    const width = Number(body.width || 512);
+    const height = Number(body.height || 512);
+    const steps = Number(body.steps || 22);
+
+    // ---------- Supabase Admin ----------
     const sb = sbAdmin();
 
-    // Suscripción (para saber si está activo)
+    // 1) Suscripción (para saber si está active)
     let isActive = false;
     let plan = null;
 
@@ -56,80 +118,111 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (subErr) {
-      return res.status(500).json({ error: "SUBSCRIPTION_ERROR", detail: subErr.message });
+      return safeJson(res, 500, { ok: false, error: "SUBSCRIPTION_ERROR", detail: subErr.message });
     }
 
     isActive = sub?.status === "active";
     plan = isActive ? sub?.plan : null;
 
-    // 1) GRATIS DEL DÍA (solo imágenes)
+    // 2) Gratis del día (solo imágenes)
     const free = await checkAndConsumeFreeImage(sb, user_id, isActive);
 
-    // 2) Si NO usó gratis => cobra jades
+    // 3) Si NO usó gratis => cobra jades
     if (!free.used_free) {
-      const cost = COSTS.img_prompt; // <- tu pricing manda aquí
+      const cost = COSTS.img_prompt;
 
-      const { error: rpcErr } = await sb.rpc("spend_jades", {
+      const { error: spendErr } = await sb.rpc("spend_jades", {
         p_user_id: user_id,
         p_amount: cost,
         p_reason: "generation:img_prompt",
         p_ref: body.ref || null,
       });
 
-      if (rpcErr) {
-        const msg = rpcErr.message || "";
+      if (spendErr) {
+        const msg = spendErr.message || "";
+
         if (msg.includes("INSUFFICIENT_JADES")) {
-          return res.status(402).json({ error: "INSUFFICIENT_JADES" });
+          return safeJson(res, 402, { ok: false, error: "INSUFFICIENT_JADES" });
         }
-        return res.status(500).json({ error: "RPC_ERROR", detail: msg });
+
+        return safeJson(res, 500, { ok: false, error: "RPC_ERROR", detail: msg });
       }
     }
 
-    // 3) Lanza RunPod
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
-    const apiKey = process.env.RP_API_KEY;
+    // ---------- RunPod Endpoint /run ----------
+    const apiKey = process.env.RP_API_KEY || process.env.RUNPOD_API_KEY;
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT; // aquí guardas el ID
 
     if (!apiKey || !endpointId) {
-      return res.status(500).json({ error: "Missing RP_API_KEY or endpointId" });
+      return safeJson(res, 500, {
+        ok: false,
+        error: "MISSING_ENV",
+        detail: "Falta RP_API_KEY o RUNPOD_ENDPOINT_ID (o RP_ENDPOINT).",
+      });
     }
 
     const base = `https://api.runpod.ai/v2/${endpointId}`;
 
     const rp = await fetch(`${base}/run`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         input: {
-          prompt: body.prompt,
-          negative_prompt: body.negative_prompt || "",
-          width: body.width || 512,
-          height: body.height || 512,
-          steps: body.steps || 22,
+          prompt,
+          negative_prompt,
+          width,
+          height,
+          steps,
+          // metadata (no afecta el worker, pero te sirve para logs)
           user_id,
           plan,
         },
       }),
     });
 
-    if (!rp.ok) {
-      const txt = await rp.text();
-      return res.status(rp.status).json({ error: "RunPod run error", details: txt });
+    // IMPORTANTE: aquí RunPod a veces responde TEXTO/HTML en errores
+    const rpText = await rp.text();
+    let rpJson = null;
+    try {
+      rpJson = JSON.parse(rpText);
+    } catch {
+      rpJson = null;
     }
 
-    const data = await rp.json();
-    const jobId = data.id || data.requestId || data.jobId || data.data?.id;
+    if (!rp.ok) {
+      // devolvemos JSON SIEMPRE
+      return safeJson(res, rp.status, {
+        ok: false,
+        error: "RUNPOD_RUN_ERROR",
+        status: rp.status,
+        details_json: rpJson,
+        details_text_preview: String(rpText || "").slice(0, 800),
+      });
+    }
+
+    const data = rpJson || {};
+    const jobId = data.id || data.requestId || data.jobId || data?.data?.id || null;
 
     if (!jobId) {
-      return res.status(500).json({ error: "RunPod no devolvió ID", raw: data });
+      return safeJson(res, 500, {
+        ok: false,
+        error: "RUNPOD_NO_ID",
+        raw: data,
+        raw_text_preview: String(rpText || "").slice(0, 800),
+      });
     }
 
-    return res.status(200).json({
+    // ✅ RESPUESTA FINAL
+    return safeJson(res, 200, {
       ok: true,
       jobId,
       billing: free.used_free ? "FREE_DAILY" : "JADE",
       remaining_free_images: free.remaining_free,
     });
   } catch (e) {
-    return res.status(500).json({ error: "Server error", details: String(e) });
+    return safeJson(res, 500, { ok: false, error: "SERVER_ERROR", detail: String(e) });
   }
 }
