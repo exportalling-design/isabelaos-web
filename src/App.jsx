@@ -345,7 +345,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         window.location.href = data.url;
       } else {
         console.error("Respuesta Paddle:", data);
-        alert("No se pudo abrir el pago con Paddle. Intenta de nuevo más tarde.");
+        alert("Estamos trabajando para poder brindarte el cobro por paddle, por el momento no esta disponible.");
       }
     } catch (err) {
       console.error("Error Paddle:", err);
@@ -509,10 +509,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setError("");
       setStatus("IDLE");
       setStatusText(
-        "Plan Basic activado: ya no tienes límite diario en este navegador y se desbloquean los módulos premium mientras dure la beta."
+        "Plan Basic activado: se desbloquean los módulos premium."
       );
       alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar imágenes sin límite y acceder a los módulos premium mientras dure la beta."
+        "Tu Plan Basic está activo. Desde ahora puedes generar imágenes y acceder a los módulos premium."
       );
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
@@ -527,9 +527,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
-          a RunPod. {DAILY_LIMIT} imágenes diarias gratis; si quieres ir más
-          allá, podrás activar un plan mensual para generar sin límite y
-          desbloquear módulos premium.
+          a GPU Virtual. {DAILY_LIMIT} imágenes diarias; si quieres ir más
+          allá, podrás activar un plan mensual para generar.
         </p>
       </div>
     );
