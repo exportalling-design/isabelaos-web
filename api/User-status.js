@@ -1,5 +1,5 @@
 // pages/api/user-status.js
-import { requireUser, getActivePlan } from "../../lib/apiAuth";
+import { sbAdmin } from "../../lib/supabaseAdmin";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -7,29 +7,45 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { sb, user } = await requireUser(req);
+    const user_id = req.query.user_id;
+    if (!user_id) {
+      return res.status(400).json({ ok: false, error: "MISSING_USER_ID" });
+    }
 
-    const sub = await getActivePlan(sb, user.id);
+    const sb = sbAdmin();
 
+    // 1) Suscripción
+    const { data: sub, error: subErr } = await sb
+      .from("user_subscription")
+      .select("plan, status")
+      .eq("user_id", user_id)
+      .maybeSingle();
+
+    if (subErr) {
+      return res.status(500).json({ ok: false, error: "SUBSCRIPTION_ERROR", detail: subErr.message });
+    }
+
+    // 2) Wallet (jades)
     const { data: wallet, error: walletErr } = await sb
       .from("user_wallet")
       .select("balance")
-      .eq("user_id", user.id)
-      .single();
+      .eq("user_id", user_id)
+      .maybeSingle();
 
-    if (walletErr && walletErr.code !== "PGRST116") {
+    if (walletErr) {
       return res.status(500).json({ ok: false, error: "WALLET_ERROR", detail: walletErr.message });
     }
 
+    const active = sub?.status === "active";
+
     return res.status(200).json({
       ok: true,
-      user_id: user.id,
-      plan: sub.plan,
-      subscription_status: sub.status,
+      plan: active ? sub.plan : null,
+      subscription_status: sub?.status || "none",
       jades: wallet?.balance ?? 0,
+      is_active: active,
     });
   } catch (e) {
-    const code = e.statusCode || 500;
-    return res.status(code).json({ ok: false, error: String(e.message || e) });
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e) });
   }
 }
