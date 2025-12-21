@@ -1,5 +1,5 @@
-// pages/api/user-status.js
-import { sbAdmin } from "../../lib/supabaseAdmin";
+// /api/user-status.js
+import { sbAdmin } from "../lib/supabaseAdmin";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
