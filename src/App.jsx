@@ -2129,9 +2129,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
-              Durante la beta puedes usar nuestro motor de imágenes y, más
-              adelante, acceder a módulos exclusivos como BodySync (movimiento
-              corporal IA), Script2Film, CineCam y generador de video desde
+              Puedes usar nuestro motor de imágenes, Generadores de vido desde
+              prompts o imagen a video. y mas adelante, acceder a módulos exclusivos 
+              como BodySync (movimiento corporal IA), Script2Film, CineCam y generador de video desde
               texto. Además, hemos añadido un módulo especial de{" "}
               <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
               para transformar una foto real de tu familia en un retrato
