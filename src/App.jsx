@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 import { useAuth } from "./context/AuthContext";
 
@@ -846,6 +846,617 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
+// Módulo: Video desde prompt (logueado)
+// ---------------------------------------------------------
+function VideoFromPromptPanel({ userStatus }) {
+  const { user } = useAuth();
+
+  const [prompt, setPrompt] = useState(
+    "Cinematic short scene, ultra detailed, soft light, 8k"
+  );
+  const [negative, setNegative] = useState(
+    "blurry, low quality, deformed, watermark, text"
+  );
+  const [steps, setSteps] = useState(25);
+
+  const [status, setStatus] = useState("IDLE");
+  const [statusText, setStatusText] = useState("");
+  const [jobId, setJobId] = useState(null);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  const canUse = !!user;
+
+  const pollVideoStatus = async (job_id) => {
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`);
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data) throw new Error(data?.error || "Error consultando /api/video-status");
+    return data;
+  };
+
+  const handleGenerateVideo = async () => {
+    setError("");
+    setVideoUrl(null);
+    setJobId(null);
+    setStatus("IN_QUEUE");
+    setStatusText("Enviando job de video a RunPod...");
+
+    try {
+      const res = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user?.id || null,
+          prompt,
+          negative_prompt: negative,
+          steps: Number(steps),
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data?.job_id) {
+        throw new Error(data?.error || "Error en /api/generate-video, revisa los logs.");
+      }
+
+      const jid = data.job_id;
+      setJobId(jid);
+      setStatus("IN_PROGRESS");
+      setStatusText(`Job enviado. ID: ${jid}. Generando video...`);
+
+      let finished = false;
+      while (!finished) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const stData = await pollVideoStatus(jid);
+
+        const st =
+          stData.status ||
+          stData.state ||
+          stData.job_status ||
+          stData.phase ||
+          "IN_PROGRESS";
+
+        setStatus(st);
+        setStatusText(`Estado actual: ${st}...`);
+
+        if (
+          st === "IN_QUEUE" ||
+          st === "IN_PROGRESS" ||
+          st === "DISPATCHED" ||
+          st === "QUEUED" ||
+          st === "RUNNING"
+        ) {
+          continue;
+        }
+
+        finished = true;
+
+        // Normalizamos posibles salidas
+        const out = stData.output || stData.result || stData.data || null;
+        const maybeUrl =
+          out?.video_url ||
+          out?.url ||
+          out?.mp4_url ||
+          out?.video ||
+          stData.video_url ||
+          stData.url ||
+          null;
+
+        if (
+          st === "COMPLETED" ||
+          st === "DONE" ||
+          st === "SUCCESS" ||
+          st === "FINISHED"
+        ) {
+          if (maybeUrl) {
+            setVideoUrl(maybeUrl);
+            setStatusText("Video generado con éxito.");
+          } else {
+            // si el backend devuelve base64, lo convertimos
+            const b64 =
+              out?.video_b64 ||
+              out?.mp4_b64 ||
+              stData.video_b64 ||
+              null;
+
+            if (b64) {
+              const blob = b64ToBlob(b64, "video/mp4");
+              const url = URL.createObjectURL(blob);
+              setVideoUrl(url);
+              setStatusText("Video generado con éxito.");
+            } else {
+              throw new Error("Job terminado pero no se recibió video en la salida.");
+            }
+          }
+        } else {
+          throw new Error(stData.error || "Error al generar el video.");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus("ERROR");
+      setStatusText("Error al generar el video.");
+      setError(err.message || String(err));
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!videoUrl) return;
+    // si es blob url, descargamos directo; si es http, descargamos igual con link
+    const link = document.createElement("a");
+    link.href = videoUrl;
+    link.download = "isabelaos-video.mp4";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  if (!canUse) {
+    return (
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        Debes iniciar sesión para usar el generador de video desde prompt.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-2">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text.white">Video desde prompt</h2>
+        <p className="mt-2 text-sm text-neutral-300">
+          Escribe un prompt y genera un clip corto usando nuestro motor en RunPod.
+          Este módulo consume jades según la configuración del backend.
+        </p>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Estado actual: {statusText || "Listo para generar."}
+            </span>
+            <span className="text-[11px] text-neutral-400">
+              {userStatus?.jades != null ? (
+                <>Jades: <span className="font-semibold text.white">{userStatus.jades}</span></>
+              ) : (
+                <>Jades: ...</>
+              )}
+            </span>
+          </div>
+          {jobId && (
+            <div className="mt-1 text-[10px] text-neutral-500">
+              Job: {jobId}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 space-y-4 text-sm">
+          <div>
+            <label className="text-neutral-300">Prompt</label>
+            <textarea
+              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-neutral-300">Negative prompt</label>
+            <textarea
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={negative}
+              onChange={(e) => setNegative(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-neutral-300">Steps</label>
+              <input
+                type="number"
+                min={5}
+                max={60}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={steps}
+                onChange={(e) => setSteps(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleGenerateVideo}
+                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+              >
+                {status === "IN_QUEUE" || status === "IN_PROGRESS"
+                  ? "Generando..."
+                  : "Generar video desde prompt"}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              className="h-full w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <p>Aquí verás el video en cuanto se complete la generación.</p>
+          )}
+        </div>
+        {videoUrl && (
+          <button
+            onClick={handleDownload}
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
+          >
+            Descargar video
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function b64ToBlob(b64, contentType = "application/octet-stream") {
+  try {
+    const byteCharacters = atob(b64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: contentType });
+  } catch (e) {
+    console.error("b64ToBlob error:", e);
+    return new Blob([], { type: contentType });
+  }
+}
+
+// ---------------------------------------------------------
+// Módulo: Imagen -> Video (logueado)
+// ---------------------------------------------------------
+function Img2VideoPanel({ userStatus }) {
+  const { user } = useAuth();
+
+  const [dataUrl, setDataUrl] = useState(null);
+  const [pureB64, setPureB64] = useState(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [negative, setNegative] = useState("");
+  const [steps, setSteps] = useState(25);
+
+  const [status, setStatus] = useState("IDLE");
+  const [statusText, setStatusText] = useState("");
+  const [jobId, setJobId] = useState(null);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  const fileInputId = "img2video-file-input";
+
+  const canUse = !!user;
+
+  const fileToBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+
+  const handlePickFile = () => {
+    const input = document.getElementById(fileInputId);
+    if (input) input.click();
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrlResult = await fileToBase64(file);
+      setDataUrl(dataUrlResult);
+      const parts = String(dataUrlResult).split(",");
+      setPureB64(parts[1] || null);
+      setImageUrl("");
+    } catch (err) {
+      console.error("Error leyendo archivo:", err);
+      setError("No se pudo leer la imagen. Intenta con otra foto.");
+    }
+  };
+
+  const pollVideoStatus = async (job_id) => {
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`);
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data) throw new Error(data?.error || "Error consultando /api/video-status");
+    return data;
+  };
+
+  const handleGenerate = async () => {
+    setError("");
+    setVideoUrl(null);
+    setJobId(null);
+    setStatus("IN_QUEUE");
+    setStatusText("Enviando Imagen → Video a RunPod...");
+
+    try {
+      if (!pureB64 && !imageUrl) {
+        setStatus("ERROR");
+        setStatusText("Falta imagen.");
+        setError("Por favor sube una imagen o pega una URL de imagen.");
+        return;
+      }
+
+      const res = await fetch("/api/generate-img2video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user?.id || null,
+          prompt: prompt || "",
+          negative_prompt: negative || "",
+          steps: Number(steps),
+          image_b64: pureB64 || null,
+          image_url: imageUrl || null,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data?.job_id) {
+        throw new Error(data?.error || "Error en /api/generate-img2video, revisa los logs.");
+      }
+
+      const jid = data.job_id;
+      setJobId(jid);
+      setStatus("IN_PROGRESS");
+      setStatusText(`Job enviado. ID: ${jid}. Generando video...`);
+
+      let finished = false;
+      while (!finished) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const stData = await pollVideoStatus(jid);
+
+        const st =
+          stData.status ||
+          stData.state ||
+          stData.job_status ||
+          stData.phase ||
+          "IN_PROGRESS";
+
+        setStatus(st);
+        setStatusText(`Estado actual: ${st}...`);
+
+        if (
+          st === "IN_QUEUE" ||
+          st === "IN_PROGRESS" ||
+          st === "DISPATCHED" ||
+          st === "QUEUED" ||
+          st === "RUNNING"
+        ) {
+          continue;
+        }
+
+        finished = true;
+
+        const out = stData.output || stData.result || stData.data || null;
+        const maybeUrl =
+          out?.video_url ||
+          out?.url ||
+          out?.mp4_url ||
+          out?.video ||
+          stData.video_url ||
+          stData.url ||
+          null;
+
+        if (
+          st === "COMPLETED" ||
+          st === "DONE" ||
+          st === "SUCCESS" ||
+          st === "FINISHED"
+        ) {
+          if (maybeUrl) {
+            setVideoUrl(maybeUrl);
+            setStatusText("Video generado con éxito.");
+          } else {
+            const b64 =
+              out?.video_b64 ||
+              out?.mp4_b64 ||
+              stData.video_b64 ||
+              null;
+
+            if (b64) {
+              const blob = b64ToBlob(b64, "video/mp4");
+              const url = URL.createObjectURL(blob);
+              setVideoUrl(url);
+              setStatusText("Video generado con éxito.");
+            } else {
+              throw new Error("Job terminado pero no se recibió video en la salida.");
+            }
+          }
+        } else {
+          throw new Error(stData.error || "Error al generar el video.");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus("ERROR");
+      setStatusText("Error al generar el video.");
+      setError(err.message || String(err));
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!videoUrl) return;
+    const link = document.createElement("a");
+    link.href = videoUrl;
+    link.download = "isabelaos-img2video.mp4";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  if (!canUse) {
+    return (
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        Debes iniciar sesión para usar Imagen → Video.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-2">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <h2 className="text-lg font-semibold text.white">Imagen → Video</h2>
+        <p className="mt-2 text-sm text-neutral-300">
+          Sube una imagen (o usa una URL) y genera un clip. Este módulo consume
+          jades según la configuración del backend.
+        </p>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Estado actual: {statusText || "Listo para generar."}
+            </span>
+            <span className="text-[11px] text-neutral-400">
+              {userStatus?.jades != null ? (
+                <>Jades: <span className="font-semibold text.white">{userStatus.jades}</span></>
+              ) : (
+                <>Jades: ...</>
+              )}
+            </span>
+          </div>
+          {jobId && (
+            <div className="mt-1 text-[10px] text-neutral-500">
+              Job: {jobId}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 space-y-4 text-sm">
+          <div>
+            <p className="text-xs text-neutral-300">1. Sube tu imagen (JPG/PNG)</p>
+            <button
+              type="button"
+              onClick={handlePickFile}
+              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300"
+            >
+              {dataUrl ? "Cambiar imagen" : "Haz clic para subir una imagen"}
+            </button>
+            <input
+              id={fileInputId}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            {dataUrl && (
+              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+                <img
+                  src={dataUrl}
+                  alt="Imagen base"
+                  className="w-full object-cover"
+                />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs text-neutral-300">o 1. Pega una URL de imagen</p>
+            <input
+              type="text"
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://..."
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+            <p className="mt-1 text-[11px] text-neutral-400">
+              Si usas URL, no es necesario subir archivo.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-neutral-300">Prompt (opcional)</label>
+            <textarea
+              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-neutral-300">Negative prompt (opcional)</label>
+            <textarea
+              className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={negative}
+              onChange={(e) => setNegative(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-neutral-300">Steps</label>
+              <input
+                type="number"
+                min={5}
+                max={60}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text.white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={steps}
+                onChange={(e) => setSteps(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text.white disabled:opacity-60"
+              >
+                {status === "IN_QUEUE" || status === "IN_PROGRESS"
+                  ? "Generando..."
+                  : "Generar Imagen → Video"}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+        <h2 className="text-lg font-semibold text.white">Resultado</h2>
+        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              controls
+              className="h-full w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <p>Aquí verás el video en cuanto se complete la generación.</p>
+          )}
+        </div>
+        {videoUrl && (
+          <button
+            onClick={handleDownload}
+            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text.white hover:bg-white/10"
+          >
+            Descargar video
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
 // Placeholder de video (próximamente)
 // ---------------------------------------------------------
 function VideoPlaceholderPanel() {
@@ -1205,6 +1816,49 @@ function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
   const [appViewMode, setAppViewMode] = useState("generator");
 
+  // -------- User Status (plan + jades) ----------
+  const [userStatus, setUserStatus] = useState({
+    loading: true,
+    plan: null,
+    subscription_status: "none",
+    jades: 0,
+  });
+
+  const fetchUserStatus = async () => {
+    if (!user?.id) return;
+    try {
+      const r = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`);
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data?.ok) {
+        throw new Error(data?.error || "user-status error");
+      }
+      setUserStatus({
+        loading: false,
+        plan: data.plan,
+        subscription_status: data.subscription_status,
+        jades: data.jades ?? 0,
+      });
+    } catch (e) {
+      console.warn("Error user-status:", e);
+      setUserStatus((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchUserStatus();
+    const t = setInterval(fetchUserStatus, 15000);
+    return () => clearInterval(t);
+  }, [user?.id]);
+
+  const userPlanLabel = useMemo(() => {
+    if (userStatus.loading) return "Cargando...";
+    if (userStatus.subscription_status === "active" && userStatus.plan) {
+      return `Usuario beta – Plan ${userStatus.plan} activo (sin límite)`;
+    }
+    return "Usuario beta – Plan Basic activo (sin límite)";
+  }, [userStatus.loading, userStatus.subscription_status, userStatus.plan]);
+
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
     const body = encodeURIComponent(
@@ -1242,6 +1896,19 @@ function DashboardView() {
             <span className="hidden sm:inline text-neutral-300">
               {user?.email} {isAdmin && "· admin"}
             </span>
+
+            {/* ✅ NUEVO: jades visibles siempre */}
+            <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5">
+              <span className="text-[10px] text-neutral-400">{userPlanLabel}</span>
+              <span className="mx-1 h-3 w-px bg-white/10" />
+              <span className="text-[11px] text-neutral-300">
+                Jades:{" "}
+                <span className="font-semibold text.white">
+                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
+                </span>
+              </span>
+            </div>
+
             <button
               onClick={handleContact}
               className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text.white hover.bg-white/10"
@@ -1261,6 +1928,16 @@ function DashboardView() {
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
         {/* Navegación móvil */}
         <div className="mb-4 md:hidden">
+          {/* ✅ NUEVO: jades visibles en móvil */}
+          <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-neutral-400">{userPlanLabel}</span>
+              <span className="font-semibold text.white">
+                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
+              </span>
+            </div>
+          </div>
+
           <p className="text-[11px] font-semibold text-neutral-300 mb-2">
             Navegación
           </p>
@@ -1278,14 +1955,25 @@ function DashboardView() {
             </button>
             <button
               type="button"
-              onClick={() => setAppViewMode("video")}
+              onClick={() => setAppViewMode("video_prompt")}
               className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video"
+                appViewMode === "video_prompt"
                   ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
                   : "bg-white/5 text-neutral-200 hover.bg-white/10"
               }`}
             >
-              Video (próximamente)
+              Video desde prompt
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("img2video")}
+              className={`rounded-2xl px-3 py-1.5 ${
+                appViewMode === "img2video"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+              }`}
+            >
+              Imagen → Video
             </button>
             <button
               type="button"
@@ -1329,17 +2017,33 @@ function DashboardView() {
             >
               Generar imagen desde prompt
             </button>
+
+            {/* ✅ NUEVO: Video desde prompt */}
             <button
               type="button"
-              onClick={() => setAppViewMode("video")}
+              onClick={() => setAppViewMode("video_prompt")}
               className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "video"
+                appViewMode === "video_prompt"
                   ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
                   : "bg-white/5 text-neutral-200 hover.bg-white/10"
               }`}
             >
-              Generar video desde prompt (próximamente)
+              Generar video desde prompt
             </button>
+
+            {/* ✅ NUEVO: Imagen → Video */}
+            <button
+              type="button"
+              onClick={() => setAppViewMode("img2video")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "img2video"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text.white"
+                  : "bg-white/5 text-neutral-200 hover.bg-white/10"
+              }`}
+            >
+              Imagen → Video
+            </button>
+
             <button
               type="button"
               onClick={() => setAppViewMode("library")}
@@ -1378,7 +2082,12 @@ function DashboardView() {
             </div>
 
             {appViewMode === "generator" && <CreatorPanel />}
-            {appViewMode === "video" && <VideoPlaceholderPanel />}
+            {appViewMode === "video_prompt" && (
+              <VideoFromPromptPanel userStatus={userStatus} />
+            )}
+            {appViewMode === "img2video" && (
+              <Img2VideoPanel userStatus={userStatus} />
+            )}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "xmas" && <XmasPhotoPanel />}
           </div>
@@ -1569,6 +2278,50 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               isabelaOs Studio es el primer sistema de generación visual con IA
               desarrollado en Guatemala pensando en creadores, estudios y
               agencias de modelos virtuales.
+            </p>
+          </div>
+        </section>
+
+        {/* ✅ NUEVO: Secciones informativas Video (NO funcionales en Home) */}
+        <section className="mt-12 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <h3 className="text-sm font-semibold text.white">
+              Video desde prompt (módulo en el panel)
+            </h3>
+            <p className="mt-2 text-[11px] text-neutral-300">
+              Dentro del panel del creador podrás escribir un prompt y generar
+              clips cortos usando nuestro motor en RunPod. Este módulo se
+              habilita en tu cuenta y utiliza jades según la configuración
+              activa.
+            </p>
+            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
+              <li>Clips cortos listos para reels.</li>
+              <li>Control por prompt con estilo cinematográfico.</li>
+              <li>Seguimiento de estado en tiempo real.</li>
+            </ul>
+            <p className="mt-3 text-[11px] text-neutral-400">
+              Nota: en el Home solo mostramos información. El uso real está
+              dentro de tu panel al iniciar sesión.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
+            <h3 className="text-sm font-semibold text.white">
+              Imagen → Video (módulo en el panel)
+            </h3>
+            <p className="mt-2 text-[11px] text-neutral-300">
+              Sube una imagen (o usa una URL) y conviértela en un clip. Este
+              módulo está pensado para “transformaciones”, cambios de outfit y
+              escenas cortas basadas en una foto.
+            </p>
+            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
+              <li>Ideal para videos tipo “antes / después”.</li>
+              <li>Control de estilo por prompt opcional.</li>
+              <li>Integración futura con BodySync.</li>
+            </ul>
+            <p className="mt-3 text-[11px] text-neutral-400">
+              Nota: en el Home solo mostramos información. El uso real está
+              dentro de tu panel al iniciar sesión.
             </p>
           </div>
         </section>
