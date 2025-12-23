@@ -193,7 +193,7 @@ function AuthModal({ open, onClose }) {
         </div>
 
         <p className="mt-2 text-xs text-neutral-400">
-          Usa tu correo o entra con Google para usar isabelaOs Studio.
+          Usa tu correo o entra con Google para acceder al motor de producción visual.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
@@ -391,12 +391,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       if (isDemo && onAuthRequired) {
         alert(
-          `Has agotado tus ${DEMO_LIMIT} imágenes de prueba. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} imágenes al día, guardar tu historial y descargar.`
+          `Has agotado tus ${DEMO_LIMIT} pruebas. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} renders al día, guardar tu historial y descargar.`
         );
         onAuthRequired();
       } else if (userLoggedIn) {
         setError(
-          `Has llegado al límite de ${DAILY_LIMIT} imágenes gratuitas por hoy. Activa una suscripción mensual para generar sin límite y desbloquear módulos premium.`
+          `Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Activa una suscripción mensual para generar sin límite y desbloquear módulos premium.`
         );
       }
       return;
@@ -486,7 +486,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const handleDownload = () => {
     if (isDemo) {
       alert(
-        "Para descargar tu imagen, por favor, crea tu cuenta o inicia sesión."
+        "Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión."
       );
       onAuthRequired && onAuthRequired();
       return;
@@ -509,10 +509,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setError("");
       setStatus("IDLE");
       setStatusText(
-        "Plan Basic activado: se desbloquean los módulos premium."
+        "Plan Basic activado: acceso sin límite y módulos premium habilitados."
       );
       alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar imágenes y acceder a los módulos premium."
+        "Tu Plan Basic está activo. Desde ahora puedes generar sin límite y acceder a módulos premium."
       );
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
@@ -523,12 +523,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
         <p className="font-medium">
-          Debes iniciar sesión para usar el generador de imágenes.
+          Debes iniciar sesión para usar el motor de producción visual.
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás crear imágenes con nuestro motor real conectado
-          a GPU Virtual. {DAILY_LIMIT} imágenes diarias; si quieres ir más
-          allá, podrás activar un plan mensual para generar.
+          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
+          {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar un plan mensual.
         </p>
       </div>
     );
@@ -543,21 +542,18 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
-          Generador desde prompt
+          Motor de imagen · Producción visual
         </h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo de prueba gratuito: te quedan {remaining} imágenes de prueba
-            sin registrarte. La descarga y la biblioteca requieren crear una
-            cuenta.
+            Modo de prueba gratuito: te quedan {remaining} outputs sin registrarte. La descarga y la biblioteca requieren crear una cuenta.
           </div>
         )}
 
         {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Atención: solo te quedan {remaining} imágenes gratis hoy. Activa un
-            plan ilimitado para seguir generando y desbloquear módulos premium.
+            Atención: solo te quedan {remaining} renders gratis hoy. Activa un plan ilimitado para seguir ejecutando el motor y desbloquear módulos premium.
           </div>
         )}
 
@@ -619,19 +615,18 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           </div>
 
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo para generar."}
+            Estado actual: {statusText || "Listo para ejecutar el motor."}
             <br />
             <span className="text-[11px] text-neutral-400">
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con
-                  acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con acceso a módulos premium).
                 </>
               )}
               {userLoggedIn && !isPremium && (
                 <>
-                  Uso de hoy: {currentCount} / {currentLimit} imágenes.
+                  Uso de hoy: {currentCount} / {currentLimit} renders.
                 </>
               )}
             </span>
@@ -653,8 +648,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             {!isPremium && currentCount >= currentLimit
               ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando..."
-              : "Generar imagen desde prompt"}
+              ? "Ejecutando..."
+              : "Ejecutar render en el motor"}
           </button>
 
           {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
@@ -700,7 +695,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
-            {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar imagen"}
+            {isDemo ? "Descargar (Requiere crear cuenta)" : "Descargar resultado"}
           </button>
         )}
       </div>
@@ -750,7 +745,7 @@ function LibraryView() {
   const handleDeleteSelected = async () => {
     if (!selected || !user) return;
     const confirmDelete = window.confirm(
-      "¿Seguro que quieres eliminar esta imagen de tu biblioteca? Esta acción también la borrará de Supabase."
+      "¿Seguro que quieres eliminar este resultado de tu biblioteca? Esta acción también lo borrará de Supabase."
     );
     if (!confirmDelete) return;
 
@@ -764,7 +759,7 @@ function LibraryView() {
       });
     } catch (e) {
       console.error("Error eliminando imagen de Supabase:", e);
-      alert("No se pudo eliminar la imagen. Intenta de nuevo.");
+      alert("No se pudo eliminar. Intenta de nuevo.");
     } finally {
       setDeleting(false);
     }
@@ -773,7 +768,7 @@ function LibraryView() {
   if (!user) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        Inicia sesión para acceder a tu biblioteca de imágenes generadas.
+        Inicia sesión para acceder a tu biblioteca de producción.
       </div>
     );
   }
@@ -781,18 +776,17 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Biblioteca</h2>
+        <h2 className="text-lg font-semibold text-white">Biblioteca de producción</h2>
         <p className="mt-1 text-xs text-neutral-400">
-          Aquí aparecerán las imágenes generadas desde tu cuenta conectada a
-          RunPod. Puedes seleccionar una para verla en grande y eliminarla si ya
-          no la necesitas.
+          Aquí se almacenan los resultados generados por el motor como parte de tu flujo de producción visual.
+          Puedes seleccionar uno para verlo en grande y eliminarlo si ya no lo necesitas.
         </p>
 
         {loading ? (
           <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
         ) : items.length === 0 ? (
           <p className="mt-4 text-xs text-neutral-400">
-            Aún no tienes imágenes guardadas en tu cuenta.
+            Aún no tienes resultados guardados en tu cuenta.
           </p>
         ) : (
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -831,7 +825,7 @@ function LibraryView() {
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Selecciona una imagen de tu biblioteca para verla en grande.</p>
+            <p>Selecciona un resultado de tu biblioteca para verlo en grande.</p>
           )}
         </div>
         {selected && (
@@ -1000,7 +994,7 @@ function VideoFromPromptPanel({ userStatus }) {
   if (!canUse) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        Debes iniciar sesión para usar el generador de video desde prompt.
+        Debes iniciar sesión para usar el motor de video.
       </div>
     );
   }
@@ -1008,10 +1002,9 @@ function VideoFromPromptPanel({ userStatus }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Video desde prompt</h2>
+        <h2 className="text-lg font-semibold text-white">Motor de video · Producción de clips</h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Escribe un prompt y genera un clip corto usando nuestro motor en
-          GPU.
+          Genera clips cortos como parte de un flujo de producción visual, ejecutados en GPU y listos para publicación.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1075,7 +1068,7 @@ function VideoFromPromptPanel({ userStatus }) {
               >
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
-                  : "Generar video desde prompt"}
+                  : "Ejecutar render de video"}
               </button>
             </div>
           </div>
@@ -1323,9 +1316,9 @@ function Img2VideoPanel({ userStatus }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Imagen → Video</h2>
+        <h2 className="text-lg font-semibold text-white">Transformación visual · Imagen a video</h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Sube una imagen (o usa una URL) y genera un clip.
+          Sube una imagen (o usa una URL) y conviértela en un clip dentro del flujo de producción.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1426,7 +1419,7 @@ function Img2VideoPanel({ userStatus }) {
               >
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
-                  : "Generar Imagen → Video"}
+                  : "Ejecutar Imagen → Video"}
               </button>
             </div>
           </div>
@@ -1470,12 +1463,11 @@ function VideoPlaceholderPanel() {
   return (
     <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
       <h2 className="text-lg font-semibold text-white">
-        Generador de video desde prompt (próximamente)
+        Motor de video (en expansión)
       </h2>
       <p className="mt-2 text-sm text-neutral-300">
-        Estamos preparando el módulo de video para que puedas escribir un prompt
-        y obtener secuencias animadas con calidad cinematográfica usando nuestro
-        motor en RunPod.
+        Estamos ampliando el motor de video para que puedas producir secuencias
+        con control cinematográfico dentro del sistema, usando GPU.
       </p>
       <p className="mt-4 text-xs text-red-400 font-semibold">
         Estamos trabajando para tener este módulo lo antes posible con la máxima
@@ -1485,7 +1477,7 @@ function VideoPlaceholderPanel() {
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
           <h3 className="text-sm font-semibold text-white">¿Qué podrás hacer?</h3>
           <ul className="mt-2 space-y-1 list-disc list-inside">
-            <li>Clips cortos desde texto (5–10 segundos).</li>
+            <li>Clips cortos listos para reels.</li>
             <li>Escenas con cámara cinematográfica.</li>
             <li>Opciones de estilo (realista, anime, artístico).</li>
           </ul>
@@ -1493,8 +1485,8 @@ function VideoPlaceholderPanel() {
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
           <h3 className="text-sm font-semibold text-white">Integración con BodySync</h3>
           <p className="mt-2">
-            Más adelante podrás combinar este módulo con BodySync para aplicar
-            movimiento corporal a tus personajes IA.
+            La arquitectura está preparada para combinar este módulo con BodySync
+            y aplicar movimiento corporal a tus personajes.
           </p>
         </div>
       </div>
@@ -1584,7 +1576,7 @@ function XmasPhotoPanel() {
 
     if (!isPremium) {
       setError(
-        "Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA junto con el generador ilimitado desde prompt."
+        "Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA junto con el motor sin límite."
       );
       return;
     }
@@ -1699,7 +1691,7 @@ function XmasPhotoPanel() {
 
           <div>
             <p className="text-xs text-neutral-300">
-              2. Opcional: cuéntanos quién aparece y qué tipo de escena quieres
+              2. Opcional: cuéntanos quién aparece y qué escena quieres
             </p>
             <input
               type="text"
@@ -1711,7 +1703,7 @@ function XmasPhotoPanel() {
           </div>
 
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo para enviar tu foto navideña a RunPod."}
+            Estado actual: {statusText || "Listo para enviar tu foto al motor."}
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
@@ -1723,8 +1715,8 @@ function XmasPhotoPanel() {
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando foto navideña..."
-              : "Generar foto navideña IA"}
+              ? "Generando..."
+              : "Ejecutar Foto Navideña IA"}
           </button>
 
           <p className="mt-2 text-[11px] text-neutral-400">
@@ -1743,7 +1735,7 @@ function XmasPhotoPanel() {
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Aquí verás tu foto navideña en cuanto se complete el render.</p>
+            <p>Aquí verás el resultado en cuanto se complete el render.</p>
           )}
         </div>
         {resultB64 && (
@@ -1751,7 +1743,7 @@ function XmasPhotoPanel() {
             onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
-            Descargar foto navideña
+            Descargar resultado
           </button>
         )}
       </div>
@@ -1894,7 +1886,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Imagen desde prompt
+              Motor de imagen
             </button>
             <button
               type="button"
@@ -1905,7 +1897,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Video desde prompt
+              Motor de video
             </button>
             <button
               type="button"
@@ -1955,7 +1947,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Generar imagen desde prompt
+              Motor de imagen (render)
             </button>
 
             <button
@@ -1967,7 +1959,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Generar video desde prompt
+              Motor de video (clips)
             </button>
 
             <button
@@ -1979,7 +1971,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Imagen → Video
+              Transformación Imagen → Video
             </button>
 
             <button
@@ -1991,7 +1983,7 @@ function DashboardView() {
                   : "bg-white/5 text-neutral-200 hover:bg-white/10"
               }`}
             >
-              Biblioteca
+              Biblioteca de producción
             </button>
             <button
               type="button"
@@ -2010,9 +2002,7 @@ function DashboardView() {
             <div>
               <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
               <p className="mt-1 text-xs text-neutral-400">
-                Genera imágenes, guarda tu historial en la biblioteca y prueba
-                los módulos especiales como Foto Navideña IA, todo desde tu
-                cuenta conectada al pipeline real en RunPod.
+                Controla tu flujo de producción visual: genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
               </p>
             </div>
 
@@ -2082,7 +2072,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               <div className="text-sm font-semibold leading-tight">
                 isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
-              <div className="text-[10px] text-neutral-500">Generación visual con IA</div>
+              <div className="text-[10px] text-neutral-500">Motor de producción visual</div>
             </div>
           </div>
 
@@ -2108,31 +2098,33 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div>
             <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
               <span className="h-1 w-1 rounded-full bg-cyan-300" />
-              <span>Beta privada · Motor de imagen de estudio</span>
+              <span>BETA PRIVADA · MOTOR DE PRODUCCIÓN VISUAL CON IA</span>
             </p>
+
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              Genera imágenes fotorrealistas{" "}
+              Produce contenido visual con IA{" "}
               <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                con IA en la nube.
+                como un sistema, no como un experimento.
               </span>
             </h1>
 
             <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              IsabelaOS Studio es el primer sistema de generación visual con IA
-              desarrollado desde Guatemala para creadores, estudios y agencias
-              de modelos virtuales. Escribe un prompt y obtén imágenes con
-              calidad de estudio en segundos.
+              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala, diseñado para creadores,
+              estudios y equipos que necesitan velocidad, consistencia y control creativo.
             </p>
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
-              Puedes usar nuestro motor de imágenes, Generadores de vido desde
-              prompts o imagen a video. y mas adelante, acceder a módulos exclusivos 
-              como BodySync (movimiento corporal IA), Script2Film, CineCam. Además, 
-              Usa nuestro módulo especial de{" "} <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
-              para transformar una foto real de tu familia en un retrato
-              navideño de estudio con fondo totalmente generado por IA.
+              No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo de producción visual.
+              La arquitectura del sistema está preparada para módulos avanzados como BodySync, CineCam y Script2Film. Además,
+              usa nuestro módulo especial de{" "}
+              <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
+              para transformar una foto real de tu familia en un retrato navideño de estudio con fondo totalmente generado por IA.
+            </p>
+
+            <p className="mt-4 text-xs text-neutral-400">
+              Mientras otros venden generación, nosotros vendemos producción confiable con IA.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -2140,17 +2132,16 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 onClick={onStartDemo}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
-                Generar mis {DEMO_LIMIT} imágenes GRATIS ahora
+                Probar el motor de producción ({DEMO_LIMIT} outputs)
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Prueba la calidad del motor antes de crear tu cuenta y
-                desbloquea {DAILY_LIMIT} registrándote.
+                Valida el motor antes de crear tu cuenta y desbloquea {DAILY_LIMIT} renders diarios registrándote.
               </p>
             </div>
 
             <p className="mt-4 text-xs text-neutral-500">
-              Próximamente: módulos de video y nuestro motor propio de realismo
-              corporal en imagenes <span className="font-semibold text-white">BodySync v1</span>.
+              Arquitectura preparada para el motor de movimiento corporal{" "}
+              <span className="font-semibold text-white">BodySync</span> y módulos cinematográficos avanzados.
             </p>
           </div>
 
@@ -2177,9 +2168,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
 
             <p className="mt-3 text-[10px] text-neutral-500">
-              isabelaOs Studio es el primer sistema de generación visual con IA
-              desarrollado en Guatemala pensando en creadores, estudios y
-              agencias de modelos virtuales.
+              isabelaOs Studio es un motor de producción visual con IA desarrollado en Guatemala para creadores, estudios y equipos que buscan consistencia y control.
             </p>
           </div>
         </section>
@@ -2187,35 +2176,29 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* ✅ NUEVO: Secciones informativas Video (NO funcionales en Home) */}
         <section className="mt-12 grid gap-6 lg:grid-cols-2">
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Video desde prompt (módulo en el panel)</h3>
+            <h3 className="text-sm font-semibold text-white">Motor de video (módulo en el panel)</h3>
             <p className="mt-2 text-[11px] text-neutral-300">
-              Dentro del panel del creador podrás escribir un prompt y generar
-              clips cortos usando nuestro motor en GPU. Este módulo se
-              habilita en tu cuenta y utiliza jades para la generacion.
+              Dentro del panel del creador podrás producir clips cortos usando nuestro motor en GPU.
+              Este módulo se habilita en tu cuenta y utiliza jades para la generación.
             </p>
             <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
               <li>Clips cortos listos para reels.</li>
               <li>Control por prompt con estilo cinematográfico.</li>
               <li>Seguimiento de estado en tiempo real.</li>
             </ul>
-            <p className="mt-3 text-[11px] text-neutral-400">
-            </p>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Imagen → Video (módulo en el panel)</h3>
+            <h3 className="text-sm font-semibold text-white">Transformación Imagen → Video (módulo en el panel)</h3>
             <p className="mt-2 text-[11px] text-neutral-300">
-              Sube una imagen (o usa una URL) y conviértela en un clip. Este
-              módulo está pensado para “transformaciones”, cambios de outfit y
-              escenas cortas basadas en una foto.
+              Sube una imagen (o usa una URL) y conviértela en un clip. Este módulo está pensado para transformaciones,
+              cambios de outfit y escenas cortas basadas en una imagen.
             </p>
             <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
               <li>Ideal para videos tipo “antes / después”.</li>
               <li>Control de estilo por prompt opcional.</li>
-              <li>Integración futura con BodySync.</li>
+              <li>Arquitectura lista para integración futura con BodySync.</li>
             </ul>
-            <p className="mt-3 text-[11px] text-neutral-400">              
-            </p>
           </div>
         </section>
 
@@ -2253,8 +2236,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
             <h3 className="text-sm font-semibold text-white">Vista previa del panel del creador</h3>
             <p className="mt-2 text-[11px] text-neutral-400">
-              Interfaz simple para escribir un prompt, ajustar resolución y ver
-              el resultado generado por el motor conectado a GPU.
+              Interfaz simple para ejecutar renders, ajustar resolución y ver
+              resultados generados por el motor conectado a GPU.
             </p>
             <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img src="/preview/panel.png" alt="Vista previa del panel de isabelaOs Studio" className="w-full object-cover" />
@@ -2265,7 +2248,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Showcase BodySync */}
         <section className="mt-12">
           <h2 className="text-sm font-semibold text-white mb-2">
-            Preparándonos para BodySync · Movimiento corporal IA
+            Arquitectura preparada para BodySync · Movimiento corporal IA
           </h2>
           <p className="text-xs text-neutral-300 max-w-2xl">
             Esta imagen fue generada con nuestro modelo de pruebas BodySync.
@@ -2286,7 +2269,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <section className="mt-14 max-w-6xl border-t border-white/10 pt-8">
           <h2 className="text-sm font-semibold text-white">Planes de suscripción</h2>
           <p className="mt-2 text-xs text-neutral-300 max-w-2xl">
-            Nuestros planes.
+            Planes diseñados para producción: acceso sin límites, módulos premium y créditos (jades) para video.
           </p>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -2297,14 +2280,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 <div className="text-sm font-semibold text-white">US$19/mes</div>
               </div>
               <p className="mt-2 text-xs text-neutral-300">
-                Para creadores que quieren generar sin estar contando límites y acceder a módulos premium base.
+                Para creadores que quieren producir sin contar límites y acceder a módulos premium base.
               </p>
               <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Generación de imágenes desde prompt.</li>
-                <li>Acceso a módulos premium video desde prompt.</li>
-                <li>Acceso a modulos premium generacion de foto navideña.</li>
-                <li>Acceso a modulos premium video desde imagen.</li>
-                <li>Obten 100 Jades mensuales</li>
+                <li>Motor de imagen (renders ilimitados).</li>
+                <li>Motor de video (desde prompt).</li>
+                <li>Transformación Imagen → Video.</li>
+                <li>Foto Navideña IA (premium).</li>
+                <li>100 Jades mensuales.</li>
               </ul>
 
               <div className="mt-4">
@@ -2332,15 +2315,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 <div className="text-sm font-semibold text-white">US$39/mes</div>
               </div>
               <p className="mt-2 text-xs text-neutral-300">
-                Para creadores avanzados y estudios que quieren lo mejor del sistema y prioridad en funciones nuevas.
+                Para creadores avanzados y estudios que quieren máximo control, prioridad y acceso temprano a módulos nuevos.
               </p>
               <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Optimizacion de prompts automatica.</li>
-                <li>Generacion de imagenes desde prompts.</li>
-                <li>Generacion de video desde prompts o Imagen.</li>
-                <li>Generacion de imagen con fondo navideño</li>
-                <li>Proximamente creacion de Avatar, y otros modulos en face de creacion</li>
-                <li>Obtienes 300 jades mensuales</li>
+                <li>Optimización automática de prompts.</li>
+                <li>Motor de imagen (renders ilimitados).</li>
+                <li>Motor de video (desde prompt e Imagen → Video).</li>
+                <li>Foto Navideña IA (premium).</li>
+                <li>Acceso temprano a módulos en desarrollo.</li>
+                <li>300 Jades mensuales.</li>
               </ul>
 
               <div className="mt-4">
@@ -2363,7 +2346,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
 
           <p className="mt-4 text-[11px] text-neutral-400">
-            Te quedaste sin jade, no te preocupes existe la opcion de comprar mas jade. 
+            ¿Te quedaste sin jades? Puedes comprar más dentro del panel (wallet).
           </p>
         </section>
 
@@ -2517,3 +2500,4 @@ export default function App() {
     </>
   );
 }
+```0
