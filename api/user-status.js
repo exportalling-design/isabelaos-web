@@ -1,5 +1,5 @@
 // api/user-status.js
-import { sbAdmin } from "../../lib/supabaseAdmin";
+import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
   // CORS
@@ -12,50 +12,45 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
 
-  // DEBUG helper (para saber hasta dónde llegó)
   const debug = {
     step: "start",
-    hasReqUrl: !!req.url,
+    hasUrl: !!process.env.SUPABASE_URL,
+    hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     host: req.headers?.host || null,
     xfProto: req.headers?.["x-forwarded-proto"] || null,
   };
 
   try {
-    // 1) Construir URL robusta (NO usa localhost a ciegas)
     debug.step = "build_url";
     const proto = req.headers?.["x-forwarded-proto"] || "https";
     const host = req.headers?.host || "localhost";
-    const path = req.url || ""; // <- si viniera undefined, no crashea
-    const full = `${proto}://${host}${path}`;
-    const url = new URL(full);
+    const path = req.url || "/";
+    const url = new URL(`${proto}://${host}${path}`);
 
     debug.step = "read_user_id";
-    const user_id =
-      (req.query && req.query.user_id) ||
-      url.searchParams.get("user_id") ||
-      null;
-
-    debug.user_id = user_id;
+    const user_id = url.searchParams.get("user_id");
+    debug.user_id = user_id || null;
 
     if (!user_id) {
       return res.status(400).json({ ok: false, error: "MISSING_USER_ID", debug });
     }
 
-    // 2) Inicializar Supabase Admin
-    debug.step = "sb_admin_init";
-    let sb;
-    try {
-      sb = sbAdmin();
-    } catch (e) {
+    debug.step = "init_supabase";
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!SUPABASE_URL || !SERVICE_KEY) {
       return res.status(500).json({
         ok: false,
-        error: "SB_ADMIN_INIT_FAILED",
-        detail: String(e),
+        error: "MISSING_SUPABASE_ENV",
         debug,
       });
     }
 
-    // 3) Leer subscription
+    const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
+      auth: { persistSession: false },
+    });
+
     debug.step = "fetch_subscription";
     const { data: sub, error: subErr } = await sb
       .from("user_subscription")
@@ -72,7 +67,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Leer wallet
     debug.step = "fetch_wallet";
     const { data: wallet, error: walletErr } = await sb
       .from("user_wallet")
@@ -100,8 +94,8 @@ export default async function handler(req, res) {
       is_active: active,
       debug: {
         ...debug,
-        has_wallet_row: !!wallet,
         has_sub_row: !!sub,
+        has_wallet_row: !!wallet,
       },
     });
   } catch (e) {
