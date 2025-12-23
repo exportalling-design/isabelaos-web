@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 
 import { useAuth } from "./context/AuthContext";
+import { supabase } from "./lib/supabaseClient"; // ✅ NUEVO (solo para leer session/access_token)
 
 import {
   saveGenerationInSupabase,
@@ -42,6 +43,27 @@ async function safeJson(res) {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------
+// ✅ NUEVO: fetch con token Supabase (NO toca textos/rutas/UI)
+// ---------------------------------------------------------
+async function fetchWithAuth(url, options = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+
+  if (!token) {
+    throw new Error("MISSING_AUTH_TOKEN");
+  }
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
 }
 
 // ---------------------------------------------------------
@@ -427,18 +449,31 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setStatusText("Enviando job a RunPod...");
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userLoggedIn ? user.id : null,
-          prompt,
-          negative_prompt: negative,
-          width: Number(width),
-          height: Number(height),
-          steps: Number(steps),
-        }),
-      });
+      // ✅ SOLO CAMBIO: usar token SOLO si NO es demo
+      const res = isDemo
+        ? await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: userLoggedIn ? user.id : null,
+              prompt,
+              negative_prompt: negative,
+              width: Number(width),
+              height: Number(height),
+              steps: Number(steps),
+            }),
+          })
+        : await fetchWithAuth("/api/generate", {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: userLoggedIn ? user.id : null,
+              prompt,
+              negative_prompt: negative,
+              width: Number(width),
+              height: Number(height),
+              steps: Number(steps),
+            }),
+          });
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -454,7 +489,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusRes = await fetch(`/api/status?id=${jobId}`);
+        // ✅ SOLO CAMBIO: status con token SOLO si NO es demo
+        const statusRes = isDemo
+          ? await fetch(`/api/status?id=${jobId}`)
+          : await fetchWithAuth(`/api/status?id=${jobId}`);
+
         const statusData = await statusRes.json();
 
         if (!statusRes.ok || statusData.error) {
@@ -896,7 +935,7 @@ function VideoFromPromptPanel({ userStatus }) {
   const canUse = !!user;
 
   const pollVideoStatus = async (job_id) => {
-    const r = await fetch(
+    const r = await fetchWithAuth(
       `/api/video-status?job_id=${encodeURIComponent(job_id)}`
     );
     const data = await r.json().catch(() => null);
@@ -913,9 +952,8 @@ function VideoFromPromptPanel({ userStatus }) {
     setStatusText("Enviando job de video a RunPod...");
 
     try {
-      const res = await fetch("/api/generate-video", {
+      const res = await fetchWithAuth("/api/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt,
@@ -1204,7 +1242,7 @@ function Img2VideoPanel({ userStatus }) {
   };
 
   const pollVideoStatus = async (job_id) => {
-    const r = await fetch(
+    const r = await fetchWithAuth(
       `/api/video-status?job_id=${encodeURIComponent(job_id)}`
     );
     const data = await r.json().catch(() => null);
@@ -1228,9 +1266,8 @@ function Img2VideoPanel({ userStatus }) {
         return;
       }
 
-      const res = await fetch("/api/generate-img2video", {
+      const res = await fetchWithAuth("/api/generate-img2video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt: prompt || "",
@@ -1623,9 +1660,8 @@ function XmasPhotoPanel() {
     setStatusText("Enviando foto navideña a RunPod...");
 
     try {
-      const res = await fetch("/api/generate-xmas", {
+      const res = await fetchWithAuth("/api/generate-xmas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: pureB64,
           description: extraPrompt || "",
@@ -1646,7 +1682,7 @@ function XmasPhotoPanel() {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusRes = await fetch(`/api/status?id=${jobId}`);
+        const statusRes = await fetchWithAuth(`/api/status?id=${jobId}`);
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
@@ -1806,9 +1842,8 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
     setError("");
     try {
       setBusy(true);
-      const res = await fetch("/api/paddle-checkout", {
+      const res = await fetchWithAuth("/api/paddle-checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "jades",
           user_id: user.id,
@@ -1836,9 +1871,8 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
     try {
       setBusy(true);
 
-      const res = await fetch("/api/jades-credit", {
+      const res = await fetchWithAuth("/api/jades-credit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user.id,
           pack_id: pack.id,
@@ -1968,7 +2002,7 @@ function DashboardView() {
   const fetchUserStatus = async () => {
     if (!user?.id) return;
     try {
-      const r = await fetch(
+      const r = await fetchWithAuth(
         `/api/user-status?user_id=${encodeURIComponent(user.id)}`
       );
       const data = await r.json().catch(() => null);
