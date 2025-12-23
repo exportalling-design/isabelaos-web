@@ -2,6 +2,8 @@
 // --- Lanza el job en RunPod y devuelve jobId
 // --- + CANDADO DE COBRO (jades) ANTES de generar (EDGE compatible)
 
+import { requireUser } from "./_auth";
+
 const COST_IMG_PROMPT_JADES = 1; // <- AJUSTA AQUÍ
 
 export default async function handler(req) {
@@ -38,10 +40,20 @@ export default async function handler(req) {
     }
 
     // =========================
-    // 1) CANDADO: LOGIN + COBRO
+    // 1) AUTH (ÚNICO ORIGEN)
     // =========================
+    const auth = await requireUser(req);
+    if (!auth.ok) {
+      return new Response(JSON.stringify({ ok: false, error: auth.error }), {
+        status: auth.code || 401,
+        headers: cors,
+      });
+    }
+    const user_id = auth.user.id;
 
-    // ENV Supabase (service role) para cobrar
+    // =========================
+    // 2) COBRO (RPC spend_jades)
+    // =========================
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -56,63 +68,6 @@ export default async function handler(req) {
       );
     }
 
-    // ✅ 1A) Resolver user_id:
-    // - Primero usa body.user_id (si viene)
-    // - Si no viene, lo saca del access_token (Authorization: Bearer ...)
-    let user_id = body.user_id || null;
-
-    if (!user_id) {
-      const auth = req.headers.get("authorization") || "";
-      const m = auth.match(/^Bearer\s+(.+)$/i);
-      const accessToken = m ? m[1] : null;
-
-      if (!accessToken) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: "LOGIN_REQUIRED",
-            note: "Falta user_id y no vino Authorization Bearer token.",
-          }),
-          { status: 401, headers: cors }
-        );
-      }
-
-      // Verificar token contra Supabase (Edge-friendly) usando Admin endpoint
-      const getUserUrl = `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`;
-
-      const ures = await fetch(getUserUrl, {
-        method: "GET",
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY, // requerido por Supabase
-          Authorization: `Bearer ${accessToken}`, // ✅ OJO: aquí va el ACCESS TOKEN del usuario
-        },
-      });
-
-      if (!ures.ok) {
-        const utxt = await ures.text();
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: "LOGIN_REQUIRED",
-            note: "Token inválido o expirado.",
-            details: utxt,
-          }),
-          { status: 401, headers: cors }
-        );
-      }
-
-      const ujson = await ures.json();
-      user_id = ujson?.id || ujson?.user?.id || null;
-
-      if (!user_id) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "LOGIN_REQUIRED", note: "No se pudo obtener user_id del token." }),
-          { status: 401, headers: cors }
-        );
-      }
-    }
-
-    // ✅ 1B) Cobra jades antes de generar (RPC spend_jades)
     const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`;
 
     const spendRes = await fetch(rpcUrl, {
@@ -147,7 +102,7 @@ export default async function handler(req) {
     }
 
     // =========================
-    // 2) RUNPOD (igual que antes)
+    // 3) RUNPOD (igual que antes)
     // =========================
     const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
 
@@ -177,7 +132,7 @@ export default async function handler(req) {
           width: body.width || 512,
           height: body.height || 512,
           steps: body.steps || 22,
-          user_id, // ✅ ya resuelto bien
+          user_id, // ✅ SIEMPRE desde auth
         },
       }),
     });
@@ -191,7 +146,6 @@ export default async function handler(req) {
     }
 
     const data = await rp.json();
-
     const jobId = data.id || data.requestId || data.jobId || data.data?.id;
 
     if (!jobId) {
