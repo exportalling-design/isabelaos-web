@@ -33,9 +33,25 @@ function scrollToId(id) {
 }
 
 // ---------------------------------------------------------
+// Helper: safe JSON
+// ---------------------------------------------------------
+async function safeJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------
 // Botón PayPal reutilizable
 // ---------------------------------------------------------
-function PayPalButton({ amount = "19.00", description = "IsabelaOS Studio", containerId, onPaid }) {
+function PayPalButton({
+  amount = "19.00",
+  description = "IsabelaOS Studio",
+  containerId,
+  onPaid,
+}) {
   const divId = containerId || "paypal-button-container";
 
   useEffect(() => {
@@ -193,7 +209,8 @@ function AuthModal({ open, onClose }) {
         </div>
 
         <p className="mt-2 text-xs text-neutral-400">
-          Usa tu correo o entra con Google para acceder al motor de producción visual.
+          Usa tu correo o entra con Google para acceder al motor de producción
+          visual.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
@@ -345,7 +362,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         window.location.href = data.url;
       } else {
         console.error("Respuesta Paddle:", data);
-        alert("Estamos trabajando para poder brindarte el cobro por paddle, por el momento no esta disponible.");
+        alert(
+          "Estamos trabajando para poder brindarte el cobro por paddle, por el momento no esta disponible."
+        );
       }
     } catch (err) {
       console.error("Error Paddle:", err);
@@ -370,8 +389,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   useEffect(() => {
     if (isDemo) {
       try {
-        const storedDemoCount =
-          localStorage.getItem("isabelaos_demo_count") || "0";
+        const storedDemoCount = localStorage.getItem("isabelaos_demo_count") || "0";
         setDemoCount(Number(storedDemoCount));
       } catch (e) {
         console.warn("Error leyendo demo count:", e);
@@ -485,9 +503,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const handleDownload = () => {
     if (isDemo) {
-      alert(
-        "Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión."
-      );
+      alert("Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión.");
       onAuthRequired && onAuthRequired();
       return;
     }
@@ -508,12 +524,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setIsPremium(true);
       setError("");
       setStatus("IDLE");
-      setStatusText(
-        "Plan Basic activado: acceso sin límite y módulos premium habilitados."
-      );
-      alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar sin límite y acceder a módulos premium."
-      );
+      setStatusText("Plan Basic activado: acceso sin límite y módulos premium habilitados.");
+      alert("Tu Plan Basic está activo. Desde ahora puedes generar sin límite y acceder a módulos premium.");
     } catch (e) {
       console.error("No se pudo guardar premium en localStorage:", e);
     }
@@ -522,12 +534,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">
-          Debes iniciar sesión para usar el motor de producción visual.
-        </p>
+        <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
-          {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar un plan mensual.
+          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU. {DAILY_LIMIT} renders
+          diarios; si quieres ir más allá, podrás activar un plan mensual.
         </p>
       </div>
     );
@@ -541,19 +551,19 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     <div className="grid gap-8 lg:grid-cols-2">
       {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Motor de imagen · Producción visual
-        </h2>
+        <h2 className="text-lg font-semibold text-white">Motor de imagen · Producción visual</h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo de prueba gratuito: te quedan {remaining} outputs sin registrarte. La descarga y la biblioteca requieren crear una cuenta.
+            Modo de prueba gratuito: te quedan {remaining} outputs sin registrarte. La descarga y la
+            biblioteca requieren crear una cuenta.
           </div>
         )}
 
         {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Atención: solo te quedan {remaining} renders gratis hoy. Activa un plan ilimitado para seguir ejecutando el motor y desbloquear módulos premium.
+            Atención: solo te quedan {remaining} renders gratis hoy. Activa un plan ilimitado para seguir
+            ejecutando el motor y desbloquear módulos premium.
           </div>
         )}
 
@@ -620,9 +630,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <span className="text-[11px] text-neutral-400">
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
-                <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con acceso a módulos premium).
-                </>
+                <>Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con acceso a módulos premium).</>
               )}
               {userLoggedIn && !isPremium && (
                 <>
@@ -632,9 +640,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             </span>
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
 
           <button
             onClick={handleGenerate}
@@ -778,16 +784,14 @@ function LibraryView() {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Biblioteca de producción</h2>
         <p className="mt-1 text-xs text-neutral-400">
-          Aquí se almacenan los resultados generados por el motor como parte de tu flujo de producción visual.
-          Puedes seleccionar uno para verlo en grande y eliminarlo si ya no lo necesitas.
+          Aquí se almacenan los resultados generados por el motor como parte de tu flujo de producción
+          visual. Puedes seleccionar uno para verlo en grande y eliminarlo si ya no lo necesitas.
         </p>
 
         {loading ? (
           <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
         ) : items.length === 0 ? (
-          <p className="mt-4 text-xs text-neutral-400">
-            Aún no tienes resultados guardados en tu cuenta.
-          </p>
+          <p className="mt-4 text-xs text-neutral-400">Aún no tienes resultados guardados en tu cuenta.</p>
         ) : (
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {items.map((item) => (
@@ -796,9 +800,7 @@ function LibraryView() {
                 type="button"
                 onClick={() => setSelected(item)}
                 className={`group relative overflow-hidden rounded-xl border ${
-                  selected && selected.id === item.id
-                    ? "border-cyan-400"
-                    : "border-white/10"
+                  selected && selected.id === item.id ? "border-cyan-400" : "border-white/10"
                 } bg-black/60`}
               >
                 <img
@@ -848,12 +850,8 @@ function LibraryView() {
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
-  const [prompt, setPrompt] = useState(
-    "Cinematic short scene, ultra detailed, soft light, 8k"
-  );
-  const [negative, setNegative] = useState(
-    "blurry, low quality, deformed, watermark, text"
-  );
+  const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
+  const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
   const [steps, setSteps] = useState(25);
 
   const [status, setStatus] = useState("IDLE");
@@ -865,12 +863,9 @@ function VideoFromPromptPanel({ userStatus }) {
   const canUse = !!user;
 
   const pollVideoStatus = async (job_id) => {
-    const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
-    );
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`);
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data)
-      throw new Error(data?.error || "Error consultando /api/video-status");
+    if (!r.ok || !data) throw new Error(data?.error || "Error consultando /api/video-status");
     return data;
   };
 
@@ -895,9 +890,7 @@ function VideoFromPromptPanel({ userStatus }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.job_id) {
-        throw new Error(
-          data?.error || "Error en /api/generate-video, revisa los logs."
-        );
+        throw new Error(data?.error || "Error en /api/generate-video, revisa los logs.");
       }
 
       const jid = data.job_id;
@@ -912,11 +905,7 @@ function VideoFromPromptPanel({ userStatus }) {
         const stData = await pollVideoStatus(jid);
 
         const st =
-          stData.status ||
-          stData.state ||
-          stData.job_status ||
-          stData.phase ||
-          "IN_PROGRESS";
+          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
@@ -944,19 +933,13 @@ function VideoFromPromptPanel({ userStatus }) {
           stData.url ||
           null;
 
-        if (
-          st === "COMPLETED" ||
-          st === "DONE" ||
-          st === "SUCCESS" ||
-          st === "FINISHED"
-        ) {
+        if (st === "COMPLETED" || st === "DONE" || st === "SUCCESS" || st === "FINISHED") {
           if (maybeUrl) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
             // si el backend devuelve base64, lo convertimos
-            const b64 =
-              out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
+            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
 
             if (b64) {
               const blob = b64ToBlob(b64, "video/mp4");
@@ -964,9 +947,7 @@ function VideoFromPromptPanel({ userStatus }) {
               setVideoUrl(url);
               setStatusText("Video generado con éxito.");
             } else {
-              throw new Error(
-                "Job terminado pero no se recibió video en la salida."
-              );
+              throw new Error("Job terminado pero no se recibió video en la salida.");
             }
           }
         } else {
@@ -1004,7 +985,8 @@ function VideoFromPromptPanel({ userStatus }) {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Motor de video · Producción de clips</h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Genera clips cortos como parte de un flujo de producción visual, ejecutados en GPU y listos para publicación.
+          Genera clips cortos como parte de un flujo de producción visual, ejecutados en GPU y listos
+          para publicación.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1013,19 +995,14 @@ function VideoFromPromptPanel({ userStatus }) {
             <span className="text-[11px] text-neutral-400">
               {userStatus?.jades != null ? (
                 <>
-                  Jades:{" "}
-                  <span className="font-semibold text-white">
-                    {userStatus.jades}
-                  </span>
+                  Jades: <span className="font-semibold text-white">{userStatus.jades}</span>
                 </>
               ) : (
                 <>Jades: ...</>
               )}
             </span>
           </div>
-          {jobId && (
-            <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
-          )}
+          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -1073,9 +1050,7 @@ function VideoFromPromptPanel({ userStatus }) {
             </div>
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
         </div>
       </div>
 
@@ -1083,11 +1058,7 @@ function VideoFromPromptPanel({ userStatus }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
           ) : (
             <p>Aquí verás el video en cuanto se complete la generación.</p>
           )}
@@ -1172,12 +1143,9 @@ function Img2VideoPanel({ userStatus }) {
   };
 
   const pollVideoStatus = async (job_id) => {
-    const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
-    );
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`);
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data)
-      throw new Error(data?.error || "Error consultando /api/video-status");
+    if (!r.ok || !data) throw new Error(data?.error || "Error consultando /api/video-status");
     return data;
   };
 
@@ -1211,9 +1179,7 @@ function Img2VideoPanel({ userStatus }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.job_id) {
-        throw new Error(
-          data?.error || "Error en /api/generate-img2video, revisa los logs."
-        );
+        throw new Error(data?.error || "Error en /api/generate-img2video, revisa los logs.");
       }
 
       const jid = data.job_id;
@@ -1228,11 +1194,7 @@ function Img2VideoPanel({ userStatus }) {
         const stData = await pollVideoStatus(jid);
 
         const st =
-          stData.status ||
-          stData.state ||
-          stData.job_status ||
-          stData.phase ||
-          "IN_PROGRESS";
+          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
@@ -1259,18 +1221,12 @@ function Img2VideoPanel({ userStatus }) {
           stData.url ||
           null;
 
-        if (
-          st === "COMPLETED" ||
-          st === "DONE" ||
-          st === "SUCCESS" ||
-          st === "FINISHED"
-        ) {
+        if (st === "COMPLETED" || st === "DONE" || st === "SUCCESS" || st === "FINISHED") {
           if (maybeUrl) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            const b64 =
-              out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
+            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
 
             if (b64) {
               const blob = b64ToBlob(b64, "video/mp4");
@@ -1278,9 +1234,7 @@ function Img2VideoPanel({ userStatus }) {
               setVideoUrl(url);
               setStatusText("Video generado con éxito.");
             } else {
-              throw new Error(
-                "Job terminado pero no se recibió video en la salida."
-              );
+              throw new Error("Job terminado pero no se recibió video en la salida.");
             }
           }
         } else {
@@ -1327,19 +1281,14 @@ function Img2VideoPanel({ userStatus }) {
             <span className="text-[11px] text-neutral-400">
               {userStatus?.jades != null ? (
                 <>
-                  Jades:{" "}
-                  <span className="font-semibold text-white">
-                    {userStatus.jades}
-                  </span>
+                  Jades: <span className="font-semibold text-white">{userStatus.jades}</span>
                 </>
               ) : (
                 <>Jades: ...</>
               )}
             </span>
           </div>
-          {jobId && (
-            <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
-          )}
+          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -1375,9 +1324,7 @@ function Img2VideoPanel({ userStatus }) {
               placeholder="https://..."
               className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <p className="mt-1 text-[11px] text-neutral-400">
-              Si usas URL, no es necesario subir archivo.
-            </p>
+            <p className="mt-1 text-[11px] text-neutral-400">Si usas URL, no es necesario subir archivo.</p>
           </div>
 
           <div>
@@ -1424,9 +1371,7 @@ function Img2VideoPanel({ userStatus }) {
             </div>
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
         </div>
       </div>
 
@@ -1434,11 +1379,7 @@ function Img2VideoPanel({ userStatus }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
           ) : (
             <p>Aquí verás el video en cuanto se complete la generación.</p>
           )}
@@ -1462,16 +1403,13 @@ function Img2VideoPanel({ userStatus }) {
 function VideoPlaceholderPanel() {
   return (
     <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-      <h2 className="text-lg font-semibold text-white">
-        Motor de video (en expansión)
-      </h2>
+      <h2 className="text-lg font-semibold text-white">Motor de video (en expansión)</h2>
       <p className="mt-2 text-sm text-neutral-300">
-        Estamos ampliando el motor de video para que puedas producir secuencias
-        con control cinematográfico dentro del sistema, usando GPU.
+        Estamos ampliando el motor de video para que puedas producir secuencias con control
+        cinematográfico dentro del sistema, usando GPU.
       </p>
       <p className="mt-4 text-xs text-red-400 font-semibold">
-        Estamos trabajando para tener este módulo lo antes posible con la máxima
-        calidad de estudio.
+        Estamos trabajando para tener este módulo lo antes posible con la máxima calidad de estudio.
       </p>
       <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
@@ -1485,8 +1423,8 @@ function VideoPlaceholderPanel() {
         <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
           <h3 className="text-sm font-semibold text-white">Integración con BodySync</h3>
           <p className="mt-2">
-            La arquitectura está preparada para combinar este módulo con BodySync
-            y aplicar movimiento corporal a tus personajes.
+            La arquitectura está preparada para combinar este módulo con BodySync y aplicar movimiento
+            corporal a tus personajes.
           </p>
         </div>
       </div>
@@ -1660,9 +1598,8 @@ function XmasPhotoPanel() {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Foto Navideña IA (Premium)</h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Convierte tu foto (o la de tu familia) en un retrato navideño de
-          estudio profesional, con iluminación cuidada y fondo temático
-          totalmente generado por IA.
+          Convierte tu foto (o la de tu familia) en un retrato navideño de estudio profesional, con
+          iluminación cuidada y fondo temático totalmente generado por IA.
         </p>
 
         <div className="mt-5 space-y-4 text-sm">
@@ -1690,9 +1627,7 @@ function XmasPhotoPanel() {
           </div>
 
           <div>
-            <p className="text-xs text-neutral-300">
-              2. Opcional: cuéntanos quién aparece y qué escena quieres
-            </p>
+            <p className="text-xs text-neutral-300">2. Opcional: cuéntanos quién aparece y qué escena quieres</p>
             <input
               type="text"
               value={extraPrompt}
@@ -1714,9 +1649,7 @@ function XmasPhotoPanel() {
             disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64 || !user}
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando..."
-              : "Ejecutar Foto Navideña IA"}
+            {status === "IN_QUEUE" || status === "IN_PROGRESS" ? "Generando..." : "Ejecutar Foto Navideña IA"}
           </button>
 
           <p className="mt-2 text-[11px] text-neutral-400">
@@ -1752,6 +1685,178 @@ function XmasPhotoPanel() {
 }
 
 // ---------------------------------------------------------
+// Wallet de Jades (logueado) – cobra y refresca user-status
+// ---------------------------------------------------------
+function JadeWalletPanel({ userStatus, onRefresh }) {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const packs = useMemo(
+    () => [
+      { id: "jade_50", title: "Pack 50 Jades", jades: 50, price: "9.00" },
+      { id: "jade_100", title: "Pack 100 Jades", jades: 100, price: "15.00" },
+      { id: "jade_300", title: "Pack 300 Jades", jades: 300, price: "39.00" },
+    ],
+    []
+  );
+
+  const handlePaddleJadesCheckout = async (pack) => {
+    if (!user?.id) return;
+    setError("");
+    try {
+      setBusy(true);
+      // Reutilizamos el endpoint existente (sin tocar otros flujos):
+      // El backend decide cómo interpretar "kind" y "pack".
+      const res = await fetch("/api/paddle-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "jades",
+          user_id: user.id,
+          pack_id: pack.id,
+          jades: pack.jades,
+          amount: pack.price,
+        }),
+      });
+      const data = await safeJson(res);
+      if (!res.ok || !data?.url) {
+        throw new Error(data?.error || "No se pudo abrir el pago con Paddle.");
+      }
+      window.location.href = data.url;
+    } catch (e) {
+      console.error("Paddle jades error:", e);
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const creditJadesWithPayPal = async (details, pack) => {
+    if (!user?.id) return;
+    setError("");
+    try {
+      setBusy(true);
+
+      // Endpoint dedicado para acreditar jades (Supabase) y devolver nuevo estado.
+      // Si tu backend usa otro nombre, solo cambia ESTA URL (no toca nada más).
+      const res = await fetch("/api/jades-credit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          pack_id: pack.id,
+          jades: pack.jades,
+          amount: pack.price,
+          provider: "paypal",
+          paypal: {
+            id: details?.id || null,
+            status: details?.status || null,
+            payer_email: details?.payer?.email_address || null,
+          },
+          raw: details || null,
+        }),
+      });
+
+      const data = await safeJson(res);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "No se pudo acreditar el paquete de jades.");
+      }
+
+      // Refrescar el user-status para actualizar el contador en UI
+      if (typeof onRefresh === "function") {
+        await onRefresh();
+      }
+
+      alert("Compra completada. Tus jades se han actualizado.");
+    } catch (e) {
+      console.error("PayPal jades credit error:", e);
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
+        Inicia sesión para acceder a tu wallet de jades.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+      <h2 className="text-lg font-semibold text-white">Wallet · Jades</h2>
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-neutral-300">
+            Jades:{" "}
+            <span className="font-semibold text-white">
+              {userStatus?.loading ? "..." : userStatus?.jades ?? 0}
+            </span>
+          </span>
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={busy}
+            className="rounded-xl border border-white/20 px-3 py-1.5 text-[11px] text-white hover:bg-white/10 disabled:opacity-60"
+          >
+            Actualizar
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="mt-3 text-xs text-red-400 whitespace-pre-line">{error}</p>}
+
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        {packs.map((pack) => (
+          <div key={pack.id} className="rounded-3xl border border-white/10 bg-black/50 p-5">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold text-white">{pack.title}</h3>
+              <div className="text-sm font-semibold text-white">US${pack.price}</div>
+            </div>
+
+            <p className="mt-2 text-[11px] text-neutral-400">Créditos para generación en módulos de video.</p>
+
+            <div className="mt-3 rounded-2xl bg-black/60 px-3 py-2 text-[11px] text-neutral-300">
+              Incluye: <span className="font-semibold text-white">{pack.jades} Jades</span>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-[11px] text-neutral-400 mb-1">
+                Pagar con <span className="font-semibold text-white">PayPal</span>:
+              </div>
+              <PayPalButton
+                amount={pack.price}
+                description={`IsabelaOS Studio – ${pack.title}`}
+                containerId={`paypal-${pack.id}`}
+                onPaid={(details) => creditJadesWithPayPal(details, pack)}
+              />
+
+              <button
+                type="button"
+                onClick={() => handlePaddleJadesCheckout(pack)}
+                disabled={busy}
+                className="mt-3 w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-60"
+              >
+                Pagar con tarjeta (Paddle)
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-5 text-[11px] text-neutral-400">
+        Si ya pagaste y no ves el saldo actualizado, usa “Actualizar”.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
 // Dashboard (logueado) con sidebar de vistas
 // ---------------------------------------------------------
 function DashboardView() {
@@ -1768,9 +1873,7 @@ function DashboardView() {
   const fetchUserStatus = async () => {
     if (!user?.id) return;
     try {
-      const r = await fetch(
-        `/api/user-status?user_id=${encodeURIComponent(user.id)}`
-      );
+      const r = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`);
       const data = await r.json().catch(() => null);
       if (!r.ok || !data?.ok) {
         throw new Error(data?.error || "user-status error");
@@ -1804,9 +1907,7 @@ function DashboardView() {
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
-    const body = encodeURIComponent(
-      "Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)"
-    );
+    const body = encodeURIComponent("Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)");
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
@@ -1842,9 +1943,7 @@ function DashboardView() {
               <span className="mx-1 h-3 w-px bg-white/10" />
               <span className="text-[11px] text-neutral-300">
                 Jades:{" "}
-                <span className="font-semibold text-white">
-                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
-                </span>
+                <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
               </span>
             </div>
 
@@ -1869,9 +1968,7 @@ function DashboardView() {
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
             <div className="flex items-center justify-between gap-2">
               <span className="text-neutral-400">{userPlanLabel}</span>
-              <span className="font-semibold text-white">
-                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
-              </span>
+              <span className="font-semibold text-white">Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
             </div>
           </div>
 
@@ -1920,6 +2017,17 @@ function DashboardView() {
               }`}
             >
               Biblioteca
+            </button>
+            <button
+              type="button"
+              onClick={() => setAppViewMode("wallet")}
+              className={`rounded-2xl px-3 py-1.5 ${
+                appViewMode === "wallet"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Wallet
             </button>
             <button
               type="button"
@@ -1985,6 +2093,19 @@ function DashboardView() {
             >
               Biblioteca de producción
             </button>
+
+            <button
+              type="button"
+              onClick={() => setAppViewMode("wallet")}
+              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                appViewMode === "wallet"
+                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
+              }`}
+            >
+              Wallet (jades)
+            </button>
+
             <button
               type="button"
               onClick={() => setAppViewMode("xmas")}
@@ -2002,7 +2123,8 @@ function DashboardView() {
             <div>
               <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
               <p className="mt-1 text-xs text-neutral-400">
-                Controla tu flujo de producción visual: genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
+                Controla tu flujo de producción visual: genera, revisa, descarga y administra resultados desde un
+                solo sistema conectado a GPU.
               </p>
             </div>
 
@@ -2010,6 +2132,7 @@ function DashboardView() {
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} />}
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} />}
             {appViewMode === "library" && <LibraryView />}
+            {appViewMode === "wallet" && <JadeWalletPanel userStatus={userStatus} onRefresh={fetchUserStatus} />}
             {appViewMode === "xmas" && <XmasPhotoPanel />}
           </div>
         </section>
@@ -2111,8 +2234,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala, diseñado para creadores,
-              estudios y equipos que necesitan velocidad, consistencia y control creativo.
+              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala,
+              diseñado para creadores, estudios y equipos que necesitan velocidad, consistencia y control creativo.
             </p>
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
@@ -2148,9 +2271,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text-white mb-3">
-              Calidad de estudio · Renderizado con el motor actual
-            </h2>
+            <h2 className="text-sm font-semibold text-white mb-3">Calidad de estudio · Renderizado con el motor actual</h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
@@ -2207,8 +2328,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
             <h3 className="text-sm font-semibold text-white">Especial Navidad · Foto Navideña IA</h3>
             <p className="mt-2 text-[11px] text-neutral-300">
-              Sube una foto real tuya o de tu familia y deja que IsabelaOS
-              Studio la convierta en un retrato navideño de estudio con fondo,
+              Sube una foto real tuya o de tu familia y deja que IsabelaOS Studio la convierta en un retrato navideño de estudio con fondo,
               luces y decoración generados por IA.
             </p>
             <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
@@ -2230,14 +2350,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         {/* Vista previa del panel */}
         <section className="mt-12">
           <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text-white mb-4">
-            Flujo de trabajo simple y potente
-          </h2>
+          <h2 className="text-sm font-semibold text-white mb-4">Flujo de trabajo simple y potente</h2>
           <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
             <h3 className="text-sm font-semibold text-white">Vista previa del panel del creador</h3>
             <p className="mt-2 text-[11px] text-neutral-400">
-              Interfaz simple para ejecutar renders, ajustar resolución y ver
-              resultados generados por el motor conectado a GPU.
+              Interfaz simple para ejecutar renders, ajustar resolución y ver resultados generados por el motor conectado a GPU.
             </p>
             <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
               <img src="/preview/panel.png" alt="Vista previa del panel de isabelaOs Studio" className="w-full object-cover" />
@@ -2247,20 +2364,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
         {/* Showcase BodySync */}
         <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-2">
-            Arquitectura preparada para BodySync · Movimiento corporal IA
-          </h2>
-          <p className="text-xs text-neutral-300 max-w-2xl">
-            Esta imagen fue generada con nuestro modelo de pruebas BodySync.
-          </p>
+          <h2 className="text-sm font-semibold text-white mb-2">Arquitectura preparada para BodySync · Movimiento corporal IA</h2>
+          <p className="text-xs text-neutral-300 max-w-2xl">Esta imagen fue generada con nuestro modelo de pruebas BodySync.</p>
 
           <div className="mt-6 flex justify-center">
             <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
-              <img
-                src="/gallery/bodysync_showcase.png"
-                alt="Ejemplo generado con BodySync"
-                className="w-full rounded-2xl object-cover"
-              />
+              <img src="/gallery/bodysync_showcase.png" alt="Ejemplo generado con BodySync" className="w-full rounded-2xl object-cover" />
             </div>
           </div>
         </section>
@@ -2294,11 +2403,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 <div className="text-[11px] text-neutral-400 mb-1">
                   Pagar con <span className="font-semibold text-white">PayPal</span>:
                 </div>
-                <PayPalButton
-                  amount="19.00"
-                  description="IsabelaOS Studio – Plan Basic (Mensual)"
-                  containerId="paypal-button-basic"
-                />
+                <PayPalButton amount="19.00" description="IsabelaOS Studio – Plan Basic (Mensual)" containerId="paypal-button-basic" />
                 <button
                   onClick={handlePaddleCheckout}
                   className="mt-3 w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
@@ -2330,11 +2435,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 <div className="text-[11px] text-neutral-400 mb-1">
                   Pagar con <span className="font-semibold text-white">PayPal</span>:
                 </div>
-                <PayPalButton
-                  amount="39.00"
-                  description="IsabelaOS Studio – Plan Pro (Mensual)"
-                  containerId="paypal-button-pro"
-                />
+                <PayPalButton amount="39.00" description="IsabelaOS Studio – Plan Pro (Mensual)" containerId="paypal-button-pro" />
                 <button
                   onClick={handlePaddleCheckout}
                   className="mt-3 w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
@@ -2345,17 +2446,14 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </div>
           </div>
 
-          <p className="mt-4 text-[11px] text-neutral-400">
-            ¿Te quedaste sin jades? Puedes comprar más dentro del panel (wallet).
-          </p>
+          <p className="mt-4 text-[11px] text-neutral-400">¿Te quedaste sin jades? Puedes comprar más dentro del panel (wallet).</p>
         </section>
 
         {/* Contacto */}
         <section id="contacto" className="mt-16 max-w-xl">
           <h2 className="text-sm font-semibold text-white">Contacto y soporte</h2>
           <p className="mt-1 text-xs text-neutral-400">
-            Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de
-            soporte responderá desde{" "}
+            Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de soporte responderá desde{" "}
             <span className="font-semibold text-white">contacto@isabelaos.com</span>.
           </p>
 
@@ -2387,10 +2485,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               />
             </div>
-            <button
-              type="submit"
-              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
-            >
+            <button type="submit" className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white">
               Enviar mensaje
             </button>
           </form>
@@ -2399,8 +2494,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
         <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
-              Guatemala, Cobán Alta Verapaz por Stalling Technologic.
+              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en Guatemala, Cobán Alta Verapaz por Stalling Technologic.
             </span>
             <span className="flex flex-wrap gap-3">
               <a href="/terms.html" className="hover:text-neutral-300">Términos de servicio</a>
@@ -2463,8 +2557,7 @@ export default function App() {
         <div
           className="min-h-screen px-4 py-10 text-white"
           style={{
-            background:
-              "radial-gradient(circle at 20% 10%, rgba(120,70,255,.25), transparent 45%), #05060A",
+            background: "radial-gradient(circle at 20% 10%, rgba(120,70,255,.25), transparent 45%), #05060A",
           }}
         >
           <div className="mx-auto max-w-6xl mb-6 flex items-center justify-between">
@@ -2500,4 +2593,3 @@ export default function App() {
     </>
   );
 }
-
