@@ -2,12 +2,18 @@
 // ============================================================
 // IsabelaOS Studio - Image → Video (Pods + async dispatch)
 //
-// Igual que /api/generate-video.js pero requiere image_b64 o image_url
-// y marca el job como kind "vid_img2vid" para cobro de jades.
+// + AUTH UNIFICADO (requireUser)
+// + COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { requireUser } from "./_auth";
+
+// =====================
+// COSTOS (JADE)
+// =====================
+const COST_IMG2VIDEO_JADES = 3; // <- AJUSTA AQUÍ
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -70,6 +76,44 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
+// =====================
+// ✅ Cobro unificado
+// =====================
+async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
+  if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+
+  const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`;
+
+  const r = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      p_user_id: user_id,
+      p_amount: amount,
+      p_reason: reason,
+      p_ref: ref,
+    }),
+  });
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    if ((t || "").includes("INSUFFICIENT_JADES")) {
+      const err = new Error("INSUFFICIENT_JADES");
+      err.code = 402;
+      throw err;
+    }
+    const err = new Error("RPC_SPEND_JADES_ERROR: " + t.slice(0, 300));
+    err.code = 500;
+    throw err;
+  }
+  return true;
+}
+
 async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
   const start = Date.now();
   const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
@@ -84,7 +128,7 @@ async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
         const txt = await r.text().catch(() => "");
         console.log("[I2V] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
         if (r.ok) return true;
-        if (r.status === 405) return true; // endpoint existe pero no acepta GET
+        if (r.status === 405) return true;
         lastInfo = `${url} -> ${r.status} ${txt.slice(0, 120)}`;
       } catch (e) {
         lastInfo = `${url} -> ERR ${String(e)}`;
@@ -102,12 +146,7 @@ async function acquireLock(sb) {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
 
-  const { data: row, error: readErr } = await sb
-    .from(POD_LOCK_TABLE)
-    .select("*")
-    .eq("id", 1)
-    .single();
-
+  const { data: row, error: readErr } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
   if (readErr) throw new Error("No existe pod_lock id=1 (crea row en Supabase)");
 
   const current = row.locked_until ? new Date(row.locked_until) : null;
@@ -135,9 +174,7 @@ async function waitForUnlock(sb) {
 // ---------- RunPod Pods ----------
 async function runpodCreatePodFromTemplate() {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) {
-    throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
-  }
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
 
   const body = {
     name: `isabela-i2v-${Date.now()}`,
@@ -166,13 +203,7 @@ async function runpodGetPod(podId) {
 }
 
 function pickPodStatus(pod) {
-  const raw =
-    pod?.status ??
-    pod?.state ??
-    pod?.desiredStatus ??
-    pod?.runtime?.status ??
-    pod?.pod?.status ??
-    "";
+  const raw = pod?.status ?? pod?.state ?? pod?.desiredStatus ?? pod?.runtime?.status ?? pod?.pod?.status ?? "";
   return String(raw || "").toUpperCase();
 }
 
@@ -250,12 +281,16 @@ export default async function handler(req, res) {
   try {
     sb = sbAdmin();
 
+    // ✅ AUTH ÚNICO
+    const auth = await requireUser(req);
+    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    const user_id = auth.user.id;
+
     const payloadRaw = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
     // Requerido para I2V
     const image_b64 = payloadRaw.image_b64 || null;
     const image_url = payloadRaw.image_url || null;
-
     if (!image_b64 && !image_url) {
       return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
     }
@@ -273,17 +308,19 @@ export default async function handler(req, res) {
 
     // Payload final para worker
     const payload = {
-      user_id: payloadRaw.user_id || "web-user",
+      user_id, // ✅ SIEMPRE desde auth
       prompt: payloadRaw.prompt || "",
       negative_prompt: payloadRaw.negative_prompt || "",
       image_b64,
       image_url,
-      // bandera para que tu worker sepa que es I2V
       action: "img2video",
       kind: "vid_img2vid",
       ...payloadRaw,
       ...maybeFast,
     };
+
+    // ✅ COBRO ANTES de pod/job
+    await spendJadesOrThrow(user_id, COST_IMG2VIDEO_JADES, "generation:img2video", payloadRaw.ref || null);
 
     // 1) Pod + worker ready
     const fresh = await ensureFreshPod(sb);
@@ -294,7 +331,7 @@ export default async function handler(req, res) {
 
     await createVideoJob(sb, {
       job_id,
-      user_id: payloadRaw.user_id || null,
+      user_id,
       status: "QUEUED",
       payload,
       pod_id: podId,
@@ -354,10 +391,12 @@ export default async function handler(req, res) {
       status: "IN_PROGRESS",
       podId,
       worker: fresh.workerUrl,
+      billed: { type: "JADE", amount: COST_IMG2VIDEO_JADES },
       note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=...",
     });
   } catch (e) {
     const msg = String(e?.message || e);
+    const code = e?.code || 500;
     console.error("[I2V] ERROR:", msg);
 
     try {
@@ -366,6 +405,6 @@ export default async function handler(req, res) {
       }
     } catch {}
 
-    return res.status(500).json({ ok: false, error: msg, podId });
+    return res.status(code).json({ ok: false, error: msg, podId });
   }
 }
