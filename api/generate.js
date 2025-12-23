@@ -2,14 +2,15 @@
 // --- Lanza el job en RunPod y devuelve jobId
 // --- + CANDADO DE COBRO (jades) ANTES de generar (EDGE compatible)
 
-const COST_IMG_PROMPT_JADES = 1; // <- AJUSTA AQUÍ si tu costo real es otro
+const COST_IMG_PROMPT_JADES = 1; // <- AJUSTA AQUÍ
 
 export default async function handler(req) {
   // CORS + JSON header
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "content-type",
+    // ✅ agrega authorization para que el browser pueda mandar el token
+    "access-control-allow-headers": "content-type, authorization",
     "content-type": "application/json; charset=utf-8",
   };
 
@@ -39,13 +40,6 @@ export default async function handler(req) {
     // =========================
     // 1) CANDADO: LOGIN + COBRO
     // =========================
-    const user_id = body.user_id || null;
-    if (!user_id) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "LOGIN_REQUIRED", note: "Se requiere user_id para aplicar cobro/candado." }),
-        { status: 401, headers: cors }
-      );
-    }
 
     // ENV Supabase (service role) para cobrar
     const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -62,8 +56,63 @@ export default async function handler(req) {
       );
     }
 
-    // Cobra jades antes de generar (RPC spend_jades)
-    // OJO: esto asume que tu RPC existe y devuelve error con mensaje INSUFFICIENT_JADES.
+    // ✅ 1A) Resolver user_id:
+    // - Primero usa body.user_id (si viene)
+    // - Si no viene, lo saca del access_token (Authorization: Bearer ...)
+    let user_id = body.user_id || null;
+
+    if (!user_id) {
+      const auth = req.headers.get("authorization") || "";
+      const m = auth.match(/^Bearer\s+(.+)$/i);
+      const accessToken = m ? m[1] : null;
+
+      if (!accessToken) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: "LOGIN_REQUIRED",
+            note: "Falta user_id y no vino Authorization Bearer token.",
+          }),
+          { status: 401, headers: cors }
+        );
+      }
+
+      // Verificar token contra Supabase (Edge-friendly) usando Admin endpoint
+      const getUserUrl = `${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`;
+
+      const ures = await fetch(getUserUrl, {
+        method: "GET",
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY, // requerido por Supabase
+          Authorization: `Bearer ${accessToken}`, // ✅ OJO: aquí va el ACCESS TOKEN del usuario
+        },
+      });
+
+      if (!ures.ok) {
+        const utxt = await ures.text();
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: "LOGIN_REQUIRED",
+            note: "Token inválido o expirado.",
+            details: utxt,
+          }),
+          { status: 401, headers: cors }
+        );
+      }
+
+      const ujson = await ures.json();
+      user_id = ujson?.id || ujson?.user?.id || null;
+
+      if (!user_id) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "LOGIN_REQUIRED", note: "No se pudo obtener user_id del token." }),
+          { status: 401, headers: cors }
+        );
+      }
+    }
+
+    // ✅ 1B) Cobra jades antes de generar (RPC spend_jades)
     const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`;
 
     const spendRes = await fetch(rpcUrl, {
@@ -84,7 +133,6 @@ export default async function handler(req) {
     if (!spendRes.ok) {
       const spendTxt = await spendRes.text();
 
-      // Si tu RPC tira ese texto/mensaje, lo interpretamos:
       if ((spendTxt || "").includes("INSUFFICIENT_JADES")) {
         return new Response(JSON.stringify({ ok: false, error: "INSUFFICIENT_JADES" }), {
           status: 402,
@@ -92,7 +140,6 @@ export default async function handler(req) {
         });
       }
 
-      // Otro error RPC
       return new Response(
         JSON.stringify({ ok: false, error: "RPC_SPEND_JADES_ERROR", details: spendTxt }),
         { status: 500, headers: cors }
@@ -130,18 +177,17 @@ export default async function handler(req) {
           width: body.width || 512,
           height: body.height || 512,
           steps: body.steps || 22,
-          // metadata opcional
-          user_id,
+          user_id, // ✅ ya resuelto bien
         },
       }),
     });
 
     if (!rp.ok) {
       const txt = await rp.text();
-      return new Response(
-        JSON.stringify({ ok: false, error: "RUNPOD_RUN_ERROR", details: txt }),
-        { status: rp.status, headers: cors }
-      );
+      return new Response(JSON.stringify({ ok: false, error: "RUNPOD_RUN_ERROR", details: txt }), {
+        status: rp.status,
+        headers: cors,
+      });
     }
 
     const data = await rp.json();
@@ -149,10 +195,10 @@ export default async function handler(req) {
     const jobId = data.id || data.requestId || data.jobId || data.data?.id;
 
     if (!jobId) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "RUNPOD_NO_ID", raw: data }),
-        { status: 500, headers: cors }
-      );
+      return new Response(JSON.stringify({ ok: false, error: "RUNPOD_NO_ID", raw: data }), {
+        status: 500,
+        headers: cors,
+      });
     }
 
     return new Response(
@@ -164,10 +210,10 @@ export default async function handler(req) {
       { status: 200, headers: cors }
     );
   } catch (e) {
-    return new Response(
-      JSON.stringify({ ok: false, error: "SERVER_ERROR", details: String(e) }),
-      { status: 500, headers: cors }
-    );
+    return new Response(JSON.stringify({ ok: false, error: "SERVER_ERROR", details: String(e) }), {
+      status: 500,
+      headers: cors,
+    });
   }
 }
 
