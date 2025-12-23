@@ -1,4 +1,3 @@
-// src/context/AuthContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -9,9 +8,12 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null); // ✅ NUEVO
   const [loading, setLoading] = useState(true);
 
-  // Cargar sesión inicial y suscribirnos a cambios
+  // ---------------------------------------------------
+  // Cargar sesión inicial y escuchar cambios
+  // ---------------------------------------------------
   useEffect(() => {
     console.log("[Auth] initSession: obteniendo sesión actual...");
 
@@ -22,8 +24,12 @@ export function AuthProvider({ children }) {
         console.error("[Auth] getSession error:", error);
       }
 
-      const currentUser = data?.session?.user ?? null;
+      const currentSession = data?.session ?? null;
+      const currentUser = currentSession?.user ?? null;
+
       console.log("[Auth] Sesión inicial:", currentUser);
+
+      setSession(currentSession); // ✅
       setUser(currentUser);
       setLoading(false);
     };
@@ -38,6 +44,8 @@ export function AuthProvider({ children }) {
         event,
         session?.user ?? null
       );
+
+      setSession(session ?? null); // ✅
       setUser(session?.user ?? null);
     });
 
@@ -51,6 +59,7 @@ export function AuthProvider({ children }) {
   // ---------------------------------------------------
   const signInWithEmail = async (email, password) => {
     console.log("[Auth] signInWithEmail:", email);
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -71,7 +80,6 @@ export function AuthProvider({ children }) {
       email,
       password,
       options: {
-        // Adonde vuelve Supabase después de confirmar correo (si lo tienes activo)
         emailRedirectTo:
           typeof window !== "undefined"
             ? `${window.location.origin}/`
@@ -105,25 +113,30 @@ export function AuthProvider({ children }) {
       throw error;
     }
 
-    // IMPORTANTE: esta llamada normalmente redirige a Google,
-    // por eso no hacemos nada más aquí.
     return data;
   };
 
   const signOut = async () => {
     console.log("[Auth] signOut");
+
     const { error } = await supabase.auth.signOut();
 
     if (error) {
       console.error("[Auth] signOut error:", error);
       throw error;
     }
+
+    setSession(null); // ✅ limpieza explícita
+    setUser(null);
   };
 
+  // ---------------------------------------------------
+  // Context value
+  // ---------------------------------------------------
   const value = {
     user,
+    session, // ✅ CLAVE PARA fetchWithAuth
     loading,
-    // Ajusta este correo al admin real si quieres
     isAdmin: !!user && user.email === "admin@isabelaos.com",
     signInWithEmail,
     signUpWithEmail,
@@ -133,13 +146,15 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={value}>
-      {/* Mientras loading es true, evitamos parpadeos raros */}
+      {/* Evita parpadeos mientras se hidrata la sesión */}
       {!loading && children}
     </AuthContext.Provider>
   );
 }
 
-// Hook para usar el contexto
+// -----------------------------------------------------
+// Hook
+// -----------------------------------------------------
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {
@@ -147,5 +162,3 @@ export function useAuth() {
   }
   return ctx;
 }
-
-
