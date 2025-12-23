@@ -1,21 +1,23 @@
-// api/user-status.js
+// /api/user-status.js
 import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
   // CORS
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "GET, OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
+  res.setHeader("access-control-allow-headers", "content-type, authorization");
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
 
+  // ✅ Debug seguro (NO expone user_id/correos)
   const debug = {
     step: "start",
     hasUrl: !!process.env.SUPABASE_URL,
     hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    hasAnonKey: !!process.env.SUPABASE_ANON_KEY,
     host: req.headers?.host || null,
     xfProto: req.headers?.["x-forwarded-proto"] || null,
   };
@@ -27,9 +29,52 @@ export default async function handler(req, res) {
     const path = req.url || "/";
     const url = new URL(`${proto}://${host}${path}`);
 
+    // ---------------------------------------------------------
+    // ✅ CAMBIO: funciona para todos
+    // 1) Acepta user_id por query ?user_id=
+    // 2) O si NO viene, lo toma del JWT en Authorization: Bearer <token>
+    // ---------------------------------------------------------
     debug.step = "read_user_id";
-    const user_id = url.searchParams.get("user_id");
-    debug.user_id = user_id || null;
+    let user_id = url.searchParams.get("user_id");
+
+    if (!user_id) {
+      debug.step = "read_auth_header";
+      const authHeader = req.headers?.authorization || req.headers?.Authorization || "";
+      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice("Bearer ".length).trim()
+        : null;
+
+      if (token) {
+        debug.step = "verify_jwt_get_user";
+        const SUPABASE_URL = process.env.SUPABASE_URL;
+        const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+        if (!SUPABASE_URL || !ANON_KEY) {
+          return res.status(500).json({
+            ok: false,
+            error: "MISSING_SUPABASE_ENV",
+            debug,
+          });
+        }
+
+        const sbAuth = createClient(SUPABASE_URL, ANON_KEY, {
+          auth: { persistSession: false },
+        });
+
+        const { data: userData, error: userErr } = await sbAuth.auth.getUser(token);
+
+        if (userErr || !userData?.user?.id) {
+          return res.status(401).json({
+            ok: false,
+            error: "UNAUTHORIZED",
+            detail: userErr?.message || "INVALID_TOKEN",
+            debug,
+          });
+        }
+
+        user_id = userData.user.id;
+      }
+    }
 
     if (!user_id) {
       return res.status(400).json({ ok: false, error: "MISSING_USER_ID", debug });
@@ -94,6 +139,8 @@ export default async function handler(req, res) {
       is_active: active,
       debug: {
         ...debug,
+        // ✅ CAMBIO: NO exponemos user_id (ni correos si alguien lo mandaba)
+        user_id: null,
         has_sub_row: !!sub,
         has_wallet_row: !!wallet,
       },
@@ -103,7 +150,10 @@ export default async function handler(req, res) {
       ok: false,
       error: "SERVER_ERROR",
       detail: String(e),
-      debug,
+      debug: {
+        ...debug,
+        user_id: null, // ✅ no exponer nada sensible
+      },
     });
   }
 }
