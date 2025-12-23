@@ -1,3 +1,4 @@
+// App.jsx
 import { useState, useEffect, useMemo } from "react";
 
 import { useAuth } from "./context/AuthContext";
@@ -294,7 +295,7 @@ function AuthModal({ open, onClose }) {
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
 
   const userLoggedIn = !isDemo && user;
 
@@ -353,13 +354,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
     try {
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
       if (data.url) {
@@ -430,15 +427,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setStatusText("Enviando job a RunPod...");
 
     try {
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userLoggedIn ? user.id : null, // ✅ CAMBIO MÍNIMO: incluir user_id cuando hay sesión
+          user_id: userLoggedIn ? user.id : null,
           prompt,
           negative_prompt: negative,
           width: Number(width),
@@ -461,12 +454,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusHeaders = {};
-        if (accessToken) statusHeaders.Authorization = `Bearer ${accessToken}`;
-
-        const statusRes = await fetch(`/api/status?id=${jobId}`, {
-          headers: statusHeaders,
-        });
+        const statusRes = await fetch(`/api/status?id=${jobId}`);
         const statusData = await statusRes.json();
 
         if (!statusRes.ok || statusData.error) {
@@ -577,7 +565,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
           Motor de imagen · Producción visual
@@ -718,7 +705,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         </div>
       </div>
 
-      {/* Resultado */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
@@ -891,7 +877,7 @@ function LibraryView() {
 // Módulo: Video desde prompt (logueado)
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
 
   const [prompt, setPrompt] = useState(
     "Cinematic short scene, ultra detailed, soft light, 8k"
@@ -910,13 +896,8 @@ function VideoFromPromptPanel({ userStatus }) {
   const canUse = !!user;
 
   const pollVideoStatus = async (job_id) => {
-    const accessToken = session?.access_token;
-    const headers = {};
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
     const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
-      { headers }
+      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
     );
     const data = await r.json().catch(() => null);
     if (!r.ok || !data)
@@ -932,13 +913,9 @@ function VideoFromPromptPanel({ userStatus }) {
     setStatusText("Enviando job de video a RunPod...");
 
     try {
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/generate-video", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt,
@@ -987,7 +964,6 @@ function VideoFromPromptPanel({ userStatus }) {
 
         finished = true;
 
-        // Normalizamos posibles salidas
         const out = stData.output || stData.result || stData.data || null;
         const maybeUrl =
           out?.video_url ||
@@ -1008,7 +984,6 @@ function VideoFromPromptPanel({ userStatus }) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            // si el backend devuelve base64, lo convertimos
             const b64 =
               out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
 
@@ -1181,7 +1156,7 @@ function b64ToBlob(b64, contentType = "application/octet-stream") {
 // Módulo: Imagen -> Video (logueado)
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus }) {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
@@ -1229,13 +1204,8 @@ function Img2VideoPanel({ userStatus }) {
   };
 
   const pollVideoStatus = async (job_id) => {
-    const accessToken = session?.access_token;
-    const headers = {};
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
     const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
-      { headers }
+      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
     );
     const data = await r.json().catch(() => null);
     if (!r.ok || !data)
@@ -1258,13 +1228,9 @@ function Img2VideoPanel({ userStatus }) {
         return;
       }
 
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/generate-img2video", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt: prompt || "",
@@ -1335,7 +1301,8 @@ function Img2VideoPanel({ userStatus }) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
+            const b64 =
+              out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
 
             if (b64) {
               const blob = b64ToBlob(b64, "video/mp4");
@@ -1343,7 +1310,9 @@ function Img2VideoPanel({ userStatus }) {
               setVideoUrl(url);
               setStatusText("Video generado con éxito.");
             } else {
-              throw new Error("Job terminado pero no se recibió video en la salida.");
+              throw new Error(
+                "Job terminado pero no se recibió video en la salida."
+              );
             }
           }
         } else {
@@ -1383,7 +1352,8 @@ function Img2VideoPanel({ userStatus }) {
           Transformación visual · Imagen a video
         </h2>
         <p className="mt-2 text-sm text-neutral-300">
-          Sube una imagen (o usa una URL) y conviértela en un clip dentro del flujo de producción.
+          Sube una imagen (o usa una URL) y conviértela en un clip dentro del
+          flujo de producción.
         </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
@@ -1392,14 +1362,19 @@ function Img2VideoPanel({ userStatus }) {
             <span className="text-[11px] text-neutral-400">
               {userStatus?.jades != null ? (
                 <>
-                  Jades: <span className="font-semibold text-white">{userStatus.jades}</span>
+                  Jades:{" "}
+                  <span className="font-semibold text-white">
+                    {userStatus.jades}
+                  </span>
                 </>
               ) : (
                 <>Jades: ...</>
               )}
             </span>
           </div>
-          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+          {jobId && (
+            <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
+          )}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -1484,7 +1459,9 @@ function Img2VideoPanel({ userStatus }) {
             </div>
           </div>
 
-          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
         </div>
       </div>
 
@@ -1492,7 +1469,11 @@ function Img2VideoPanel({ userStatus }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
+            <video
+              src={videoUrl}
+              controls
+              className="h-full w-full rounded-2xl object-contain"
+            />
           ) : (
             <p>Aquí verás el video en cuanto se complete la generación.</p>
           )}
@@ -1549,7 +1530,7 @@ function VideoPlaceholderPanel() {
 // Módulo Foto Navideña IA (Premium)
 // ---------------------------------------------------------
 function XmasPhotoPanel() {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
@@ -1642,13 +1623,9 @@ function XmasPhotoPanel() {
     setStatusText("Enviando foto navideña a RunPod...");
 
     try {
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: pureB64,
           description: extraPrompt || "",
@@ -1669,12 +1646,7 @@ function XmasPhotoPanel() {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusHeaders = {};
-        if (accessToken) statusHeaders.Authorization = `Bearer ${accessToken}`;
-
-        const statusRes = await fetch(`/api/status?id=${jobId}`, {
-          headers: statusHeaders,
-        });
+        const statusRes = await fetch(`/api/status?id=${jobId}`);
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
@@ -1765,7 +1737,9 @@ function XmasPhotoPanel() {
             Estado actual: {statusText || "Listo para enviar tu foto al motor."}
           </div>
 
-          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
+          {error && (
+            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+          )}
 
           <button
             type="button"
@@ -1814,7 +1788,7 @@ function XmasPhotoPanel() {
 // Wallet de Jades (logueado) – cobra y refresca user-status
 // ---------------------------------------------------------
 function JadeWalletPanel({ userStatus, onRefresh }) {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -1832,15 +1806,9 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
     setError("");
     try {
       setBusy(true);
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
-      // Reutilizamos el endpoint existente (sin tocar otros flujos):
-      // El backend decide cómo interpretar "kind" y "pack".
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "jades",
           user_id: user.id,
@@ -1868,15 +1836,9 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
     try {
       setBusy(true);
 
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
-      // Endpoint dedicado para acreditar jades (Supabase) y devolver nuevo estado.
-      // Si tu backend usa otro nombre, solo cambia ESTA URL (no toca nada más).
       const res = await fetch("/api/jades-credit", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user.id,
           pack_id: pack.id,
@@ -1897,7 +1859,6 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
         throw new Error(data?.error || "No se pudo acreditar el paquete de jades.");
       }
 
-      // Refrescar el user-status para actualizar el contador en UI
       if (typeof onRefresh === "function") {
         await onRefresh();
       }
@@ -1994,7 +1955,7 @@ function JadeWalletPanel({ userStatus, onRefresh }) {
 // Dashboard (logueado) con sidebar de vistas
 // ---------------------------------------------------------
 function DashboardView() {
-  const { user, session, isAdmin, signOut } = useAuth();
+  const { user, isAdmin, signOut } = useAuth();
   const [appViewMode, setAppViewMode] = useState("generator");
 
   const [userStatus, setUserStatus] = useState({
@@ -2007,13 +1968,8 @@ function DashboardView() {
   const fetchUserStatus = async () => {
     if (!user?.id) return;
     try {
-      const accessToken = session?.access_token;
-      const headers = {};
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const r = await fetch(
-        `/api/user-status?user_id=${encodeURIComponent(user.id)}`,
-        { headers }
+        `/api/user-status?user_id=${encodeURIComponent(user.id)}`
       );
       const data = await r.json().catch(() => null);
       if (!r.ok || !data?.ok) {
@@ -2036,7 +1992,7 @@ function DashboardView() {
     fetchUserStatus();
     const t = setInterval(fetchUserStatus, 15000);
     return () => clearInterval(t);
-  }, [user?.id, session?.access_token]);
+  }, [user?.id]);
 
   const userPlanLabel = useMemo(() => {
     if (userStatus.loading) return "Cargando...";
@@ -2052,6 +2008,15 @@ function DashboardView() {
       "Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)"
     );
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
+  };
+
+  // ✅ ÚNICO CAMBIO AUTORIZADO: asegurar retorno a landing al cerrar sesión
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } finally {
+      window.location.href = "/";
+    }
   };
 
   return (
@@ -2098,8 +2063,9 @@ function DashboardView() {
             >
               Contacto
             </button>
+
             <button
-              onClick={signOut}
+              onClick={handleSignOut}
               className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Cerrar sesión
@@ -2298,17 +2264,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
 
-  const { session } = useAuth();
-
   const handlePaddleCheckout = async () => {
     try {
-      const accessToken = session?.access_token;
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
       if (data.url) {
@@ -2391,7 +2351,6 @@ export default function App() {
     document.documentElement.style.background = "#06070B";
   }, []);
 
-  // ✅ FIX: no forzar setViewMode("landing") al abrir auth
   const openAuth = () => {
     setShowAuthModal(true);
   };
@@ -2419,7 +2378,6 @@ export default function App() {
     return <DashboardView />;
   }
 
-  // ✅ FIX: demo mode sin duplicar landing (solo demo + header + auth modal)
   if (viewMode === "demo") {
     return (
       <>
