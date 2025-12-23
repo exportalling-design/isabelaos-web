@@ -429,6 +429,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          user_id: userLoggedIn ? user.id : null, // ✅ CAMBIO MÍNIMO: incluir user_id cuando hay sesión
           prompt,
           negative_prompt: negative,
           width: Number(width),
