@@ -16,6 +16,13 @@ const DEMO_LIMIT = 3; // Imágenes para usuarios sin registrar (Modo Invitado)
 const DAILY_LIMIT = 5; // Imágenes para usuarios registrados (Modo Beta Gratuito)
 
 // ---------------------------------------------------------
+// COSTOS DE TOKENS (JADES)
+// ---------------------------------------------------------
+const COST_VIDEO_FROM_PROMPT = 20;
+const COST_IMG2VIDEO = 25;
+const COST_XMAS_PHOTO = 10;
+
+// ---------------------------------------------------------
 // PayPal – Client ID
 // ---------------------------------------------------------
 const PAYPAL_CLIENT_ID =
@@ -276,7 +283,7 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
-function CreatorPanel({ isDemo = false, onAuthRequired }) {
+function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && user;
@@ -297,37 +304,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [error, setError] = useState("");
 
   const [dailyCount, setDailyCount] = useState(0);
-  const [isPremium, setIsPremium] = useState(false);
 
-  const premiumKey = userLoggedIn ? `isabelaos_premium_${user.id}` : null;
-
-  useEffect(() => {
-    if (!userLoggedIn) {
-      setIsPremium(false);
-      setDailyCount(0);
-      return;
-    }
-
-    if (user.email === "exportalling@gmail.com") {
-      setIsPremium(true);
-      if (premiumKey) {
-        try {
-          localStorage.setItem(premiumKey, "1");
-        } catch (e) {
-          console.warn("No se pudo guardar premium para exportalling:", e);
-        }
-      }
-      return;
-    }
-
-    try {
-      const stored = premiumKey ? localStorage.getItem(premiumKey) : null;
-      setIsPremium(stored === "1");
-    } catch (e) {
-      console.warn("No se pudo leer premium desde localStorage:", e);
-      setIsPremium(false);
-    }
-  }, [userLoggedIn, user, premiumKey]);
+  const isPremium =
+    !isDemo &&
+    !!user &&
+    (userStatus?.subscription_status === "active");
 
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
@@ -501,24 +482,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     document.body.removeChild(link);
   };
 
-  const handlePayPalUnlock = () => {
-    if (!userLoggedIn || !premiumKey) return;
-    try {
-      localStorage.setItem(premiumKey, "1");
-      setIsPremium(true);
-      setError("");
-      setStatus("IDLE");
-      setStatusText(
-        "Plan Basic activado: acceso sin límite y módulos premium habilitados."
-      );
-      alert(
-        "Tu Plan Basic está activo. Desde ahora puedes generar sin límite y acceder a módulos premium."
-      );
-    } catch (e) {
-      console.error("No se pudo guardar premium en localStorage:", e);
-    }
-  };
-
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
@@ -621,7 +584,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan Basic activo (sin límite y con acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -668,7 +631,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                   amount="19.00"
                   description="IsabelaOS Studio – Plan Basic (Mensual)"
                   containerId="paypal-button-panel"
-                  onPaid={handlePayPalUnlock}
+                  onPaid={() => {
+                    alert(
+                      "Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio."
+                    );
+                  }}
                 />
               </div>
             </>
@@ -845,7 +812,7 @@ function LibraryView() {
 // ---------------------------------------------------------
 // Módulo: Video desde prompt (logueado)
 // ---------------------------------------------------------
-function VideoFromPromptPanel({ userStatus }) {
+function VideoFromPromptPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
 
   const [prompt, setPrompt] = useState(
@@ -863,6 +830,10 @@ function VideoFromPromptPanel({ userStatus }) {
   const [error, setError] = useState("");
 
   const canUse = !!user;
+
+  const cost = COST_VIDEO_FROM_PROMPT;
+  const currentJades = userStatus?.jades ?? 0;
+  const hasEnough = currentJades >= cost;
 
   const pollVideoStatus = async (job_id) => {
     const r = await fetch(
@@ -882,6 +853,17 @@ function VideoFromPromptPanel({ userStatus }) {
     setStatusText("Enviando job de video a RunPod...");
 
     try {
+      if (!hasEnough) {
+        setStatus("ERROR");
+        setStatusText("No tienes jades suficientes.");
+        setError(`Necesitas ${cost} jades para generar este video.`);
+        return;
+      }
+
+      if (typeof spendJades === "function") {
+        await spendJades({ amount: cost, reason: "video_from_prompt" });
+      }
+
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1023,6 +1005,9 @@ function VideoFromPromptPanel({ userStatus }) {
               )}
             </span>
           </div>
+          <div className="mt-1 text-[11px] text-neutral-400">
+            Costo: <span className="font-semibold text-white">{cost}</span> jades por video
+          </div>
           {jobId && (
             <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
           )}
@@ -1063,11 +1048,13 @@ function VideoFromPromptPanel({ userStatus }) {
               <button
                 type="button"
                 onClick={handleGenerateVideo}
-                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
+                  : !hasEnough
+                  ? "Sin jades suficientes"
                   : "Ejecutar render de video"}
               </button>
             </div>
@@ -1123,7 +1110,7 @@ function b64ToBlob(b64, contentType = "application/octet-stream") {
 // ---------------------------------------------------------
 // Módulo: Imagen -> Video (logueado)
 // ---------------------------------------------------------
-function Img2VideoPanel({ userStatus }) {
+function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
@@ -1142,6 +1129,10 @@ function Img2VideoPanel({ userStatus }) {
   const fileInputId = "img2video-file-input";
 
   const canUse = !!user;
+
+  const cost = COST_IMG2VIDEO;
+  const currentJades = userStatus?.jades ?? 0;
+  const hasEnough = currentJades >= cost;
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -1189,11 +1180,22 @@ function Img2VideoPanel({ userStatus }) {
     setStatusText("Enviando Imagen → Video a RunPod...");
 
     try {
+      if (!hasEnough) {
+        setStatus("ERROR");
+        setStatusText("No tienes jades suficientes.");
+        setError(`Necesitas ${cost} jades para Imagen → Video.`);
+        return;
+      }
+
       if (!pureB64 && !imageUrl) {
         setStatus("ERROR");
         setStatusText("Falta imagen.");
         setError("Por favor sube una imagen o pega una URL de imagen.");
         return;
+      }
+
+      if (typeof spendJades === "function") {
+        await spendJades({ amount: cost, reason: "img2video" });
       }
 
       const res = await fetch("/api/generate-img2video", {
@@ -1337,6 +1339,9 @@ function Img2VideoPanel({ userStatus }) {
               )}
             </span>
           </div>
+          <div className="mt-1 text-[11px] text-neutral-400">
+            Costo: <span className="font-semibold text-white">{cost}</span> jades por video
+          </div>
           {jobId && (
             <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
           )}
@@ -1414,11 +1419,13 @@ function Img2VideoPanel({ userStatus }) {
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS"}
+                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
+                  : !hasEnough
+                  ? "Sin jades suficientes"
                   : "Ejecutar Imagen → Video"}
               </button>
             </div>
@@ -1497,7 +1504,7 @@ function VideoPlaceholderPanel() {
 // ---------------------------------------------------------
 // Módulo Foto Navideña IA (Premium)
 // ---------------------------------------------------------
-function XmasPhotoPanel() {
+function XmasPhotoPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
@@ -1508,34 +1515,8 @@ function XmasPhotoPanel() {
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
 
-  const [isPremium, setIsPremium] = useState(false);
-
-  useEffect(() => {
-    if (!user) {
-      setIsPremium(false);
-      return;
-    }
-
-    const premiumKey = `isabelaos_premium_${user.id}`;
-
-    if (user.email === "exportalling@gmail.com") {
-      setIsPremium(true);
-      try {
-        localStorage.setItem(premiumKey, "1");
-      } catch (e) {
-        console.warn("No se pudo guardar premium para exportalling en Xmas:", e);
-      }
-      return;
-    }
-
-    try {
-      const stored = localStorage.getItem(premiumKey);
-      setIsPremium(stored === "1");
-    } catch (e) {
-      console.warn("No se pudo leer premium desde localStorage en Xmas:", e);
-      setIsPremium(false);
-    }
-  }, [user]);
+  const isPremium =
+    !!user && (userStatus?.subscription_status === "active");
 
   const fileInputId = "xmas-file-input";
 
@@ -1794,6 +1775,28 @@ function DashboardView() {
     return () => clearInterval(t);
   }, [user?.id]);
 
+  const spendJades = async ({ amount, reason }) => {
+    if (!user?.id) throw new Error("No user");
+
+    const r = await fetch("/api/jades-spend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        amount: Number(amount),
+        reason: reason || "spend",
+      }),
+    });
+
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.ok) {
+      throw new Error(data?.error || "No se pudo descontar jades.");
+    }
+
+    await fetchUserStatus();
+    return data;
+  };
+
   const userPlanLabel = useMemo(() => {
     if (userStatus.loading) return "Cargando...";
     if (userStatus.subscription_status === "active" && userStatus.plan) {
@@ -2006,11 +2009,15 @@ function DashboardView() {
               </p>
             </div>
 
-            {appViewMode === "generator" && <CreatorPanel />}
-            {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} />}
-            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} />}
+            {appViewMode === "generator" && <CreatorPanel userStatus={userStatus} />}
+            {appViewMode === "video_prompt" && (
+              <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
+            )}
+            {appViewMode === "img2video" && (
+              <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
+            )}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "xmas" && <XmasPhotoPanel />}
+            {appViewMode === "xmas" && <XmasPhotoPanel userStatus={userStatus} />}
           </div>
         </section>
       </main>
@@ -2484,7 +2491,7 @@ export default function App() {
           </div>
 
           <div className="mx-auto max-w-6xl">
-            <CreatorPanel isDemo={true} onAuthRequired={openAuth} />
+            <CreatorPanel isDemo={true} onAuthRequired={openAuth} userStatus={null} />
           </div>
         </div>
 
