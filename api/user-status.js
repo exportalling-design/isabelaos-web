@@ -15,9 +15,10 @@ export default async function handler(req, res) {
   // ✅ Debug seguro (NO expone user_id/correos)
   const debug = {
     step: "start",
-    hasUrl: !!process.env.SUPABASE_URL,
+    hasUrl: !!(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL),
     hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    hasAnonKey: !!process.env.SUPABASE_ANON_KEY,
+    // ✅ acepta ambas (SUPABASE_ANON_KEY o VITE_SUPABASE_ANON_KEY)
+    hasAnonKey: !!(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY),
     host: req.headers?.host || null,
     xfProto: req.headers?.["x-forwarded-proto"] || null,
   };
@@ -30,29 +31,37 @@ export default async function handler(req, res) {
     const url = new URL(`${proto}://${host}${path}`);
 
     // ---------------------------------------------------------
-    // ✅ CAMBIO: funciona para todos
-    // 1) Acepta user_id por query ?user_id=
-    // 2) O si NO viene, lo toma del JWT en Authorization: Bearer <token>
+    // ✅ 1) acepta user_id por query ?user_id=
+    // ✅ 2) si NO viene, lo toma del JWT Authorization: Bearer <token>
     // ---------------------------------------------------------
     debug.step = "read_user_id";
     let user_id = url.searchParams.get("user_id");
 
     if (!user_id) {
       debug.step = "read_auth_header";
-      const authHeader = req.headers?.authorization || req.headers?.Authorization || "";
-      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
-        ? authHeader.slice("Bearer ".length).trim()
-        : null;
+      const authHeader =
+        req.headers?.authorization || req.headers?.Authorization || "";
+      const token =
+        typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+          ? authHeader.slice("Bearer ".length).trim()
+          : null;
 
       if (token) {
         debug.step = "verify_jwt_get_user";
-        const SUPABASE_URL = process.env.SUPABASE_URL;
-        const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+        // ✅ ALINEADO: acepta SUPABASE_URL o VITE_SUPABASE_URL
+        const SUPABASE_URL =
+          process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
+        // ✅ ALINEADO: acepta SUPABASE_ANON_KEY o VITE_SUPABASE_ANON_KEY
+        const ANON_KEY =
+          process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
         if (!SUPABASE_URL || !ANON_KEY) {
           return res.status(500).json({
             ok: false,
             error: "MISSING_SUPABASE_ENV",
+            detail: "Falta SUPABASE_URL/VITE_SUPABASE_URL o SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY",
             debug,
           });
         }
@@ -61,7 +70,8 @@ export default async function handler(req, res) {
           auth: { persistSession: false },
         });
 
-        const { data: userData, error: userErr } = await sbAuth.auth.getUser(token);
+        const { data: userData, error: userErr } =
+          await sbAuth.auth.getUser(token);
 
         if (userErr || !userData?.user?.id) {
           return res.status(401).json({
@@ -81,13 +91,18 @@ export default async function handler(req, res) {
     }
 
     debug.step = "init_supabase";
-    const SUPABASE_URL = process.env.SUPABASE_URL;
+
+    // ✅ Admin/Service role para leer tablas
+    const SUPABASE_URL =
+      process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
     const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!SUPABASE_URL || !SERVICE_KEY) {
       return res.status(500).json({
         ok: false,
         error: "MISSING_SUPABASE_ENV",
+        detail: "Falta SUPABASE_URL/VITE_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY",
         debug,
       });
     }
@@ -139,7 +154,7 @@ export default async function handler(req, res) {
       is_active: active,
       debug: {
         ...debug,
-        // ✅ CAMBIO: NO exponemos user_id (ni correos si alguien lo mandaba)
+        // ✅ NO exponemos user_id
         user_id: null,
         has_sub_row: !!sub,
         has_wallet_row: !!wallet,
@@ -152,7 +167,7 @@ export default async function handler(req, res) {
       detail: String(e),
       debug: {
         ...debug,
-        user_id: null, // ✅ no exponer nada sensible
+        user_id: null,
       },
     });
   }
