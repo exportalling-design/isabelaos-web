@@ -92,7 +92,7 @@ function PayPalButton({
 
               if (typeof onPaid === "function") {
                 try {
-                  onPaid(details);
+                  await onPaid(details);
                 } catch (cbErr) {
                   console.error("Error en onPaid PayPal:", cbErr);
                 }
@@ -181,6 +181,7 @@ function AuthModal({ open, onClose }) {
     setLocalLoading(true);
     try {
       await signInWithGoogle();
+      onClose();
     } catch (err) {
       setError(err.message || String(err));
       setLocalLoading(false);
@@ -287,7 +288,12 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
-function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
+function CreatorPanel({
+  isDemo = false,
+  onAuthRequired,
+  userStatus,
+  onRefreshUserStatus, // ✅ NUEVO (para refrescar plan/jades después de pagar)
+}) {
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && user;
@@ -309,7 +315,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
   const [dailyCount, setDailyCount] = useState(0);
 
-  const isPremium = !isDemo && !!user && userStatus?.subscription_status === "active";
+  const isPremium =
+    !isDemo && !!user && userStatus?.subscription_status === "active";
 
   // =========================================================
   // ✅ TOKEN SUPABASE → HEADER AUTH
@@ -446,7 +453,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Error en /api/generate, revisa los logs.");
+        throw new Error(
+          data?.error || "Error en /api/generate, revisa los logs."
+        );
       }
 
       const jobId = data.jobId;
@@ -515,7 +524,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
   const handleDownload = () => {
     if (isDemo) {
-      alert("Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión.");
+      alert(
+        "Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión."
+      );
       onAuthRequired && onAuthRequired();
       return;
     }
@@ -532,10 +543,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
+        <p className="font-medium">
+          Debes iniciar sesión para usar el motor de producción visual.
+        </p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.{" "}
-          {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar un plan mensual.
+          {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar
+          un plan mensual.
         </p>
       </div>
     );
@@ -549,17 +563,22 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
     <div className="grid gap-8 lg:grid-cols-2">
       {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Motor de imagen · Producción visual</h2>
+        <h2 className="text-lg font-semibold text-white">
+          Motor de imagen · Producción visual
+        </h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo de prueba gratuito: te quedan {remaining} outputs sin registrarte. La descarga y la biblioteca requieren crear una cuenta.
+            Modo de prueba gratuito: te quedan {remaining} outputs sin
+            registrarte. La descarga y la biblioteca requieren crear una cuenta.
           </div>
         )}
 
         {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Atención: solo te quedan {remaining} renders gratis hoy. Activa un plan ilimitado para seguir ejecutando el motor y desbloquear módulos premium.
+            Atención: solo te quedan {remaining} renders gratis hoy. Activa un
+            plan ilimitado para seguir ejecutando el motor y desbloquear módulos
+            premium.
           </div>
         )}
 
@@ -627,7 +646,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
                 <>
-                  Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).
+                  Uso de hoy: {currentCount}. Plan activo (sin límite y con
+                  acceso a módulos premium).
                 </>
               )}
               {userLoggedIn && !isPremium && (
@@ -638,47 +658,61 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
             </span>
           </div>
 
-          {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
+          {error && (
+            <p className="whitespace-pre-line text-xs text-red-400">{error}</p>
+          )}
 
           <button
             onClick={handleGenerate}
             disabled={
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
-              (!isPremium && (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT))
+              (!isPremium &&
+                (isDemo ? demoCount : dailyCount) >=
+                  (isDemo ? DEMO_LIMIT : DAILY_LIMIT))
             }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {!isPremium && (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT)
+            {!isPremium &&
+            (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT)
               ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Ejecutando..."
               : "Ejecutar render en el motor"}
           </button>
 
-          {userLoggedIn && !isPremium && (isDemo ? demoCount : dailyCount) >= DAILY_LIMIT && (
-            <>
-              <button
-                type="button"
-                onClick={handlePaddleCheckout}
-                className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-              >
-                Desbloquear con IsabelaOS Basic – US$19/mes (tarjeta / Paddle)
-              </button>
+          {userLoggedIn &&
+            !isPremium &&
+            (isDemo ? demoCount : dailyCount) >= DAILY_LIMIT && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePaddleCheckout}
+                  className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
+                >
+                  Desbloquear con IsabelaOS Basic – US$19/mes (tarjeta / Paddle)
+                </button>
 
-              <div className="mt-3 text-[11px] text-neutral-400">
-                o pagar con <span className="font-semibold">PayPal</span>:
-                <PayPalButton
-                  amount="19.00"
-                  description="IsabelaOS Studio – Plan Basic (Mensual)"
-                  containerId="paypal-button-panel"
-                  onPaid={() => {
-                    alert("Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio.");
-                  }}
-                />
-              </div>
-            </>
-          )}
+                <div className="mt-3 text-[11px] text-neutral-400">
+                  o pagar con <span className="font-semibold">PayPal</span>:
+                  <PayPalButton
+                    amount="19.00"
+                    description="IsabelaOS Studio – Plan Basic (Mensual)"
+                    containerId="paypal-button-panel"
+                    onPaid={async () => {
+                      alert("Pago completado. Actualizando tu estado...");
+                      if (typeof onRefreshUserStatus === "function") {
+                        await onRefreshUserStatus();
+                      } else {
+                        alert(
+                          "Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio."
+                        );
+                      }
+                    }}
+                  />
+                </div>
+              </>
+            )}
         </div>
       </div>
 
@@ -760,10 +794,12 @@ function LibraryView() {
     try {
       setDeleting(true);
       await deleteGenerationFromSupabase(selected.id);
-      setItems((prev) => prev.filter((it) => it.id !== selected.id));
-      setSelected((prevSelected) => {
-        const remaining = items.filter((it) => it.id !== prevSelected.id);
-        return remaining.length > 0 ? remaining[0] : null;
+
+      // ✅ FIX: evitar estado stale con "items"
+      setItems((prevItems) => {
+        const next = prevItems.filter((it) => it.id !== selected.id);
+        setSelected(next.length > 0 ? next[0] : null);
+        return next;
       });
     } catch (e) {
       console.error("Error eliminando imagen de Supabase:", e);
@@ -784,10 +820,13 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Biblioteca de producción</h2>
+        <h2 className="text-lg font-semibold text-white">
+          Biblioteca de producción
+        </h2>
         <p className="mt-1 text-xs text-neutral-400">
-          Aquí se almacenan los resultados generados por el motor como parte de tu flujo de producción visual.
-          Puedes seleccionar uno para verlo en grande y eliminarlo si ya no lo necesitas.
+          Aquí se almacenan los resultados generados por el motor como parte de
+          tu flujo de producción visual. Puedes seleccionar uno para verlo en
+          grande y eliminarlo si ya no lo necesitas.
         </p>
 
         {loading ? (
@@ -844,6 +883,232 @@ function LibraryView() {
           >
             {deleting ? "Eliminando..." : "Eliminar de mi biblioteca"}
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// ✅ APP COMPLETO — ya con user-status + jades integrado
+// ---------------------------------------------------------
+export default function App() {
+  const { user } = useAuth();
+
+  const [authOpen, setAuthOpen] = useState(false);
+  const [view, setView] = useState("home"); // home | library
+  const [userStatus, setUserStatus] = useState(null);
+  const [jades, setJades] = useState(0);
+
+  // =========================
+  // ✅ AUTH HEADERS (TOKEN)
+  // =========================
+  const getAuthHeaders = async () => {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) return {};
+      const token = data?.session?.access_token;
+      if (!token) return {};
+      return { Authorization: `Bearer ${token}` };
+    } catch (e) {
+      console.warn("getAuthHeaders error:", e);
+      return {};
+    }
+  };
+
+  // =========================
+  // ✅ USER STATUS + JADES
+  // =========================
+  const refreshUserStatus = async () => {
+    const headers = await getAuthHeaders();
+
+    // si no hay token, no pegues al endpoint (evita 401)
+    if (!headers.Authorization) {
+      setUserStatus(null);
+      setJades(0);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/user-status", { headers });
+      const data = await res.json();
+
+      if (!res.ok || !data?.ok) {
+        console.error("user-status failed:", data);
+        setUserStatus(null);
+        setJades(0);
+        return;
+      }
+
+      setUserStatus(data);
+      setJades(Number(data.jades || 0));
+    } catch (e) {
+      console.error("refreshUserStatus error:", e);
+      setUserStatus(null);
+      setJades(0);
+    }
+  };
+
+  // ✅ refresca al cargar y en login/logout
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      if (!mounted) return;
+      if (user) await refreshUserStatus();
+      else {
+        setUserStatus(null);
+        setJades(0);
+      }
+    };
+
+    run();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      if (!mounted) return;
+
+      // volvemos a leer sesión; si hay token, refrescamos
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+
+      if (token) await refreshUserStatus();
+      else {
+        setUserStatus(null);
+        setJades(0);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      sub?.subscription?.unsubscribe?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setView("home");
+  };
+
+  const title = useMemo(() => {
+    if (view === "library") return "Biblioteca";
+    return "IsabelaOS Studio";
+  }, [view]);
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-white">
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* Top bar */}
+      <div className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500" />
+            <div>
+              <p className="text-sm font-semibold">{title}</p>
+              <p className="text-[11px] text-neutral-400">
+                Motor visual · Beta
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {user ? (
+              <>
+                <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-neutral-200">
+                  <span className="text-neutral-400">Jades:</span>{" "}
+                  <span className="font-semibold">{jades}</span>
+                  <span className="mx-2 h-4 w-px bg-white/10" />
+                  <span className="text-neutral-400">Plan:</span>{" "}
+                  <span className="font-semibold">
+                    {userStatus?.subscription_status === "active"
+                      ? "Activo"
+                      : "Gratis"}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setView("home")}
+                  className={`rounded-2xl px-3 py-2 text-xs ${
+                    view === "home"
+                      ? "bg-white/10"
+                      : "hover:bg-white/10 text-neutral-200"
+                  }`}
+                >
+                  Motor
+                </button>
+                <button
+                  onClick={() => setView("library")}
+                  className={`rounded-2xl px-3 py-2 text-xs ${
+                    view === "library"
+                      ? "bg-white/10"
+                      : "hover:bg-white/10 text-neutral-200"
+                  }`}
+                >
+                  Biblioteca
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-2xl border border-white/10 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10"
+                >
+                  Cerrar sesión
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setAuthOpen(true)}
+                  className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white"
+                >
+                  Iniciar sesión
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="mx-auto max-w-6xl px-4 py-8">
+        {view === "library" ? (
+          <LibraryView />
+        ) : (
+          <>
+            {/* demo panel si no hay user */}
+            {!user && (
+              <div className="mb-6 rounded-3xl border border-white/10 bg-black/40 p-6">
+                <h1 className="text-xl font-semibold">IsabelaOS Studio</h1>
+                <p className="mt-1 text-sm text-neutral-300">
+                  Prueba el motor en modo invitado. Para guardar biblioteca y
+                  descargar, inicia sesión.
+                </p>
+                <div className="mt-4">
+                  <button
+                    onClick={() => setAuthOpen(true)}
+                    className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white"
+                  >
+                    Crear cuenta / Iniciar sesión
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {user ? (
+              <CreatorPanel
+                isDemo={false}
+                onAuthRequired={() => setAuthOpen(true)}
+                userStatus={userStatus}
+                onRefreshUserStatus={refreshUserStatus}
+              />
+            ) : (
+              <CreatorPanel
+                isDemo={true}
+                onAuthRequired={() => setAuthOpen(true)}
+                userStatus={null}
+                onRefreshUserStatus={null}
+              />
+            )}
+          </>
         )}
       </div>
     </div>
