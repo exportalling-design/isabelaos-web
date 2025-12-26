@@ -1,174 +1,102 @@
-// /api/user-status.js
+// /api/user_status.js
 import { createClient } from "@supabase/supabase-js";
 
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const INITIAL_JADES = Number(process.env.INITIAL_JADES || 50000);
+
+function getBearer(req) {
+  const h = req.headers?.authorization || req.headers?.Authorization || "";
+  if (!h.startsWith("Bearer ")) return null;
+  return h.slice("Bearer ".length).trim();
+}
+
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET, OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type, authorization");
-
-  if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "GET") {
-    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
-  }
-
-  // ✅ Debug seguro (NO expone user_id/correos)
-  const debug = {
-    step: "start",
-    hasUrl: !!(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL),
-    hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    // ✅ acepta ambas (SUPABASE_ANON_KEY o VITE_SUPABASE_ANON_KEY)
-    hasAnonKey: !!(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY),
-    host: req.headers?.host || null,
-    xfProto: req.headers?.["x-forwarded-proto"] || null,
-  };
-
   try {
-    debug.step = "build_url";
-    const proto = req.headers?.["x-forwarded-proto"] || "https";
-    const host = req.headers?.host || "localhost";
-    const path = req.url || "/";
-    const url = new URL(`${proto}://${host}${path}`);
-
-    // ---------------------------------------------------------
-    // ✅ 1) acepta user_id por query ?user_id=
-    // ✅ 2) si NO viene, lo toma del JWT Authorization: Bearer <token>
-    // ---------------------------------------------------------
-    debug.step = "read_user_id";
-    let user_id = url.searchParams.get("user_id");
-
-    if (!user_id) {
-      debug.step = "read_auth_header";
-      const authHeader =
-        req.headers?.authorization || req.headers?.Authorization || "";
-      const token =
-        typeof authHeader === "string" && authHeader.startsWith("Bearer ")
-          ? authHeader.slice("Bearer ".length).trim()
-          : null;
-
-      if (token) {
-        debug.step = "verify_jwt_get_user";
-
-        // ✅ ALINEADO: acepta SUPABASE_URL o VITE_SUPABASE_URL
-        const SUPABASE_URL =
-          process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-
-        // ✅ ALINEADO: acepta SUPABASE_ANON_KEY o VITE_SUPABASE_ANON_KEY
-        const ANON_KEY =
-          process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-
-        if (!SUPABASE_URL || !ANON_KEY) {
-          return res.status(500).json({
-            ok: false,
-            error: "MISSING_SUPABASE_ENV",
-            detail: "Falta SUPABASE_URL/VITE_SUPABASE_URL o SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY",
-            debug,
-          });
-        }
-
-        const sbAuth = createClient(SUPABASE_URL, ANON_KEY, {
-          auth: { persistSession: false },
-        });
-
-        const { data: userData, error: userErr } =
-          await sbAuth.auth.getUser(token);
-
-        if (userErr || !userData?.user?.id) {
-          return res.status(401).json({
-            ok: false,
-            error: "UNAUTHORIZED",
-            detail: userErr?.message || "INVALID_TOKEN",
-            debug,
-          });
-        }
-
-        user_id = userData.user.id;
-      }
-    }
-
-    if (!user_id) {
-      return res.status(400).json({ ok: false, error: "MISSING_USER_ID", debug });
-    }
-
-    debug.step = "init_supabase";
-
-    // ✅ Admin/Service role para leer tablas
-    const SUPABASE_URL =
-      process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-
-    const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!SUPABASE_URL || !SERVICE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
       return res.status(500).json({
         ok: false,
-        error: "MISSING_SUPABASE_ENV",
-        detail: "Falta SUPABASE_URL/VITE_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY",
-        debug,
+        error: "Missing env vars: SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY",
       });
     }
 
-    const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
-      auth: { persistSession: false },
+    // 1) Leer JWT del cliente
+    const token = getBearer(req);
+    if (!token) {
+      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
+    }
+
+    // 2) Cliente "authed" con ANON + token (para validar el usuario)
+    const authed = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    debug.step = "fetch_subscription";
-    const { data: sub, error: subErr } = await sb
-      .from("user_subscription")
-      .select("plan, status")
-      .eq("user_id", user_id)
-      .maybeSingle();
-
-    if (subErr) {
-      return res.status(500).json({
-        ok: false,
-        error: "SUBSCRIPTION_ERROR",
-        detail: subErr.message,
-        debug,
-      });
+    const { data: userData, error: userErr } = await authed.auth.getUser();
+    if (userErr || !userData?.user?.id) {
+      return res.status(401).json({ ok: false, error: "Invalid session", details: userErr?.message });
     }
 
-    debug.step = "fetch_wallet";
-    const { data: wallet, error: walletErr } = await sb
+    const user = userData.user;
+    const userId = user.id;
+
+    // 3) Cliente ADMIN para DB (service role)
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // 4) Leer/crear wallet
+    //    OJO: si tu PK en user_wallet no es user_id, ajusta el onConflict.
+    const { data: walletRows, error: wSelErr } = await admin
       .from("user_wallet")
-      .select("balance")
-      .eq("user_id", user_id)
-      .maybeSingle();
+      .select("user_id,balance,plan,updated_at,created_at")
+      .eq("user_id", userId)
+      .limit(1);
 
-    if (walletErr) {
-      return res.status(500).json({
-        ok: false,
-        error: "WALLET_ERROR",
-        detail: walletErr.message,
-        debug,
-      });
+    if (wSelErr) {
+      return res.status(500).json({ ok: false, error: "DB_READ_WALLET_ERROR", details: wSelErr.message });
     }
 
-    debug.step = "ok";
-    const active = sub?.status === "active";
+    let wallet = walletRows?.[0] || null;
 
+    // Si no existe, lo creamos.
+    if (!wallet) {
+      // Importante: este insert SOLO va a funcionar si userId EXISTE en auth.users EN ESTE MISMO PROYECTO/DB.
+      const { data: ins, error: wInsErr } = await admin
+        .from("user_wallet")
+        .insert([{ user_id: userId, balance: INITIAL_JADES, plan: "basic" }])
+        .select("user_id,balance,plan,updated_at,created_at")
+        .single();
+
+      if (wInsErr) {
+        return res.status(500).json({
+          ok: false,
+          error: "DB_CREATE_WALLET_ERROR",
+          details: wInsErr.message,
+          hint:
+            "Si aquí sale FK error, ese userId no existe en auth.users en este proyecto/DB. Revisa que estés en el proyecto correcto y que ese usuario exista en Authentication > Users.",
+        });
+      }
+
+      wallet = ins;
+    }
+
+    // 5) Respuesta unificada
     return res.status(200).json({
       ok: true,
-      plan: active ? sub?.plan : null,
-      subscription_status: sub?.status || "none",
-      jades: wallet?.balance ?? 0,
-      is_active: active,
-      debug: {
-        ...debug,
-        // ✅ NO exponemos user_id
-        user_id: null,
-        has_sub_row: !!sub,
-        has_wallet_row: !!wallet,
+      user: {
+        id: userId,
+        email: user.email,
+        created_at: user.created_at,
+      },
+      status: {
+        plan: wallet.plan || "basic",
+        jades: Number(wallet.balance || 0),
       },
     });
   } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      error: "SERVER_ERROR",
-      detail: String(e),
-      debug: {
-        ...debug,
-        user_id: null,
-      },
-    });
+    return res.status(500).json({ ok: false, error: "USER_STATUS_FATAL", details: String(e?.message || e) });
   }
 }
