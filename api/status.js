@@ -1,18 +1,13 @@
 // /api/status.js
-// --- Consulta el estado real del job en RunPod
-
 export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    // ✅ FIX: permitir Authorization para que puedas mandar Bearer token
     "access-control-allow-headers": "content-type, authorization",
     "content-type": "application/json; charset=utf-8",
   };
 
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: cors });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   if (req.method !== "GET" && req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, error: "METHOD_NOT_ALLOWED" }), {
@@ -39,7 +34,6 @@ export default async function handler(req) {
       });
     }
 
-    // ✅ Igual que en generate: prioridad a RUNPOD_ENDPOINT_ID
     const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
     const apiKey = process.env.RP_API_KEY;
 
@@ -48,7 +42,7 @@ export default async function handler(req) {
         JSON.stringify({
           ok: false,
           error: "MISSING_RP_ENV",
-          detail: "Falta RP_API_KEY o endpointId (RUNPOD_ENDPOINT_ID / RP_ENDPOINT).",
+          detail: "Falta RP_API_KEY o RUNPOD_ENDPOINT_ID/RP_ENDPOINT",
         }),
         { status: 500, headers: cors }
       );
@@ -66,10 +60,10 @@ export default async function handler(req) {
 
     if (!rp.ok) {
       const txt = await rp.text();
-      return new Response(
-        JSON.stringify({ ok: false, error: "RUNPOD_STATUS_ERROR", details: txt }),
-        { status: rp.status, headers: cors }
-      );
+      return new Response(JSON.stringify({ ok: false, error: "RUNPOD_STATUS_ERROR", details: txt }), {
+        status: rp.status,
+        headers: cors,
+      });
     }
 
     const data = await rp.json();
@@ -84,13 +78,11 @@ export default async function handler(req) {
       { status: 200, headers: cors }
     );
   } catch (e) {
-    return new Response(
-      JSON.stringify({ ok: false, error: "SERVER_ERROR", details: String(e) }),
-      { status: 500, headers: cors }
-    );
+    return new Response(JSON.stringify({ ok: false, error: "SERVER_ERROR", details: String(e) }), {
+      status: 500,
+      headers: cors,
+    });
   }
 }
 
-export const config = {
-  runtime: "edge",
-};
+export const config = { runtime: "edge" };
