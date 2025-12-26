@@ -890,9 +890,9 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// ✅ APP COMPLETO — ya con user-status + jades integrado
+// ✅ APP SHELL — user-status + jades + topbar + library
 // ---------------------------------------------------------
-export default function App() {
+function AppShell() {
   const { user } = useAuth();
 
   const [authOpen, setAuthOpen] = useState(false);
@@ -901,7 +901,7 @@ export default function App() {
   const [jades, setJades] = useState(0);
 
   // =========================
-  // ✅ AUTH HEADERS (TOKEN)
+  // AUTH HEADERS (TOKEN)
   // =========================
   const getAuthHeaders = async () => {
     try {
@@ -910,19 +910,16 @@ export default function App() {
       const token = data?.session?.access_token;
       if (!token) return {};
       return { Authorization: `Bearer ${token}` };
-    } catch (e) {
-      console.warn("getAuthHeaders error:", e);
+    } catch {
       return {};
     }
   };
 
   // =========================
-  // ✅ USER STATUS + JADES
+  // USER STATUS + JADES
   // =========================
   const refreshUserStatus = async () => {
     const headers = await getAuthHeaders();
-
-    // si no hay token, no pegues al endpoint (evita 401)
     if (!headers.Authorization) {
       setUserStatus(null);
       setJades(0);
@@ -934,7 +931,6 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok || !data?.ok) {
-        console.error("user-status failed:", data);
         setUserStatus(null);
         setJades(0);
         return;
@@ -942,14 +938,12 @@ export default function App() {
 
       setUserStatus(data);
       setJades(Number(data.jades || 0));
-    } catch (e) {
-      console.error("refreshUserStatus error:", e);
+    } catch {
       setUserStatus(null);
       setJades(0);
     }
   };
 
-  // ✅ refresca al cargar y en login/logout
   useEffect(() => {
     let mounted = true;
 
@@ -966,34 +960,19 @@ export default function App() {
 
     const { data: sub } = supabase.auth.onAuthStateChange(async () => {
       if (!mounted) return;
-
-      // volvemos a leer sesión; si hay token, refrescamos
-      const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token;
-
-      if (token) await refreshUserStatus();
-      else {
-        setUserStatus(null);
-        setJades(0);
-      }
+      await refreshUserStatus();
     });
 
     return () => {
       mounted = false;
       sub?.subscription?.unsubscribe?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setView("home");
   };
-
-  const title = useMemo(() => {
-    if (view === "library") return "Biblioteca";
-    return "IsabelaOS Studio";
-  }, [view]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white">
@@ -1005,65 +984,46 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500" />
             <div>
-              <p className="text-sm font-semibold">{title}</p>
-              <p className="text-[11px] text-neutral-400">
-                Motor visual · Beta
-              </p>
+              <p className="text-sm font-semibold">IsabelaOS Studio</p>
+              <p className="text-[11px] text-neutral-400">Motor visual · Beta</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {user ? (
-              <>
-                <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-neutral-200">
-                  <span className="text-neutral-400">Jades:</span>{" "}
-                  <span className="font-semibold">{jades}</span>
-                  <span className="mx-2 h-4 w-px bg-white/10" />
-                  <span className="text-neutral-400">Plan:</span>{" "}
-                  <span className="font-semibold">
-                    {userStatus?.subscription_status === "active"
-                      ? "Activo"
-                      : "Gratis"}
-                  </span>
-                </div>
+            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2 text-[11px]">
+              <span className="text-neutral-400">Jades:</span>
+              <span className="font-semibold">{jades}</span>
+              <span className="mx-2 h-4 w-px bg-white/10" />
+              <span className="text-neutral-400">Plan:</span>
+              <span className="font-semibold">
+                {userStatus?.subscription_status === "active" ? "Activo" : "Gratis"}
+              </span>
+            </div>
 
-                <button
-                  onClick={() => setView("home")}
-                  className={`rounded-2xl px-3 py-2 text-xs ${
-                    view === "home"
-                      ? "bg-white/10"
-                      : "hover:bg-white/10 text-neutral-200"
-                  }`}
-                >
-                  Motor
-                </button>
-                <button
-                  onClick={() => setView("library")}
-                  className={`rounded-2xl px-3 py-2 text-xs ${
-                    view === "library"
-                      ? "bg-white/10"
-                      : "hover:bg-white/10 text-neutral-200"
-                  }`}
-                >
-                  Biblioteca
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="rounded-2xl border border-white/10 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10"
-                >
-                  Cerrar sesión
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => setAuthOpen(true)}
-                  className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white"
-                >
-                  Iniciar sesión
-                </button>
-              </>
-            )}
+            <button
+              onClick={() => setView("home")}
+              className={`rounded-2xl px-3 py-2 text-xs ${
+                view === "home" ? "bg-white/10" : "hover:bg-white/10"
+              }`}
+            >
+              Motor
+            </button>
+
+            <button
+              onClick={() => setView("library")}
+              className={`rounded-2xl px-3 py-2 text-xs ${
+                view === "library" ? "bg-white/10" : "hover:bg-white/10"
+              }`}
+            >
+              Biblioteca
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="rounded-2xl border border-white/10 px-3 py-2 text-xs hover:bg-white/10"
+            >
+              Cerrar sesión
+            </button>
           </div>
         </div>
       </div>
@@ -1073,42 +1033,12 @@ export default function App() {
         {view === "library" ? (
           <LibraryView />
         ) : (
-          <>
-            {/* demo panel si no hay user */}
-            {!user && (
-              <div className="mb-6 rounded-3xl border border-white/10 bg-black/40 p-6">
-                <h1 className="text-xl font-semibold">IsabelaOS Studio</h1>
-                <p className="mt-1 text-sm text-neutral-300">
-                  Prueba el motor en modo invitado. Para guardar biblioteca y
-                  descargar, inicia sesión.
-                </p>
-                <div className="mt-4">
-                  <button
-                    onClick={() => setAuthOpen(true)}
-                    className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white"
-                  >
-                    Crear cuenta / Iniciar sesión
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {user ? (
-              <CreatorPanel
-                isDemo={false}
-                onAuthRequired={() => setAuthOpen(true)}
-                userStatus={userStatus}
-                onRefreshUserStatus={refreshUserStatus}
-              />
-            ) : (
-              <CreatorPanel
-                isDemo={true}
-                onAuthRequired={() => setAuthOpen(true)}
-                userStatus={null}
-                onRefreshUserStatus={null}
-              />
-            )}
-          </>
+          <CreatorPanel
+            isDemo={false}
+            onAuthRequired={() => setAuthOpen(true)}
+            userStatus={userStatus}
+            onRefreshUserStatus={refreshUserStatus}
+          />
         )}
       </div>
     </div>
@@ -2730,7 +2660,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 }
 
 // ---------------------------------------------------------
-// App principal
+// ✅ APP PRINCIPAL — landing / demo / shell
 // ---------------------------------------------------------
 export default function App() {
   const { user, loading } = useAuth();
@@ -2741,21 +2671,14 @@ export default function App() {
     document.documentElement.style.background = "#06070B";
   }, []);
 
-  // ✅ FIX: no forzar setViewMode("landing") al abrir auth
-  const openAuth = () => {
-    setShowAuthModal(true);
-  };
+  const openAuth = () => setShowAuthModal(true);
   const closeAuth = () => setShowAuthModal(false);
 
-  const handleStartDemo = () => {
-    setViewMode("demo");
-  };
+  const handleStartDemo = () => setViewMode("demo");
 
   useEffect(() => {
-    if (user && viewMode !== "dashboard") {
-      setViewMode("dashboard");
-    }
-  }, [user, viewMode]);
+    if (user) setViewMode("shell");
+  }, [user]);
 
   if (loading) {
     return (
@@ -2765,40 +2688,33 @@ export default function App() {
     );
   }
 
-  if (user) {
-    return <DashboardView />;
+  // 🔥 USUARIO LOGUEADO → APP REAL
+  if (user && viewMode === "shell") {
+    return <AppShell />;
   }
 
-  // ✅ FIX: demo mode sin duplicar landing (solo demo + header + auth modal)
+  // DEMO
   if (viewMode === "demo") {
     return (
       <>
-        <div
-          className="min-h-screen px-4 py-10 text-white"
-          style={{
-            background:
-              "radial-gradient(circle at 20% 10%, rgba(120,70,255,.25), transparent 45%), #05060A",
-          }}
-        >
-          <div className="mx-auto max-w-6xl mb-6 flex items-center justify-between">
+        <div className="min-h-screen px-4 py-10 text-white bg-[#05060A]">
+          <div className="mx-auto max-w-6xl mb-6 flex justify-between">
             <button
               onClick={() => setViewMode("landing")}
-              className="rounded-xl border border-white/20 px-4 py-2 text-xs text-white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
             >
               ← Volver
             </button>
 
             <button
               onClick={openAuth}
-              className="rounded-xl border border-white/20 px-4 py-2 text-xs text-white hover:bg-white/10"
+              className="rounded-xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
             >
               Iniciar sesión / Registrarse
             </button>
           </div>
 
-          <div className="mx-auto max-w-6xl">
-            <CreatorPanel isDemo={true} onAuthRequired={openAuth} userStatus={null} />
-          </div>
+          <CreatorPanel isDemo={true} onAuthRequired={openAuth} userStatus={null} />
         </div>
 
         <AuthModal open={showAuthModal} onClose={closeAuth} />
@@ -2806,6 +2722,7 @@ export default function App() {
     );
   }
 
+  // LANDING
   return (
     <>
       <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
