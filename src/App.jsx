@@ -1,16 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
-
 import { useAuth } from "./context/AuthContext";
 
-// ✅ IMPORT QUE TE FALTA (para supabase.auth.getSession)
-// (Tu archivo existe en /src/lib/supabaseClient.js según tu captura)
-import { supabase } from "./lib/supabaseClient";
+import { supabase } from "./lib/supabaseClient"; // ✅ ESTE ES EL QUE FALTABA
 
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
   getTodayGenerationCount,
-  deleteGenerationFromSupabase, // NUEVO: para borrar desde Supabase
+  deleteGenerationFromSupabase,
 } from "./lib/generations";
 
 // ---------------------------------------------------------
