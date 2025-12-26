@@ -283,6 +283,14 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
+// Requiere (en tu archivo):
+// import { useState, useEffect } from "react";
+// import { useAuth } from "./context/AuthContext";
+// import { saveGenerationInSupabase, getTodayGenerationCount } from "./lib/generations";
+// const DEMO_LIMIT = 3;
+// const DAILY_LIMIT = 5;
+// y tu componente <PayPalButton ... />
+
 function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   const { user } = useAuth();
 
@@ -308,7 +316,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   const isPremium =
     !isDemo &&
     !!user &&
-    (userStatus?.subscription_status === "active");
+    userStatus?.subscription_status === "active";
 
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
@@ -326,7 +334,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
         window.location.href = data.url;
       } else {
         console.error("Respuesta Paddle:", data);
-        alert("Estamos trabajando para poder brindarte el cobro por paddle, por el momento no esta disponible.");
+        alert(
+          "Estamos trabajando para poder brindarte el cobro por Paddle, por el momento no está disponible."
+        );
       }
     } catch (err) {
       console.error("Error Paddle:", err);
@@ -341,8 +351,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
     }
 
     (async () => {
-      const countToday = await getTodayGenerationCount(user.id);
-      setDailyCount(countToday);
+      try {
+        const countToday = await getTodayGenerationCount(user.id);
+        setDailyCount(countToday || 0);
+      } catch (e) {
+        console.error("Error leyendo dailyCount:", e);
+        setDailyCount(0);
+      }
     })();
   }, [userLoggedIn, user]);
 
@@ -402,7 +417,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Error en /api/generate, revisa los logs.");
+        throw new Error(
+          data?.error || "Error en /api/generate, revisa los logs."
+        );
       }
 
       const jobId = data.jobId;
@@ -416,7 +433,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
         const statusData = await statusRes.json();
 
         if (!statusRes.ok || statusData.error) {
-          throw new Error(statusData.error || "Error al consultar /api/status.");
+          throw new Error(
+            statusData.error || "Error al consultar /api/status."
+          );
         }
 
         const st = statusData.status;
@@ -439,6 +458,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
           } else if (userLoggedIn) {
             setDailyCount((prev) => prev + 1);
 
+            // Guardado en Supabase como dataURL (tal como lo tenías)
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
@@ -460,15 +480,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
       console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar la imagen.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
   };
 
   const handleDownload = () => {
     if (isDemo) {
-      alert(
-        "Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión."
-      );
+      alert("Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión.");
       onAuthRequired && onAuthRequired();
       return;
     }
@@ -489,7 +507,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
           Debes iniciar sesión para usar el motor de producción visual.
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
+          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.{" "}
           {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar un plan mensual.
         </p>
       </div>
@@ -583,20 +601,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
             <span className="text-[11px] text-neutral-400">
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
-                <>
-                  Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).
-                </>
+                <>Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).</>
               )}
               {userLoggedIn && !isPremium && (
-                <>
-                  Uso de hoy: {currentCount} / {currentLimit} renders.
-                </>
+                <>Uso de hoy: {currentCount} / {currentLimit} renders.</>
               )}
             </span>
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
+            <p className="whitespace-pre-line text-xs text-red-400">{error}</p>
           )}
 
           <button
@@ -644,8 +658,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
       </div>
 
       {/* Resultado */}
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+      <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
+
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {imageB64 ? (
             <img
@@ -657,6 +672,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
             <p>Aquí verás el resultado en cuanto se complete el render.</p>
           )}
         </div>
+
         {imageB64 && (
           <button
             onClick={handleDownload}
