@@ -1,102 +1,133 @@
-// /api/user_status.js
+// /api/user-status.js
 import { createClient } from "@supabase/supabase-js";
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const INITIAL_JADES = Number(process.env.INITIAL_JADES || 50000);
-
-function getBearer(req) {
-  const h = req.headers?.authorization || req.headers?.Authorization || "";
-  if (!h.startsWith("Bearer ")) return null;
-  return h.slice("Bearer ".length).trim();
-}
 
 export default async function handler(req, res) {
   try {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+    // ----------------------------
+    // 1) Leer user_id
+    // ----------------------------
+    const user_id =
+      req.query.user_id ||
+      req.query.userId ||
+      (req.body && (req.body.user_id || req.body.userId));
+
+    if (!user_id) {
+      return res.status(400).json({ ok: false, error: "MISSING_USER_ID" });
+    }
+
+    // ----------------------------
+    // 2) ENV: aceptar nombres server y VITE fallback
+    // ----------------------------
+    const SUPABASE_URL =
+      process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
+    // Para user-status NO necesitas anon si usas service role,
+    // pero lo dejamos por compatibilidad / logs.
+    const SUPABASE_ANON_KEY =
+      process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+    const SUPABASE_SERVICE_ROLE_KEY =
+      process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    const missing = [];
+    if (!SUPABASE_URL) missing.push("SUPABASE_URL (o VITE_SUPABASE_URL)");
+    if (!SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (missing.length) {
       return res.status(500).json({
         ok: false,
-        error: "Missing env vars: SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY",
+        error: "MISSING_ENV_VARS",
+        missing,
+        // te lo dejo visible para debug rápido
+        hasAnon: Boolean(SUPABASE_ANON_KEY),
       });
     }
 
-    // 1) Leer JWT del cliente
-    const token = getBearer(req);
-    if (!token) {
-      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
-    }
-
-    // 2) Cliente "authed" con ANON + token (para validar el usuario)
-    const authed = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
+    // ----------------------------
+    // 3) Cliente ADMIN (bypass RLS)
+    // ----------------------------
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: userData, error: userErr } = await authed.auth.getUser();
-    if (userErr || !userData?.user?.id) {
-      return res.status(401).json({ ok: false, error: "Invalid session", details: userErr?.message });
-    }
+    // ----------------------------
+    // 4) Leer wallet (public.user_wallet)
+    // ----------------------------
+    let balance = 0;
 
-    const user = userData.user;
-    const userId = user.id;
-
-    // 3) Cliente ADMIN para DB (service role)
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    // 4) Leer/crear wallet
-    //    OJO: si tu PK en user_wallet no es user_id, ajusta el onConflict.
-    const { data: walletRows, error: wSelErr } = await admin
+    const { data: walletRow, error: walletErr } = await supabase
       .from("user_wallet")
-      .select("user_id,balance,plan,updated_at,created_at")
-      .eq("user_id", userId)
-      .limit(1);
+      .select("user_id,balance,updated_at")
+      .eq("user_id", user_id)
+      .maybeSingle();
 
-    if (wSelErr) {
-      return res.status(500).json({ ok: false, error: "DB_READ_WALLET_ERROR", details: wSelErr.message });
+    if (walletErr) {
+      // Si el select falla por permisos/tablas, devolvemos el error claro
+      return res.status(500).json({
+        ok: false,
+        error: "WALLET_SELECT_ERROR",
+        details: walletErr.message || walletErr,
+      });
     }
 
-    let wallet = walletRows?.[0] || null;
+    // Si NO existe row, la creamos con 0 (o si quieres 50000)
+    if (!walletRow) {
+      const initialBalance = 0; // <-- si quieres 50000, cambia aquí
 
-    // Si no existe, lo creamos.
-    if (!wallet) {
-      // Importante: este insert SOLO va a funcionar si userId EXISTE en auth.users EN ESTE MISMO PROYECTO/DB.
-      const { data: ins, error: wInsErr } = await admin
+      const { error: insErr } = await supabase
         .from("user_wallet")
-        .insert([{ user_id: userId, balance: INITIAL_JADES, plan: "basic" }])
-        .select("user_id,balance,plan,updated_at,created_at")
-        .single();
+        .insert([{ user_id, balance: initialBalance }]);
 
-      if (wInsErr) {
+      if (insErr) {
         return res.status(500).json({
           ok: false,
-          error: "DB_CREATE_WALLET_ERROR",
-          details: wInsErr.message,
-          hint:
-            "Si aquí sale FK error, ese userId no existe en auth.users en este proyecto/DB. Revisa que estés en el proyecto correcto y que ese usuario exista en Authentication > Users.",
+          error: "WALLET_INSERT_ERROR",
+          details: insErr.message || insErr,
         });
       }
 
-      wallet = ins;
+      balance = initialBalance;
+    } else {
+      balance = Number(walletRow.balance || 0);
     }
 
-    // 5) Respuesta unificada
+    // ----------------------------
+    // 5) (Opcional) Contar generaciones HOY
+    //    Si no existe la tabla, no revienta.
+    // ----------------------------
+    let todayCount = null;
+    try {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+
+      const { count, error: cntErr } = await supabase
+        .from("generations")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user_id)
+        .gte("created_at", start.toISOString())
+        .lte("created_at", end.toISOString());
+
+      if (!cntErr) todayCount = count ?? 0;
+    } catch (_) {
+      // ignora
+    }
+
+    // ----------------------------
+    // 6) Respuesta
+    // ----------------------------
     return res.status(200).json({
       ok: true,
-      user: {
-        id: userId,
-        email: user.email,
-        created_at: user.created_at,
-      },
-      status: {
-        plan: wallet.plan || "basic",
-        jades: Number(wallet.balance || 0),
-      },
+      user_id,
+      balance,
+      todayCount, // puede ser null si no existe la tabla
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: "USER_STATUS_FATAL", details: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: "USER_STATUS_FATAL",
+      details: e?.message || String(e),
+    });
   }
 }
