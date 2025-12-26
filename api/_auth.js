@@ -1,68 +1,53 @@
 // /api/_auth.js
+// ============================================================
+// Auth helper (Supabase Admin) para APIs.
+// Lee Bearer token del header "Authorization: Bearer <token>"
+// y valida el usuario con supabase.auth.getUser(token).
+// ============================================================
+
 import { createClient } from "@supabase/supabase-js";
 
-// ============================================================
-// ENV
-// ============================================================
+// Soporta ambas formas de env (por si estás mezclando Vite/Vercel)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// ============================================================
-// Supabase admin client (server-side only)
-// ============================================================
+// Crea cliente admin (service role)
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
-  if (!SUPABASE_SERVICE_ROLE_KEY)
-    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
 }
 
-// ============================================================
-// Leer headers compatible con:
-// - Edge Runtime (Headers.get)
-// - Node Runtime (objeto plano)
-// ============================================================
-function getHeader(req, name) {
-  const headers = req?.headers;
-
-  // Edge / Fetch API
-  if (headers && typeof headers.get === "function") {
-    return headers.get(name) || "";
-  }
-
-  // Node / Serverless
-  if (headers && typeof headers === "object") {
-    const key = String(name).toLowerCase();
-    return headers[key] || headers[name] || "";
-  }
-
-  return "";
-}
-
-// ============================================================
-// requireUser
-// ============================================================
+/**
+ * requireUser(req)
+ * - Devuelve { ok:true, user, sb } si el token es válido
+ * - Devuelve { ok:false, code, error } si no
+ */
 export async function requireUser(req) {
-  const authHeader = getHeader(req, "authorization");
+  try {
+    const headers = req.headers || {};
+    const authHeader = headers.authorization || headers.Authorization || "";
 
-  const token =
-    authHeader && authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
+    // Espera: "Bearer xxxxx"
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!token) {
-    return { ok: false, code: 401, error: "MISSING_AUTH_TOKEN" };
+    if (!token) return { ok: false, code: 401, error: "MISSING_AUTH_TOKEN" };
+
+    const sb = sbAdmin();
+
+    const { data, error } = await sb.auth.getUser(token);
+
+    if (error || !data?.user) {
+      return { ok: false, code: 401, error: "INVALID_AUTH_TOKEN" };
+    }
+
+    return { ok: true, user: data.user, sb };
+  } catch (e) {
+    // Si esto falla, lo verás en logs de Vercel
+    console.error("[AUTH] requireUser crashed:", e);
+    return { ok: false, code: 500, error: "AUTH_INTERNAL_ERROR" };
   }
-
-  const sb = sbAdmin();
-  const { data, error } = await sb.auth.getUser(token);
-
-  if (error || !data?.user) {
-    return { ok: false, code: 401, error: "INVALID_AUTH_TOKEN" };
-  }
-
-  return { ok: true, user: data.user, sb };
 }
