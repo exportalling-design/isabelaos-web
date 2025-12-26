@@ -2,6 +2,10 @@ import { useState, useEffect, useMemo } from "react";
 
 import { useAuth } from "./context/AuthContext";
 
+// ✅ IMPORT QUE TE FALTA (para supabase.auth.getSession)
+// (Tu archivo existe en /src/lib/supabaseClient.js según tu captura)
+import { supabase } from "./lib/supabaseClient";
+
 import {
   saveGenerationInSupabase,
   loadGenerationsForUser,
@@ -42,7 +46,12 @@ function scrollToId(id) {
 // ---------------------------------------------------------
 // Botón PayPal reutilizable
 // ---------------------------------------------------------
-function PayPalButton({ amount = "19.00", description = "IsabelaOS Studio", containerId, onPaid }) {
+function PayPalButton({
+  amount = "19.00",
+  description = "IsabelaOS Studio",
+  containerId,
+  onPaid,
+}) {
   const divId = containerId || "paypal-button-container";
 
   useEffect(() => {
@@ -74,7 +83,7 @@ function PayPalButton({ amount = "19.00", description = "IsabelaOS Studio", cont
                     value: amount,
                     currency_code: "USD",
                   },
-                  description: description,
+                  description,
                 },
               ],
             });
@@ -113,11 +122,8 @@ function PayPalButton({ amount = "19.00", description = "IsabelaOS Studio", cont
     );
 
     if (existingScript) {
-      if (window.paypal) {
-        renderButtons();
-      } else {
-        existingScript.addEventListener("load", renderButtons);
-      }
+      if (window.paypal) renderButtons();
+      else existingScript.addEventListener("load", renderButtons);
       return;
     }
 
@@ -200,7 +206,8 @@ function AuthModal({ open, onClose }) {
         </div>
 
         <p className="mt-2 text-xs text-neutral-400">
-          Usa tu correo o entra con Google para acceder al motor de producción visual.
+          Usa tu correo o entra con Google para acceder al motor de producción
+          visual.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
@@ -283,14 +290,6 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
-// Requiere (en tu archivo):
-// import { useState, useEffect } from "react";
-// import { useAuth } from "./context/AuthContext";
-// import { saveGenerationInSupabase, getTodayGenerationCount } from "./lib/generations";
-// const DEMO_LIMIT = 3;
-// const DAILY_LIMIT = 5;
-// y tu componente <PayPalButton ... />
-
 function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   const { user } = useAuth();
 
@@ -313,10 +312,31 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
   const [dailyCount, setDailyCount] = useState(0);
 
-  const isPremium =
-    !isDemo &&
-    !!user &&
-    userStatus?.subscription_status === "active";
+  const isPremium = !isDemo && !!user && userStatus?.subscription_status === "active";
+
+  // =========================================================
+  // ✅ TOKEN SUPABASE → HEADER AUTH
+  // =========================================================
+  const getAuthHeaders = async () => {
+    // En modo demo NO mandamos token
+    if (isDemo) return {};
+
+    try {
+      const { data, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) {
+        console.warn("supabase.getSession error:", sessionErr);
+        return {};
+      }
+
+      const token = data?.session?.access_token;
+      if (!token) return {};
+
+      return { Authorization: `Bearer ${token}` };
+    } catch (e) {
+      console.warn("No se pudo obtener token:", e);
+      return {};
+    }
+  };
 
   const handlePaddleCheckout = async () => {
     if (!userLoggedIn) {
@@ -324,11 +344,18 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
       onAuthRequired && onAuthRequired();
       return;
     }
+
     try {
+      const authHeaders = await getAuthHeaders();
+
       const res = await fetch("/api/paddle-checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
       });
+
       const data = await res.json();
       if (data.url) {
         window.location.href = data.url;
@@ -403,9 +430,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
     setStatusText("Enviando job a RunPod...");
 
     try {
+      const authHeaders = await getAuthHeaders();
+
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify({
           prompt,
           negative_prompt: negative,
@@ -417,9 +449,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        throw new Error(
-          data?.error || "Error en /api/generate, revisa los logs."
-        );
+        throw new Error(data?.error || "Error en /api/generate, revisa los logs.");
       }
 
       const jobId = data.jobId;
@@ -429,13 +459,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusRes = await fetch(`/api/status?id=${jobId}`);
+        const authHeaders2 = await getAuthHeaders();
+
+        const statusRes = await fetch(`/api/status?id=${jobId}`, {
+          headers: { ...authHeaders2 },
+        });
+
         const statusData = await statusRes.json();
 
         if (!statusRes.ok || statusData.error) {
-          throw new Error(
-            statusData.error || "Error al consultar /api/status."
-          );
+          throw new Error(statusData.error || "Error al consultar /api/status.");
         }
 
         const st = statusData.status;
@@ -458,7 +491,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
           } else if (userLoggedIn) {
             setDailyCount((prev) => prev + 1);
 
-            // Guardado en Supabase como dataURL (tal como lo tenías)
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
@@ -503,9 +535,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">
-          Debes iniciar sesión para usar el motor de producción visual.
-        </p>
+        <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.{" "}
           {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar un plan mensual.
@@ -522,9 +552,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
     <div className="grid gap-8 lg:grid-cols-2">
       {/* Formulario */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Motor de imagen · Producción visual
-        </h2>
+        <h2 className="text-lg font-semibold text-white">Motor de imagen · Producción visual</h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
@@ -601,35 +629,37 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
             <span className="text-[11px] text-neutral-400">
               {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
               {userLoggedIn && isPremium && (
-                <>Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).</>
+                <>
+                  Uso de hoy: {currentCount}. Plan activo (sin límite y con acceso a módulos premium).
+                </>
               )}
               {userLoggedIn && !isPremium && (
-                <>Uso de hoy: {currentCount} / {currentLimit} renders.</>
+                <>
+                  Uso de hoy: {currentCount} / {currentLimit} renders.
+                </>
               )}
             </span>
           </div>
 
-          {error && (
-            <p className="whitespace-pre-line text-xs text-red-400">{error}</p>
-          )}
+          {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
 
           <button
             onClick={handleGenerate}
             disabled={
               status === "IN_QUEUE" ||
               status === "IN_PROGRESS" ||
-              (!isPremium && currentCount >= currentLimit)
+              (!isPremium && (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT))
             }
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {!isPremium && currentCount >= currentLimit
+            {!isPremium && (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT)
               ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Ejecutando..."
               : "Ejecutar render en el motor"}
           </button>
 
-          {userLoggedIn && !isPremium && currentCount >= DAILY_LIMIT && (
+          {userLoggedIn && !isPremium && (isDemo ? demoCount : dailyCount) >= DAILY_LIMIT && (
             <>
               <button
                 type="button"
@@ -646,9 +676,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired, userStatus }) {
                   description="IsabelaOS Studio – Plan Basic (Mensual)"
                   containerId="paypal-button-panel"
                   onPaid={() => {
-                    alert(
-                      "Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio."
-                    );
+                    alert("Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio.");
                   }}
                 />
               </div>
