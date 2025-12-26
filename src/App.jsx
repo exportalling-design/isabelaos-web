@@ -1046,7 +1046,7 @@ function AppShell() {
 }
 
 // ---------------------------------------------------------
-// Módulo: Video desde prompt (logueado)
+// Módulo: Video desde prompt (logueado) ✅ CORREGIDO (AUTH + headers)
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1071,13 +1071,52 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
+  // ✅ AUTH HEADERS
+  const getAuthHeaders = async () => {
+    try {
+      const { data, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) return {};
+      const token = data?.session?.access_token;
+      if (!token) return {};
+      return { Authorization: `Bearer ${token}` };
+    } catch {
+      return {};
+    }
+  };
+
+  // ✅ status poll con AUTH
   const pollVideoStatus = async (job_id) => {
+    const auth = await getAuthHeaders();
     const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
+      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
+      { headers: { ...auth } }
     );
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data)
+    if (!r.ok || !data) {
       throw new Error(data?.error || "Error consultando /api/video-status");
+    }
+    return data;
+  };
+
+  // ✅ fallback spend jades (si no te pasan spendJades)
+  const spendJadesFallback = async ({ amount, reason }) => {
+    const auth = await getAuthHeaders();
+    if (!auth.Authorization) throw new Error("No hay sesión/token para descontar jades.");
+
+    const r = await fetch("/api/jades-spend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      body: JSON.stringify({
+        user_id: user?.id || null,
+        amount: Number(amount),
+        reason: reason || "spend",
+      }),
+    });
+
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.ok) {
+      throw new Error(data?.error || "No se pudo descontar jades.");
+    }
     return data;
   };
 
@@ -1085,6 +1124,14 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
     setError("");
     setVideoUrl(null);
     setJobId(null);
+
+    if (!canUse) {
+      setStatus("ERROR");
+      setStatusText("Debes iniciar sesión.");
+      setError("Debes iniciar sesión para usar el motor de video.");
+      return;
+    }
+
     setStatus("IN_QUEUE");
     setStatusText("Enviando job de video a RunPod...");
 
@@ -1096,13 +1143,21 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         return;
       }
 
+      // ✅ Descontar jades (con AUTH)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "video_from_prompt" });
+      } else {
+        await spendJadesFallback({ amount: cost, reason: "video_from_prompt" });
+      }
+
+      const auth = await getAuthHeaders();
+      if (!auth.Authorization) {
+        throw new Error("No hay sesión/token. Cierra sesión e inicia de nuevo.");
       }
 
       const res = await fetch("/api/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt,
@@ -1151,7 +1206,6 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
         finished = true;
 
-        // Normalizamos posibles salidas
         const out = stData.output || stData.result || stData.data || null;
         const maybeUrl =
           out?.video_url ||
@@ -1172,7 +1226,6 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            // si el backend devuelve base64, lo convertimos
             const b64 =
               out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
 
@@ -1182,9 +1235,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
               setVideoUrl(url);
               setStatusText("Video generado con éxito.");
             } else {
-              throw new Error(
-                "Job terminado pero no se recibió video en la salida."
-              );
+              throw new Error("Job terminado pero no se recibió video en la salida.");
             }
           }
         } else {
@@ -1195,7 +1246,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
       console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar el video.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
   };
 
@@ -1220,7 +1271,9 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Motor de video · Producción de clips</h2>
+        <h2 className="text-lg font-semibold text-white">
+          Motor de video · Producción de clips
+        </h2>
         <p className="mt-2 text-sm text-neutral-300">
           Genera clips cortos como parte de un flujo de producción visual, ejecutados en GPU y listos para publicación.
         </p>
@@ -1328,23 +1381,8 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   );
 }
 
-function b64ToBlob(b64, contentType = "application/octet-stream") {
-  try {
-    const byteCharacters = atob(b64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: contentType });
-  } catch (e) {
-    console.error("b64ToBlob error:", e);
-    return new Blob([], { type: contentType });
-  }
-}
-
 // ---------------------------------------------------------
-// Módulo: Imagen -> Video (logueado)
+// Módulo: Imagen -> Video (logueado) ✅ CORREGIDO (AUTH + headers)
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1363,12 +1401,24 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const [error, setError] = useState("");
 
   const fileInputId = "img2video-file-input";
-
   const canUse = !!user;
 
   const cost = COST_IMG2VIDEO;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
+
+  // ✅ AUTH HEADERS
+  const getAuthHeaders = async () => {
+    try {
+      const { data, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) return {};
+      const token = data?.session?.access_token;
+      if (!token) return {};
+      return { Authorization: `Bearer ${token}` };
+    } catch {
+      return {};
+    }
+  };
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -1398,13 +1448,39 @@ function Img2VideoPanel({ userStatus, spendJades }) {
     }
   };
 
+  // ✅ status poll con AUTH
   const pollVideoStatus = async (job_id) => {
+    const auth = await getAuthHeaders();
     const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`
+      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
+      { headers: { ...auth } }
     );
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data)
+    if (!r.ok || !data) {
       throw new Error(data?.error || "Error consultando /api/video-status");
+    }
+    return data;
+  };
+
+  // ✅ fallback spend jades (si no te pasan spendJades)
+  const spendJadesFallback = async ({ amount, reason }) => {
+    const auth = await getAuthHeaders();
+    if (!auth.Authorization) throw new Error("No hay sesión/token para descontar jades.");
+
+    const r = await fetch("/api/jades-spend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      body: JSON.stringify({
+        user_id: user?.id || null,
+        amount: Number(amount),
+        reason: reason || "spend",
+      }),
+    });
+
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.ok) {
+      throw new Error(data?.error || "No se pudo descontar jades.");
+    }
     return data;
   };
 
@@ -1412,6 +1488,14 @@ function Img2VideoPanel({ userStatus, spendJades }) {
     setError("");
     setVideoUrl(null);
     setJobId(null);
+
+    if (!canUse) {
+      setStatus("ERROR");
+      setStatusText("Debes iniciar sesión.");
+      setError("Debes iniciar sesión para usar Imagen → Video.");
+      return;
+    }
+
     setStatus("IN_QUEUE");
     setStatusText("Enviando Imagen → Video a RunPod...");
 
@@ -1430,13 +1514,21 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         return;
       }
 
+      // ✅ Descontar jades (con AUTH)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "img2video" });
+      } else {
+        await spendJadesFallback({ amount: cost, reason: "img2video" });
+      }
+
+      const auth = await getAuthHeaders();
+      if (!auth.Authorization) {
+        throw new Error("No hay sesión/token. Cierra sesión e inicia de nuevo.");
       }
 
       const res = await fetch("/api/generate-img2video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           user_id: user?.id || null,
           prompt: prompt || "",
@@ -1516,9 +1608,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               setVideoUrl(url);
               setStatusText("Video generado con éxito.");
             } else {
-              throw new Error(
-                "Job terminado pero no se recibió video en la salida."
-              );
+              throw new Error("Job terminado pero no se recibió video en la salida.");
             }
           }
         } else {
@@ -1529,7 +1619,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
       console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar el video.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
   };
 
@@ -1554,7 +1644,9 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Transformación visual · Imagen a video</h2>
+        <h2 className="text-lg font-semibold text-white">
+          Transformación visual · Imagen a video
+        </h2>
         <p className="mt-2 text-sm text-neutral-300">
           Sube una imagen (o usa una URL) y conviértela en un clip dentro del flujo de producción.
         </p>
