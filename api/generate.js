@@ -8,7 +8,6 @@
 //
 // IMPORTANTE:
 // - Este archivo debe estar en /api/generate.js (RAÍZ DEL REPO)
-// - NO va dentro de dist/
 // ============================================================
 
 import { requireUser } from "./_auth.js";
@@ -16,9 +15,6 @@ import { requireUser } from "./_auth.js";
 const COST_IMG_PROMPT_JADES = 1; // <- AJUSTA AQUÍ
 
 export default async function handler(req) {
-  // ----------------------------------------------------------
-  // CORS + JSON header
-  // ----------------------------------------------------------
   const cors = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
@@ -26,16 +22,10 @@ export default async function handler(req) {
     "content-type": "application/json; charset=utf-8",
   };
 
-  // ----------------------------------------------------------
-  // Preflight
-  // ----------------------------------------------------------
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: cors });
   }
 
-  // ----------------------------------------------------------
-  // Solo POST
-  // ----------------------------------------------------------
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, error: "METHOD_NOT_ALLOWED" }), {
       status: 405,
@@ -46,9 +36,6 @@ export default async function handler(req) {
   try {
     console.log("[GEN] step=START");
 
-    // --------------------------------------------------------
-    // Body JSON
-    // --------------------------------------------------------
     const body = await req.json().catch(() => null);
 
     if (!body || !body.prompt) {
@@ -58,9 +45,7 @@ export default async function handler(req) {
       });
     }
 
-    // --------------------------------------------------------
-    // 1) AUTH (ÚNICO ORIGEN)
-    // --------------------------------------------------------
+    // 1) AUTH
     console.log("[GEN] step=AUTH_BEGIN");
     const auth = await requireUser(req);
 
@@ -72,12 +57,10 @@ export default async function handler(req) {
       });
     }
 
-    const user_id = auth.user.id;
+    const user_id = auth.user.id; // UUID string
     console.log("[GEN] step=AUTH_OK user_id=", user_id);
 
-    // --------------------------------------------------------
     // 2) COBRO (RPC spend_jades)
-    // --------------------------------------------------------
     console.log("[GEN] step=JADE_CHARGE_BEGIN");
 
     const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -97,6 +80,9 @@ export default async function handler(req) {
 
     const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`;
 
+    // p_ref en tu función es TEXT, así que mandamos string o null
+    const ref = body.ref == null ? null : String(body.ref);
+
     const spendRes = await fetch(rpcUrl, {
       method: "POST",
       headers: {
@@ -105,10 +91,10 @@ export default async function handler(req) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        p_user_id: user_id,
-        p_amount: COST_IMG_PROMPT_JADES,
-        p_reason: "generation:img_prompt",
-        p_ref: body.ref || null,
+        p_user_id: user_id,                 // UUID string -> OK
+        p_amount: COST_IMG_PROMPT_JADES,    // int
+        p_reason: "generation:img_prompt",  // text
+        p_ref: ref,                         // text | null
       }),
     });
 
@@ -129,15 +115,17 @@ export default async function handler(req) {
       );
     }
 
+    // Si tu función retorna balance, acá podrías leerlo si querés:
+    // const billedInfo = await spendRes.json().catch(() => null);
+
     console.log("[GEN] step=JADE_CHARGE_OK");
 
-    // --------------------------------------------------------
-    // 3) RUNPOD (igual que antes)
-    // --------------------------------------------------------
+    // 3) RUNPOD
     console.log("[GEN] step=RUNPOD_BEGIN");
 
     const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
-    const rpKey = process.env.RP_API_KEY;
+    const rpKey =
+      process.env.RP_API_KEY || process.env.RUNPOD_API_KEY; // por si usas el otro nombre
 
     if (!rpKey || !endpointId) {
       console.log("[GEN] step=MISSING_RP_ENV");
@@ -145,7 +133,7 @@ export default async function handler(req) {
         JSON.stringify({
           ok: false,
           error: "MISSING_RP_ENV",
-          detail: "Falta RP_API_KEY o endpointId (RUNPOD_ENDPOINT_ID / RP_ENDPOINT).",
+          detail: "Falta RP_API_KEY (o RUNPOD_API_KEY) y endpointId (RUNPOD_ENDPOINT_ID / RP_ENDPOINT).",
         }),
         { status: 500, headers: cors }
       );
@@ -166,7 +154,7 @@ export default async function handler(req) {
           width: body.width || 512,
           height: body.height || 512,
           steps: body.steps || 22,
-          user_id, // ✅ SIEMPRE desde auth
+          user_id, // SIEMPRE desde auth
         },
       }),
     });
@@ -210,6 +198,4 @@ export default async function handler(req) {
   }
 }
 
-export const config = {
-  runtime: "edge",
-};
+export const config = { runtime: "edge" };
