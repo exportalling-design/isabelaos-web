@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import getRawBody from "raw-body";
 
 export const config = {
-  api: { bodyParser: false }, // ✅ CLAVE: necesitamos RAW body
+  api: { bodyParser: false }, // ✅ RAW body
 };
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -39,8 +39,7 @@ async function paypalAccessToken() {
   return j.access_token;
 }
 
-async function verifyWebhookSignature({ rawBody, event, headers }) {
-  // PayPal manda headers con esos nombres; en Node vienen en minúscula
+async function verifyWebhookSignature({ event, headers }) {
   const transmissionId = headers["paypal-transmission-id"];
   const transmissionTime = headers["paypal-transmission-time"];
   const certUrl = headers["paypal-cert-url"];
@@ -60,7 +59,7 @@ async function verifyWebhookSignature({ rawBody, event, headers }) {
     transmission_sig: transmissionSig,
     transmission_time: transmissionTime,
     webhook_id: PAYPAL_WEBHOOK_ID,
-    webhook_event: event, // 👈 objeto parseado
+    webhook_event: event,
   };
 
   const r = await fetch(`${PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature`, {
@@ -73,12 +72,8 @@ async function verifyWebhookSignature({ rawBody, event, headers }) {
   });
 
   const j = await r.json();
-  // PayPal responde verification_status: "SUCCESS" | "FAILURE"
   const ok = r.ok && j?.verification_status === "SUCCESS";
-  return {
-    verified: ok,
-    error: ok ? null : `verify_failed: ${JSON.stringify(j)}`,
-  };
+  return { verified: ok, error: ok ? null : `verify_failed: ${JSON.stringify(j)}` };
 }
 
 export default async function handler(req, res) {
@@ -100,7 +95,6 @@ export default async function handler(req, res) {
     try {
       event = JSON.parse(rawText);
     } catch {
-      // Guardamos aunque venga raro
       event = { parse_error: true, raw: rawText };
     }
 
@@ -108,15 +102,11 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // 1) Intentar verificar (si falla, NO tiramos 400)
     let verified = false;
     let verifyError = null;
+
     try {
-      const v = await verifyWebhookSignature({
-        rawBody: rawText,
-        event,
-        headers: req.headers,
-      });
+      const v = await verifyWebhookSignature({ event, headers: req.headers });
       verified = v.verified;
       verifyError = v.error;
     } catch (e) {
@@ -124,7 +114,6 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
-    // 2) Guardar SIEMPRE en Supabase (raw + headers)
     const insertPayload = {
       id: eventId,
       event_type: eventType,
@@ -135,14 +124,21 @@ export default async function handler(req, res) {
       headers: req.headers,
     };
 
-    await supabase
+    const { data, error } = await supabase
       .from("paypal_events_raw")
       .upsert(insertPayload, { onConflict: "id" });
 
-    // ✅ 3) RESPONDER 200 SIEMPRE (definitivo, evita retries infinitos)
+    if (error) {
+      console.error("[PP_WEBHOOK] supabase_upsert_error", error);
+      // respondemos 200 igual, pero te dejamos la pista clara en logs
+      return res.status(200).json({ ok: false, stored: false, supabase_error: error.message, verified });
+    }
+
+    console.log("[PP_WEBHOOK] stored", { id: eventId, verified, eventType });
+
     return res.status(200).json({ ok: true, stored: true, verified });
   } catch (e) {
-    // Incluso en error interno: responde 200 para que PayPal no reintente infinito
+    console.error("[PP_WEBHOOK] exception", e);
     return res.status(200).json({ ok: false, error: String(e?.message || e) });
   }
 }
