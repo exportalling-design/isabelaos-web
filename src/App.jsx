@@ -288,13 +288,16 @@ function AuthModal({ open, onClose }) {
 // ---------------------------------------------------------
 // Panel del creador (generador de imágenes) - sin biblioteca
 // ---------------------------------------------------------
-import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "./context/AuthContext";
 
-import {
-  saveGenerationInSupabase,
-  getTodayGenerationCount,
-} from "./lib/generations";
+const numStyle = {
+  width: "100%",
+  height: 44,
+  borderRadius: 14,
+  padding: "0 12px",
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(0,0,0,0.35)",
+  color: "white",
+};
 
 function CreatorPanel({
   isDemo = false,
@@ -329,7 +332,9 @@ function CreatorPanel({
   // jades: profiles.jade_balance
   const jadeBalance = useMemo(() => {
     if (!userLoggedIn) return 0;
-    return typeof userStatus?.jade_balance === "number" ? userStatus.jade_balance : 0;
+    return typeof userStatus?.jade_balance === "number"
+      ? userStatus.jade_balance
+      : 0;
   }, [userLoggedIn, userStatus]);
 
   const plan = useMemo(() => {
@@ -337,20 +342,20 @@ function CreatorPanel({
     return typeof userStatus?.plan === "string" ? userStatus.plan : "free";
   }, [userLoggedIn, userStatus]);
 
-  // Premium si NO es free (basic/pro/beta/etc). Ajusta si tu DB usa otros nombres.
+  // Premium si NO es free (basic/pro/beta/etc).
   const isPremium = useMemo(() => {
     if (!userLoggedIn) return false;
-    return plan && plan.toLowerCase() !== "free";
+    return String(plan || "free").toLowerCase() !== "free";
   }, [userLoggedIn, plan]);
 
-  // Si tienes jades > 0, puedes generar aunque el conteo diga 5/5
+  // Si tienes jades > 0 o eres premium, puedes generar
   const hasCredits = useMemo(() => {
     if (!userLoggedIn) return false;
     return jadeBalance > 0 || isPremium;
   }, [userLoggedIn, jadeBalance, isPremium]);
 
   // Demo limit (modo invitado)
-  const DEMO_LIMIT = 3;
+  const DEMO_LOCAL_LIMIT = 3;
   const demoKey = "isabelaos_demo_count";
   const demoCount = useMemo(() => {
     if (!isDemo) return 0;
@@ -358,7 +363,7 @@ function CreatorPanel({
     return Number.isFinite(v) ? v : 0;
   }, [isDemo]);
 
-  const demoRemaining = Math.max(0, DEMO_LIMIT - demoCount);
+  const demoRemaining = Math.max(0, DEMO_LOCAL_LIMIT - demoCount);
 
   const canGenerate = useMemo(() => {
     if (status === "RUNNING") return false;
@@ -415,7 +420,7 @@ function CreatorPanel({
       setStatus("RUNNING");
       setStatusText("Generando...");
 
-      // 🔥 Endpoint real del motor (ajusta si tu ruta es otra)
+      // Endpoint real del motor (ajusta si tu ruta es otra)
       const res = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -467,15 +472,15 @@ function CreatorPanel({
         localStorage.setItem(demoKey, String(next));
       }
 
-      // Refrescar plan/jades (importantísimo si descuentas jades en DB)
-      await onRefreshUserStatus?.();
+      // Refrescar plan/jades
+      if (typeof onRefreshUserStatus === "function") {
+        await onRefreshUserStatus();
+      }
     } catch (e) {
       setStatus("ERROR");
       setStatusText("Error en generación.");
       setError(e?.message || "Error desconocido");
     } finally {
-      // vuelve a IDLE si quedó en RUNNING con error
-      // (si quedó DONE, se queda DONE)
       setTimeout(() => {
         setStatus((s) => (s === "RUNNING" ? "IDLE" : s));
       }, 300);
@@ -532,7 +537,14 @@ function CreatorPanel({
           }}
         />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 10,
+            marginTop: 14,
+          }}
+        >
           <div>
             <div style={{ opacity: 0.85, marginBottom: 6 }}>Steps</div>
             <input
@@ -572,12 +584,19 @@ function CreatorPanel({
 
         <div style={{ marginTop: 14, opacity: 0.9, fontSize: 14 }}>
           <div>Estado actual: {statusText}</div>
+
           {!isDemo && userLoggedIn && (
-            <div style={{ opacity: 0.7 }}>Uso de hoy: {dailyCount} renders (solo informativo)</div>
+            <div style={{ opacity: 0.7 }}>
+              Uso de hoy: {dailyCount} renders (solo informativo)
+            </div>
           )}
+
           {isDemo && (
-            <div style={{ opacity: 0.7 }}>Demo: te quedan {demoRemaining} renders</div>
+            <div style={{ opacity: 0.7 }}>
+              Demo: te quedan {demoRemaining} renders
+            </div>
           )}
+
           {!isDemo && userLoggedIn && (
             <div style={{ opacity: 0.7 }}>
               Plan: <b>{plan}</b> · Jades: <b>{jadeBalance}</b>
@@ -638,29 +657,27 @@ function CreatorPanel({
       >
         {imageB64 ? (
           <img
-            src={imageB64.startsWith("data:") ? imageB64 : `data:image/png;base64,${imageB64}`}
+            src={
+              imageB64.startsWith("data:")
+                ? imageB64
+                : `data:image/png;base64,${imageB64}`
+            }
             alt="Resultado"
-            style={{ width: "100%", borderRadius: 14, objectFit: "contain" }}
+            style={{
+              width: "100%",
+              borderRadius: 14,
+              objectFit: "contain",
+            }}
           />
         ) : (
-          <div style={{ opacity: 0.6 }}>Aquí verás el resultado en cuanto se complete el render.</div>
+          <div style={{ opacity: 0.6 }}>
+            Aquí verás el resultado en cuanto se complete el render.
+          </div>
         )}
       </div>
     </div>
   );
 }
-
-const numStyle = {
-  width: "100%",
-  height: 44,
-  borderRadius: 14,
-  padding: "0 12px",
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(0,0,0,0.35)",
-  color: "white",
-};
-
-export default CreatorPanel;
 
   // =========================================================
   // ✅ TOKEN SUPABASE → HEADER AUTH
