@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
 import { supabase } from "./lib/supabaseClient"; // ✅ ESTE ES EL QUE FALTABA
@@ -35,8 +35,38 @@ const PAYPAL_CLIENT_ID =
 // ---------------------------------------------------------
 function scrollToId(id) {
   const el = document.getElementById(id);
-  if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------------------------------------------------------
+// Helpers base64
+// ---------------------------------------------------------
+function b64ToBlob(b64, contentType = "application/octet-stream") {
+  const byteCharacters = atob(String(b64));
+  const byteArrays = [];
+  const sliceSize = 1024;
+
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) byteNumbers[i] = slice.charCodeAt(i);
+    byteArrays.push(new Uint8Array(byteNumbers));
+  }
+  return new Blob(byteArrays, { type: contentType });
+}
+
+// ---------------------------------------------------------
+// ✅ TOKEN SUPABASE → HEADER AUTH (GLOBAL HELPER)
+// ---------------------------------------------------------
+async function getAuthHeadersGlobal() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return {};
+    const token = data?.session?.access_token;
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+  } catch {
+    return {};
   }
 }
 
@@ -72,33 +102,24 @@ function PayPalButton({
             shape: "pill",
             label: "paypal",
           },
-          createOrder: (data, actions) => {
-            return actions.order.create({
+          createOrder: (data, actions) =>
+            actions.order.create({
               purchase_units: [
                 {
-                  amount: {
-                    value: amount,
-                    currency_code: "USD",
-                  },
+                  amount: { value: amount, currency_code: "USD" },
                   description,
                 },
               ],
-            });
-          },
+            }),
           onApprove: async (data, actions) => {
             try {
               const details = await actions.order.capture();
               console.log("Pago PayPal completado:", details);
-
               if (typeof onPaid === "function") {
-                try {
-                  await onPaid(details);
-                } catch (cbErr) {
-                  console.error("Error en onPaid PayPal:", cbErr);
-                }
+                await onPaid(details);
               } else {
                 alert(
-                  "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo en IsabelaOS Studio."
+                  "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo."
                 );
               }
             } catch (err) {
@@ -129,8 +150,6 @@ function PayPalButton({
     script.async = true;
     script.onload = renderButtons;
     document.body.appendChild(script);
-
-    return () => {};
   }, [amount, divId, onPaid, description]);
 
   return (
@@ -286,25 +305,9 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// Panel del creador (generador de imágenes) - sin biblioteca
+// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN ( /api/generate + /api/status )
 // ---------------------------------------------------------
-
-const numStyle = {
-  width: "100%",
-  height: 44,
-  borderRadius: 14,
-  padding: "0 12px",
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(0,0,0,0.35)",
-  color: "white",
-};
-
-function CreatorPanel({
-  isDemo = false,
-  onAuthRequired,
-  userStatus,
-  onRefreshUserStatus, // para refrescar plan/jades después de pagar o tras generar
-}) {
+function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && !!user;
@@ -319,429 +322,19 @@ function CreatorPanel({
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  const [status, setStatus] = useState("IDLE"); // IDLE | RUNNING | DONE | ERROR
+  const [status, setStatus] = useState("IDLE"); // IDLE | IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
   const [statusText, setStatusText] = useState("Listo para ejecutar el motor.");
   const [imageB64, setImageB64] = useState(null);
   const [error, setError] = useState("");
 
-  // Conteo diario SOLO informativo (NO bloquea)
   const [dailyCount, setDailyCount] = useState(0);
-
-  // Fuente de verdad FINAL:
-  // plan: profiles.plan
-  // jades: profiles.jade_balance
-  const jadeBalance = useMemo(() => {
-    if (!userLoggedIn) return 0;
-    return typeof userStatus?.jade_balance === "number"
-      ? userStatus.jade_balance
-      : 0;
-  }, [userLoggedIn, userStatus]);
-
-  const plan = useMemo(() => {
-    if (!userLoggedIn) return "free";
-    return typeof userStatus?.plan === "string" ? userStatus.plan : "free";
-  }, [userLoggedIn, userStatus]);
-
-  // Premium si NO es free (basic/pro/beta/etc).
-  const isPremium = useMemo(() => {
-    if (!userLoggedIn) return false;
-    return String(plan || "free").toLowerCase() !== "free";
-  }, [userLoggedIn, plan]);
-
-  // Si tienes jades > 0 o eres premium, puedes generar
-  const hasCredits = useMemo(() => {
-    if (!userLoggedIn) return false;
-    return jadeBalance > 0 || isPremium;
-  }, [userLoggedIn, jadeBalance, isPremium]);
-
-  // Demo limit (modo invitado)
-  const DEMO_LOCAL_LIMIT = 3;
-  const demoKey = "isabelaos_demo_count";
-  const demoCount = useMemo(() => {
-    if (!isDemo) return 0;
-    const v = parseInt(localStorage.getItem(demoKey) || "0", 10);
-    return Number.isFinite(v) ? v : 0;
-  }, [isDemo]);
-
-  const demoRemaining = Math.max(0, DEMO_LOCAL_LIMIT - demoCount);
-
-  const canGenerate = useMemo(() => {
-    if (status === "RUNNING") return false;
-    if (isDemo) return demoRemaining > 0;
-    if (!userLoggedIn) return false;
-    return hasCredits;
-  }, [status, isDemo, demoRemaining, userLoggedIn, hasCredits]);
-
-  useEffect(() => {
-    let alive = true;
-
-    async function loadDaily() {
-      try {
-        if (!userLoggedIn || !user?.id) return;
-        const c = await getTodayGenerationCount(user.id);
-        if (!alive) return;
-        setDailyCount(typeof c === "number" ? c : 0);
-      } catch {
-        // No rompas el panel por esto
-      }
-    }
-
-    loadDaily();
-    return () => {
-      alive = false;
-    };
-  }, [userLoggedIn, user?.id]);
-
-  async function handleGenerate() {
-    try {
-      setError("");
-      setImageB64(null);
-
-      // Si no está logueado (modo normal), pedir auth
-      if (!isDemo && !userLoggedIn) {
-        onAuthRequired?.();
-        return;
-      }
-
-      // Validación de demo
-      if (isDemo && demoRemaining <= 0) {
-        setStatus("ERROR");
-        setStatusText("Límite demo alcanzado.");
-        return;
-      }
-
-      // Validación de créditos
-      if (!isDemo && userLoggedIn && !hasCredits) {
-        setStatus("ERROR");
-        setStatusText("Sin jades o plan activo. Desbloquea tu plan.");
-        return;
-      }
-
-      setStatus("RUNNING");
-      setStatusText("Generando...");
-
-      // Endpoint real del motor (ajusta si tu ruta es otra)
-      const res = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: negative,
-          width,
-          height,
-          steps,
-        }),
-      });
-
-      let data = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
-
-      if (!res.ok) {
-        const msg = data?.error || data?.message || `Error ${res.status}`;
-        throw new Error(msg);
-      }
-
-      const b64 = data?.imageB64 || data?.image_b64 || null;
-      if (!b64) throw new Error("La API no devolvió imageB64.");
-
-      setImageB64(b64);
-      setStatus("DONE");
-      setStatusText("Render completado.");
-
-      // Guardar en Supabase (solo si hay usuario)
-      if (!isDemo && userLoggedIn && user?.id) {
-        await saveGenerationInSupabase({
-          user_id: user.id,
-          type: "image",
-          prompt,
-          negative_prompt: negative,
-          width,
-          height,
-          steps,
-          image_b64: b64,
-        });
-      }
-
-      // Actualiza contador demo
-      if (isDemo) {
-        const next = demoCount + 1;
-        localStorage.setItem(demoKey, String(next));
-      }
-
-      // Refrescar plan/jades
-      if (typeof onRefreshUserStatus === "function") {
-        await onRefreshUserStatus();
-      }
-    } catch (e) {
-      setStatus("ERROR");
-      setStatusText("Error en generación.");
-      setError(e?.message || "Error desconocido");
-    } finally {
-      setTimeout(() => {
-        setStatus((s) => (s === "RUNNING" ? "IDLE" : s));
-      }, 300);
-    }
-  }
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div
-        style={{
-          background: "rgba(0,0,0,0.35)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 18,
-          padding: 18,
-        }}
-      >
-        <h2 style={{ margin: 0, marginBottom: 12, fontSize: 22 }}>
-          Motor de imagen · Producción visual
-        </h2>
-
-        <label style={{ display: "block", marginTop: 10, opacity: 0.9 }}>
-          Prompt
-        </label>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={4}
-          style={{
-            width: "100%",
-            marginTop: 6,
-            borderRadius: 14,
-            padding: 12,
-            border: "1px solid rgba(255,255,255,0.10)",
-            background: "rgba(0,0,0,0.35)",
-            color: "white",
-          }}
-        />
-
-        <label style={{ display: "block", marginTop: 14, opacity: 0.9 }}>
-          Negative prompt
-        </label>
-        <textarea
-          value={negative}
-          onChange={(e) => setNegative(e.target.value)}
-          rows={3}
-          style={{
-            width: "100%",
-            marginTop: 6,
-            borderRadius: 14,
-            padding: 12,
-            border: "1px solid rgba(255,255,255,0.10)",
-            background: "rgba(0,0,0,0.35)",
-            color: "white",
-          }}
-        />
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: 10,
-            marginTop: 14,
-          }}
-        >
-          <div>
-            <div style={{ opacity: 0.85, marginBottom: 6 }}>Steps</div>
-            <input
-              type="number"
-              value={steps}
-              onChange={(e) => setSteps(parseInt(e.target.value || "0", 10))}
-              style={numStyle}
-              min={1}
-              max={60}
-            />
-          </div>
-          <div>
-            <div style={{ opacity: 0.85, marginBottom: 6 }}>Width</div>
-            <input
-              type="number"
-              value={width}
-              onChange={(e) => setWidth(parseInt(e.target.value || "0", 10))}
-              style={numStyle}
-              min={256}
-              max={2048}
-              step={64}
-            />
-          </div>
-          <div>
-            <div style={{ opacity: 0.85, marginBottom: 6 }}>Height</div>
-            <input
-              type="number"
-              value={height}
-              onChange={(e) => setHeight(parseInt(e.target.value || "0", 10))}
-              style={numStyle}
-              min={256}
-              max={2048}
-              step={64}
-            />
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14, opacity: 0.9, fontSize: 14 }}>
-          <div>Estado actual: {statusText}</div>
-
-          {!isDemo && userLoggedIn && (
-            <div style={{ opacity: 0.7 }}>
-              Uso de hoy: {dailyCount} renders (solo informativo)
-            </div>
-          )}
-
-          {isDemo && (
-            <div style={{ opacity: 0.7 }}>
-              Demo: te quedan {demoRemaining} renders
-            </div>
-          )}
-
-          {!isDemo && userLoggedIn && (
-            <div style={{ opacity: 0.7 }}>
-              Plan: <b>{plan}</b> · Jades: <b>{jadeBalance}</b>
-            </div>
-          )}
-        </div>
-
-        {error ? (
-          <div style={{ marginTop: 10, color: "#ff7b7b", fontSize: 14 }}>
-            {error}
-          </div>
-        ) : null}
-
-        <button
-          onClick={handleGenerate}
-          disabled={!canGenerate}
-          style={{
-            marginTop: 16,
-            width: "100%",
-            height: 48,
-            borderRadius: 16,
-            border: "1px solid rgba(255,255,255,0.14)",
-            background: canGenerate
-              ? "linear-gradient(90deg, rgba(0,205,255,0.55), rgba(165,55,255,0.55))"
-              : "rgba(255,255,255,0.10)",
-            color: "white",
-            cursor: canGenerate ? "pointer" : "not-allowed",
-            fontWeight: 700,
-          }}
-        >
-          {status === "RUNNING"
-            ? "Generando..."
-            : isDemo
-            ? "Generar (Demo)"
-            : userLoggedIn
-            ? "Generar imagen"
-            : "Inicia sesión para generar"}
-        </button>
-
-        {!isDemo && userLoggedIn && !hasCredits ? (
-          <div style={{ marginTop: 10, opacity: 0.85, fontSize: 13 }}>
-            No tienes jades o plan activo. Desbloquea tu plan para continuar.
-          </div>
-        ) : null}
-      </div>
-
-      <div
-        style={{
-          background: "rgba(0,0,0,0.35)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 18,
-          padding: 18,
-          minHeight: 420,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {imageB64 ? (
-          <img
-            src={
-              imageB64.startsWith("data:")
-                ? imageB64
-                : `data:image/png;base64,${imageB64}`
-            }
-            alt="Resultado"
-            style={{
-              width: "100%",
-              borderRadius: 14,
-              objectFit: "contain",
-            }}
-          />
-        ) : (
-          <div style={{ opacity: 0.6 }}>
-            Aquí verás el resultado en cuanto se complete el render.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-  // =========================================================
-  // ✅ TOKEN SUPABASE → HEADER AUTH
-  // =========================================================
-  const getAuthHeaders = async () => {
-    // En modo demo NO mandamos token
-    if (isDemo) return {};
-
-    try {
-      const { data, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) {
-        console.warn("supabase.getSession error:", sessionErr);
-        return {};
-      }
-
-      const token = data?.session?.access_token;
-      if (!token) return {};
-
-      return { Authorization: `Bearer ${token}` };
-    } catch (e) {
-      console.warn("No se pudo obtener token:", e);
-      return {};
-    }
-  };
-
-  const handlePaddleCheckout = async () => {
-    if (!userLoggedIn) {
-      alert("Por favor, inicia sesión para activar el plan.");
-      onAuthRequired && onAuthRequired();
-      return;
-    }
-
-    try {
-      const authHeaders = await getAuthHeaders();
-
-      const res = await fetch("/api/paddle-checkout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-      });
-
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Paddle:", data);
-        alert(
-          "Estamos trabajando para poder brindarte el cobro por Paddle, por el momento no está disponible."
-        );
-      }
-    } catch (err) {
-      console.error("Error Paddle:", err);
-      alert("Error al conectar con Paddle.");
-    }
-  };
+  const [demoCount, setDemoCount] = useState(0);
 
   useEffect(() => {
     if (!userLoggedIn) {
       setDailyCount(0);
       return;
     }
-
     (async () => {
       try {
         const countToday = await getTodayGenerationCount(user.id);
@@ -751,29 +344,42 @@ function CreatorPanel({
         setDailyCount(0);
       }
     })();
-  }, [userLoggedIn, user]);
-
-  const [demoCount, setDemoCount] = useState(0);
+  }, [userLoggedIn, user?.id]);
 
   useEffect(() => {
-    if (isDemo) {
-      try {
-        const storedDemoCount =
-          localStorage.getItem("isabelaos_demo_count") || "0";
-        setDemoCount(Number(storedDemoCount));
-      } catch (e) {
-        console.warn("Error leyendo demo count:", e);
-      }
+    if (!isDemo) return;
+    try {
+      const stored = localStorage.getItem("isabelaos_demo_count") || "0";
+      setDemoCount(Number(stored));
+    } catch (e) {
+      console.warn("Error leyendo demo count:", e);
     }
   }, [isDemo]);
+
+  const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
+  const currentCount = isDemo ? demoCount : dailyCount;
+  const remaining = Math.max(0, currentLimit - currentCount);
+
+  const disabled =
+    status === "IN_QUEUE" ||
+    status === "IN_PROGRESS" ||
+    (!isDemo && !userLoggedIn) ||
+    currentCount >= currentLimit;
+
+  const getAuthHeaders = async () => {
+    if (isDemo) return {};
+    return await getAuthHeadersGlobal();
+  };
 
   const handleGenerate = async () => {
     setError("");
 
-    const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-    const currentCount = isDemo ? demoCount : dailyCount;
+    if (!isDemo && !userLoggedIn) {
+      onAuthRequired?.();
+      return;
+    }
 
-    if (!isPremium && currentCount >= currentLimit) {
+    if (currentCount >= currentLimit) {
       setStatus("ERROR");
       setStatusText("Límite de generación alcanzado.");
 
@@ -784,7 +390,7 @@ function CreatorPanel({
         onAuthRequired();
       } else if (userLoggedIn) {
         setError(
-          `Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Activa una suscripción mensual para generar sin límite y desbloquear módulos premium.`
+          `Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Activa una suscripción mensual para generar sin límite.`
         );
       }
       return;
@@ -812,14 +418,13 @@ function CreatorPanel({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(
-          data?.error || "Error en /api/generate, revisa los logs."
-        );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Error en /api/generate, revisa logs.");
       }
 
       const jobId = data.jobId;
+      setStatus("IN_PROGRESS");
       setStatusText(`Job enviado. ID: ${jobId}. Consultando estado...`);
 
       let finished = false;
@@ -827,15 +432,13 @@ function CreatorPanel({
         await new Promise((r) => setTimeout(r, 2000));
 
         const authHeaders2 = await getAuthHeaders();
-
         const statusRes = await fetch(`/api/status?id=${jobId}`, {
           headers: { ...authHeaders2 },
         });
 
-        const statusData = await statusRes.json();
-
-        if (!statusRes.ok || statusData.error) {
-          throw new Error(statusData.error || "Error al consultar /api/status.");
+        const statusData = await statusRes.json().catch(() => null);
+        if (!statusRes.ok || statusData?.error) {
+          throw new Error(statusData?.error || "Error consultando /api/status.");
         }
 
         const st = statusData.status;
@@ -852,24 +455,23 @@ function CreatorPanel({
           setStatusText("Render completado.");
 
           if (isDemo) {
-            const newDemoCount = demoCount + 1;
-            setDemoCount(newDemoCount);
-            localStorage.setItem("isabelaos_demo_count", String(newDemoCount));
+            const next = demoCount + 1;
+            setDemoCount(next);
+            localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
             setDailyCount((prev) => prev + 1);
 
+            // Guardar en supabase (tu wrapper)
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt: "",
-              negativePrompt: "",
+              prompt,
+              negativePrompt: negative,
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
-            }).catch((e) => {
-              console.error("Error guardando en Supabase:", e);
-            });
+            }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
@@ -885,13 +487,10 @@ function CreatorPanel({
 
   const handleDownload = () => {
     if (isDemo) {
-      alert(
-        "Para descargar tu resultado, por favor, crea tu cuenta o inicia sesión."
-      );
-      onAuthRequired && onAuthRequired();
+      alert("Para descargar, por favor crea tu cuenta o inicia sesión.");
+      onAuthRequired?.();
       return;
     }
-
     if (!imageB64) return;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${imageB64}`;
@@ -908,21 +507,15 @@ function CreatorPanel({
           Debes iniciar sesión para usar el motor de producción visual.
         </p>
         <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.{" "}
-          {DAILY_LIMIT} renders diarios; si quieres ir más allá, podrás activar
-          un plan mensual.
+          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
         </p>
       </div>
     );
   }
 
-  const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-  const currentCount = isDemo ? demoCount : dailyCount;
-  const remaining = currentLimit - currentCount;
-
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Formulario */}
+      {/* Form */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">
           Motor de imagen · Producción visual
@@ -930,16 +523,14 @@ function CreatorPanel({
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo de prueba gratuito: te quedan {remaining} outputs sin
-            registrarte. La descarga y la biblioteca requieren crear una cuenta.
+            Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y
+            biblioteca requieren cuenta.
           </div>
         )}
 
-        {userLoggedIn && !isPremium && remaining <= 2 && remaining > 0 && (
+        {!isDemo && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
-            Atención: solo te quedan {remaining} renders gratis hoy. Activa un
-            plan ilimitado para seguir ejecutando el motor y desbloquear módulos
-            premium.
+            Atención: solo te quedan {remaining} renders hoy.
           </div>
         )}
 
@@ -971,7 +562,7 @@ function CreatorPanel({
                 max={50}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
-                onChange={(e) => setSteps(e.target.value)}
+                onChange={(e) => setSteps(Number(e.target.value))}
               />
             </div>
             <div>
@@ -983,7 +574,7 @@ function CreatorPanel({
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={width}
-                onChange={(e) => setWidth(e.target.value)}
+                onChange={(e) => setWidth(Number(e.target.value))}
               />
             </div>
             <div>
@@ -995,7 +586,7 @@ function CreatorPanel({
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={height}
-                onChange={(e) => setHeight(e.target.value)}
+                onChange={(e) => setHeight(Number(e.target.value))}
               />
             </div>
           </div>
@@ -1004,18 +595,7 @@ function CreatorPanel({
             Estado actual: {statusText || "Listo para ejecutar el motor."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              {isDemo && `Uso de prueba: ${currentCount} / ${currentLimit}.`}
-              {userLoggedIn && isPremium && (
-                <>
-                  Uso de hoy: {currentCount}. Plan activo (sin límite y con
-                  acceso a módulos premium).
-                </>
-              )}
-              {userLoggedIn && !isPremium && (
-                <>
-                  Uso de hoy: {currentCount} / {currentLimit} renders.
-                </>
-              )}
+              Uso: {currentCount} / {currentLimit}
             </span>
           </div>
 
@@ -1025,59 +605,21 @@ function CreatorPanel({
 
           <button
             onClick={handleGenerate}
-            disabled={
-              status === "IN_QUEUE" ||
-              status === "IN_PROGRESS" ||
-              (!isPremium &&
-                (isDemo ? demoCount : dailyCount) >=
-                  (isDemo ? DEMO_LIMIT : DAILY_LIMIT))
-            }
+            disabled={disabled}
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {!isPremium &&
-            (isDemo ? demoCount : dailyCount) >= (isDemo ? DEMO_LIMIT : DAILY_LIMIT)
-              ? "Límite alcanzado (Crea cuenta / Desbloquea plan)"
+            {currentCount >= currentLimit
+              ? "Límite alcanzado"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Ejecutando..."
+              : isDemo
+              ? "Generar (Demo)"
               : "Ejecutar render en el motor"}
           </button>
-
-          {userLoggedIn &&
-            !isPremium &&
-            (isDemo ? demoCount : dailyCount) >= DAILY_LIMIT && (
-              <>
-                <button
-                  type="button"
-                  onClick={handlePaddleCheckout}
-                  className="mt-3 w-full rounded-2xl border border-yellow-400/60 py-2 text-xs font-semibold text-yellow-100 hover:bg-yellow-500/10"
-                >
-                  Desbloquear con IsabelaOS Basic – US$19/mes (tarjeta / Paddle)
-                </button>
-
-                <div className="mt-3 text-[11px] text-neutral-400">
-                  o pagar con <span className="font-semibold">PayPal</span>:
-                  <PayPalButton
-                    amount="19.00"
-                    description="IsabelaOS Studio – Plan Basic (Mensual)"
-                    containerId="paypal-button-panel"
-                    onPaid={async () => {
-                      alert("Pago completado. Actualizando tu estado...");
-                      if (typeof onRefreshUserStatus === "function") {
-                        await onRefreshUserStatus();
-                      } else {
-                        alert(
-                          "Pago completado. Tu plan se activará automáticamente en tu cuenta en IsabelaOS Studio."
-                        );
-                      }
-                    }}
-                  />
-                </div>
-              </>
-            )}
         </div>
       </div>
 
-      {/* Resultado */}
+      {/* Result */}
       <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
 
@@ -1134,9 +676,7 @@ function LibraryView() {
           src: row.image_url,
         }));
         setItems(mapped);
-        if (mapped.length > 0) {
-          setSelected(mapped[0]);
-        }
+        if (mapped.length > 0) setSelected(mapped[0]);
       } catch (e) {
         console.error("Error cargando biblioteca:", e);
       } finally {
@@ -1147,23 +687,21 @@ function LibraryView() {
 
   const handleDeleteSelected = async () => {
     if (!selected || !user) return;
-    const confirmDelete = window.confirm(
-      "¿Seguro que quieres eliminar este resultado de tu biblioteca? Esta acción también lo borrará de Supabase."
+    const ok = window.confirm(
+      "¿Seguro que quieres eliminar este resultado? Esto también lo borrará de Supabase."
     );
-    if (!confirmDelete) return;
+    if (!ok) return;
 
     try {
       setDeleting(true);
       await deleteGenerationFromSupabase(selected.id);
-
-      // ✅ FIX: evitar estado stale con "items"
-      setItems((prevItems) => {
-        const next = prevItems.filter((it) => it.id !== selected.id);
+      setItems((prev) => {
+        const next = prev.filter((it) => it.id !== selected.id);
         setSelected(next.length > 0 ? next[0] : null);
         return next;
       });
     } catch (e) {
-      console.error("Error eliminando imagen de Supabase:", e);
+      console.error("Error eliminando:", e);
       alert("No se pudo eliminar. Intenta de nuevo.");
     } finally {
       setDeleting(false);
@@ -1185,16 +723,14 @@ function LibraryView() {
           Biblioteca de producción
         </h2>
         <p className="mt-1 text-xs text-neutral-400">
-          Aquí se almacenan los resultados generados por el motor como parte de
-          tu flujo de producción visual. Puedes seleccionar uno para verlo en
-          grande y eliminarlo si ya no lo necesitas.
+          Resultados guardados por tu cuenta.
         </p>
 
         {loading ? (
           <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
         ) : items.length === 0 ? (
           <p className="mt-4 text-xs text-neutral-400">
-            Aún no tienes resultados guardados en tu cuenta.
+            Aún no tienes resultados guardados.
           </p>
         ) : (
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -1204,9 +740,7 @@ function LibraryView() {
                 type="button"
                 onClick={() => setSelected(item)}
                 className={`group relative overflow-hidden rounded-xl border ${
-                  selected && selected.id === item.id
-                    ? "border-cyan-400"
-                    : "border-white/10"
+                  selected?.id === item.id ? "border-cyan-400" : "border-white/10"
                 } bg-black/60`}
               >
                 <img
@@ -1229,11 +763,11 @@ function LibraryView() {
           {selected ? (
             <img
               src={selected.src}
-              alt="Imagen seleccionada"
+              alt="Seleccionada"
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Selecciona un resultado de tu biblioteca para verlo en grande.</p>
+            <p>Selecciona un resultado para verlo.</p>
           )}
         </div>
         {selected && (
@@ -1251,163 +785,7 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// ✅ APP SHELL — user-status + jades + topbar + library
-// ---------------------------------------------------------
-function AppShell() {
-  const { user } = useAuth();
-
-  const [authOpen, setAuthOpen] = useState(false);
-  const [view, setView] = useState("home"); // home | library
-  const [userStatus, setUserStatus] = useState(null);
-  const [jades, setJades] = useState(0);
-
-  // =========================
-  // AUTH HEADERS (TOKEN)
-  // =========================
-  const getAuthHeaders = async () => {
-    try {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) return {};
-      const token = data?.session?.access_token;
-      if (!token) return {};
-      return { Authorization: `Bearer ${token}` };
-    } catch {
-      return {};
-    }
-  };
-
-  // =========================
-  // USER STATUS + JADES
-  // =========================
-  const refreshUserStatus = async () => {
-    const headers = await getAuthHeaders();
-    if (!headers.Authorization) {
-      setUserStatus(null);
-      setJades(0);
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/user-status", { headers });
-      const data = await res.json();
-
-      if (!res.ok || !data?.ok) {
-        setUserStatus(null);
-        setJades(0);
-        return;
-      }
-
-      setUserStatus(data);
-      setJades(Number(data.jades || 0));
-    } catch {
-      setUserStatus(null);
-      setJades(0);
-    }
-  };
-
-  useEffect(() => {
-    let mounted = true;
-
-    const run = async () => {
-      if (!mounted) return;
-      if (user) await refreshUserStatus();
-      else {
-        setUserStatus(null);
-        setJades(0);
-      }
-    };
-
-    run();
-
-    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
-      if (!mounted) return;
-      await refreshUserStatus();
-    });
-
-    return () => {
-      mounted = false;
-      sub?.subscription?.unsubscribe?.();
-    };
-  }, [user]);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setView("home");
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-white">
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
-
-      {/* Top bar */}
-      <div className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500" />
-            <div>
-              <p className="text-sm font-semibold">IsabelaOS Studio</p>
-              <p className="text-[11px] text-neutral-400">Motor visual · Beta</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2 text-[11px]">
-              <span className="text-neutral-400">Jades:</span>
-              <span className="font-semibold">{jades}</span>
-              <span className="mx-2 h-4 w-px bg-white/10" />
-              <span className="text-neutral-400">Plan:</span>
-              <span className="font-semibold">
-                {userStatus?.subscription_status === "active" ? "Activo" : "Gratis"}
-              </span>
-            </div>
-
-            <button
-              onClick={() => setView("home")}
-              className={`rounded-2xl px-3 py-2 text-xs ${
-                view === "home" ? "bg-white/10" : "hover:bg-white/10"
-              }`}
-            >
-              Motor
-            </button>
-
-            <button
-              onClick={() => setView("library")}
-              className={`rounded-2xl px-3 py-2 text-xs ${
-                view === "library" ? "bg-white/10" : "hover:bg-white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-
-            <button
-              onClick={handleLogout}
-              className="rounded-2xl border border-white/10 px-3 py-2 text-xs hover:bg-white/10"
-            >
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="mx-auto max-w-6xl px-4 py-8">
-        {view === "library" ? (
-          <LibraryView />
-        ) : (
-          <CreatorPanel
-            isDemo={false}
-            onAuthRequired={() => setAuthOpen(true)}
-            userStatus={userStatus}
-            onRefreshUserStatus={refreshUserStatus}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------
-// Módulo: Video desde prompt (logueado) ✅ CORREGIDO (AUTH + headers)
+// Video desde prompt (logueado) ✅ AUTH + spend jades
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1432,37 +810,20 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
-  // ✅ AUTH HEADERS
-  const getAuthHeaders = async () => {
-    try {
-      const { data, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) return {};
-      const token = data?.session?.access_token;
-      if (!token) return {};
-      return { Authorization: `Bearer ${token}` };
-    } catch {
-      return {};
-    }
-  };
-
-  // ✅ status poll con AUTH
   const pollVideoStatus = async (job_id) => {
-    const auth = await getAuthHeaders();
+    const auth = await getAuthHeadersGlobal();
     const r = await fetch(
       `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
       { headers: { ...auth } }
     );
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data) {
-      throw new Error(data?.error || "Error consultando /api/video-status");
-    }
+    if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
     return data;
   };
 
-  // ✅ fallback spend jades (si no te pasan spendJades)
   const spendJadesFallback = async ({ amount, reason }) => {
-    const auth = await getAuthHeaders();
-    if (!auth.Authorization) throw new Error("No hay sesión/token para descontar jades.");
+    const auth = await getAuthHeadersGlobal();
+    if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
     const r = await fetch("/api/jades-spend", {
       method: "POST",
@@ -1475,9 +836,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
     });
 
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) {
-      throw new Error(data?.error || "No se pudo descontar jades.");
-    }
+    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
     return data;
   };
 
@@ -1504,17 +863,14 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         return;
       }
 
-      // ✅ Descontar jades (con AUTH)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "video_from_prompt" });
       } else {
         await spendJadesFallback({ amount: cost, reason: "video_from_prompt" });
       }
 
-      const auth = await getAuthHeaders();
-      if (!auth.Authorization) {
-        throw new Error("No hay sesión/token. Cierra sesión e inicia de nuevo.");
-      }
+      const auth = await getAuthHeadersGlobal();
+      if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
       const res = await fetch("/api/generate-video", {
         method: "POST",
@@ -1529,75 +885,42 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.job_id) {
-        throw new Error(
-          data?.error || "Error en /api/generate-video, revisa los logs."
-        );
+        throw new Error(data?.error || "Error /api/generate-video");
       }
 
       const jid = data.job_id;
       setJobId(jid);
       setStatus("IN_PROGRESS");
-      setStatusText(`Job enviado. ID: ${jid}. Generando video...`);
+      setStatusText(`Job enviado. ID: ${jid}. Generando...`);
 
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 3000));
-
         const stData = await pollVideoStatus(jid);
 
         const st =
-          stData.status ||
-          stData.state ||
-          stData.job_status ||
-          stData.phase ||
-          "IN_PROGRESS";
+          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (
-          st === "IN_QUEUE" ||
-          st === "IN_PROGRESS" ||
-          st === "DISPATCHED" ||
-          st === "QUEUED" ||
-          st === "RUNNING"
-        ) {
-          continue;
-        }
+        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
 
         finished = true;
 
         const out = stData.output || stData.result || stData.data || null;
-        const maybeUrl =
-          out?.video_url ||
-          out?.url ||
-          out?.mp4_url ||
-          out?.video ||
-          stData.video_url ||
-          stData.url ||
-          null;
+        const maybeUrl = out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
 
-        if (
-          st === "COMPLETED" ||
-          st === "DONE" ||
-          st === "SUCCESS" ||
-          st === "FINISHED"
-        ) {
+        if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            const b64 =
-              out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
-
-            if (b64) {
-              const blob = b64ToBlob(b64, "video/mp4");
-              const url = URL.createObjectURL(blob);
-              setVideoUrl(url);
-              setStatusText("Video generado con éxito.");
-            } else {
-              throw new Error("Job terminado pero no se recibió video en la salida.");
-            }
+            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
+            if (!b64) throw new Error("Terminado pero sin video.");
+            const blob = b64ToBlob(b64, "video/mp4");
+            setVideoUrl(URL.createObjectURL(blob));
+            setStatusText("Video generado con éxito.");
           }
         } else {
           throw new Error(stData.error || "Error al generar el video.");
@@ -1635,32 +958,21 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         <h2 className="text-lg font-semibold text-white">
           Motor de video · Producción de clips
         </h2>
-        <p className="mt-2 text-sm text-neutral-300">
-          Genera clips cortos como parte de un flujo de producción visual, ejecutados en GPU y listos para publicación.
-        </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Estado actual: {statusText || "Listo para generar."}</span>
+            <span>Estado: {statusText || "Listo."}</span>
             <span className="text-[11px] text-neutral-400">
-              {userStatus?.jades != null ? (
-                <>
-                  Jades:{" "}
-                  <span className="font-semibold text-white">
-                    {userStatus.jades}
-                  </span>
-                </>
-              ) : (
-                <>Jades: ...</>
-              )}
+              Jades:{" "}
+              <span className="font-semibold text-white">
+                {userStatus?.jades ?? "..."}
+              </span>
             </span>
           </div>
           <div className="mt-1 text-[11px] text-neutral-400">
             Costo: <span className="font-semibold text-white">{cost}</span> jades por video
           </div>
-          {jobId && (
-            <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
-          )}
+          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -1691,7 +1003,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
                 max={60}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
-                onChange={(e) => setSteps(e.target.value)}
+                onChange={(e) => setSteps(Number(e.target.value))}
               />
             </div>
             <div className="flex items-end">
@@ -1704,8 +1016,8 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
                   : !hasEnough
-                  ? "Sin jades suficientes"
-                  : "Ejecutar render de video"}
+                  ? "Sin jades"
+                  : "Generar video"}
               </button>
             </div>
           </div>
@@ -1720,13 +1032,9 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
           ) : (
-            <p>Aquí verás el video en cuanto se complete la generación.</p>
+            <p>Aquí verás el video cuando termine.</p>
           )}
         </div>
         {videoUrl && (
@@ -1743,7 +1051,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Módulo: Imagen -> Video (logueado) ✅ CORREGIDO (AUTH + headers)
+// Imagen -> Video (logueado) ✅ AUTH + spend jades
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1761,25 +1069,12 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
-  const fileInputId = "img2video-file-input";
   const canUse = !!user;
-
   const cost = COST_IMG2VIDEO;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
-  // ✅ AUTH HEADERS
-  const getAuthHeaders = async () => {
-    try {
-      const { data, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) return {};
-      const token = data?.session?.access_token;
-      if (!token) return {};
-      return { Authorization: `Bearer ${token}` };
-    } catch {
-      return {};
-    }
-  };
+  const fileInputId = "img2video-file-input";
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -1798,36 +1093,30 @@ function Img2VideoPanel({ userStatus, spendJades }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrlResult = await fileToBase64(file);
-      setDataUrl(dataUrlResult);
-      const parts = String(dataUrlResult).split(",");
+      const durl = await fileToBase64(file);
+      setDataUrl(durl);
+      const parts = String(durl).split(",");
       setPureB64(parts[1] || null);
       setImageUrl("");
     } catch (err) {
-      console.error("Error leyendo archivo:", err);
-      setError("No se pudo leer la imagen. Intenta con otra foto.");
+      console.error(err);
+      setError("No se pudo leer la imagen.");
     }
   };
 
-  // ✅ status poll con AUTH
   const pollVideoStatus = async (job_id) => {
-    const auth = await getAuthHeaders();
-    const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
-      { headers: { ...auth } }
-    );
+    const auth = await getAuthHeadersGlobal();
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
+      headers: { ...auth },
+    });
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data) {
-      throw new Error(data?.error || "Error consultando /api/video-status");
-    }
+    if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
     return data;
   };
 
-  // ✅ fallback spend jades (si no te pasan spendJades)
   const spendJadesFallback = async ({ amount, reason }) => {
-    const auth = await getAuthHeaders();
-    if (!auth.Authorization) throw new Error("No hay sesión/token para descontar jades.");
-
+    const auth = await getAuthHeadersGlobal();
+    if (!auth.Authorization) throw new Error("No hay sesión/token.");
     const r = await fetch("/api/jades-spend", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...auth },
@@ -1837,11 +1126,8 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         reason: reason || "spend",
       }),
     });
-
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) {
-      throw new Error(data?.error || "No se pudo descontar jades.");
-    }
+    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
     return data;
   };
 
@@ -1863,29 +1149,26 @@ function Img2VideoPanel({ userStatus, spendJades }) {
     try {
       if (!hasEnough) {
         setStatus("ERROR");
-        setStatusText("No tienes jades suficientes.");
-        setError(`Necesitas ${cost} jades para Imagen → Video.`);
+        setStatusText("Sin jades.");
+        setError(`Necesitas ${cost} jades.`);
         return;
       }
 
       if (!pureB64 && !imageUrl) {
         setStatus("ERROR");
         setStatusText("Falta imagen.");
-        setError("Por favor sube una imagen o pega una URL de imagen.");
+        setError("Sube una imagen o pega una URL.");
         return;
       }
 
-      // ✅ Descontar jades (con AUTH)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "img2video" });
       } else {
         await spendJadesFallback({ amount: cost, reason: "img2video" });
       }
 
-      const auth = await getAuthHeaders();
-      if (!auth.Authorization) {
-        throw new Error("No hay sesión/token. Cierra sesión e inicia de nuevo.");
-      }
+      const auth = await getAuthHeadersGlobal();
+      if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
       const res = await fetch("/api/generate-img2video", {
         method: "POST",
@@ -1902,75 +1185,42 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.job_id) {
-        throw new Error(
-          data?.error || "Error en /api/generate-img2video, revisa los logs."
-        );
+        throw new Error(data?.error || "Error /api/generate-img2video");
       }
 
       const jid = data.job_id;
       setJobId(jid);
       setStatus("IN_PROGRESS");
-      setStatusText(`Job enviado. ID: ${jid}. Generando video...`);
+      setStatusText(`Job enviado. ID: ${jid}. Generando...`);
 
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 3000));
-
         const stData = await pollVideoStatus(jid);
 
         const st =
-          stData.status ||
-          stData.state ||
-          stData.job_status ||
-          stData.phase ||
-          "IN_PROGRESS";
+          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (
-          st === "IN_QUEUE" ||
-          st === "IN_PROGRESS" ||
-          st === "DISPATCHED" ||
-          st === "QUEUED" ||
-          st === "RUNNING"
-        ) {
-          continue;
-        }
+        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
 
         finished = true;
 
         const out = stData.output || stData.result || stData.data || null;
-        const maybeUrl =
-          out?.video_url ||
-          out?.url ||
-          out?.mp4_url ||
-          out?.video ||
-          stData.video_url ||
-          stData.url ||
-          null;
+        const maybeUrl = out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
 
-        if (
-          st === "COMPLETED" ||
-          st === "DONE" ||
-          st === "SUCCESS" ||
-          st === "FINISHED"
-        ) {
+        if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
             setVideoUrl(maybeUrl);
             setStatusText("Video generado con éxito.");
           } else {
-            const b64 =
-              out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
-
-            if (b64) {
-              const blob = b64ToBlob(b64, "video/mp4");
-              const url = URL.createObjectURL(blob);
-              setVideoUrl(url);
-              setStatusText("Video generado con éxito.");
-            } else {
-              throw new Error("Job terminado pero no se recibió video en la salida.");
-            }
+            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
+            if (!b64) throw new Error("Terminado pero sin video.");
+            const blob = b64ToBlob(b64, "video/mp4");
+            setVideoUrl(URL.createObjectURL(blob));
+            setStatusText("Video generado con éxito.");
           }
         } else {
           throw new Error(stData.error || "Error al generar el video.");
@@ -2008,37 +1258,26 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         <h2 className="text-lg font-semibold text-white">
           Transformación visual · Imagen a video
         </h2>
-        <p className="mt-2 text-sm text-neutral-300">
-          Sube una imagen (o usa una URL) y conviértela en un clip dentro del flujo de producción.
-        </p>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Estado actual: {statusText || "Listo para generar."}</span>
+            <span>Estado: {statusText || "Listo."}</span>
             <span className="text-[11px] text-neutral-400">
-              {userStatus?.jades != null ? (
-                <>
-                  Jades:{" "}
-                  <span className="font-semibold text-white">
-                    {userStatus.jades}
-                  </span>
-                </>
-              ) : (
-                <>Jades: ...</>
-              )}
+              Jades:{" "}
+              <span className="font-semibold text-white">
+                {userStatus?.jades ?? "..."}
+              </span>
             </span>
           </div>
           <div className="mt-1 text-[11px] text-neutral-400">
             Costo: <span className="font-semibold text-white">{cost}</span> jades por video
           </div>
-          {jobId && (
-            <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>
-          )}
+          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
           <div>
-            <p className="text-xs text-neutral-300">1. Sube tu imagen (JPG/PNG)</p>
+            <p className="text-xs text-neutral-300">1. Sube tu imagen</p>
             <button
               type="button"
               onClick={handlePickFile}
@@ -2061,7 +1300,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
           </div>
 
           <div>
-            <p className="text-xs text-neutral-300">o 1. Pega una URL de imagen</p>
+            <p className="text-xs text-neutral-300">o pega una URL</p>
             <input
               type="text"
               value={imageUrl}
@@ -2069,9 +1308,6 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               placeholder="https://..."
               className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <p className="mt-1 text-[11px] text-neutral-400">
-              Si usas URL, no es necesario subir archivo.
-            </p>
           </div>
 
           <div>
@@ -2084,7 +1320,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
           </div>
 
           <div>
-            <label className="text-neutral-300">Negative prompt (opcional)</label>
+            <label className="text-neutral-300">Negative (opcional)</label>
             <textarea
               className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={negative}
@@ -2101,7 +1337,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
                 max={60}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
-                onChange={(e) => setSteps(e.target.value)}
+                onChange={(e) => setSteps(Number(e.target.value))}
               />
             </div>
             <div className="flex items-end">
@@ -2114,8 +1350,8 @@ function Img2VideoPanel({ userStatus, spendJades }) {
                 {status === "IN_QUEUE" || status === "IN_PROGRESS"
                   ? "Generando..."
                   : !hasEnough
-                  ? "Sin jades suficientes"
-                  : "Ejecutar Imagen → Video"}
+                  ? "Sin jades"
+                  : "Generar Imagen → Video"}
               </button>
             </div>
           </div>
@@ -2130,13 +1366,9 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {videoUrl ? (
-            <video
-              src={videoUrl}
-              controls
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
           ) : (
-            <p>Aquí verás el video en cuanto se complete la generación.</p>
+            <p>Aquí verás el video cuando termine.</p>
           )}
         </div>
         {videoUrl && (
@@ -2153,45 +1385,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Placeholder de video (próximamente)
-// ---------------------------------------------------------
-function VideoPlaceholderPanel() {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-      <h2 className="text-lg font-semibold text-white">
-        Motor de video (en expansión)
-      </h2>
-      <p className="mt-2 text-sm text-neutral-300">
-        Estamos ampliando el motor de video para que puedas producir secuencias
-        con control cinematográfico dentro del sistema, usando GPU.
-      </p>
-      <p className="mt-4 text-xs text-red-400 font-semibold">
-        Estamos trabajando para tener este módulo lo antes posible con la máxima
-        calidad de estudio.
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-2 text-xs text-neutral-300">
-        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text-white">¿Qué podrás hacer?</h3>
-          <ul className="mt-2 space-y-1 list-disc list-inside">
-            <li>Clips cortos listos para reels.</li>
-            <li>Escenas con cámara cinematográfica.</li>
-            <li>Opciones de estilo (realista, anime, artístico).</li>
-          </ul>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
-          <h3 className="text-sm font-semibold text-white">Integración con BodySync</h3>
-          <p className="mt-2">
-            La arquitectura está preparada para combinar este módulo con BodySync
-            y aplicar movimiento corporal a tus personajes.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------
-// Módulo Foto Navideña IA (Premium)
+// Foto Navideña IA (Premium) – mantiene tu lógica (si luego quieres jades aquí, se agrega)
 // ---------------------------------------------------------
 function XmasPhotoPanel({ userStatus }) {
   const { user } = useAuth();
@@ -2204,9 +1398,7 @@ function XmasPhotoPanel({ userStatus }) {
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
 
-  const isPremium =
-    !!user && (userStatus?.subscription_status === "active");
-
+  const isPremium = !!user && userStatus?.subscription_status === "active";
   const fileInputId = "xmas-file-input";
 
   const handlePickFile = () => {
@@ -2226,13 +1418,13 @@ function XmasPhotoPanel({ userStatus }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrlResult = await fileToBase64(file);
-      setDataUrl(dataUrlResult);
-      const parts = String(dataUrlResult).split(",");
+      const durl = await fileToBase64(file);
+      setDataUrl(durl);
+      const parts = String(durl).split(",");
       setPureB64(parts[1] || null);
     } catch (err) {
-      console.error("Error leyendo archivo:", err);
-      setError("No se pudo leer la imagen. Intenta con otra foto.");
+      console.error(err);
+      setError("No se pudo leer la imagen.");
     }
   };
 
@@ -2243,14 +1435,12 @@ function XmasPhotoPanel({ userStatus }) {
       setError("Debes iniciar sesión para usar este módulo.");
       return;
     }
-
     if (!isPremium) {
       setError(
-        "Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA junto con el motor sin límite."
+        "Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA."
       );
       return;
     }
-
     if (!pureB64) {
       setError("Por favor sube una foto primero.");
       return;
@@ -2261,20 +1451,21 @@ function XmasPhotoPanel({ userStatus }) {
     setStatusText("Enviando foto navideña a RunPod...");
 
     try {
+      const auth = await getAuthHeadersGlobal();
+
       const res = await fetch("/api/generate-xmas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           image_b64: pureB64,
           description: extraPrompt || "",
+          cost: COST_XMAS_PHOTO, // por si lo usas del lado server
         }),
       });
 
       const data = await res.json().catch(() => null);
-      console.log("Respuesta /api/generate-xmas:", data);
-
-      if (!res.ok || !data || !data.ok || !data.jobId) {
-        throw new Error(data?.error || "Error lanzando job navideño en RunPod.");
+      if (!res.ok || !data?.ok || !data?.jobId) {
+        throw new Error(data?.error || "Error lanzando job navideño.");
       }
 
       const jobId = data.jobId;
@@ -2284,11 +1475,14 @@ function XmasPhotoPanel({ userStatus }) {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const statusRes = await fetch(`/api/status?id=${jobId}`);
+        const auth2 = await getAuthHeadersGlobal();
+        const statusRes = await fetch(`/api/status?id=${jobId}`, {
+          headers: { ...auth2 },
+        });
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
-          throw new Error(statusData?.error || "Error al consultar /api/status.");
+          throw new Error(statusData?.error || "Error consultando /api/status.");
         }
 
         const st = statusData.status;
@@ -2304,14 +1498,14 @@ function XmasPhotoPanel({ userStatus }) {
           setResultB64(b64);
           setStatusText("Foto navideña generada con éxito.");
         } else {
-          throw new Error("Job terminado pero sin imagen en la salida.");
+          throw new Error("Job terminado pero sin imagen.");
         }
       }
     } catch (err) {
-      console.error("Error en handleGenerateXmas:", err);
+      console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar la foto navideña.");
-      setError(err.message || String(err));
+      setError(err?.message || String(err));
     }
   };
 
@@ -2329,11 +1523,6 @@ function XmasPhotoPanel({ userStatus }) {
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Foto Navideña IA (Premium)</h2>
-        <p className="mt-2 text-sm text-neutral-300">
-          Convierte tu foto (o la de tu familia) en un retrato navideño de
-          estudio profesional, con iluminación cuidada y fondo temático
-          totalmente generado por IA.
-        </p>
 
         <div className="mt-5 space-y-4 text-sm">
           <div>
@@ -2361,19 +1550,19 @@ function XmasPhotoPanel({ userStatus }) {
 
           <div>
             <p className="text-xs text-neutral-300">
-              2. Opcional: cuéntanos quién aparece y qué escena quieres
+              2. Opcional: describe escena
             </p>
             <input
               type="text"
               value={extraPrompt}
               onChange={(e) => setExtraPrompt(e.target.value)}
-              placeholder="Ejemplo: familia de 4 personas, dos niños pequeños, estilo sala acogedora junto al árbol de Navidad."
+              placeholder="Ejemplo: familia, sala acogedora, árbol de navidad..."
               className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
           </div>
 
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado actual: {statusText || "Listo para enviar tu foto al motor."}
+            Estado: {statusText || "Listo."}
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
@@ -2386,12 +1575,8 @@ function XmasPhotoPanel({ userStatus }) {
           >
             {status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
-              : "Ejecutar Foto Navideña IA"}
+              : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
           </button>
-
-          <p className="mt-2 text-[11px] text-neutral-400">
-            Este módulo forma parte de las funciones premium incluidas en el Plan Basic.
-          </p>
         </div>
       </div>
 
@@ -2401,11 +1586,11 @@ function XmasPhotoPanel({ userStatus }) {
           {resultB64 ? (
             <img
               src={`data:image/png;base64,${resultB64}`}
-              alt="Foto navideña generada"
+              alt="Resultado navideño"
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Aquí verás el resultado en cuanto se complete el render.</p>
+            <p>Aquí verás el resultado cuando termine.</p>
           )}
         </div>
         {resultB64 && (
@@ -2438,13 +1623,15 @@ function DashboardView() {
   const fetchUserStatus = async () => {
     if (!user?.id) return;
     try {
-      const r = await fetch(
-        `/api/user-status?user_id=${encodeURIComponent(user.id)}`
-      );
+      const auth = await getAuthHeadersGlobal();
+
+      const r = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`, {
+        headers: { ...auth },
+      });
+
       const data = await r.json().catch(() => null);
-      if (!r.ok || !data?.ok) {
-        throw new Error(data?.error || "user-status error");
-      }
+      if (!r.ok || !data?.ok) throw new Error(data?.error || "user-status error");
+
       setUserStatus({
         loading: false,
         plan: data.plan,
@@ -2467,9 +1654,10 @@ function DashboardView() {
   const spendJades = async ({ amount, reason }) => {
     if (!user?.id) throw new Error("No user");
 
+    const auth = await getAuthHeadersGlobal();
     const r = await fetch("/api/jades-spend", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auth },
       body: JSON.stringify({
         user_id: user.id,
         amount: Number(amount),
@@ -2478,9 +1666,7 @@ function DashboardView() {
     });
 
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) {
-      throw new Error(data?.error || "No se pudo descontar jades.");
-    }
+    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
 
     await fetchUserStatus();
     return data;
@@ -2526,7 +1712,7 @@ function DashboardView() {
 
           <div className="flex items-center gap-3 text-xs">
             <span className="hidden sm:inline text-neutral-300">
-              {user?.email} {isAdmin && "· admin"}
+              {user?.email} {isAdmin ? "· admin" : ""}
             </span>
 
             <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5">
@@ -2569,136 +1755,66 @@ function DashboardView() {
 
           <p className="text-[11px] font-semibold text-neutral-300 mb-2">Navegación</p>
           <div className="flex flex-wrap gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Motor de imagen
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video_prompt")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "video_prompt"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Motor de video
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("img2video")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "img2video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Imagen → Video
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Biblioteca
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("xmas")}
-              className={`rounded-2xl px-3 py-1.5 ${
-                appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
-                  : "bg-gradient-to-r from-cyan-600/70 to-fuchsia-600/70 text-white/90"
-              }`}
-            >
-              🎄 Foto Navideña IA
-            </button>
+            {[
+              ["generator", "Motor de imagen"],
+              ["video_prompt", "Motor de video"],
+              ["img2video", "Imagen → Video"],
+              ["library", "Biblioteca"],
+              ["xmas", "🎄 Foto Navideña IA"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setAppViewMode(key)}
+                className={`rounded-2xl px-3 py-1.5 ${
+                  appViewMode === key
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
         <section className="flex gap-6">
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
             <p className="text-[11px] font-semibold text-neutral-300 mb-3">Navegación</p>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("generator")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "generator"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Motor de imagen (render)
-            </button>
 
-            <button
-              type="button"
-              onClick={() => setAppViewMode("video_prompt")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "video_prompt"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Motor de video (clips)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("img2video")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "img2video"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Transformación Imagen → Video
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAppViewMode("library")}
-              className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "library"
-                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                  : "bg-white/5 text-neutral-200 hover:bg-white/10"
-              }`}
-            >
-              Biblioteca de producción
-            </button>
-            <button
-              type="button"
-              onClick={() => setAppViewMode("xmas")}
-              className={`mt-4 w-full rounded-2xl px-3 py-2 text-left ${
-                appViewMode === "xmas"
-                  ? "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white"
-                  : "bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white/90"
-              }`}
-            >
-              🎄 Foto Navideña IA (Premium)
-            </button>
+            {[
+              ["generator", "Motor de imagen (render)"],
+              ["video_prompt", "Motor de video (clips)"],
+              ["img2video", "Transformación Imagen → Video"],
+              ["library", "Biblioteca de producción"],
+              ["xmas", "🎄 Foto Navideña IA (Premium)"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setAppViewMode(key)}
+                className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
+                  appViewMode === key
+                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
+                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </aside>
 
           <div className="flex-1 space-y-6">
             <div>
               <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
               <p className="mt-1 text-xs text-neutral-400">
-                Controla tu flujo de producción visual: genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
+                Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
               </p>
             </div>
 
-            {appViewMode === "generator" && <CreatorPanel userStatus={userStatus} />}
+            {appViewMode === "generator" && (
+              <CreatorPanel isDemo={false} />
+            )}
             {appViewMode === "video_prompt" && (
               <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
             )}
@@ -2715,31 +1831,12 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing (no sesión) con neon + BodySync
+// Landing (no sesión) con neon + demo
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
-
-  const handlePaddleCheckout = async () => {
-    try {
-      const res = await fetch("/api/paddle-checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        console.error("Respuesta Paddle:", data);
-        alert("No se pudo abrir el pago con Paddle. Intenta con Paypal.");
-      }
-    } catch (err) {
-      console.error("Error Paddle:", err);
-      alert("Error al conectar con Paddle.");
-    }
-  };
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
@@ -2813,14 +1910,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
               No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo de producción visual.
-              La arquitectura del sistema está preparada para módulos avanzados como BodySync, CineCam y Script2Film. Además,
-              usa nuestro módulo especial de{" "}
-              <span className="font-semibold text-white">Foto Navideña IA</span>{" "}
-              para transformar una foto real de tu familia en un retrato navideño de estudio con fondo totalmente generado por IA.
-            </p>
-
-            <p className="mt-4 text-xs text-neutral-400">
-              Mientras otros venden generación, nosotros vendemos producción confiable con IA.
+              Arquitectura preparada para módulos avanzados como BodySync, CineCam y Script2Film.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -2828,358 +1918,122 @@ function LandingView({ onOpenAuth, onStartDemo }) {
                 onClick={onStartDemo}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
-                Probar el motor de producción ({DEMO_LIMIT} outputs)
+                Probar el motor ({DEMO_LIMIT} outputs)
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Valida el motor antes de crear tu cuenta y desbloquea {DAILY_LIMIT} renders diarios registrándote.
+                Luego crea tu cuenta para desbloquear {DAILY_LIMIT} renders diarios y biblioteca.
               </p>
             </div>
-
-            <p className="mt-4 text-xs text-neutral-500">
-              Arquitectura preparada para el motor de movimiento corporal{" "}
-              <span className="font-semibold text-white">BodySync</span> y módulos cinematográficos avanzados.
-            </p>
           </div>
 
           <div className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
             <h2 className="text-sm font-semibold text-white mb-3">
-              Calidad de estudio · Renderizado con el motor actual
+              Calidad de estudio · Render del motor actual
             </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
-                <img src="/gallery/img1.png?v=2" alt="Imagen generada 1" className="w-full h-auto object-cover" />
-              </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
-                <img src="/gallery/img2.png?v=2" alt="Imagen generada 2" className="w-full h-auto object-cover" />
-              </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-fuchsia-500/10">
-                <img src="/gallery/img3.png?v=2" alt="Imagen generada 3" className="w-full h-auto object-cover" />
-              </div>
-              <div className="rounded-2xl border border-white/10 overflow-hidden shadow-xl shadow-cyan-500/10">
-                <img src="/gallery/img4.png?v=2" alt="Imagen generada 4" className="w-full h-auto object-cover" />
-              </div>
+              {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
+                <div
+                  key={p}
+                  className={`rounded-2xl border border-white/10 overflow-hidden shadow-xl ${
+                    i % 2 === 0 ? "shadow-fuchsia-500/10" : "shadow-cyan-500/10"
+                  }`}
+                >
+                  <img src={`/gallery/${p}?v=2`} alt={p} className="w-full h-auto object-cover" />
+                </div>
+              ))}
             </div>
 
             <p className="mt-3 text-[10px] text-neutral-500">
-              isabelaOs Studio es un motor de producción visual con IA desarrollado en Guatemala para creadores, estudios y equipos que buscan consistencia y control.
+              IsabelaOS Studio · motor de producción visual con IA desarrollado en Guatemala.
             </p>
           </div>
-        </section>
-
-        {/* ✅ NUEVO: Secciones informativas Video (NO funcionales en Home) */}
-        <section className="mt-12 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Motor de video (módulo en el panel)</h3>
-            <p className="mt-2 text-[11px] text-neutral-300">
-              Dentro del panel del creador podrás producir clips cortos usando nuestro motor en GPU.
-              Este módulo se habilita en tu cuenta y utiliza jades para la generación.
-            </p>
-            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
-              <li>Clips cortos listos para reels.</li>
-              <li>Control por prompt con estilo cinematográfico.</li>
-              <li>Seguimiento de estado en tiempo real.</li>
-            </ul>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Transformación Imagen → Video (módulo en el panel)</h3>
-            <p className="mt-2 text-[11px] text-neutral-300">
-              Sube una imagen (o usa una URL) y conviértela en un clip. Este módulo está pensado para transformaciones,
-              cambios de outfit y escenas cortas basadas en una imagen.
-            </p>
-            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
-              <li>Ideal para videos tipo “antes / después”.</li>
-              <li>Control de estilo por prompt opcional.</li>
-              <li>Arquitectura lista para integración futura con BodySync.</li>
-            </ul>
-          </div>
-        </section>
-
-        {/* Sección especial Foto Navideña IA */}
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Especial Navidad · Foto Navideña IA</h3>
-            <p className="mt-2 text-[11px] text-neutral-300">
-              Sube una foto real tuya o de tu familia y deja que IsabelaOS
-              Studio la convierta en un retrato navideño de estudio con fondo,
-              luces y decoración generados por IA.
-            </p>
-            <ul className="mt-2 list-disc list-inside text-[11px] text-neutral-400">
-              <li>Ideal para compartir en redes sociales o imprimir.</li>
-              <li>Respeta la pose original y cambia el entorno a una escena navideña realista.</li>
-              <li>Incluido en el Plan Basic.</li>
-            </ul>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/60 p-4 flex items-center justify-center">
-            <img
-              src="/gallery/xmas_family_before_after.png"
-              alt="Ejemplo de familia antes y después con fondo navideño"
-              className="w-full rounded-2xl object-cover"
-            />
-          </div>
-        </section>
-
-        {/* Vista previa del panel */}
-        <section className="mt-12">
-          <div className="mb-3 h-px w-24 bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent" />
-          <h2 className="text-sm font-semibold text-white mb-4">
-            Flujo de trabajo simple y potente
-          </h2>
-          <div className="rounded-3xl border border-white/10 bg-black/50 p-5 text-xs text-neutral-300">
-            <h3 className="text-sm font-semibold text-white">Vista previa del panel del creador</h3>
-            <p className="mt-2 text-[11px] text-neutral-400">
-              Interfaz simple para ejecutar renders, ajustar resolución y ver
-              resultados generados por el motor conectado a GPU.
-            </p>
-            <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-black/60">
-              <img src="/preview/panel.png" alt="Vista previa del panel de isabelaOs Studio" className="w-full object-cover" />
-            </div>
-          </div>
-        </section>
-
-        {/* Showcase BodySync */}
-        <section className="mt-12">
-          <h2 className="text-sm font-semibold text-white mb-2">
-            Arquitectura preparada para BodySync · Movimiento corporal IA
-          </h2>
-          <p className="text-xs text-neutral-300 max-w-2xl">
-            Esta imagen fue generada con nuestro modelo de pruebas BodySync.
-          </p>
-
-          <div className="mt-6 flex justify-center">
-            <div className="max-w-md w-full rounded-3xl border border-white/10 bg-black/70 px-4 py-4 shadow-lg shadow-cyan-500/25">
-              <img
-                src="/gallery/bodysync_showcase.png"
-                alt="Ejemplo generado con BodySync"
-                className="w-full rounded-2xl object-cover"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* ✅ CAMBIO: Planes (2 planes) */}
-        <section className="mt-14 max-w-6xl border-t border-white/10 pt-8">
-          <h2 className="text-sm font-semibold text-white">Planes de suscripción</h2>
-          <p className="mt-2 text-xs text-neutral-300 max-w-2xl">
-            Planes diseñados para producción: acceso sin límites, módulos premium y créditos (jades) para video.
-          </p>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {/* Basic */}
-            <div className="rounded-3xl border border-white/10 bg-black/50 p-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-white">Basic</h3>
-                <div className="text-sm font-semibold text-white">US$19/mes</div>
-              </div>
-              <p className="mt-2 text-xs text-neutral-300">
-                Para creadores que quieren producir sin contar límites y acceder a módulos premium base.
-              </p>
-              <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Motor de imagen (renders ilimitados).</li>
-                <li>Motor de video (desde prompt).</li>
-                <li>Transformación Imagen → Video.</li>
-                <li>Foto Navideña IA (premium).</li>
-                <li>100 Jades mensuales.</li>
-              </ul>
-
-              <div className="mt-4">
-                <div className="text-[11px] text-neutral-400 mb-1">
-                  Pagar con <span className="font-semibold text-white">PayPal</span>:
-                </div>
-                <PayPalButton
-                  amount="19.00"
-                  description="IsabelaOS Studio – Plan Basic (Mensual)"
-                  containerId="paypal-button-basic"
-                />
-                <button
-                  onClick={handlePaddleCheckout}
-                  className="mt-3 w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
-                >
-                  Pagar con tarjeta (Paddle) – Basic US$19/mes
-                </button>
-              </div>
-            </div>
-
-            {/* Pro */}
-            <div className="rounded-3xl border border-white/10 bg-black/50 p-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-white">Pro</h3>
-                <div className="text-sm font-semibold text-white">US$39/mes</div>
-              </div>
-              <p className="mt-2 text-xs text-neutral-300">
-                Para creadores avanzados y estudios que quieren máximo control, prioridad y acceso temprano a módulos nuevos.
-              </p>
-              <ul className="mt-3 list-disc list-inside text-[11px] text-neutral-400 space-y-1">
-                <li>Optimización automática de prompts.</li>
-                <li>Motor de imagen (renders ilimitados).</li>
-                <li>Motor de video (desde prompt e Imagen → Video).</li>
-                <li>Foto Navideña IA (premium).</li>
-                <li>Acceso temprano a módulos en desarrollo.</li>
-                <li>300 Jades mensuales.</li>
-              </ul>
-
-              <div className="mt-4">
-                <div className="text-[11px] text-neutral-400 mb-1">
-                  Pagar con <span className="font-semibold text-white">PayPal</span>:
-                </div>
-                <PayPalButton
-                  amount="39.00"
-                  description="IsabelaOS Studio – Plan Pro (Mensual)"
-                  containerId="paypal-button-pro"
-                />
-                <button
-                  onClick={handlePaddleCheckout}
-                  className="mt-3 w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
-                >
-                  Pagar con tarjeta (Paddle) – Pro US$39/mes
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-4 text-[11px] text-neutral-400">
-            ¿Te quedaste sin jades? Puedes comprar más dentro del panel (wallet).
-          </p>
         </section>
 
         {/* Contacto */}
-        <section id="contacto" className="mt-16 max-w-xl">
-          <h2 className="text-sm font-semibold text-white">Contacto y soporte</h2>
-          <p className="mt-1 text-xs text-neutral-400">
-            Si tienes dudas sobre IsabelaOS Studio, escríbenos y el equipo de
-            soporte responderá desde{" "}
-            <span className="font-semibold text-white">contacto@isabelaos.com</span>.
+        <section id="contacto" className="mt-16 rounded-3xl border border-white/10 bg-black/40 p-6">
+          <h3 className="text-lg font-semibold text-white">Contacto</h3>
+          <p className="mt-2 text-xs text-neutral-400">
+            Escríbenos y te respondemos lo antes posible.
           </p>
 
-          <form onSubmit={handleContactSubmit} className="mt-4 space-y-3 text-sm">
-            <div>
-              <label className="text-xs text-neutral-300">Nombre</label>
-              <input
-                type="text"
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-300">Correo</label>
-              <input
-                type="email"
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-300">Mensaje</label>
-              <textarea
-                rows={4}
-                value={contactMessage}
-                onChange={(e) => setContactMessage(e.target.value)}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
+          <form onSubmit={handleContactSubmit} className="mt-5 grid gap-3 md:grid-cols-2">
+            <input
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              placeholder="Nombre"
+              className="rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+            <input
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder="Correo"
+              type="email"
+              className="rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+            <textarea
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+              placeholder="Mensaje"
+              className="md:col-span-2 h-28 resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
             <button
               type="submit"
-              className="mt-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2 text-sm font-semibold text-white"
+              className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
             >
-              Enviar mensaje
+              Enviar
             </button>
           </form>
         </section>
-
-        <footer className="mt-16 border-t border-white/10 pt-6 text-[11px] text-neutral-500">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>
-              © {new Date().getFullYear()} isabelaOs Studio · Desarrollado en
-              Guatemala, Cobán Alta Verapaz por Stalling Technologic.
-            </span>
-            <span className="flex flex-wrap gap-3">
-              <a href="/terms.html" className="hover:text-neutral-300">Términos de servicio</a>
-              <span>•</span>
-              <a href="/privacy.html" className="hover:text-neutral-300">Política de privacidad</a>
-              <span>•</span>
-              <a href="/refunds.html" className="hover:text-neutral-300">Política de reembolsos</a>
-            </span>
-          </div>
-        </footer>
       </main>
     </div>
   );
 }
 
 // ---------------------------------------------------------
-// ✅ APP PRINCIPAL — landing / demo / shell
+// Root App
 // ---------------------------------------------------------
 export default function App() {
-  const { user, loading } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [viewMode, setViewMode] = useState("landing");
+  const { user } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
-  useEffect(() => {
-    document.documentElement.style.background = "#06070B";
-  }, []);
+  // si está logueado, siempre dashboard; si no, landing o demo
+  if (user) return <DashboardView />;
 
-  const openAuth = () => setShowAuthModal(true);
-  const closeAuth = () => setShowAuthModal(false);
-
-  const handleStartDemo = () => setViewMode("demo");
-
-  useEffect(() => {
-    if (user) setViewMode("shell");
-  }, [user]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-black text-white">
-        <p className="text-sm text-neutral-400">Cargando sesión...</p>
-      </div>
-    );
-  }
-
-  // 🔥 USUARIO LOGUEADO → APP REAL
-  if (user && viewMode === "shell") {
-    return <AppShell />;
-  }
-
-  // DEMO
-  if (viewMode === "demo") {
-    return (
-      <>
-        <div className="min-h-screen px-4 py-10 text-white bg-[#05060A]">
-          <div className="mx-auto max-w-6xl mb-6 flex justify-between">
-            <button
-              onClick={() => setViewMode("landing")}
-              className="rounded-xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
-            >
-              ← Volver
-            </button>
-
-            <button
-              onClick={openAuth}
-              className="rounded-xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
-            >
-              Iniciar sesión / Registrarse
-            </button>
-          </div>
-
-          <CreatorPanel isDemo={true} onAuthRequired={openAuth} userStatus={null} />
-        </div>
-
-        <AuthModal open={showAuthModal} onClose={closeAuth} />
-      </>
-    );
-  }
-
-  // LANDING
   return (
     <>
-      <LandingView onOpenAuth={openAuth} onStartDemo={handleStartDemo} />
-      <AuthModal open={showAuthModal} onClose={closeAuth} />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      {demoMode ? (
+        <div className="min-h-screen bg-neutral-950 text-white">
+          <div className="mx-auto max-w-6xl px-4 py-8">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">IsabelaOS Studio</p>
+                <p className="text-[11px] text-neutral-400">Demo del motor</p>
+              </div>
+              <button
+                onClick={() => setDemoMode(false)}
+                className="rounded-2xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
+              >
+                Volver
+              </button>
+            </div>
+
+            <CreatorPanel
+              isDemo={true}
+              onAuthRequired={() => setAuthOpen(true)}
+            />
+          </div>
+        </div>
+      ) : (
+        <LandingView
+          onOpenAuth={() => setAuthOpen(true)}
+          onStartDemo={() => setDemoMode(true)}
+        />
+      )}
     </>
   );
 }
