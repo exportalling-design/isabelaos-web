@@ -22,11 +22,14 @@ function getHeader(req, name) {
 // ---- PayPal: token ----
 async function getPayPalAccessToken() {
   const isLive = (process.env.PAYPAL_ENV || "sandbox") === "live";
-  const base = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+  const base = isLive
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
 
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_SECRET;
-  if (!clientId || !secret) throw new Error("Missing PAYPAL_CLIENT_ID / PAYPAL_SECRET");
+  if (!clientId || !secret)
+    throw new Error("Missing PAYPAL_CLIENT_ID / PAYPAL_SECRET");
 
   const auth = Buffer.from(`${clientId}:${secret}`).toString("base64");
 
@@ -40,7 +43,8 @@ async function getPayPalAccessToken() {
   });
 
   const data = await r.json();
-  if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(data)}`);
+  if (!r.ok)
+    throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(data)}`);
   return { base, token: data.access_token };
 }
 
@@ -82,7 +86,8 @@ async function verifyPayPalSignature({ rawBody, headers }) {
   });
 
   const data = await r.json();
-  if (!r.ok) throw new Error(`Verify signature error: ${r.status} ${JSON.stringify(data)}`);
+  if (!r.ok)
+    throw new Error(`Verify signature error: ${r.status} ${JSON.stringify(data)}`);
 
   return data.verification_status === "SUCCESS";
 }
@@ -95,30 +100,64 @@ function supabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// ---- extraer user_id y reference_id del evento ----
-function extractMeta(event) {
-  // Estrategia:
-  // 1) Preferir event.resource.custom_id como user_id
-  // 2) Preferir event.resource.invoice_id o reference_id como referencia (tuya)
-  // 3) Fallbacks simples si vienen anidados (según tipo de evento)
+// ---- PayPal: lookup order (para recuperar custom_id / invoice_id) ----
+async function getPayPalOrder(orderId) {
+  if (!orderId) throw new Error("Missing orderId for PayPal order lookup");
 
+  const { base, token } = await getPayPalAccessToken();
+
+  const r = await fetch(`${base}/v2/checkout/orders/${orderId}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  const data = await r.json();
+  if (!r.ok)
+    throw new Error(
+      `PayPal order lookup error: ${r.status} ${JSON.stringify(data)}`
+    );
+
+  return data;
+}
+
+// ---- extraer user_id y reference_id del evento (robusto) ----
+async function extractMetaRobust(event) {
   const r = event?.resource || {};
-  const userId =
+
+  // Intento directo (cuando venga)
+  let userId =
     r.custom_id ||
     r?.subscriber?.payer_id || // fallback (NO recomendado para tu sistema)
     null;
 
-  const referenceId =
+  let referenceId =
     r.invoice_id ||
     r.reference_id ||
     r.id || // fallback
     null;
 
-  return { userId, referenceId };
+  // Para CAPTURE/Sale: a veces trae order_id dentro de supplementary_data
+  const orderId =
+    r?.supplementary_data?.related_ids?.order_id ||
+    r?.supplementary_data?.related_ids?.orderId ||
+    null;
+
+  // Si faltó algo importante, consultamos la orden para sacar purchase_units[0].custom_id / invoice_id
+  if ((!userId || !referenceId) && orderId) {
+    const order = await getPayPalOrder(orderId);
+    const pu = order?.purchase_units?.[0] || {};
+
+    userId = userId || pu.custom_id || null;
+    referenceId =
+      referenceId || pu.invoice_id || pu.reference_id || referenceId || null;
+  }
+
+  return { userId, referenceId, orderId };
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
     const rawBody = await readRawBody(req);
@@ -167,7 +206,9 @@ export default async function handler(req, res) {
     // 3) Procesar por tipo
     const type = event.event_type;
     const resource = event.resource || {};
-    const { userId, referenceId } = extractMeta(event);
+
+    // 🔥 Parche: extracción robusta (incluye lookup de ORDER para conseguir custom_id / invoice_id)
+    const { userId, referenceId } = await extractMetaRobust(event);
 
     // ⚠️ Regla: para acreditar jades, necesitas userId.
     // userId debe venir como UUID en custom_id desde tu checkout.
@@ -181,7 +222,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: false,
         status: "missing_user",
-        note: "No custom_id/userId in event. Configure checkout to send custom_id=user_uuid.",
+        note: "No custom_id/userId in event (or in the parent Order). Configure checkout to send custom_id=user_uuid on purchase_units[0].custom_id.",
       });
     }
 
@@ -205,7 +246,7 @@ export default async function handler(req, res) {
           ok: false,
           status: "unknown_pack",
           got_referenceId: referenceId,
-          note: "Set invoice_id/referenceId to a known pack key (pack_50/100/500/1000) or implement your own mapping.",
+          note: "Set purchase_units[0].invoice_id (or referenceId) to a known pack key (pack_50/100/500/1000) or implement your own mapping.",
         });
       }
 
@@ -223,13 +264,12 @@ export default async function handler(req, res) {
     // En PayPal a veces viene como BILLING.SUBSCRIPTION.PAYMENT.COMPLETED
     if (type === "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED") {
       // Aquí decides jades del plan.
-      // Ideal: enviar plan en referenceId (invoice_id) o usar resource.billing_agreement_id / subscription_id
+      // Ideal: mapear por plan_id si viene en el evento.
       const subscriptionId = resource?.billing_agreement_id || resource?.id || null;
-
-      // Ejemplo: mapear por plan_id si viene:
       const planId = resource?.plan_id || null;
+
       const planMap = {
-        // "P-XXXXXXXXXXXX": 300, // Basic
+        // "P-XXXXXXXXXXXX": 300,  // Basic
         // "P-YYYYYYYYYYYY": 1000, // Pro
       };
 
