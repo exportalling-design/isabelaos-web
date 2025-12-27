@@ -1,279 +1,148 @@
-
-// /api/webhook.js
+// api/webhook.js
 import { createClient } from "@supabase/supabase-js";
+import getRawBody from "raw-body";
 
 export const config = {
-  api: { bodyParser: false }, // NECESARIO para firma PayPal (raw body)
+  api: { bodyParser: false }, // ✅ CLAVE: necesitamos RAW body
 };
 
-// -----------------------------
-// helpers
-// -----------------------------
-async function readRawBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return Buffer.concat(chunks);
-}
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function getHeader(req, name) {
-  const key = Object.keys(req.headers).find(
-    (k) => k.toLowerCase() === name.toLowerCase()
-  );
-  return key ? req.headers[key] : undefined;
-}
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
+const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
+const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase(); // sandbox | live
 
-// -----------------------------
-// PayPal token
-// -----------------------------
-function getPayPalBase() {
-  // ✅ parche: no dependemos de PAYPAL_ENV
-  // Usa PAYPAL_MODE="live" si quieres producción. Si no existe, sandbox.
-  const mode = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
-  const isLive = mode === "live";
-  return isLive
+const PAYPAL_API_BASE =
+  PAYPAL_MODE === "live"
     ? "https://api-m.paypal.com"
     : "https://api-m.sandbox.paypal.com";
+
+function must(name, val) {
+  if (!val) throw new Error(`Missing env: ${name}`);
+  return val;
 }
 
-async function getPayPalAccessToken() {
-  const base = getPayPalBase();
-
-  const clientId = process.env.PAYPAL_CLIENT_ID;
-  // ✅ parche: tú lo tienes como PAYPAL_CLIENT_SECRET
-  const secret =
-    process.env.PAYPAL_CLIENT_SECRET ||
-    process.env.PAYPAL_SECRET; // compat
-
-  if (!clientId || !secret) {
-    throw new Error("Missing PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET");
-  }
-
-  const auth = Buffer.from(`${clientId}:${secret}`).toString("base64");
-
-  const r = await fetch(`${base}/v1/oauth2/token`, {
+async function paypalAccessToken() {
+  const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
+  const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${auth}`,
+      Authorization: `Basic ${basic}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
   });
-
-  const data = await r.json();
-  if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(data)}`);
-  return { base, token: data.access_token };
+  const j = await r.json();
+  if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(j)}`);
+  return j.access_token;
 }
 
-// -----------------------------
-// PayPal verify webhook signature
-// -----------------------------
-async function verifyPayPalSignature({ rawBody, headers }) {
-  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
-  if (!webhookId) throw new Error("Missing PAYPAL_WEBHOOK_ID");
+async function verifyWebhookSignature({ rawBody, event, headers }) {
+  // PayPal manda headers con esos nombres; en Node vienen en minúscula
+  const transmissionId = headers["paypal-transmission-id"];
+  const transmissionTime = headers["paypal-transmission-time"];
+  const certUrl = headers["paypal-cert-url"];
+  const authAlgo = headers["paypal-auth-algo"];
+  const transmissionSig = headers["paypal-transmission-sig"];
 
-  // headers mínimos requeridos
-  for (const k of [
-    "paypal-auth-algo",
-    "paypal-cert-url",
-    "paypal-transmission-id",
-    "paypal-transmission-sig",
-    "paypal-transmission-time",
-  ]) {
-    if (!headers[k]) throw new Error(`Missing required PayPal header: ${k}`);
+  if (!transmissionId || !transmissionTime || !certUrl || !authAlgo || !transmissionSig) {
+    return { verified: false, error: "Missing PayPal signature headers" };
   }
 
-  const { base, token } = await getPayPalAccessToken();
+  const accessToken = await paypalAccessToken();
 
   const payload = {
-    auth_algo: headers["paypal-auth-algo"],
-    cert_url: headers["paypal-cert-url"],
-    transmission_id: headers["paypal-transmission-id"],
-    transmission_sig: headers["paypal-transmission-sig"],
-    transmission_time: headers["paypal-transmission-time"],
-    webhook_id: webhookId,
-    webhook_event: JSON.parse(rawBody.toString("utf8")),
+    auth_algo: authAlgo,
+    cert_url: certUrl,
+    transmission_id: transmissionId,
+    transmission_sig: transmissionSig,
+    transmission_time: transmissionTime,
+    webhook_id: PAYPAL_WEBHOOK_ID,
+    webhook_event: event, // 👈 objeto parseado
   };
 
-  const r = await fetch(`${base}/v1/notifications/verify-webhook-signature`, {
+  const r = await fetch(`${PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
   });
 
-  const data = await r.json();
-  if (!r.ok) throw new Error(`Verify signature error: ${r.status} ${JSON.stringify(data)}`);
-
-  return data.verification_status === "SUCCESS";
+  const j = await r.json();
+  // PayPal responde verification_status: "SUCCESS" | "FAILURE"
+  const ok = r.ok && j?.verification_status === "SUCCESS";
+  return {
+    verified: ok,
+    error: ok ? null : `verify_failed: ${JSON.stringify(j)}`,
+  };
 }
 
-// -----------------------------
-// Supabase admin client
-// -----------------------------
-function supabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY; // SOLO server-side
-  if (!url || !key) throw new Error("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-// -----------------------------
-// extraer user_id y reference_id del evento
-// -----------------------------
-function extractMeta(event) {
-  const r = event?.resource || {};
-  const userId = r.custom_id || null;
-
-  // ✅ en tu payload real viene invoice_id y custom_id sí existe.
-  const referenceId =
-    r.invoice_id ||
-    r.reference_id ||
-    r.id ||
-    null;
-
-  return { userId, referenceId };
-}
-
-// -----------------------------
-// MAIN
-// -----------------------------
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method not allowed" });
-  }
-
-  const sb = (() => {
-    try { return supabaseAdmin(); } catch { return null; }
-  })();
-
-  let rawBody;
-  let event;
-  let headers;
-  let verified = false;
-  let errMsg = null;
-
   try {
-    rawBody = await readRawBody(req);
-    event = JSON.parse(rawBody.toString("utf8"));
+    if (req.method !== "POST") return res.status(200).json({ ok: true, ignored: true });
 
-    // Normalizar headers PayPal a minúsculas
-    headers = {
-      "paypal-auth-algo": getHeader(req, "paypal-auth-algo"),
-      "paypal-cert-url": getHeader(req, "paypal-cert-url"),
-      "paypal-transmission-id": getHeader(req, "paypal-transmission-id"),
-      "paypal-transmission-sig": getHeader(req, "paypal-transmission-sig"),
-      "paypal-transmission-time": getHeader(req, "paypal-transmission-time"),
+    must("SUPABASE_URL", SUPABASE_URL);
+    must("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
+    must("PAYPAL_CLIENT_ID", PAYPAL_CLIENT_ID);
+    must("PAYPAL_CLIENT_SECRET", PAYPAL_CLIENT_SECRET);
+    must("PAYPAL_WEBHOOK_ID", PAYPAL_WEBHOOK_ID);
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const raw = await getRawBody(req);
+    const rawText = raw.toString("utf8");
+
+    let event;
+    try {
+      event = JSON.parse(rawText);
+    } catch {
+      // Guardamos aunque venga raro
+      event = { parse_error: true, raw: rawText };
+    }
+
+    const eventId = event?.id || `no-id-${Date.now()}`;
+    const eventType = event?.event_type || null;
+    const resourceType = event?.resource_type || null;
+
+    // 1) Intentar verificar (si falla, NO tiramos 400)
+    let verified = false;
+    let verifyError = null;
+    try {
+      const v = await verifyWebhookSignature({
+        rawBody: rawText,
+        event,
+        headers: req.headers,
+      });
+      verified = v.verified;
+      verifyError = v.error;
+    } catch (e) {
+      verified = false;
+      verifyError = `verify_exception: ${String(e?.message || e)}`;
+    }
+
+    // 2) Guardar SIEMPRE en Supabase (raw + headers)
+    const insertPayload = {
+      id: eventId,
+      event_type: eventType,
+      resource_type: resourceType,
+      verified,
+      error: verifyError,
+      payload: event,
+      headers: req.headers,
     };
 
-    // 1) Verificar firma
-    verified = await verifyPayPalSignature({ rawBody, headers });
+    await supabase
+      .from("paypal_events_raw")
+      .upsert(insertPayload, { onConflict: "id" });
 
+    // ✅ 3) RESPONDER 200 SIEMPRE (definitivo, evita retries infinitos)
+    return res.status(200).json({ ok: true, stored: true, verified });
   } catch (e) {
-    verified = false;
-    errMsg = String(e?.message || e);
-  }
-
-  // ✅ PARCHE CLAVE: siempre loguear en paypal_events_raw (la que tú creaste)
-  // Así aunque falle firma/ENV, lo verás en Supabase con el error.
-  try {
-    if (sb && event?.id) {
-      const insertPayload = {
-        id: event.id,
-        event_type: event.event_type || null,
-        resource_type: event.resource_type || null,
-        verified,
-        error: errMsg,
-        raw: event,
-      };
-
-      // upsert = idempotencia
-      const { error: upErr } = await sb
-        .from("paypal_events_raw")
-        .upsert(insertPayload, { onConflict: "id" });
-
-      if (upErr) {
-        // Si falla el log, igual respondemos, pero te avisamos en response
-        return res.status(200).json({
-          ok: false,
-          status: "logged_failed",
-          verified,
-          error: errMsg,
-          supabase_error: upErr,
-        });
-      }
-    }
-  } catch (logErr) {
-    // no reventar la función por logging
-  }
-
-  // Si firma inválida => 400 (y ya quedó registrado en paypal_events_raw con error)
-  if (!verified) {
-    return res.status(400).json({ ok: false, error: errMsg || "Invalid signature" });
-  }
-
-  // A partir de aquí: firma OK, puedes procesar de forma definitiva
-  try {
-    if (!sb) throw new Error("Supabase admin not available (missing env vars)");
-
-    const type = event.event_type;
-    const { userId, referenceId } = extractMeta(event);
-
-    // Para acreditar jades necesitas userId (uuid) desde custom_id
-    const mustHaveUser = ["PAYMENT.CAPTURE.COMPLETED"];
-    if (mustHaveUser.includes(type) && !userId) {
-      return res.status(200).json({
-        ok: false,
-        status: "missing_user",
-        note: "No custom_id/userId in event. Configure checkout to send custom_id=user_uuid.",
-      });
-    }
-
-    // A) Pago único (packs)
-    if (type === "PAYMENT.CAPTURE.COMPLETED") {
-      // 👇 IMPORTANTE:
-      // Tu invoice_id real se ve así:
-      // "3942619:fdv09c49-a3g6-4cbf-1358-f6d241dacea2"
-      // Entonces NO va a matchear pack_50 directo.
-      //
-      // Solución definitiva: manda invoice_id como "pack_50" (o usa un prefijo).
-      // Mientras, hacemos un parser por si viene "pack_50:xxxx".
-      const map = {
-        pack_50: 50,
-        pack_100: 100,
-        pack_500: 500,
-        pack_1000: 1000,
-      };
-
-      const ref = String(referenceId || "");
-      const firstToken = ref.split(":")[0]; // "pack_50:xxxx" => "pack_50"
-      const amount = map[firstToken] || null;
-
-      if (!amount) {
-        return res.status(200).json({
-          ok: true,
-          status: "captured_but_no_pack_mapping",
-          got_invoice_id: referenceId,
-          note:
-            "Set invoice_id to 'pack_50' (o 'pack_50:algo') para acreditar automático, o implementa tu propio mapping por amount/order_id.",
-        });
-      }
-
-      // ✅ usa tu RPC existente
-      const { error } = await sb.rpc("credit_jades_from_payment", {
-        p_user_id: userId,
-        p_amount: amount,
-        p_reference_id: `pp_${event.id}`, // id único
-      });
-      if (error) throw new Error(`credit_jades_from_payment error: ${JSON.stringify(error)}`);
-
-      return res.status(200).json({ ok: true, status: "credited_pack", amount });
-    }
-
-    // Default: evento verificado, pero no manejado
-    return res.status(200).json({ ok: true, status: "verified_ignored_event", type });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    // Incluso en error interno: responde 200 para que PayPal no reintente infinito
+    return res.status(200).json({ ok: false, error: String(e?.message || e) });
   }
 }
