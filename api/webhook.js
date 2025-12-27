@@ -21,15 +21,16 @@ function getHeader(req, name) {
 
 // ---- PayPal: token ----
 async function getPayPalAccessToken() {
-  const isLive = (process.env.PAYPAL_ENV || "sandbox") === "live";
+  const env = (process.env.PAYPAL_ENV || "sandbox").toLowerCase();
+  const isLive = env === "live";
+
   const base = isLive
     ? "https://api-m.paypal.com"
     : "https://api-m.sandbox.paypal.com";
 
   const clientId = process.env.PAYPAL_CLIENT_ID;
 
-  // ✅ PARCHE: aceptar PAYPAL_CLIENT_SECRET (nombre real en dashboard)
-  // y fallback a PAYPAL_SECRET si alguien lo usa así.
+  // ✅ PARCHE: PayPal lo llama Client Secret
   const secret =
     process.env.PAYPAL_CLIENT_SECRET ||
     process.env.PAYPAL_SECRET ||
@@ -54,7 +55,8 @@ async function getPayPalAccessToken() {
 
   const data = await r.json();
   if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(data)}`);
-  return { base, token: data.access_token };
+
+  return { base, token: data.access_token, env };
 }
 
 // ---- PayPal: verify webhook signature ----
@@ -64,7 +66,7 @@ async function verifyPayPalSignature({ rawBody, headers }) {
 
   const { base, token } = await getPayPalAccessToken();
 
-  // headers mínimos requeridos
+  // headers mínimos requeridos por PayPal
   for (const k of [
     "paypal-auth-algo",
     "paypal-cert-url",
@@ -112,10 +114,7 @@ function supabaseAdmin() {
 function extractMeta(event) {
   const r = event?.resource || {};
 
-  const userId =
-    r.custom_id ||
-    r?.subscriber?.payer_id || // fallback (NO recomendado)
-    null;
+  const userId = r.custom_id || null;
 
   const referenceId =
     r.invoice_id ||
@@ -127,6 +126,15 @@ function extractMeta(event) {
 }
 
 export default async function handler(req, res) {
+  // ✅ PARCHE: permitir GET para probar que el endpoint vive
+  if (req.method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      route: "/api/webhook",
+      note: "PayPal envía POST. Si ves esto, el endpoint está vivo.",
+    });
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Método no permitido" });
   }
@@ -134,7 +142,6 @@ export default async function handler(req, res) {
   try {
     const rawBody = await readRawBody(req);
 
-    // Normalizar headers PayPal a minúsculas
     const headers = {
       "paypal-auth-algo": getHeader(req, "paypal-auth-algo"),
       "paypal-cert-url": getHeader(req, "paypal-cert-url"),
@@ -143,14 +150,24 @@ export default async function handler(req, res) {
       "paypal-transmission-time": getHeader(req, "paypal-transmission-time"),
     };
 
-    // 1) Verificar firma
+    const event = JSON.parse(rawBody.toString("utf8"));
+
+    // ✅ DEBUG: logs en Vercel
+    console.log("[PP_WEBHOOK] received event.id=", event?.id, "type=", event?.event_type);
+    console.log("[PP_WEBHOOK] headers keys=", Object.keys(headers).reduce((acc, k) => {
+      acc[k] = !!headers[k];
+      return acc;
+    }, {}));
+
+    // 1) Verificar firma (si falla, NO insertará nada en paypal_events)
     const valid = await verifyPayPalSignature({ rawBody, headers });
+    console.log("[PP_WEBHOOK] signature valid =", valid);
+
     if (!valid) return res.status(400).json({ ok: false, error: "Invalid signature" });
 
-    const event = JSON.parse(rawBody.toString("utf8"));
     const sb = supabaseAdmin();
 
-    // 2) Idempotencia por event.id
+    // 2) Idempotencia + guardar evento
     if (event?.id) {
       const { data: existing, error: exErr } = await sb
         .from("paypal_events")
@@ -172,28 +189,13 @@ export default async function handler(req, res) {
       });
 
       if (insErr) throw new Error(`paypal_events insert error: ${JSON.stringify(insErr)}`);
+      console.log("[PP_WEBHOOK] inserted paypal_events id =", event.id);
     }
 
     // 3) Procesar por tipo
     const type = event.event_type;
-    const resource = event.resource || {};
     const { userId, referenceId } = extractMeta(event);
 
-    const mustHaveUser = [
-      "PAYMENT.CAPTURE.COMPLETED",
-      "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED",
-      "PAYMENT.SALE.COMPLETED",
-    ];
-
-    if (mustHaveUser.includes(type) && !userId) {
-      return res.status(200).json({
-        ok: false,
-        status: "missing_user",
-        note: "No custom_id/userId in event. Configure checkout to send custom_id=user_uuid.",
-      });
-    }
-
-    // ---- A) Pago único (packs) ----
     if (type === "PAYMENT.CAPTURE.COMPLETED") {
       const map = {
         pack_50: 50,
@@ -202,15 +204,25 @@ export default async function handler(req, res) {
         pack_1000: 1000,
       };
 
-      const packKey = referenceId; // idealmente invoice_id = "pack_500"
+      // OJO: tu invoice_id actual es tipo "3942619:fdv0..."
+      // Eso NO matchea pack_500, por eso te daría unknown_pack.
+      const packKey = referenceId;
       const amount = map[packKey] || null;
+
+      if (!userId) {
+        return res.status(200).json({
+          ok: false,
+          status: "missing_user",
+          note: "custom_id debe ser el UUID del usuario (y ya lo está llegando).",
+        });
+      }
 
       if (!amount) {
         return res.status(200).json({
-          ok: false,
-          status: "unknown_pack",
+          ok: true,
+          status: "payment_received_but_unknown_pack",
           got_referenceId: referenceId,
-          note: "Set invoice_id/referenceId to pack_50/100/500/1000 or implement mapping.",
+          tip: "Si quieres packs automáticos, envía invoice_id=pack_50/100/500/1000 desde tu checkout.",
         });
       }
 
@@ -219,49 +231,15 @@ export default async function handler(req, res) {
         p_amount: amount,
         p_reference_id: `pp_${event.id}`,
       });
+
       if (error) throw new Error(`credit_jades_from_payment error: ${JSON.stringify(error)}`);
 
       return res.status(200).json({ ok: true, status: "credited_pack", amount });
     }
 
-    // ---- B) Pago de suscripción (recarga mensual) ----
-    if (type === "BILLING.SUBSCRIPTION.PAYMENT.COMPLETED") {
-      const subscriptionId = resource?.billing_agreement_id || resource?.id || null;
-
-      const planId = resource?.plan_id || null;
-      const planMap = {
-        // "P-XXXXXXXXXXXX": 300,  // Basic
-        // "P-YYYYYYYYYYYY": 1000, // Pro
-      };
-
-      const amount = planId ? planMap[planId] : null;
-
-      if (!amount) {
-        return res.status(200).json({
-          ok: false,
-          status: "unknown_plan",
-          got_planId: planId,
-          note: "Add your PayPal plan_id mapping to planMap for monthly jade credit.",
-        });
-      }
-
-      const { error } = await sb.rpc("credit_jades_from_payment", {
-        p_user_id: userId,
-        p_amount: amount,
-        p_reference_id: `sub_${subscriptionId || event.id}_${event.id}`,
-      });
-      if (error) throw new Error(`credit_jades_from_payment error: ${JSON.stringify(error)}`);
-
-      return res.status(200).json({ ok: true, status: "credited_subscription", amount });
-    }
-
-    // ---- C) Reembolso (opcional) ----
-    if (type === "PAYMENT.CAPTURE.REFUNDED") {
-      return res.status(200).json({ ok: true, status: "refund_received_logged" });
-    }
-
     return res.status(200).json({ ok: true, status: "ignored_event", type });
   } catch (e) {
+    console.error("[PP_WEBHOOK] ERROR:", e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 }
