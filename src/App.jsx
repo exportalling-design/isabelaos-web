@@ -292,11 +292,11 @@ function CreatorPanel({
   isDemo = false,
   onAuthRequired,
   userStatus,
-  onRefreshUserStatus, // ✅ NUEVO (para refrescar plan/jades después de pagar)
+  onRefreshUserStatus, // ✅ para refrescar plan/jades después de pagar o tras generar
 }) {
   const { user } = useAuth();
 
-  const userLoggedIn = !isDemo && user;
+  const userLoggedIn = !isDemo && !!user;
 
   const [prompt, setPrompt] = useState(
     "Cinematic portrait, ultra detailed, soft light, 8k"
@@ -308,15 +308,339 @@ function CreatorPanel({
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  const [status, setStatus] = useState("IDLE");
-  const [statusText, setStatusText] = useState("");
+  const [status, setStatus] = useState("IDLE"); // IDLE | RUNNING | DONE | ERROR
+  const [statusText, setStatusText] = useState("Listo para ejecutar el motor.");
   const [imageB64, setImageB64] = useState(null);
   const [error, setError] = useState("");
 
+  // Conteo diario SOLO informativo (NO bloquea si hay jades)
   const [dailyCount, setDailyCount] = useState(0);
 
-  const isPremium =
-    !isDemo && !!user && userStatus?.subscription_status === "active";
+  // -----------------------------
+  // Fuente de verdad FINAL:
+  // - plan: profiles.plan
+  // - jades: profiles.jade_balance
+  // -----------------------------
+  const jadeBalance =
+    userLoggedIn && typeof userStatus?.jade_balance === "number"
+      ? userStatus.jade_balance
+      : 0;
+
+  const plan =
+    userLoggedIn && typeof userStatus?.plan === "string"
+      ? userStatus.plan
+      : "free";
+
+  const hasCredits = userLoggedIn ? jadeBalance > 0 : false;
+
+  // Demo limit (si usas modo invitado)
+  const DEMO_LIMIT = 3;
+  const demoKey = "isabelaos_demo_count";
+  const demoCount = useMemo(() => {
+    if (!isDemo) return 0;
+    const v = parseInt(localStorage.getItem(demoKey) || "0", 10);
+    return Number.isFinite(v) ? v : 0;
+  }, [isDemo]);
+
+  const demoLimitReached = isDemo ? demoCount >= DEMO_LIMIT : false;
+
+  // (Opcional) refrescar conteo diario desde tu helper (si existe)
+  useEffect(() => {
+    let cancel = false;
+
+    async function loadDaily() {
+      try {
+        // Si ya tienes getTodayGenerationCount() en tu proyecto, úsalo:
+        // const c = await getTodayGenerationCount(user?.id);
+        // if (!cancel) setDailyCount(c || 0);
+
+        // Si NO lo tienes o está fallando, lo dejamos en 0 sin romper nada:
+        if (!cancel) setDailyCount((v) => v || 0);
+      } catch {
+        if (!cancel) setDailyCount((v) => v || 0);
+      }
+    }
+
+    if (userLoggedIn) loadDaily();
+    return () => {
+      cancel = true;
+    };
+  }, [userLoggedIn, user?.id]);
+
+  // Utilidad: clamp
+  const clampInt = (n, min, max, fallback) => {
+    const x = parseInt(n, 10);
+    if (!Number.isFinite(x)) return fallback;
+    return Math.max(min, Math.min(max, x));
+  };
+
+  // -----------------------------
+  // Generar imagen
+  // -----------------------------
+  async function handleGenerate() {
+    setError("");
+    setImageB64(null);
+
+    // 1) Auth
+    if (!isDemo && !userLoggedIn) {
+      onAuthRequired?.();
+      return;
+    }
+
+    // 2) Demo gating
+    if (isDemo) {
+      if (demoLimitReached) {
+        setError("Límite alcanzado. Crea cuenta para desbloquear.");
+        return;
+      }
+    }
+
+    // 3) Créditos gating (REGISTRO: SOLO por jades)
+    if (!isDemo && userLoggedIn && !hasCredits) {
+      setError("No tienes jades disponibles.");
+      return;
+    }
+
+    // 4) Validaciones básicas
+    const w = clampInt(width, 256, 1536, 512);
+    const h = clampInt(height, 256, 1536, 512);
+    const s = clampInt(steps, 5, 60, 22);
+
+    if (!prompt?.trim()) {
+      setError("Escribe un prompt.");
+      return;
+    }
+
+    setStatus("RUNNING");
+    setStatusText("Enviando al motor...");
+
+    try {
+      // ✅ Endpoint esperado:
+      // POST /api/generate-image
+      // body: { prompt, negative, width, height, steps }
+      // respuesta: { ok:true, imageB64, new_balance? }
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          negative: (negative || "").trim(),
+          width: w,
+          height: h,
+          steps: s,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data?.ok) {
+        const msg =
+          data?.error ||
+          data?.message ||
+          `Error del motor (${res.status || "?"})`;
+        throw new Error(msg);
+      }
+
+      if (!data?.imageB64) {
+        throw new Error("El motor respondió sin imagen.");
+      }
+
+      setImageB64(data.imageB64);
+      setStatus("DONE");
+      setStatusText("Render completado.");
+
+      // Demo: incrementar contador
+      if (isDemo) {
+        const next = demoCount + 1;
+        localStorage.setItem(demoKey, String(next));
+      }
+
+      // ✅ Refrescar estado (plan/jades) desde Supabase/API
+      // (Asumimos que tu onRefreshUserStatus vuelve a llamar /api/user-status)
+      await onRefreshUserStatus?.();
+
+      // Conteo diario SOLO informativo
+      setDailyCount((c) => (Number.isFinite(c) ? c + 1 : 1));
+    } catch (e) {
+      setStatus("ERROR");
+      setStatusText("Error.");
+      setError(e?.message || "Error desconocido");
+    }
+  }
+
+  const disabled =
+    status === "RUNNING" ||
+    (isDemo ? demoLimitReached : userLoggedIn ? !hasCredits : true);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Panel */}
+      <div className="rounded-2xl border border-white/10 bg-black/30 p-6">
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold text-white">
+            Motor de imagen · Producción visual
+          </h2>
+          <p className="text-sm text-white/60">
+            {userLoggedIn ? (
+              <>
+                Plan:{" "}
+                <span className="text-white/80 font-medium">{plan}</span> ·
+                Jades:{" "}
+                <span className="text-white/80 font-medium">
+                  {jadeBalance}
+                </span>
+              </>
+            ) : isDemo ? (
+              <>
+                Modo invitado · {demoCount}/{DEMO_LIMIT} renders
+              </>
+            ) : (
+              "Inicia sesión para usar el motor."
+            )}
+          </p>
+        </div>
+
+        {/* Prompt */}
+        <label className="block text-sm text-white/70 mb-2">Prompt</label>
+        <textarea
+          className="w-full min-h-[90px] rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-white/20"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe lo que quieres generar..."
+        />
+
+        {/* Negative */}
+        <label className="block text-sm text-white/70 mt-4 mb-2">
+          Negative prompt
+        </label>
+        <textarea
+          className="w-full min-h-[70px] rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-white/20"
+          value={negative}
+          onChange={(e) => setNegative(e.target.value)}
+          placeholder="Ej: blurry, watermark..."
+        />
+
+        {/* Controls */}
+        <div className="mt-4 grid grid-cols-3 gap-3">
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Steps</label>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none focus:border-white/20"
+              type="number"
+              value={steps}
+              min={5}
+              max={60}
+              onChange={(e) => setSteps(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Width</label>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none focus:border-white/20"
+              type="number"
+              value={width}
+              min={256}
+              max={1536}
+              onChange={(e) => setWidth(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Height</label>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-white outline-none focus:border-white/20"
+              type="number"
+              value={height}
+              min={256}
+              max={1536}
+              onChange={(e) => setHeight(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Status */}
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3">
+          <div className="text-sm text-white/80">
+            Estado actual:{" "}
+            <span className="font-medium text-white">{statusText}</span>
+          </div>
+          <div className="text-xs text-white/50 mt-1">
+            Uso de hoy: {dailyCount} renders.
+          </div>
+          {error ? (
+            <div className="mt-2 text-sm text-red-300">{error}</div>
+          ) : null}
+        </div>
+
+        {/* CTA buttons */}
+        <div className="mt-4 space-y-3">
+          {/* Generar */}
+          <button
+            onClick={handleGenerate}
+            disabled={disabled}
+            className={`w-full rounded-xl px-4 py-3 font-semibold transition
+              ${
+                disabled
+                  ? "bg-white/10 text-white/40 cursor-not-allowed"
+                  : "bg-gradient-to-r from-cyan-500/80 to-purple-500/80 text-white hover:from-cyan-500 hover:to-purple-500"
+              }`}
+          >
+            {status === "RUNNING" ? "Generando..." : "Generar"}
+          </button>
+
+          {/* Mensajes de bloqueo */}
+          {!isDemo && !userLoggedIn ? (
+            <button
+              onClick={() => onAuthRequired?.()}
+              className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white/80 hover:bg-black/30"
+            >
+              Crear cuenta / Iniciar sesión
+            </button>
+          ) : null}
+
+          {!isDemo && userLoggedIn && !hasCredits ? (
+            <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-sm text-yellow-100">
+              No tienes jades. Desbloquea un plan o recarga créditos.
+            </div>
+          ) : null}
+
+          {isDemo && demoLimitReached ? (
+            <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-sm text-yellow-100">
+              Límite alcanzado. Crea cuenta para desbloquear el motor.
+            </div>
+          ) : null}
+
+          {/* Refrescar estado (después de pagar) */}
+          {userLoggedIn ? (
+            <button
+              onClick={() => onRefreshUserStatus?.()}
+              className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-white/80 hover:bg-black/30"
+            >
+              Refrescar plan/jades
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Resultado */}
+      <div className="rounded-2xl border border-white/10 bg-black/30 p-6">
+        <h3 className="text-lg font-semibold text-white mb-3">Resultado</h3>
+        <div className="rounded-2xl border border-white/10 bg-black/40 p-4 min-h-[360px] flex items-center justify-center">
+          {imageB64 ? (
+            <img
+              src={`data:image/png;base64,${imageB64}`}
+              alt="Resultado"
+              className="max-w-full rounded-xl"
+            />
+          ) : (
+            <div className="text-sm text-white/50 text-center">
+              Aquí verás el resultado en cuanto se complete el render.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
   // =========================================================
   // ✅ TOKEN SUPABASE → HEADER AUTH
