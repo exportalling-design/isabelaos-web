@@ -13,7 +13,9 @@ const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
 const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
 
 const PAYPAL_API_BASE =
-  PAYPAL_MODE === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+  PAYPAL_MODE === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
 
 function must(name, val) {
   if (!val) throw new Error(`Missing env: ${name}`);
@@ -21,7 +23,10 @@ function must(name, val) {
 }
 
 function isDuplicateKeyError(err) {
-  return err?.code === "23505" || (typeof err?.message === "string" && err.message.includes("duplicate key"));
+  return (
+    err?.code === "23505" ||
+    (typeof err?.message === "string" && err.message.includes("duplicate key"))
+  );
 }
 
 function isUuid(s) {
@@ -47,6 +52,7 @@ async function paypalAccessToken() {
 }
 
 async function verifyWebhookSignature({ event, headers }) {
+  // Node/Next normaliza headers a lowercase
   const transmissionId = headers["paypal-transmission-id"];
   const transmissionTime = headers["paypal-transmission-time"];
   const certUrl = headers["paypal-cert-url"];
@@ -86,25 +92,21 @@ async function verifyWebhookSignature({ event, headers }) {
 /**
  * Normaliza resource de PayPal:
  * - V2 Subscriptions: resource.status, resource.plan_id, resource.subscriber.payer_id, resource.custom_id
- * - V1 Agreements (tu simulador): resource.state, NO plan_id, payer.payer_info.payer_id
+ * - V1 Agreements (simuladores): resource.state, NO plan_id, payer.payer_info.payer_id
  */
 function normalizeSubscriptionLike(resource) {
   const subscription_id = resource?.id || null;
 
-  // status v2 / v1
   const status = resource?.status || resource?.state || null;
 
-  // plan_id v2
   const plan_id = resource?.plan_id || null;
 
-  // payer_id v2 / v1
   const payer_id =
     resource?.subscriber?.payer_id ||
     resource?.payer?.payer_id ||
     resource?.payer?.payer_info?.payer_id ||
     null;
 
-  // custom_id v2 (para mapear user)
   const custom_id = resource?.custom_id || null;
   const user_id = isUuid(custom_id) ? custom_id : null;
 
@@ -124,14 +126,16 @@ async function upsertPaypalSubscription({ supabase, resource }) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from("paypal_subscriptions").upsert(row, { onConflict: "subscription_id" });
+  const { error } = await supabase
+    .from("paypal_subscriptions")
+    .upsert(row, { onConflict: "subscription_id" });
 
   if (error) return { ok: false, error };
   return { ok: true, ...n };
 }
 
 // ===================================================
-// NUEVO: MAPEO plan_id -> (basic/pro) + jades incluidos
+// MAPEO plan_id -> basic/pro + jades incluidos
 // ===================================================
 function planFromPayPalPlanId(plan_id) {
   const basic = process.env.PAYPAL_PLAN_ID_BASIC;
@@ -142,10 +146,46 @@ function planFromPayPalPlanId(plan_id) {
 }
 
 function includedJadesForPlan(plan) {
-  // Podés usar envs o tu pricing. Aquí lo dejo por ENV para no tocar tu pricing.js sin verlo.
   if (plan === "basic") return Number(process.env.BASIC_INCLUDED_JADES || 0);
   if (plan === "pro") return Number(process.env.PRO_INCLUDED_JADES || 0);
   return 0;
+}
+
+// ===================================================
+// ✅ Crédito con fallback (definitivo)
+// - primero intenta credit_jades_from_payment (idempotente por ref)
+// - si NO existe esa función, usa add_jades como fallback
+// ===================================================
+async function creditJadesSafe({ supabase, user_id, amount, reference_id, reason }) {
+  // 1) intento: credit_jades_from_payment
+  try {
+    const { error } = await supabase.rpc("credit_jades_from_payment", {
+      p_user_id: user_id,
+      p_amount: amount,
+      p_reference_id: reference_id,
+      p_reason: reason,
+    });
+    if (!error) return { ok: true, used: "credit_jades_from_payment" };
+    // si falla por "function not found" caemos al fallback
+    const msg = String(error.message || "");
+    const fnNotFound =
+      error.code === "42883" ||
+      msg.toLowerCase().includes("function") && msg.toLowerCase().includes("does not exist");
+    if (!fnNotFound) return { ok: false, error, used: "credit_jades_from_payment" };
+  } catch (e) {
+    // también cae a fallback
+  }
+
+  // 2) fallback: add_jades (tu función actual)
+  const { error: e2 } = await supabase.rpc("add_jades", {
+    p_user_id: user_id,
+    p_amount: amount,
+    p_reason: reason,
+    p_ref: reference_id || null,
+  });
+
+  if (e2) return { ok: false, error: e2, used: "add_jades" };
+  return { ok: true, used: "add_jades" };
 }
 
 export default async function handler(req, res) {
@@ -174,7 +214,7 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // verify signature (aunque el simulador a veces no cuadra)
+    // verify signature (simulador a veces no cuadra)
     let verified = false;
     let verifyError = null;
     try {
@@ -186,7 +226,7 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
-    // idempotencia: si ya procesamos, NO hacemos nada más
+    // idempotencia
     const { data: alreadyProcessed } = await supabase
       .from("paypal_events_processed")
       .select("event_id")
@@ -198,7 +238,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, already_processed: true, verified });
     }
 
-    // guardar raw (insert; si dup, ignore)
+    // guardar raw
     const insertPayload = {
       id: eventId,
       event_type: eventType,
@@ -213,9 +253,12 @@ export default async function handler(req, res) {
     const { error: rawInsertErr } = await supabase.from("paypal_events_raw").insert(insertPayload);
     if (rawInsertErr && !isDuplicateKeyError(rawInsertErr)) {
       console.error("[PP_WEBHOOK] raw_insert_error", rawInsertErr);
-      return res
-        .status(200)
-        .json({ ok: false, stored: false, verified, supabase_error: rawInsertErr.message });
+      return res.status(200).json({
+        ok: false,
+        stored: false,
+        verified,
+        supabase_error: rawInsertErr.message,
+      });
     }
 
     // procesar subscriptions/agreement
@@ -235,34 +278,31 @@ export default async function handler(req, res) {
           has_user_id: !!subRes.user_id,
         });
 
-        // ===================================================
-        // NUEVO: ACREDITAR JADES POR SUSCRIPCIÓN (1 VEZ)
-        // ===================================================
-        // Solo si ya viene user_id desde custom_id
+        // ✅ acreditar jades (1 vez) si viene user_id por custom_id
         if (subRes.user_id) {
           const plan = planFromPayPalPlanId(subRes.plan_id);
           const amount = includedJadesForPlan(plan);
 
-          // Solo acreditamos si podemos mapear plan y amount > 0
           if (plan && amount > 0) {
-            // ref idempotente: si llega 2 veces el evento, tu función/índice debe evitar duplicado
             const ref = `ppsub:${subRes.subscription_id}:first`;
 
-            const { error: creditErr } = await supabase.rpc("credit_jades_from_payment", {
-              p_user_id: subRes.user_id,
-              p_amount: amount,
-              p_reference_id: ref,
-              p_reason: `subscription:${plan}`,
+            const creditRes = await creditJadesSafe({
+              supabase,
+              user_id: subRes.user_id,
+              amount,
+              reference_id: ref,
+              reason: `subscription:${plan}`,
             });
 
-            if (creditErr) {
-              console.error("[PP_WEBHOOK] credit_subscription_failed", creditErr);
+            if (!creditRes.ok) {
+              console.error("[PP_WEBHOOK] credit_subscription_failed", creditRes.error);
             } else {
               console.log("[PP_WEBHOOK] credit_subscription_ok", {
                 user_id: subRes.user_id,
                 subscription_id: subRes.subscription_id,
                 plan,
                 amount,
+                used: creditRes.used,
               });
             }
           } else {
