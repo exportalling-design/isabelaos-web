@@ -4,7 +4,7 @@ import getRawBody from "raw-body";
 
 export const config = { api: { bodyParser: false } };
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
@@ -36,6 +36,25 @@ function isUuid(s) {
   );
 }
 
+// -------------------------------
+// Headers case-insensitive
+// -------------------------------
+function getHeaderCI(headers, name) {
+  if (!headers) return "";
+  const target = String(name || "").toLowerCase();
+
+  // Next/Vercel node: headers es objeto {k:v}
+  if (typeof headers === "object") {
+    const keys = Object.keys(headers);
+    const foundKey = keys.find((k) => String(k).toLowerCase() === target);
+    if (!foundKey) return "";
+    const v = headers[foundKey];
+    if (Array.isArray(v)) return v[0] || "";
+    return v || "";
+  }
+  return "";
+}
+
 async function paypalAccessToken() {
   const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
   const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
@@ -46,17 +65,18 @@ async function paypalAccessToken() {
     },
     body: "grant_type=client_credentials",
   });
+
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(j)}`);
   return j.access_token;
 }
 
 async function verifyWebhookSignature({ event, headers }) {
-  const transmissionId = headers["paypal-transmission-id"];
-  const transmissionTime = headers["paypal-transmission-time"];
-  const certUrl = headers["paypal-cert-url"];
-  const authAlgo = headers["paypal-auth-algo"];
-  const transmissionSig = headers["paypal-transmission-sig"];
+  const transmissionId = getHeaderCI(headers, "paypal-transmission-id");
+  const transmissionTime = getHeaderCI(headers, "paypal-transmission-time");
+  const certUrl = getHeaderCI(headers, "paypal-cert-url");
+  const authAlgo = getHeaderCI(headers, "paypal-auth-algo");
+  const transmissionSig = getHeaderCI(headers, "paypal-transmission-sig");
 
   // En sandbox/simuladores a veces faltan headers: no rompemos todo
   if (!transmissionId || !transmissionTime || !certUrl || !authAlgo || !transmissionSig) {
@@ -96,9 +116,7 @@ async function verifyWebhookSignature({ event, headers }) {
  */
 function normalizeSubscriptionLike(resource) {
   const subscription_id = resource?.id || null;
-
   const status = resource?.status || resource?.state || null;
-
   const plan_id = resource?.plan_id || null;
 
   const payer_id =
@@ -160,13 +178,15 @@ export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(200).json({ ok: true, ignored: true });
 
-    must("SUPABASE_URL", SUPABASE_URL);
+    must("SUPABASE_URL (o VITE_SUPABASE_URL)", SUPABASE_URL);
     must("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
     must("PAYPAL_CLIENT_ID", PAYPAL_CLIENT_ID);
     must("PAYPAL_CLIENT_SECRET", PAYPAL_CLIENT_SECRET);
     must("PAYPAL_WEBHOOK_ID", PAYPAL_WEBHOOK_ID);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const raw = await getRawBody(req);
     const rawText = raw.toString("utf8");
