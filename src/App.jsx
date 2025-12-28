@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
@@ -74,8 +75,19 @@ async function getAuthHeadersGlobal() {
 // Botón PayPal reutilizable
 // ---------------------------------------------------------
 function PayPalButton({
+  // === MODO ===
+  // "order" (default): pago único (lo que ya tenías)
+  // "subscription": suscripción mensual/anual usando plan_id
+  mode = "order",
+
+  // === ORDER (pago único) ===
   amount = "19.00",
   description = "IsabelaOS Studio",
+
+  // === SUBSCRIPTION (plan) ===
+  planId = null,     // <-- P-XXXXXX (PayPal plan_id real)
+  customId = null,   // <-- aquí vas a pasar user.id (UUID) para que llegue al webhook
+
   containerId,
   onPaid,
 }) {
@@ -94,14 +106,91 @@ function PayPalButton({
       const host = document.getElementById(divId);
       if (host) host.innerHTML = "";
 
+      const common = {
+        style: {
+          layout: "horizontal",
+          color: "black",
+          shape: "pill",
+          label: "paypal",
+        },
+        onError: (err) => {
+          console.error("Error PayPal:", err);
+          alert("Error al conectar con PayPal.");
+        },
+      };
+
+      // ===========================
+      // ✅ MODO SUSCRIPCIÓN
+      // ===========================
+      if (mode === "subscription") {
+        if (!planId) {
+          console.warn("PayPalButton: mode=subscription pero falta planId (P-xxxx)");
+          const host2 = document.getElementById(divId);
+          if (host2) host2.innerHTML = `<div style="color:#fff;font-size:12px;padding:6px 10px;">Falta planId de PayPal</div>`;
+          return;
+        }
+
+        window.paypal
+          .Buttons({
+            ...common,
+
+            // ✅ CLAVE: createSubscription + custom_id
+            createSubscription: (data, actions) => {
+              return actions.subscription.create({
+                plan_id: planId,
+                // ✅ esto es lo que faltaba para mapear user -> webhook -> supabase
+                ...(customId ? { custom_id: customId } : {}),
+              });
+            },
+
+            // En suscripción NO hay capture(). PayPal devuelve subscriptionID.
+            onApprove: async (data, actions) => {
+              try {
+                const subscriptionID = data?.subscriptionID || null;
+
+                // opcional: obtener detalles
+                let details = null;
+                try {
+                  if (actions?.subscription?.get && subscriptionID) {
+                    details = await actions.subscription.get();
+                  }
+                } catch (e) {
+                  // no frena el flujo
+                  console.warn("No se pudo obtener detalles de la suscripción:", e);
+                }
+
+                console.log("Suscripción PayPal aprobada:", { subscriptionID, details });
+
+                if (typeof onPaid === "function") {
+                  await onPaid({
+                    type: "subscription",
+                    subscriptionID,
+                    details,
+                    planId,
+                    customId: customId || null,
+                  });
+                } else {
+                  alert(
+                    "Suscripción creada. En breve se acreditarán tus jades automáticamente cuando el webhook confirme."
+                  );
+                }
+              } catch (err) {
+                console.error("Error en aprobación de suscripción PayPal:", err);
+                alert("Ocurrió un error al confirmar la suscripción con PayPal.");
+              }
+            },
+          })
+          .render(`#${divId}`);
+
+        return;
+      }
+
+      // ===========================
+      // ✅ MODO ORDER (pago único)
+      // ===========================
       window.paypal
         .Buttons({
-          style: {
-            layout: "horizontal",
-            color: "black",
-            shape: "pill",
-            label: "paypal",
-          },
+          ...common,
           createOrder: (data, actions) =>
             actions.order.create({
               purchase_units: [
@@ -116,7 +205,7 @@ function PayPalButton({
               const details = await actions.order.capture();
               console.log("Pago PayPal completado:", details);
               if (typeof onPaid === "function") {
-                await onPaid(details);
+                await onPaid({ type: "order", details });
               } else {
                 alert(
                   "Pago completado con PayPal. En la siguiente versión marcaremos automáticamente tu plan como activo."
@@ -127,30 +216,37 @@ function PayPalButton({
               alert("Ocurrió un error al confirmar el pago con PayPal.");
             }
           },
-          onError: (err) => {
-            console.error("Error PayPal:", err);
-            alert("Error al conectar con PayPal.");
-          },
         })
         .render(`#${divId}`);
     };
+
+    // ✅ Si es suscripción, el SDK debe cargar con vault=true&intent=subscription
+    const sdkParams =
+      mode === "subscription"
+        ? `client-id=${PAYPAL_CLIENT_ID}&currency=USD&vault=true&intent=subscription`
+        : `client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
+
+    const sdkSrc = `https://www.paypal.com/sdk/js?${sdkParams}`;
 
     const existingScript = document.querySelector(
       'script[src*="https://www.paypal.com/sdk/js"]'
     );
 
     if (existingScript) {
+      // Si ya está cargado, render directo
       if (window.paypal) renderButtons();
       else existingScript.addEventListener("load", renderButtons);
       return;
     }
 
     const script = document.createElement("script");
-    script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
+    script.src = sdkSrc;
     script.async = true;
     script.onload = renderButtons;
     document.body.appendChild(script);
-  }, [amount, divId, onPaid, description]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount, divId, onPaid, description, mode, planId, customId]);
 
   return (
     <div className="mt-2 w-full flex justify-center">
