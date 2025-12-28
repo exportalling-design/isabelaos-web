@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
@@ -30,6 +29,12 @@ const COST_XMAS_PHOTO = 10;
 const PAYPAL_CLIENT_ID =
   import.meta.env.VITE_PAYPAL_CLIENT_ID ||
   "AZgwhtDkXVf9N6VrwtWk6dzwzM65DWBrM3dn3Og4DXgZhbxSxqRu1UWdEtbj12W_7ItmcrNhZDI3mtPG";
+
+// ---------------------------------------------------------
+// PayPal – Plan IDs (Subscriptions)
+// ---------------------------------------------------------
+const PAYPAL_PLAN_ID_BASIC = import.meta.env.VITE_PAYPAL_PLAN_ID_BASIC || "";
+const PAYPAL_PLAN_ID_PRO = import.meta.env.VITE_PAYPAL_PLAN_ID_PRO || "";
 
 // ---------------------------------------------------------
 // Helper scroll suave
@@ -85,8 +90,8 @@ function PayPalButton({
   description = "IsabelaOS Studio",
 
   // === SUBSCRIPTION (plan) ===
-  planId = null,     // <-- P-XXXXXX (PayPal plan_id real)
-  customId = null,   // <-- aquí vas a pasar user.id (UUID) para que llegue al webhook
+  planId = null, // <-- P-XXXXXX (PayPal plan_id real)
+  customId = null, // <-- aquí vas a pasar user.id (UUID) para que llegue al webhook
 
   containerId,
   onPaid,
@@ -124,9 +129,12 @@ function PayPalButton({
       // ===========================
       if (mode === "subscription") {
         if (!planId) {
-          console.warn("PayPalButton: mode=subscription pero falta planId (P-xxxx)");
+          console.warn(
+            "PayPalButton: mode=subscription pero falta planId (P-xxxx)"
+          );
           const host2 = document.getElementById(divId);
-          if (host2) host2.innerHTML = `<div style="color:#fff;font-size:12px;padding:6px 10px;">Falta planId de PayPal</div>`;
+          if (host2)
+            host2.innerHTML = `<div style="color:#fff;font-size:12px;padding:6px 10px;">Falta planId de PayPal</div>`;
           return;
         }
 
@@ -156,10 +164,16 @@ function PayPalButton({
                   }
                 } catch (e) {
                   // no frena el flujo
-                  console.warn("No se pudo obtener detalles de la suscripción:", e);
+                  console.warn(
+                    "No se pudo obtener detalles de la suscripción:",
+                    e
+                  );
                 }
 
-                console.log("Suscripción PayPal aprobada:", { subscriptionID, details });
+                console.log("Suscripción PayPal aprobada:", {
+                  subscriptionID,
+                  details,
+                });
 
                 if (typeof onPaid === "function") {
                   await onPaid({
@@ -176,7 +190,9 @@ function PayPalButton({
                 }
               } catch (err) {
                 console.error("Error en aprobación de suscripción PayPal:", err);
-                alert("Ocurrió un error al confirmar la suscripción con PayPal.");
+                alert(
+                  "Ocurrió un error al confirmar la suscripción con PayPal."
+                );
               }
             },
           })
@@ -228,9 +244,7 @@ function PayPalButton({
 
     const sdkSrc = `https://www.paypal.com/sdk/js?${sdkParams}`;
 
-    const existingScript = document.querySelector(
-      'script[src*="https://www.paypal.com/sdk/js"]'
-    );
+    const existingScript = document.querySelector(`script[src="${sdkSrc}"]`);
 
     if (existingScript) {
       // Si ya está cargado, render directo
@@ -1907,6 +1921,115 @@ function DashboardView() {
                 Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
               </p>
             </div>
+
+            {/* ---------------------------------------------------------
+                Planes / Suscripción (PayPal Subscriptions)
+            --------------------------------------------------------- */}
+            <section className="rounded-3xl border border-white/10 bg-black/60 p-6">
+              <div className="flex flex-col gap-2">
+                <h2 className="text-lg font-semibold text-white">Planes</h2>
+                <p className="text-xs text-neutral-400">
+                  Suscripción mensual. Al activarse, el sistema acreditará tus
+                  jades automáticamente por webhook.
+                </p>
+              </div>
+
+              {/* Estado actual */}
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Estado:{" "}
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : userStatus.subscription_status}
+                    </span>
+                  </span>
+
+                  <span className="text-neutral-400">
+                    Plan:{" "}
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : (userStatus.plan || "none")}
+                    </span>
+                  </span>
+
+                  <span className="text-neutral-400">
+                    Jades:{" "}
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : (userStatus.jades ?? 0)}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Botones */}
+              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* BASIC */}
+                <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-white">Basic</h3>
+                    <span className="text-sm text-neutral-300">$19/mes</span>
+                  </div>
+                  <p className="mt-2 text-xs text-neutral-400">
+                    Ideal para creators en beta. Incluye jades mensuales.
+                  </p>
+
+                  <div className="mt-4">
+                    {!PAYPAL_PLAN_ID_BASIC ? (
+                      <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                        Falta VITE_PAYPAL_PLAN_ID_BASIC en tu .env
+                      </div>
+                    ) : (
+                      <PayPalButton
+                        mode="subscription"
+                        planId={PAYPAL_PLAN_ID_BASIC}
+                        customId={user.id} // ✅ CLAVE: user.id al webhook
+                        containerId="pp-sub-basic"
+                        onPaid={() => {
+                          alert(
+                            "Suscripción Basic creada. En breve se acreditan tus jades cuando el webhook confirme."
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* PRO */}
+                <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-white">Pro</h3>
+                    <span className="text-sm text-neutral-300">$39/mes</span>
+                  </div>
+                  <p className="mt-2 text-xs text-neutral-400">
+                    Más jades y potencia para producción constante.
+                  </p>
+
+                  <div className="mt-4">
+                    {!PAYPAL_PLAN_ID_PRO ? (
+                      <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                        Falta VITE_PAYPAL_PLAN_ID_PRO en tu .env
+                      </div>
+                    ) : (
+                      <PayPalButton
+                        mode="subscription"
+                        planId={PAYPAL_PLAN_ID_PRO}
+                        customId={user.id} // ✅ CLAVE: user.id al webhook
+                        containerId="pp-sub-pro"
+                        onPaid={() => {
+                          alert(
+                            "Suscripción Pro creada. En breve se acreditan tus jades cuando el webhook confirme."
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <p className="mt-4 text-[10px] text-neutral-500">
+                Nota: si el webhook tarda unos segundos, refresca la página. El
+                crédito de jades se aplica cuando PayPal confirma el evento.
+              </p>
+            </section>
 
             {appViewMode === "generator" && (
               <CreatorPanel isDemo={false} />
