@@ -25,7 +25,8 @@ function isDuplicateKeyError(err) {
 }
 
 function isUuid(s) {
-  return typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+  return typeof s === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 }
 
 async function paypalAccessToken() {
@@ -80,30 +81,47 @@ async function verifyWebhookSignature({ event, headers }) {
   return { verified: ok, error: ok ? null : `verify_failed: ${JSON.stringify(j)}` };
 }
 
-async function upsertPaypalSubscription({ supabase, resource, statusOverride = null }) {
-  // PayPal subscription object suele venir en event.resource
-  // Campos típicos:
-  // resource.id (subscription_id)
-  // resource.status
-  // resource.plan_id
-  // resource.subscriber.payer_id
-  // resource.custom_id (si tú lo mandas al crear)
+/**
+ * Normaliza resource de PayPal:
+ * - V2 Subscriptions: resource.status, resource.plan_id, resource.subscriber.payer_id, resource.custom_id
+ * - V1 Agreements (tu simulador): resource.state, NO plan_id, payer.payer_info.payer_id
+ */
+function normalizeSubscriptionLike(resource) {
   const subscription_id = resource?.id || null;
-  if (!subscription_id) return { ok: false, reason: "no_subscription_id" };
 
-  const status = statusOverride || resource?.status || null;
+  // status v2 / v1
+  const status =
+    resource?.status ||
+    resource?.state || // v1 Agreement
+    null;
+
+  // plan_id v2
   const plan_id = resource?.plan_id || null;
-  const payer_id = resource?.subscriber?.payer_id || resource?.payer?.payer_id || null;
 
+  // payer_id v2 / v1
+  const payer_id =
+    resource?.subscriber?.payer_id || // v2
+    resource?.payer?.payer_id || // a veces
+    resource?.payer?.payer_info?.payer_id || // v1 Agreement (tu payload)
+    null;
+
+  // custom_id v2 (para mapear user)
   const custom_id = resource?.custom_id || null;
   const user_id = isUuid(custom_id) ? custom_id : null;
 
+  return { subscription_id, status, plan_id, payer_id, user_id };
+}
+
+async function upsertPaypalSubscription({ supabase, resource }) {
+  const n = normalizeSubscriptionLike(resource);
+  if (!n.subscription_id) return { ok: false, reason: "no_subscription_id" };
+
   const row = {
-    subscription_id,
-    status,
-    plan_id,
-    payer_id,
-    user_id,
+    subscription_id: n.subscription_id,
+    status: n.status,
+    plan_id: n.plan_id,
+    payer_id: n.payer_id,
+    user_id: n.user_id,
     updated_at: new Date().toISOString(),
   };
 
@@ -112,42 +130,7 @@ async function upsertPaypalSubscription({ supabase, resource, statusOverride = n
     .upsert(row, { onConflict: "subscription_id" });
 
   if (error) return { ok: false, error };
-  return { ok: true, subscription_id, user_id, status, plan_id, payer_id };
-}
-
-async function syncUserSubscription({ supabase, user_id, plan_id, status, subscription_id }) {
-  if (!user_id) return { ok: false, reason: "no_user_id" };
-
-  // mapeo simple plan_id -> plan interno
-  // AJUSTA esto a tus planes reales (IDs de PayPal)
-  let plan = "basic";
-  if (plan_id) {
-    // ejemplo:
-    // if (plan_id === "P-XXXXX") plan = "pro";
-    plan = "basic";
-  }
-
-  const normalizedStatus =
-    status === "ACTIVE" ? "active" :
-    status === "CANCELLED" ? "cancelled" :
-    status === "SUSPENDED" ? "suspended" :
-    status ? status.toLowerCase() : "unknown";
-
-  const row = {
-    user_id,
-    plan,
-    status: normalizedStatus,
-    paypal_subscription_id: subscription_id || null,
-    started_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
-  const { error } = await supabase
-    .from("user_subscription")
-    .upsert(row, { onConflict: "user_id" });
-
-  if (error) return { ok: false, error };
-  return { ok: true };
+  return { ok: true, ...n };
 }
 
 export default async function handler(req, res) {
@@ -176,7 +159,7 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // Verificación firma
+    // verify signature (aunque el simulador a veces no cuadra)
     let verified = false;
     let verifyError = null;
     try {
@@ -188,7 +171,7 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
-    // Idempotencia por evento
+    // idempotencia: si ya procesamos, NO hacemos nada más
     const { data: alreadyProcessed } = await supabase
       .from("paypal_events_processed")
       .select("event_id")
@@ -200,16 +183,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, already_processed: true, verified });
     }
 
-    // Guardar RAW (no reventar duplicado)
+    // guardar raw (insert; si dup, ignore)
     const insertPayload = {
       id: eventId,
       event_type: eventType,
       resource_type: resourceType,
       verified,
       error: verifyError,
-      raw: event,
-      headers: req.headers,
       payload: event,
+      headers: req.headers,
       received_at: new Date().toISOString(),
     };
 
@@ -219,38 +201,34 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, stored: false, verified, supabase_error: rawInsertErr.message });
     }
 
-    // ---- PROCESAR SUSCRIPCIONES ----
-    // Si no viene resource, no hacemos nada más.
+    // procesar subscriptions/agreement
     const resource = event?.resource || null;
 
     if (eventType && eventType.startsWith("BILLING.SUBSCRIPTION.") && resource) {
-      // CREATED / ACTIVATED / CANCELLED / SUSPENDED etc.
       const subRes = await upsertPaypalSubscription({ supabase, resource });
       if (!subRes.ok) {
         console.error("[PP_WEBHOOK] subscription_upsert_failed", subRes);
       } else {
-        // Si tenemos user_id (custom_id UUID), sincronizamos user_subscription
-        await syncUserSubscription({
-          supabase,
-          user_id: subRes.user_id,
-          plan_id: subRes.plan_id,
-          status: subRes.status,
+        console.log("[PP_WEBHOOK] subscription_upsert_ok", {
           subscription_id: subRes.subscription_id,
+          status: subRes.status,
+          plan_id: subRes.plan_id,
+          payer_id: subRes.payer_id,
+          has_user_id: !!subRes.user_id,
         });
       }
     }
 
-    // Marcar evento procesado
+    // marcar como procesado
     const { error: processedErr } = await supabase
       .from("paypal_events_processed")
-      .insert({ event_id: eventId });
+      .insert({ event_id: eventId, processed_at: new Date().toISOString() });
 
     if (processedErr && !isDuplicateKeyError(processedErr)) {
       console.error("[PP_WEBHOOK] processed_insert_error", processedErr);
     }
 
     console.log("[PP_WEBHOOK] stored", { id: eventId, verified, eventType });
-
     return res.status(200).json({ ok: true, stored: true, verified });
   } catch (e) {
     console.error("[PP_WEBHOOK] exception", e);
