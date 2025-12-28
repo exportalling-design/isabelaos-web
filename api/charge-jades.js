@@ -6,18 +6,24 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
 
   try {
-    const { user_id, kind, ref } = req.body || {};
-    if (!user_id || !kind) return res.status(400).json({ error: "MISSING_FIELDS" });
+    const { user_id, kind, amount, ref } = req.body || {};
+    if (!user_id) return res.status(400).json({ error: "MISSING_FIELDS" });
 
-    const cost = COSTS[kind];
-    if (!cost) return res.status(400).json({ error: "INVALID_KIND" });
+    // ✅ Compat: si viene amount directo, úsalo. Si viene kind, usa COSTS[kind]
+    let cost = null;
+    if (amount != null) cost = Number(amount);
+    else if (kind) cost = COSTS[kind];
+
+    if (!cost || !Number.isFinite(cost) || cost <= 0) {
+      return res.status(400).json({ error: "INVALID_COST" });
+    }
 
     const sb = sbAdmin();
 
     const { data, error } = await sb.rpc("spend_jades", {
       p_user_id: user_id,
       p_amount: cost,
-      p_reason: `generation:${kind}`,
+      p_reason: kind ? `generation:${kind}` : "spend",
       p_ref: ref || null,
     });
 
