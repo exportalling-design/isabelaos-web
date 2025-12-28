@@ -52,13 +52,13 @@ async function paypalAccessToken() {
 }
 
 async function verifyWebhookSignature({ event, headers }) {
-  // Node/Next normaliza headers a lowercase
   const transmissionId = headers["paypal-transmission-id"];
   const transmissionTime = headers["paypal-transmission-time"];
   const certUrl = headers["paypal-cert-url"];
   const authAlgo = headers["paypal-auth-algo"];
   const transmissionSig = headers["paypal-transmission-sig"];
 
+  // En sandbox/simuladores a veces faltan headers: no rompemos todo
   if (!transmissionId || !transmissionTime || !certUrl || !authAlgo || !transmissionSig) {
     return { verified: false, error: "Missing PayPal signature headers" };
   }
@@ -90,9 +90,9 @@ async function verifyWebhookSignature({ event, headers }) {
 }
 
 /**
- * Normaliza resource de PayPal:
+ * Normaliza subscription-like:
  * - V2 Subscriptions: resource.status, resource.plan_id, resource.subscriber.payer_id, resource.custom_id
- * - V1 Agreements (simuladores): resource.state, NO plan_id, payer.payer_info.payer_id
+ * - V1 Agreements: resource.state, payer.payer_info.payer_id
  */
 function normalizeSubscriptionLike(resource) {
   const subscription_id = resource?.id || null;
@@ -135,7 +135,7 @@ async function upsertPaypalSubscription({ supabase, resource }) {
 }
 
 // ===================================================
-// MAPEO plan_id -> basic/pro + jades incluidos
+// MAPEO plan_id -> (basic/pro) + jades incluidos
 // ===================================================
 function planFromPayPalPlanId(plan_id) {
   const basic = process.env.PAYPAL_PLAN_ID_BASIC;
@@ -151,41 +151,9 @@ function includedJadesForPlan(plan) {
   return 0;
 }
 
-// ===================================================
-// ✅ Crédito con fallback (definitivo)
-// - primero intenta credit_jades_from_payment (idempotente por ref)
-// - si NO existe esa función, usa add_jades como fallback
-// ===================================================
-async function creditJadesSafe({ supabase, user_id, amount, reference_id, reason }) {
-  // 1) intento: credit_jades_from_payment
-  try {
-    const { error } = await supabase.rpc("credit_jades_from_payment", {
-      p_user_id: user_id,
-      p_amount: amount,
-      p_reference_id: reference_id,
-      p_reason: reason,
-    });
-    if (!error) return { ok: true, used: "credit_jades_from_payment" };
-    // si falla por "function not found" caemos al fallback
-    const msg = String(error.message || "");
-    const fnNotFound =
-      error.code === "42883" ||
-      msg.toLowerCase().includes("function") && msg.toLowerCase().includes("does not exist");
-    if (!fnNotFound) return { ok: false, error, used: "credit_jades_from_payment" };
-  } catch (e) {
-    // también cae a fallback
-  }
-
-  // 2) fallback: add_jades (tu función actual)
-  const { error: e2 } = await supabase.rpc("add_jades", {
-    p_user_id: user_id,
-    p_amount: amount,
-    p_reason: reason,
-    p_ref: reference_id || null,
-  });
-
-  if (e2) return { ok: false, error: e2, used: "add_jades" };
-  return { ok: true, used: "add_jades" };
+function isActiveStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return s === "active";
 }
 
 export default async function handler(req, res) {
@@ -214,7 +182,7 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // verify signature (simulador a veces no cuadra)
+    // verify signature (sandbox/sim puede fallar)
     let verified = false;
     let verifyError = null;
     try {
@@ -250,7 +218,10 @@ export default async function handler(req, res) {
       received_at: new Date().toISOString(),
     };
 
-    const { error: rawInsertErr } = await supabase.from("paypal_events_raw").insert(insertPayload);
+    const { error: rawInsertErr } = await supabase
+      .from("paypal_events_raw")
+      .insert(insertPayload);
+
     if (rawInsertErr && !isDuplicateKeyError(rawInsertErr)) {
       console.error("[PP_WEBHOOK] raw_insert_error", rawInsertErr);
       return res.status(200).json({
@@ -261,7 +232,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // procesar subscriptions/agreement
+    // procesar subscriptions
     const resource = event?.resource || null;
 
     if (eventType && eventType.startsWith("BILLING.SUBSCRIPTION.") && resource) {
@@ -278,31 +249,32 @@ export default async function handler(req, res) {
           has_user_id: !!subRes.user_id,
         });
 
-        // ✅ acreditar jades (1 vez) si viene user_id por custom_id
-        if (subRes.user_id) {
+        // ===================================================
+        // ✅ ACREDITAR JADES (1 VEZ) CUANDO SEA ACTIVA
+        // ===================================================
+        if (subRes.user_id && isActiveStatus(subRes.status)) {
           const plan = planFromPayPalPlanId(subRes.plan_id);
           const amount = includedJadesForPlan(plan);
 
           if (plan && amount > 0) {
+            // idempotente por ref único
             const ref = `ppsub:${subRes.subscription_id}:first`;
 
-            const creditRes = await creditJadesSafe({
-              supabase,
-              user_id: subRes.user_id,
-              amount,
-              reference_id: ref,
-              reason: `subscription:${plan}`,
+            const { error: creditErr } = await supabase.rpc("add_jades", {
+              p_user_id: subRes.user_id,
+              p_amount: amount,
+              p_reason: `subscription:${plan}`,
+              p_ref: ref,
             });
 
-            if (!creditRes.ok) {
-              console.error("[PP_WEBHOOK] credit_subscription_failed", creditRes.error);
+            if (creditErr) {
+              console.error("[PP_WEBHOOK] credit_subscription_failed", creditErr);
             } else {
               console.log("[PP_WEBHOOK] credit_subscription_ok", {
                 user_id: subRes.user_id,
                 subscription_id: subRes.subscription_id,
                 plan,
                 amount,
-                used: creditRes.used,
               });
             }
           } else {
@@ -313,15 +285,17 @@ export default async function handler(req, res) {
             });
           }
         } else {
-          console.log("[PP_WEBHOOK] subscription_missing_user_id_custom_id", {
+          console.log("[PP_WEBHOOK] no_credit (missing user_id or not active yet)", {
             subscription_id: subRes.subscription_id,
+            status: subRes.status,
             plan_id: subRes.plan_id,
+            has_user_id: !!subRes.user_id,
           });
         }
       }
     }
 
-    // marcar como procesado
+    // marcar procesado
     const { error: processedErr } = await supabase
       .from("paypal_events_processed")
       .insert({ event_id: eventId, processed_at: new Date().toISOString() });
