@@ -24,6 +24,13 @@ function must(name, val) {
   return val;
 }
 
+// ✅ ID ÚNICO POR FILA (para que NUNCA sobrescriba)
+function makeRowId() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+  return `row-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 async function paypalAccessToken() {
   const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
   const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
@@ -98,9 +105,18 @@ export default async function handler(req, res) {
       event = { parse_error: true, raw: rawText };
     }
 
-    const eventId = event?.id || `no-id-${Date.now()}`;
+    // ✅ PayPal puede repetir event.id (especialmente en simulator).
+    // Para no sobrescribir: usamos un ID único para la fila.
+    const rowId = makeRowId();
+
+    // ✅ Guardamos también el ID real de PayPal por si quieres agrupar/filtrar
+    const paypalEventId = event?.id || null;
+
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
+
+    // ✅ También guardamos transmission id si existe (sirve para debug/dedup real)
+    const transmissionId = req.headers["paypal-transmission-id"] || null;
 
     let verified = false;
     let verifyError = null;
@@ -114,29 +130,43 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
+    // ✅ OJO: tu tabla tiene raw JSONB, headers JSONB, payload JSONB
+    // -> raw debe ser JSON (no texto). Guardamos event como "raw".
     const insertPayload = {
-      id: eventId,
+      id: rowId, // ✅ PK único => nunca sobrescribe
+      paypal_event_id: paypalEventId, // ✅ requiere que ya exista esa columna en tu tabla
+      transmission_id: transmissionId, // ✅ requiere que ya exista esa columna en tu tabla
       event_type: eventType,
       resource_type: resourceType,
       verified,
       error: verifyError,
-      payload: event,
-      headers: req.headers,
+      raw: event, // ✅ JSONB
+      payload: event, // ✅ JSONB
+      headers: req.headers, // ✅ JSONB
     };
 
-    const { data, error } = await supabase
-      .from("paypal_events_raw")
-      .upsert(insertPayload, { onConflict: "id" });
+    // ✅ INSERT (no UPSERT) => nunca pisa una fila anterior
+    const { error } = await supabase.from("paypal_events_raw").insert(insertPayload);
 
     if (error) {
-      console.error("[PP_WEBHOOK] supabase_upsert_error", error);
-      // respondemos 200 igual, pero te dejamos la pista clara en logs
-      return res.status(200).json({ ok: false, stored: false, supabase_error: error.message, verified });
+      console.error("[PP_WEBHOOK] supabase_insert_error", error);
+      return res.status(200).json({
+        ok: false,
+        stored: false,
+        supabase_error: error.message,
+        verified,
+      });
     }
 
-    console.log("[PP_WEBHOOK] stored", { id: eventId, verified, eventType });
+    console.log("[PP_WEBHOOK] stored", {
+      rowId,
+      paypalEventId,
+      verified,
+      eventType,
+      transmissionId,
+    });
 
-    return res.status(200).json({ ok: true, stored: true, verified });
+    return res.status(200).json({ ok: true, stored: true, verified, rowId, paypalEventId });
   } catch (e) {
     console.error("[PP_WEBHOOK] exception", e);
     return res.status(200).json({ ok: false, error: String(e?.message || e) });
