@@ -8,10 +8,8 @@ import { sbAdmin } from "../../lib/supabaseAdmin";
 import { PLANS } from "../../lib/pricing";
 
 function requireInternal(req) {
-  // Seguridad simple: solo server/webhooks.
-  // En Vercel, tus webhooks no llevan esta cabecera.
-  // Por eso: este endpoint se usa desde los handlers de webhook INTERNAMENTE (server-to-server),
-  // NO desde el cliente.
+  // Si luego querés, aquí metés una verificación real (secret header).
+  // Por ahora lo dejamos igual que tu código.
   return true;
 }
 
@@ -37,27 +35,34 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString(),
       });
 
-    if (subErr) return res.status(500).json({ error: "SUBSCRIPTION_SAVE_ERROR", detail: subErr.message });
+    if (subErr) {
+      return res.status(500).json({ error: "SUBSCRIPTION_SAVE_ERROR", detail: subErr.message });
+    }
 
-    // 2) credit included jades (lo haces al activar)
+    // 2) credit included jades usando TU función final
     const amount = PLANS[plan].included_jades;
 
-    const { data, error } = await sb.rpc("add_jades", {
+    // ref debe ser un identificador idempotente (ej: "ppsub:SUBSCRIPTION_ID:first")
+    const reference_id = ref || `subscription:${plan}:${user_id}:${Date.now()}`;
+
+    const { error: creditErr } = await sb.rpc("credit_jades_from_payment", {
       p_user_id: user_id,
       p_amount: amount,
+      p_reference_id: reference_id,
       p_reason: `subscription:${plan}`,
-      p_ref: ref || null,
     });
 
-    if (error) return res.status(500).json({ error: "CREDIT_ERROR", detail: error.message });
+    if (creditErr) {
+      return res.status(500).json({ error: "CREDIT_ERROR", detail: creditErr.message });
+    }
 
     return res.status(200).json({
       ok: true,
       plan,
       credited: amount,
-      new_balance: data?.[0]?.new_balance ?? null,
+      reference_id,
     });
   } catch (e) {
-    return res.status(500).json({ error: "SERVER_ERROR", detail: String(e) });
+    return res.status(500).json({ error: "SERVER_ERROR", detail: String(e?.message || e) });
   }
 }
