@@ -1,4 +1,5 @@
 // pages/api/charge-jades.js
+import { requireUser } from "../../api/_auth.js"; // ajusta si tu _auth está en otra ruta
 import { sbAdmin } from "../../lib/supabaseAdmin";
 import { COSTS } from "../../lib/pricing";
 
@@ -6,24 +7,23 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
 
   try {
-    const { user_id, kind, amount, ref } = req.body || {};
-    if (!user_id) return res.status(400).json({ error: "MISSING_FIELDS" });
+    const auth = await requireUser(req);
+    if (!auth.ok) return res.status(auth.code || 401).json({ error: auth.error });
 
-    // ✅ Compat: si viene amount directo, úsalo. Si viene kind, usa COSTS[kind]
-    let cost = null;
-    if (amount != null) cost = Number(amount);
-    else if (kind) cost = COSTS[kind];
+    const user_id = auth.user.id;
 
-    if (!cost || !Number.isFinite(cost) || cost <= 0) {
-      return res.status(400).json({ error: "INVALID_COST" });
-    }
+    const { kind, ref } = req.body || {};
+    if (!kind) return res.status(400).json({ error: "MISSING_FIELDS" });
+
+    const cost = COSTS[kind];
+    if (!cost) return res.status(400).json({ error: "INVALID_KIND" });
 
     const sb = sbAdmin();
 
     const { data, error } = await sb.rpc("spend_jades", {
       p_user_id: user_id,
       p_amount: cost,
-      p_reason: kind ? `generation:${kind}` : "spend",
+      p_reason: `generation:${kind}`,
       p_ref: ref || null,
     });
 
