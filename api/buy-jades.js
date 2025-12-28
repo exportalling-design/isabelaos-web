@@ -1,4 +1,5 @@
 // pages/api/buy-jades.js
+import { requireUser } from "../../api/_auth.js"; // ajusta si tu _auth está en otra ruta
 import { sbAdmin } from "../../lib/supabaseAdmin";
 import { JADE_PACKS } from "../../lib/pricing";
 
@@ -6,8 +7,13 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
 
   try {
-    const { user_id, pack, ref } = req.body || {};
-    if (!user_id || !pack) return res.status(400).json({ error: "MISSING_FIELDS" });
+    const auth = await requireUser(req);
+    if (!auth.ok) return res.status(auth.code || 401).json({ error: auth.error });
+
+    const user_id = auth.user.id;
+
+    const { pack, ref } = req.body || {};
+    if (!pack) return res.status(400).json({ error: "MISSING_FIELDS" });
 
     const p = JADE_PACKS[String(pack)];
     if (!p) return res.status(400).json({ error: "INVALID_PACK" });
