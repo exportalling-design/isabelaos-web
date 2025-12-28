@@ -1,24 +1,12 @@
 // /api/user-status.js
-import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
-// Map plan_id -> label
 function planFromPayPalPlanId(plan_id) {
   const basic = process.env.PAYPAL_PLAN_ID_BASIC;
   const pro = process.env.PAYPAL_PLAN_ID_PRO;
   if (plan_id && basic && plan_id === basic) return "basic";
   if (plan_id && pro && plan_id === pro) return "pro";
   return null;
-}
-
-// Normaliza status PayPal a "active"/"none"/"inactive"
-function normalizeSubStatus(ppStatus) {
-  const s = String(ppStatus || "").toLowerCase();
-  if (!s) return "none";
-  if (["active"].includes(s)) return "active";
-  // V2 típicos: ACTIVE, SUSPENDED, CANCELLED, EXPIRED
-  if (["suspended", "cancelled", "canceled", "expired"].includes(s)) return "inactive";
-  return "inactive";
 }
 
 export default async function handler(req, res) {
@@ -29,29 +17,10 @@ export default async function handler(req, res) {
     }
 
     const user_id = auth.user.id;
+    const sb = auth.sb; // ✅ ya es admin client por tu helper
 
-    const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-    const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!SUPABASE_URL || !SERVICE_KEY) {
-      return res.status(500).json({
-        ok: false,
-        error: "MISSING_ENV_VARS",
-        missing: [
-          !SUPABASE_URL ? "SUPABASE_URL (o VITE_SUPABASE_URL)" : null,
-          !SERVICE_KEY ? "SUPABASE_SERVICE_ROLE_KEY" : null,
-        ].filter(Boolean),
-      });
-    }
-
-    const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    // -------------------------
-    // Wallet (jades)
-    // -------------------------
-    const { data: walletRow, error: walletErr } = await supabase
+    // 1) Wallet (jades)
+    const { data: walletRow, error: walletErr } = await sb
       .from("user_wallet")
       .select("balance,updated_at")
       .eq("user_id", user_id)
@@ -67,13 +36,10 @@ export default async function handler(req, res) {
 
     const balance = Number(walletRow?.balance || 0);
 
-    // -------------------------
-    // Subscription status (PayPal)
-    // -------------------------
-    // Tomamos la más reciente por updated_at
-    const { data: subRow, error: subErr } = await supabase
+    // 2) Última suscripción (si existe)
+    const { data: subRow, error: subErr } = await sb
       .from("paypal_subscriptions")
-      .select("status,plan_id,updated_at,subscription_id")
+      .select("status, plan_id, updated_at, subscription_id")
       .eq("user_id", user_id)
       .order("updated_at", { ascending: false })
       .limit(1)
@@ -82,28 +48,30 @@ export default async function handler(req, res) {
     if (subErr) {
       return res.status(500).json({
         ok: false,
-        error: "SUB_SELECT_ERROR",
+        error: "SUBSCRIPTION_SELECT_ERROR",
         details: subErr.message || subErr,
       });
     }
 
-    const plan = planFromPayPalPlanId(subRow?.plan_id || null);
-    const subscription_status = normalizeSubStatus(subRow?.status || null);
+    const subscription_status = subRow?.status || "none";
+    const plan = planFromPayPalPlanId(subRow?.plan_id) || null;
 
     return res.status(200).json({
       ok: true,
       user_id,
-      // ✅ lo que tu UI está esperando
-      plan: plan, // "basic" | "pro" | null
-      subscription_status, // "active" | "inactive" | "none"
+
+      // ✅ lo que usa tu UI
       jades: balance,
-      // extra por debug
+      plan,
+      subscription_status,
+
+      // (extras por si querés debug)
       balance,
       paypal: subRow
         ? {
             subscription_id: subRow.subscription_id,
-            status: subRow.status,
             plan_id: subRow.plan_id,
+            status: subRow.status,
             updated_at: subRow.updated_at,
           }
         : null,
