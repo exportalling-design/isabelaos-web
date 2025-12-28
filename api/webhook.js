@@ -1,8 +1,10 @@
-// api/webhook.js
+// /api/webhook.js
 import { createClient } from "@supabase/supabase-js";
 import getRawBody from "raw-body";
 
-export const config = { api: { bodyParser: false } };
+export const config = {
+  api: { bodyParser: false }, // ✅ RAW body
+};
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -38,6 +40,7 @@ async function paypalAccessToken() {
 }
 
 async function verifyWebhookSignature({ event, headers }) {
+  // PayPal manda headers en minúscula en Node/Vercel
   const transmissionId = headers["paypal-transmission-id"];
   const transmissionTime = headers["paypal-transmission-time"];
   const certUrl = headers["paypal-cert-url"];
@@ -74,128 +77,9 @@ async function verifyWebhookSignature({ event, headers }) {
   return { verified: ok, error: ok ? null : `verify_failed: ${JSON.stringify(j)}` };
 }
 
-function isSubscriptionEvent(eventType) {
-  // PayPal Subscriptions (v1/v2 webhooks)
-  // Ejemplos: BILLING.SUBSCRIPTION.CREATED / ACTIVATED / UPDATED / CANCELLED / SUSPENDED / EXPIRED
-  return typeof eventType === "string" && eventType.startsWith("BILLING.SUBSCRIPTION.");
-}
-
-function toTimestamptzSafe(val) {
-  if (!val) return null;
-  const d = new Date(val);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-/**
- * Extrae datos “lo más estándar posible” de resource (varía por evento)
- */
-function extractSubscriptionFields(event) {
-  const r = event?.resource || {};
-  const subscriptionId = r?.id || r?.billing_agreement_id || null;
-
-  // En muchos eventos v2:
-  const planId = r?.plan_id || r?.plan?.id || null;
-  const status = r?.status || null;
-
-  // subscriber / payer
-  const payerId =
-    r?.subscriber?.payer_id ||
-    r?.subscriber?.payer?.payer_id ||
-    r?.payer?.payer_id ||
-    null;
-
-  const subscriberEmail =
-    r?.subscriber?.email_address ||
-    r?.subscriber?.payer?.email_address ||
-    null;
-
-  // custom_id: CLAVE si tú lo mandas cuando creas la suscripción (ideal: user_id)
-  const customId = r?.custom_id || r?.custom || null;
-
-  const startTime = toTimestamptzSafe(r?.start_time);
-  const nextBillingTime = toTimestamptzSafe(r?.billing_info?.next_billing_time);
-
-  return {
-    subscriptionId,
-    status,
-    planId,
-    payerId,
-    customId,
-    subscriberEmail,
-    startTime,
-    nextBillingTime,
-  };
-}
-
-async function markProcessedOnce(supabase, eventId) {
-  // Idempotencia dura: si ya fue procesado, no repetimos lógica de negocio
-  const { error } = await supabase
-    .from("paypal_events_processed")
-    .insert({ event_id: eventId });
-
-  if (!error) return { firstTime: true };
-
-  // Si es duplicate key => ya procesado
-  // PostgREST típicamente devuelve código 23505 en detalles; pero no siempre.
-  const msg = String(error?.message || "");
-  const dup =
-    msg.includes("duplicate") ||
-    msg.includes("already exists") ||
-    msg.includes("23505");
-
-  if (dup) return { firstTime: false };
-  throw error;
-}
-
-async function upsertSubscriptionState(supabase, event) {
-  const eventId = event?.id || null;
-  const eventType = event?.event_type || null;
-
-  const {
-    subscriptionId,
-    status,
-    planId,
-    payerId,
-    customId,
-    subscriberEmail,
-    startTime,
-    nextBillingTime,
-  } = extractSubscriptionFields(event);
-
-  if (!subscriptionId) {
-    console.warn("[PP_WEBHOOK] subscription event without subscriptionId", { eventId, eventType });
-    return { ok: false, reason: "missing_subscription_id" };
-  }
-
-  const nowIso = new Date().toISOString();
-
-  const row = {
-    subscription_id: subscriptionId,
-    status,
-    plan_id: planId,
-    payer_id: payerId,
-    custom_id: customId,
-    subscriber_email: subscriberEmail,
-    start_time: startTime,
-    next_billing_time: nextBillingTime,
-    last_event_id: eventId,
-    last_event_type: eventType,
-    last_event_at: nowIso,
-    payload: event?.resource || event, // guardamos resource completo
-    updated_at: nowIso,
-  };
-
-  const { error } = await supabase
-    .from("paypal_subscriptions")
-    .upsert(row, { onConflict: "subscription_id" });
-
-  if (error) throw error;
-
-  return { ok: true, subscriptionId, status, planId };
-}
-
 export default async function handler(req, res) {
   try {
+    // PayPal solo manda POST, pero respondemos 200 siempre para no reintentar por errores de método.
     if (req.method !== "POST") return res.status(200).json({ ok: true, ignored: true });
 
     must("SUPABASE_URL", SUPABASE_URL);
@@ -206,10 +90,11 @@ export default async function handler(req, res) {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // RAW body
+    // 1) Leer RAW body (NECESARIO para verificación)
     const raw = await getRawBody(req);
     const rawText = raw.toString("utf8");
 
+    // 2) Parse del evento
     let event;
     try {
       event = JSON.parse(rawText);
@@ -221,7 +106,27 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // 1) Verificación best-effort (sandbox puede fallar)
+    // ✅ 3) Idempotencia (EVITA DUPLICADOS)
+    // Si ya existe en paypal_events_processed => ya fue manejado, respondemos 200 y ya.
+    try {
+      const { data: alreadyProcessed, error: peErr } = await supabase
+        .from("paypal_events_processed")
+        .select("event_id")
+        .eq("event_id", eventId)
+        .maybeSingle();
+
+      if (peErr) {
+        // No detenemos el webhook por esto, pero lo dejamos en logs
+        console.warn("[PP_WEBHOOK] processed_check_error", peErr);
+      } else if (alreadyProcessed) {
+        console.log("[PP_WEBHOOK] duplicate_event_ignored", { id: eventId, eventType });
+        return res.status(200).json({ ok: true, duplicate: true, verified: true });
+      }
+    } catch (e) {
+      console.warn("[PP_WEBHOOK] processed_check_exception", String(e?.message || e));
+    }
+
+    // 4) Verificación PayPal (firma)
     let verified = false;
     let verifyError = null;
 
@@ -234,62 +139,83 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
-    // 2) Guardar SIEMPRE el raw (auditoría)
-    //    OJO: tu tabla ya tiene raw, headers, payload. Guardamos lo que ya usas.
+    // 5) Guardar RAW (sin sobrescribir: INSERT + ignore duplicates)
+    // - PayPal puede reenviar el mismo event_id
+    // - Si existe, no queremos que truene; queremos ignorarlo sin error.
     const insertPayload = {
-      // IMPORTANTE: no usamos "id" como PK aquí, tu tabla ya permite repetidos (como acabas de ver)
       id: eventId,
       event_type: eventType,
       resource_type: resourceType,
       verified,
       error: verifyError,
-      raw: event,          // si prefieres rawText, puedes cambiarlo a { rawText }
-      headers: req.headers,
-      payload: event,
-      // received_at lo maneja default en DB si lo tienes, si no, lo puedes agregar aquí:
-      // received_at: new Date().toISOString(),
+      raw: event,        // ✅ según tus columnas: raw jsonb
+      headers: req.headers, // ✅ headers jsonb
+      payload: event,    // ✅ payload jsonb (si la tienes)
     };
 
-    const rawInsert = await supabase.from("paypal_events_raw").insert(insertPayload);
-    if (rawInsert.error) {
-      console.error("[PP_WEBHOOK] raw_insert_error", rawInsert.error);
-      // respondemos 200 igual, pero dejamos log
-    }
-
-    // 3) Lógica de negocio (SUSCRIPCIONES primero)
-    //    Idempotencia por event_id (no se ejecuta 2 veces)
-    let business = { ran: false };
+    let storedRaw = false;
 
     try {
-      const { firstTime } = await markProcessedOnce(supabase, eventId);
-      if (!firstTime) {
-        business = { ran: false, skipped: true, reason: "already_processed" };
-      } else {
-        if (isSubscriptionEvent(eventType)) {
-          const r = await upsertSubscriptionState(supabase, event);
-          business = { ran: true, type: "subscription", result: r };
+      const { error: rawErr } = await supabase
+        .from("paypal_events_raw")
+        .insert(insertPayload);
+
+      if (rawErr) {
+        // Si es duplicado, lo ignoramos (23505)
+        const msg = String(rawErr?.message || rawErr);
+        const code = rawErr?.code;
+
+        if (code === "23505" || msg.toLowerCase().includes("duplicate")) {
+          console.log("[PP_WEBHOOK] raw_duplicate_ignored", { id: eventId, eventType });
+          storedRaw = false; // ya existía
         } else {
-          business = { ran: false, skipped: true, reason: "not_subscription_event" };
+          console.error("[PP_WEBHOOK] raw_insert_error", rawErr);
+          // Respondemos 200 igual para que PayPal no reintente infinito
+          return res.status(200).json({
+            ok: false,
+            stored: false,
+            step: "raw_insert",
+            supabase_error: rawErr.message,
+            verified,
+          });
+        }
+      } else {
+        storedRaw = true;
+      }
+    } catch (e) {
+      console.error("[PP_WEBHOOK] raw_insert_exception", e);
+      return res.status(200).json({ ok: false, stored: false, step: "raw_insert_exception", verified });
+    }
+
+    // 6) Marcar como procesado (evita re-procesar)
+    // Aquí todavía NO hacemos lógica de suscripción/jades; solo marcamos idempotencia.
+    try {
+      const { error: procErr } = await supabase
+        .from("paypal_events_processed")
+        .insert({ event_id: eventId });
+
+      if (procErr) {
+        // Si llega duplicado aquí, también lo ignoramos.
+        const msg = String(procErr?.message || procErr);
+        const code = procErr?.code;
+        if (code === "23505" || msg.toLowerCase().includes("duplicate")) {
+          console.log("[PP_WEBHOOK] processed_duplicate_ignored", { id: eventId });
+        } else {
+          console.error("[PP_WEBHOOK] processed_insert_error", procErr);
+          // Respondemos 200 igual
         }
       }
     } catch (e) {
-      console.error("[PP_WEBHOOK] business_error", e);
-      business = { ran: false, error: String(e?.message || e) };
-      // Igual devolvemos 200 para que PayPal no reintente infinito
+      console.error("[PP_WEBHOOK] processed_insert_exception", e);
+      // Respondemos 200 igual
     }
 
-    console.log("[PP_WEBHOOK] ok", { eventId, eventType, verified, business });
+    console.log("[PP_WEBHOOK] ok", { id: eventId, verified, eventType, storedRaw });
 
-    return res.status(200).json({
-      ok: true,
-      stored: true,
-      verified,
-      eventId,
-      eventType,
-      business,
-    });
+    return res.status(200).json({ ok: true, stored: true, storedRaw, verified });
   } catch (e) {
     console.error("[PP_WEBHOOK] exception", e);
     return res.status(200).json({ ok: false, error: String(e?.message || e) });
   }
 }
+```0
