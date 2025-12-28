@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
-import { supabase } from "./lib/supabaseClient"; // ✅ ESTE ES EL QUE FALTABA
+import { supabase } from "./lib/supabaseClient";
 
 import {
   saveGenerationInSupabase,
@@ -10,11 +10,13 @@ import {
   deleteGenerationFromSupabase,
 } from "./lib/generations";
 
+import { PLANS } from "./lib/pricing";
+
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
-const DEMO_LIMIT = 3; // Imágenes para usuarios sin registrar (Modo Invitado)
-const DAILY_LIMIT = 5; // Imágenes para usuarios registrados (Modo Beta Gratuito)
+const DEMO_LIMIT = 3; // Invitado
+const DAILY_LIMIT = 5; // Beta gratis (logueado)
 
 // ---------------------------------------------------------
 // COSTOS DE TOKENS (JADES)
@@ -77,22 +79,14 @@ async function getAuthHeadersGlobal() {
 }
 
 // ---------------------------------------------------------
-// Botón PayPal reutilizable
+// Botón PayPal reutilizable (ORDER / SUBSCRIPTION)
 // ---------------------------------------------------------
 function PayPalButton({
-  // === MODO ===
-  // "order" (default): pago único (lo que ya tenías)
-  // "subscription": suscripción mensual/anual usando plan_id
-  mode = "order",
-
-  // === ORDER (pago único) ===
+  mode = "order", // "order" | "subscription"
   amount = "19.00",
   description = "IsabelaOS Studio",
-
-  // === SUBSCRIPTION (plan) ===
-  planId = null, // <-- P-XXXXXX (PayPal plan_id real)
-  customId = null, // <-- aquí vas a pasar user.id (UUID) para que llegue al webhook
-
+  planId = null,
+  customId = null,
   containerId,
   onPaid,
 }) {
@@ -107,7 +101,6 @@ function PayPalButton({
     const renderButtons = () => {
       if (!window.paypal) return;
 
-      // ✅ FIX: limpiar contenedor antes de render para evitar duplicados
       const host = document.getElementById(divId);
       if (host) host.innerHTML = "";
 
@@ -124,14 +117,9 @@ function PayPalButton({
         },
       };
 
-      // ===========================
-      // ✅ MODO SUSCRIPCIÓN
-      // ===========================
       if (mode === "subscription") {
         if (!planId) {
-          console.warn(
-            "PayPalButton: mode=subscription pero falta planId (P-xxxx)"
-          );
+          console.warn("PayPalButton: mode=subscription pero falta planId (P-xxxx)");
           const host2 = document.getElementById(divId);
           if (host2)
             host2.innerHTML = `<div style="color:#fff;font-size:12px;padding:6px 10px;">Falta planId de PayPal</div>`;
@@ -141,33 +129,23 @@ function PayPalButton({
         window.paypal
           .Buttons({
             ...common,
-
-            // ✅ CLAVE: createSubscription + custom_id
             createSubscription: (data, actions) => {
               return actions.subscription.create({
                 plan_id: planId,
-                // ✅ esto es lo que faltaba para mapear user -> webhook -> supabase
                 ...(customId ? { custom_id: customId } : {}),
               });
             },
-
-            // En suscripción NO hay capture(). PayPal devuelve subscriptionID.
             onApprove: async (data, actions) => {
               try {
                 const subscriptionID = data?.subscriptionID || null;
 
-                // opcional: obtener detalles
                 let details = null;
                 try {
                   if (actions?.subscription?.get && subscriptionID) {
                     details = await actions.subscription.get();
                   }
                 } catch (e) {
-                  // no frena el flujo
-                  console.warn(
-                    "No se pudo obtener detalles de la suscripción:",
-                    e
-                  );
+                  console.warn("No se pudo obtener detalles de la suscripción:", e);
                 }
 
                 console.log("Suscripción PayPal aprobada:", {
@@ -190,9 +168,7 @@ function PayPalButton({
                 }
               } catch (err) {
                 console.error("Error en aprobación de suscripción PayPal:", err);
-                alert(
-                  "Ocurrió un error al confirmar la suscripción con PayPal."
-                );
+                alert("Ocurrió un error al confirmar la suscripción con PayPal.");
               }
             },
           })
@@ -201,9 +177,6 @@ function PayPalButton({
         return;
       }
 
-      // ===========================
-      // ✅ MODO ORDER (pago único)
-      // ===========================
       window.paypal
         .Buttons({
           ...common,
@@ -236,18 +209,15 @@ function PayPalButton({
         .render(`#${divId}`);
     };
 
-    // ✅ Si es suscripción, el SDK debe cargar con vault=true&intent=subscription
     const sdkParams =
       mode === "subscription"
         ? `client-id=${PAYPAL_CLIENT_ID}&currency=USD&vault=true&intent=subscription`
         : `client-id=${PAYPAL_CLIENT_ID}&currency=USD`;
 
     const sdkSrc = `https://www.paypal.com/sdk/js?${sdkParams}`;
-
     const existingScript = document.querySelector(`script[src="${sdkSrc}"]`);
 
     if (existingScript) {
-      // Si ya está cargado, render directo
       if (window.paypal) renderButtons();
       else existingScript.addEventListener("load", renderButtons);
       return;
@@ -333,8 +303,7 @@ function AuthModal({ open, onClose }) {
         </div>
 
         <p className="mt-2 text-xs text-neutral-400">
-          Usa tu correo o entra con Google para acceder al motor de producción
-          visual.
+          Usa tu correo o entra con Google para acceder al motor de producción visual.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
@@ -368,11 +337,7 @@ function AuthModal({ open, onClose }) {
             disabled={localLoading}
             className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {localLoading
-              ? "Procesando..."
-              : mode === "login"
-              ? "Entrar"
-              : "Registrarme"}
+            {localLoading ? "Procesando..." : mode === "login" ? "Entrar" : "Registrarme"}
           </button>
         </form>
 
@@ -415,24 +380,20 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN ( /api/generate + /api/status )
+// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && !!user;
 
-  const [prompt, setPrompt] = useState(
-    "Cinematic portrait, ultra detailed, soft light, 8k"
-  );
-  const [negative, setNegative] = useState(
-    "blurry, low quality, deformed, watermark, text"
-  );
+  const [prompt, setPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
+  const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
   const [width, setWidth] = useState(512);
   const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
-  const [status, setStatus] = useState("IDLE"); // IDLE | IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
+  const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("Listo para ejecutar el motor.");
   const [imageB64, setImageB64] = useState(null);
   const [error, setError] = useState("");
@@ -571,7 +532,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           } else if (userLoggedIn) {
             setDailyCount((prev) => prev + 1);
 
-            // Guardar en supabase (tu wrapper)
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
@@ -613,9 +573,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        <p className="font-medium">
-          Debes iniciar sesión para usar el motor de producción visual.
-        </p>
+        <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
         <p className="mt-1 text-xs text-yellow-200/80">
           Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
         </p>
@@ -625,16 +583,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Form */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Motor de imagen · Producción visual
-        </h2>
+        <h2 className="text-lg font-semibold text-white">Motor de imagen · Producción visual</h2>
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y
-            biblioteca requieren cuenta.
+            Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y biblioteca requieren
+            cuenta.
           </div>
         )}
 
@@ -709,9 +664,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             </span>
           </div>
 
-          {error && (
-            <p className="whitespace-pre-line text-xs text-red-400">{error}</p>
-          )}
+          {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
 
           <button
             onClick={handleGenerate}
@@ -729,7 +682,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         </div>
       </div>
 
-      {/* Result */}
       <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
 
@@ -829,19 +781,13 @@ function LibraryView() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1.4fr]">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Biblioteca de producción
-        </h2>
-        <p className="mt-1 text-xs text-neutral-400">
-          Resultados guardados por tu cuenta.
-        </p>
+        <h2 className="text-lg font-semibold text-white">Biblioteca de producción</h2>
+        <p className="mt-1 text-xs text-neutral-400">Resultados guardados por tu cuenta.</p>
 
         {loading ? (
           <p className="mt-4 text-xs text-neutral-400">Cargando historial...</p>
         ) : items.length === 0 ? (
-          <p className="mt-4 text-xs text-neutral-400">
-            Aún no tienes resultados guardados.
-          </p>
+          <p className="mt-4 text-xs text-neutral-400">Aún no tienes resultados guardados.</p>
         ) : (
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {items.map((item) => (
@@ -871,11 +817,7 @@ function LibraryView() {
         <h2 className="text-lg font-semibold text-white">Vista previa</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {selected ? (
-            <img
-              src={selected.src}
-              alt="Seleccionada"
-              className="h-full w-full rounded-2xl object-contain"
-            />
+            <img src={selected.src} alt="Seleccionada" className="h-full w-full rounded-2xl object-contain" />
           ) : (
             <p>Selecciona un resultado para verlo.</p>
           )}
@@ -900,12 +842,8 @@ function LibraryView() {
 function VideoFromPromptPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
 
-  const [prompt, setPrompt] = useState(
-    "Cinematic short scene, ultra detailed, soft light, 8k"
-  );
-  const [negative, setNegative] = useState(
-    "blurry, low quality, deformed, watermark, text"
-  );
+  const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
+  const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
   const [steps, setSteps] = useState(25);
 
   const [status, setStatus] = useState("IDLE");
@@ -915,17 +853,15 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   const [error, setError] = useState("");
 
   const canUse = !!user;
-
   const cost = COST_VIDEO_FROM_PROMPT;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
-    const r = await fetch(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
-      { headers: { ...auth } }
-    );
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
+      headers: { ...auth },
+    });
     const data = await r.json().catch(() => null);
     if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
     return data;
@@ -1019,7 +955,14 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         finished = true;
 
         const out = stData.output || stData.result || stData.data || null;
-        const maybeUrl = out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
+        const maybeUrl =
+          out?.video_url ||
+          out?.url ||
+          out?.mp4_url ||
+          out?.video ||
+          stData.video_url ||
+          stData.url ||
+          null;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
@@ -1065,18 +1008,13 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Motor de video · Producción de clips
-        </h2>
+        <h2 className="text-lg font-semibold text-white">Motor de video · Producción de clips</h2>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Estado: {statusText || "Listo."}</span>
             <span className="text-[11px] text-neutral-400">
-              Jades:{" "}
-              <span className="font-semibold text-white">
-                {userStatus?.jades ?? "..."}
-              </span>
+              Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
             </span>
           </div>
           <div className="mt-1 text-[11px] text-neutral-400">
@@ -1132,9 +1070,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
             </div>
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
         </div>
       </div>
 
@@ -1161,7 +1097,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Imagen -> Video (logueado) ✅ AUTH + spend jades
+// Imagen -> Video (logueado)
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1319,7 +1255,14 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         finished = true;
 
         const out = stData.output || stData.result || stData.data || null;
-        const maybeUrl = out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
+        const maybeUrl =
+          out?.video_url ||
+          out?.url ||
+          out?.mp4_url ||
+          out?.video ||
+          stData.video_url ||
+          stData.url ||
+          null;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
@@ -1365,18 +1308,13 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">
-          Transformación visual · Imagen a video
-        </h2>
+        <h2 className="text-lg font-semibold text-white">Transformación visual · Imagen a video</h2>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Estado: {statusText || "Listo."}</span>
             <span className="text-[11px] text-neutral-400">
-              Jades:{" "}
-              <span className="font-semibold text-white">
-                {userStatus?.jades ?? "..."}
-              </span>
+              Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
             </span>
           </div>
           <div className="mt-1 text-[11px] text-neutral-400">
@@ -1466,9 +1404,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
             </div>
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
         </div>
       </div>
 
@@ -1495,7 +1431,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Foto Navideña IA (Premium) – mantiene tu lógica (si luego quieres jades aquí, se agrega)
+// Foto Navideña IA (Premium)
 // ---------------------------------------------------------
 function XmasPhotoPanel({ userStatus }) {
   const { user } = useAuth();
@@ -1569,7 +1505,7 @@ function XmasPhotoPanel({ userStatus }) {
         body: JSON.stringify({
           image_b64: pureB64,
           description: extraPrompt || "",
-          cost: COST_XMAS_PHOTO, // por si lo usas del lado server
+          cost: COST_XMAS_PHOTO,
         }),
       });
 
@@ -1659,9 +1595,7 @@ function XmasPhotoPanel({ userStatus }) {
           </div>
 
           <div>
-            <p className="text-xs text-neutral-300">
-              2. Opcional: describe escena
-            </p>
+            <p className="text-xs text-neutral-300">2. Opcional: describe escena</p>
             <input
               type="text"
               value={extraPrompt}
@@ -1717,7 +1651,7 @@ function XmasPhotoPanel({ userStatus }) {
 }
 
 // ---------------------------------------------------------
-// Dashboard (logueado) con sidebar de vistas
+// Dashboard (logueado)
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
@@ -1792,9 +1726,7 @@ function DashboardView() {
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
-    const body = encodeURIComponent(
-      "Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)"
-    );
+    const body = encodeURIComponent("Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)");
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
@@ -1922,19 +1854,15 @@ function DashboardView() {
               </p>
             </div>
 
-            {/* ---------------------------------------------------------
-                Planes / Suscripción (PayPal Subscriptions)
-            --------------------------------------------------------- */}
+            {/* Planes / Suscripción */}
             <section className="rounded-3xl border border-white/10 bg-black/60 p-6">
               <div className="flex flex-col gap-2">
                 <h2 className="text-lg font-semibold text-white">Planes</h2>
                 <p className="text-xs text-neutral-400">
-                  Suscripción mensual. Al activarse, el sistema acreditará tus
-                  jades automáticamente por webhook.
+                  Suscripción mensual. Al activarse, el sistema acreditará tus jades automáticamente por webhook.
                 </p>
               </div>
 
-              {/* Estado actual */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
@@ -1947,30 +1875,26 @@ function DashboardView() {
                   <span className="text-neutral-400">
                     Plan:{" "}
                     <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : (userStatus.plan || "none")}
+                      {userStatus.loading ? "..." : userStatus.plan || "none"}
                     </span>
                   </span>
 
                   <span className="text-neutral-400">
                     Jades:{" "}
                     <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : (userStatus.jades ?? 0)}
+                      {userStatus.loading ? "..." : userStatus.jades ?? 0}
                     </span>
                   </span>
                 </div>
               </div>
 
-              {/* Botones */}
               <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {/* BASIC */}
                 <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-semibold text-white">Basic</h3>
                     <span className="text-sm text-neutral-300">$19/mes</span>
                   </div>
-                  <p className="mt-2 text-xs text-neutral-400">
-                    Ideal para creators en beta. Incluye jades mensuales.
-                  </p>
+                  <p className="mt-2 text-xs text-neutral-400">Ideal para creators en beta. Incluye jades mensuales.</p>
 
                   <div className="mt-4">
                     {!PAYPAL_PLAN_ID_BASIC ? (
@@ -1981,27 +1905,22 @@ function DashboardView() {
                       <PayPalButton
                         mode="subscription"
                         planId={PAYPAL_PLAN_ID_BASIC}
-                        customId={user.id} // ✅ CLAVE: user.id al webhook
+                        customId={user.id}
                         containerId="pp-sub-basic"
                         onPaid={() => {
-                          alert(
-                            "Suscripción Basic creada. En breve se acreditan tus jades cuando el webhook confirme."
-                          );
+                          alert("Suscripción Basic creada. En breve se acreditan tus jades cuando el webhook confirme.");
                         }}
                       />
                     )}
                   </div>
                 </div>
 
-                {/* PRO */}
                 <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-semibold text-white">Pro</h3>
                     <span className="text-sm text-neutral-300">$39/mes</span>
                   </div>
-                  <p className="mt-2 text-xs text-neutral-400">
-                    Más jades y potencia para producción constante.
-                  </p>
+                  <p className="mt-2 text-xs text-neutral-400">Más jades y potencia para producción constante.</p>
 
                   <div className="mt-4">
                     {!PAYPAL_PLAN_ID_PRO ? (
@@ -2012,12 +1931,10 @@ function DashboardView() {
                       <PayPalButton
                         mode="subscription"
                         planId={PAYPAL_PLAN_ID_PRO}
-                        customId={user.id} // ✅ CLAVE: user.id al webhook
+                        customId={user.id}
                         containerId="pp-sub-pro"
                         onPaid={() => {
-                          alert(
-                            "Suscripción Pro creada. En breve se acreditan tus jades cuando el webhook confirme."
-                          );
+                          alert("Suscripción Pro creada. En breve se acreditan tus jades cuando el webhook confirme.");
                         }}
                       />
                     )}
@@ -2026,14 +1943,11 @@ function DashboardView() {
               </div>
 
               <p className="mt-4 text-[10px] text-neutral-500">
-                Nota: si el webhook tarda unos segundos, refresca la página. El
-                crédito de jades se aplica cuando PayPal confirma el evento.
+                Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal confirma el evento.
               </p>
             </section>
 
-            {appViewMode === "generator" && (
-              <CreatorPanel isDemo={false} />
-            )}
+            {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
             {appViewMode === "video_prompt" && (
               <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
             )}
@@ -2049,164 +1963,10 @@ function DashboardView() {
   );
 }
 
-// App.jsx
-// ============================================================
-// ✅ SOLO AGREGA (no quita) sección "Planes" en la Landing
-// ✅ Incluye botones de suscripción PayPal (Basic/Pro) para probar
-// ✅ Usa los IDs desde Vercel:
-//    - PAYPAL_PLAN_BASIC_ID
-//    - PAYPAL_PLAN_PRO_ID
-// ✅ Asume que ya tenés PAYPAL_CLIENT_ID en Vercel (si no, añadilo)
-// ============================================================
-
-import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "./context/AuthContext";
-import { PLANS } from "./lib/pricing";
-
 // ---------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------
-function scrollToId(id) {
-  const el = document.getElementById(id);
-  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-// ---------------------------------------------------------
-// PayPal: cargar SDK una sola vez + botón de suscripción
-// ---------------------------------------------------------
-function loadPayPalSdk(clientId) {
-  return new Promise((resolve, reject) => {
-    if (window.paypal) return resolve(true);
-    if (!clientId) return reject(new Error("Falta PAYPAL_CLIENT_ID"));
-
-    const existing = document.querySelector('script[data-pp-sdk="1"]');
-    if (existing) {
-      existing.addEventListener("load", () => resolve(true));
-      existing.addEventListener("error", reject);
-      return;
-    }
-
-    const s = document.createElement("script");
-    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(
-      clientId
-    )}&vault=true&intent=subscription`;
-    s.async = true;
-    s.defer = true;
-    s.setAttribute("data-pp-sdk", "1");
-    s.onload = () => resolve(true);
-    s.onerror = reject;
-    document.body.appendChild(s);
-  });
-}
-
-function PayPalSubscribeButton({
-  planId,
-  label = "Suscribirse",
-  className = "",
-  onApproved,
-}) {
-  const [ready, setReady] = useState(false);
-  const [err, setErr] = useState("");
-
-  const clientId =
-    import.meta?.env?.VITE_PAYPAL_CLIENT_ID ||
-    import.meta?.env?.PAYPAL_CLIENT_ID ||
-    (typeof process !== "undefined" ? process.env?.PAYPAL_CLIENT_ID : "");
-
-  useEffect(() => {
-    let mounted = true;
-    setErr("");
-
-    loadPayPalSdk(clientId)
-      .then(() => mounted && setReady(true))
-      .catch((e) => mounted && setErr(e?.message || "Error cargando PayPal"));
-
-    return () => {
-      mounted = false;
-    };
-  }, [clientId]);
-
-  useEffect(() => {
-    if (!ready) return;
-    if (!window.paypal) return;
-    if (!planId) {
-      setErr("Falta el Plan ID (PAYPAL_PLAN_*)");
-      return;
-    }
-
-    // Render dentro del contenedor
-    const containerId = `pp-sub-${planId}`;
-    const el = document.getElementById(containerId);
-    if (!el) return;
-
-    // Limpia render previo (evita duplicados si React re-renderiza)
-    el.innerHTML = "";
-
-    try {
-      window.paypal
-        .Buttons({
-          style: { layout: "vertical", shape: "rect" },
-          createSubscription: function (data, actions) {
-            return actions.subscription.create({
-              plan_id: planId,
-            });
-          },
-          onApprove: function (data) {
-            // data.subscriptionID
-            if (onApproved) onApproved(data);
-            alert(`✅ Suscripción creada: ${data.subscriptionID}`);
-          },
-          onError: function (e) {
-            console.error("PayPal error:", e);
-            setErr("PayPal dio error. Revisa consola / credenciales / planId.");
-          },
-        })
-        .render(`#${containerId}`);
-    } catch (e) {
-      console.error(e);
-      setErr("No se pudo renderizar PayPal Buttons.");
-    }
-  }, [ready, planId, onApproved]);
-
-  return (
-    <div className={className}>
-      {!ready && !err && (
-        <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
-          Cargando checkout…
-        </div>
-      )}
-
-      {err ? (
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[11px] text-rose-200">
-          {err}
-        </div>
-      ) : (
-        <div>
-          {/* Contenedor donde PayPal renderiza */}
-          <div id={`pp-sub-${planId}`} />
-          {/* label opcional (PayPal ya muestra botón) */}
-          <div className="mt-2 text-[10px] text-neutral-500">{label}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------
-// Landing: sección de planes (NUEVA)
+// Landing: sección de planes
 // ---------------------------------------------------------
 function PricingSection({ onOpenAuth }) {
-  // ✅ IDs desde Vercel (Server) o Vite (Client). Tu caso: Vercel env vars.
-  const BASIC_ID =
-    import.meta?.env?.VITE_PAYPAL_PLAN_BASIC_ID ||
-    import.meta?.env?.PAYPAL_PLAN_BASIC_ID ||
-    (typeof process !== "undefined" ? process.env?.PAYPAL_PLAN_BASIC_ID : "");
-
-  const PRO_ID =
-    import.meta?.env?.VITE_PAYPAL_PLAN_PRO_ID ||
-    import.meta?.env?.PAYPAL_PLAN_PRO_ID ||
-    (typeof process !== "undefined" ? process.env?.PAYPAL_PLAN_PRO_ID : "");
-
   const features = useMemo(
     () => ({
       basic: [
@@ -2247,7 +2007,6 @@ function PricingSection({ onOpenAuth }) {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {/* BASIC */}
           <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/40 p-6">
             <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-fuchsia-500/10 blur-2xl" />
 
@@ -2280,19 +2039,20 @@ function PricingSection({ onOpenAuth }) {
             </ul>
 
             <div className="mt-5">
-              <PayPalSubscribeButton
-                planId={BASIC_ID}
-                label="Checkout de suscripción (Basic)"
-                className="rounded-2xl border border-white/10 bg-black/20 p-3"
-              />
+              {!PAYPAL_PLAN_ID_BASIC ? (
+                <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                  Falta VITE_PAYPAL_PLAN_ID_BASIC en Vercel
+                </div>
+              ) : (
+                <PayPalButton
+                  mode="subscription"
+                  planId={PAYPAL_PLAN_ID_BASIC}
+                  containerId="pp-landing-basic"
+                />
+              )}
             </div>
-
-            <p className="mt-3 text-[10px] text-neutral-500">
-              Tip: Si el botón no carga, revisa que exista PAYPAL_CLIENT_ID y PAYPAL_PLAN_BASIC_ID en Vercel.
-            </p>
           </div>
 
-          {/* PRO */}
           <div className="relative overflow-hidden rounded-3xl border border-fuchsia-400/25 bg-black/40 p-6">
             <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-fuchsia-500/18 via-transparent to-violet-500/18 blur-2xl" />
 
@@ -2328,16 +2088,14 @@ function PricingSection({ onOpenAuth }) {
             </ul>
 
             <div className="mt-5">
-              <PayPalSubscribeButton
-                planId={PRO_ID}
-                label="Checkout de suscripción (Pro)"
-                className="rounded-2xl border border-white/10 bg-black/20 p-3"
-              />
+              {!PAYPAL_PLAN_ID_PRO ? (
+                <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                  Falta VITE_PAYPAL_PLAN_ID_PRO en Vercel
+                </div>
+              ) : (
+                <PayPalButton mode="subscription" planId={PAYPAL_PLAN_ID_PRO} containerId="pp-landing-pro" />
+              )}
             </div>
-
-            <p className="mt-3 text-[10px] text-neutral-500">
-              Tip: Si el botón no carga, revisa PAYPAL_PLAN_PRO_ID en Vercel.
-            </p>
           </div>
         </div>
       </div>
@@ -2346,21 +2104,12 @@ function PricingSection({ onOpenAuth }) {
 }
 
 // ---------------------------------------------------------
-// Landing (no sesión) con neon + demo
+// Landing (no sesión) + demo
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
-
-  // ⚠️ Asumo que ya existen en tu script global (como antes):
-  // const DEMO_LIMIT = ...
-  // const DAILY_LIMIT = ...
-  // Si ya están fuera, dejalos como estaban. Aquí no los redefino.
-  const DEMO_LIMIT =
-    (typeof window !== "undefined" && window.DEMO_LIMIT) || 3; // fallback
-  const DAILY_LIMIT =
-    (typeof window !== "undefined" && window.DAILY_LIMIT) || 5; // fallback
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
@@ -2434,13 +2183,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala, diseñado para creadores,
-              estudios y equipos que necesitan velocidad, consistencia y control creativo.
+              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala,
+              diseñado para creadores, estudios y equipos que necesitan velocidad, consistencia y control creativo.
             </p>
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
               No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo de producción visual.
-              Arquitectura preparada para módulos avanzados como BodySync, CineCam y Script2Film.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -2459,9 +2207,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text-white mb-3">
-              Calidad de estudio · Render del motor actual
-            </h2>
+            <h2 className="text-sm font-semibold text-white mb-3">Calidad de estudio · Render del motor actual</h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
@@ -2482,15 +2228,11 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
-        {/* ✅ NUEVO: Planes + Botones de compra */}
         <PricingSection onOpenAuth={onOpenAuth} />
 
-        {/* Contacto */}
         <section id="contacto" className="mt-16 rounded-3xl border border-white/10 bg-black/40 p-6">
           <h3 className="text-lg font-semibold text-white">Contacto</h3>
-          <p className="mt-2 text-xs text-neutral-400">
-            Escríbenos y te respondemos lo antes posible.
-          </p>
+          <p className="mt-2 text-xs text-neutral-400">Escríbenos y te respondemos lo antes posible.</p>
 
           <form onSubmit={handleContactSubmit} className="mt-5 grid gap-3 md:grid-cols-2">
             <input
@@ -2528,26 +2270,17 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 // ---------------------------------------------------------
 // Root App
 // ---------------------------------------------------------
-// ⚠️ Asumo que ya existen en tu proyecto:
-// - <DashboardView />
-// - <AuthModal />
-// - <CreatorPanel />
-// Si en tu archivo original estaban importados, dejalos igual.
-import DashboardView from "./DashboardView";
-import AuthModal from "./components/AuthModal";
-import CreatorPanel from "./components/CreatorPanel";
-
 export default function App() {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
-  // si está logueado, siempre dashboard; si no, landing o demo
   if (user) return <DashboardView />;
 
   return (
     <>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
       {demoMode ? (
         <div className="min-h-screen bg-neutral-950 text-white">
           <div className="mx-auto max-w-6xl px-4 py-8">
