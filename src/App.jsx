@@ -2049,6 +2049,302 @@ function DashboardView() {
   );
 }
 
+// App.jsx
+// ============================================================
+// ✅ SOLO AGREGA (no quita) sección "Planes" en la Landing
+// ✅ Incluye botones de suscripción PayPal (Basic/Pro) para probar
+// ✅ Usa los IDs desde Vercel:
+//    - PAYPAL_PLAN_BASIC_ID
+//    - PAYPAL_PLAN_PRO_ID
+// ✅ Asume que ya tenés PAYPAL_CLIENT_ID en Vercel (si no, añadilo)
+// ============================================================
+
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "./context/AuthContext";
+import { PLANS } from "./lib/pricing";
+
+// ---------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------
+function scrollToId(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------------------------------------------------------
+// PayPal: cargar SDK una sola vez + botón de suscripción
+// ---------------------------------------------------------
+function loadPayPalSdk(clientId) {
+  return new Promise((resolve, reject) => {
+    if (window.paypal) return resolve(true);
+    if (!clientId) return reject(new Error("Falta PAYPAL_CLIENT_ID"));
+
+    const existing = document.querySelector('script[data-pp-sdk="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(true));
+      existing.addEventListener("error", reject);
+      return;
+    }
+
+    const s = document.createElement("script");
+    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(
+      clientId
+    )}&vault=true&intent=subscription`;
+    s.async = true;
+    s.defer = true;
+    s.setAttribute("data-pp-sdk", "1");
+    s.onload = () => resolve(true);
+    s.onerror = reject;
+    document.body.appendChild(s);
+  });
+}
+
+function PayPalSubscribeButton({
+  planId,
+  label = "Suscribirse",
+  className = "",
+  onApproved,
+}) {
+  const [ready, setReady] = useState(false);
+  const [err, setErr] = useState("");
+
+  const clientId =
+    import.meta?.env?.VITE_PAYPAL_CLIENT_ID ||
+    import.meta?.env?.PAYPAL_CLIENT_ID ||
+    (typeof process !== "undefined" ? process.env?.PAYPAL_CLIENT_ID : "");
+
+  useEffect(() => {
+    let mounted = true;
+    setErr("");
+
+    loadPayPalSdk(clientId)
+      .then(() => mounted && setReady(true))
+      .catch((e) => mounted && setErr(e?.message || "Error cargando PayPal"));
+
+    return () => {
+      mounted = false;
+    };
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!window.paypal) return;
+    if (!planId) {
+      setErr("Falta el Plan ID (PAYPAL_PLAN_*)");
+      return;
+    }
+
+    // Render dentro del contenedor
+    const containerId = `pp-sub-${planId}`;
+    const el = document.getElementById(containerId);
+    if (!el) return;
+
+    // Limpia render previo (evita duplicados si React re-renderiza)
+    el.innerHTML = "";
+
+    try {
+      window.paypal
+        .Buttons({
+          style: { layout: "vertical", shape: "rect" },
+          createSubscription: function (data, actions) {
+            return actions.subscription.create({
+              plan_id: planId,
+            });
+          },
+          onApprove: function (data) {
+            // data.subscriptionID
+            if (onApproved) onApproved(data);
+            alert(`✅ Suscripción creada: ${data.subscriptionID}`);
+          },
+          onError: function (e) {
+            console.error("PayPal error:", e);
+            setErr("PayPal dio error. Revisa consola / credenciales / planId.");
+          },
+        })
+        .render(`#${containerId}`);
+    } catch (e) {
+      console.error(e);
+      setErr("No se pudo renderizar PayPal Buttons.");
+    }
+  }, [ready, planId, onApproved]);
+
+  return (
+    <div className={className}>
+      {!ready && !err && (
+        <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
+          Cargando checkout…
+        </div>
+      )}
+
+      {err ? (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-[11px] text-rose-200">
+          {err}
+        </div>
+      ) : (
+        <div>
+          {/* Contenedor donde PayPal renderiza */}
+          <div id={`pp-sub-${planId}`} />
+          {/* label opcional (PayPal ya muestra botón) */}
+          <div className="mt-2 text-[10px] text-neutral-500">{label}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// Landing: sección de planes (NUEVA)
+// ---------------------------------------------------------
+function PricingSection({ onOpenAuth }) {
+  // ✅ IDs desde Vercel (Server) o Vite (Client). Tu caso: Vercel env vars.
+  const BASIC_ID =
+    import.meta?.env?.VITE_PAYPAL_PLAN_BASIC_ID ||
+    import.meta?.env?.PAYPAL_PLAN_BASIC_ID ||
+    (typeof process !== "undefined" ? process.env?.PAYPAL_PLAN_BASIC_ID : "");
+
+  const PRO_ID =
+    import.meta?.env?.VITE_PAYPAL_PLAN_PRO_ID ||
+    import.meta?.env?.PAYPAL_PLAN_PRO_ID ||
+    (typeof process !== "undefined" ? process.env?.PAYPAL_PLAN_PRO_ID : "");
+
+  const features = useMemo(
+    () => ({
+      basic: [
+        "Acceso al motor en la web",
+        `Incluye ${PLANS?.basic?.included_jades ?? 100} jades / mes`,
+        "Biblioteca personal (historial y descargas)",
+        "Actualizaciones del motor (beta)",
+        "Soporte básico por contacto",
+      ],
+      pro: [
+        "Todo lo de Basic",
+        `Incluye ${PLANS?.pro?.included_jades ?? 300} jades / mes`,
+        "Más capacidad de generación (prioridad)",
+        "Acceso anticipado a nuevas funciones",
+        "Soporte prioritario (beta)",
+      ],
+    }),
+    []
+  );
+
+  return (
+    <section id="planes" className="mt-16">
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Planes</h3>
+            <p className="mt-1 text-xs text-neutral-400">
+              Suscripción mensual. Cancela cuando quieras. (Los jades se cargan mensualmente.)
+            </p>
+          </div>
+
+          <button
+            onClick={onOpenAuth}
+            className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
+          >
+            Ya tengo cuenta → Iniciar sesión
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          {/* BASIC */}
+          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/40 p-6">
+            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-fuchsia-500/10 blur-2xl" />
+
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-white">Plan Basic</p>
+                <p className="mt-1 text-[11px] text-neutral-400">
+                  Para creadores que quieren entrar al motor y producir de forma constante.
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-2xl font-semibold text-white">
+                  ${PLANS?.basic?.price_usd ?? 19}
+                  <span className="text-xs text-neutral-400">/mes</span>
+                </p>
+                <p className="text-[10px] text-neutral-500">
+                  {PLANS?.basic?.included_jades ?? 100} jades incluidos
+                </p>
+              </div>
+            </div>
+
+            <ul className="mt-4 space-y-2 text-[12px] text-neutral-200">
+              {features.basic.map((t) => (
+                <li key={t} className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                  <span className="text-neutral-300">{t}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-5">
+              <PayPalSubscribeButton
+                planId={BASIC_ID}
+                label="Checkout de suscripción (Basic)"
+                className="rounded-2xl border border-white/10 bg-black/20 p-3"
+              />
+            </div>
+
+            <p className="mt-3 text-[10px] text-neutral-500">
+              Tip: Si el botón no carga, revisa que exista PAYPAL_CLIENT_ID y PAYPAL_PLAN_BASIC_ID en Vercel.
+            </p>
+          </div>
+
+          {/* PRO */}
+          <div className="relative overflow-hidden rounded-3xl border border-fuchsia-400/25 bg-black/40 p-6">
+            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-fuchsia-500/18 via-transparent to-violet-500/18 blur-2xl" />
+
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-semibold text-fuchsia-200">
+                  Recomendado
+                </div>
+                <p className="mt-2 text-sm font-semibold text-white">Plan Pro</p>
+                <p className="mt-1 text-[11px] text-neutral-400">
+                  Para usuarios que quieren más jades, más potencia y prioridad en generación.
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-2xl font-semibold text-white">
+                  ${PLANS?.pro?.price_usd ?? 39}
+                  <span className="text-xs text-neutral-400">/mes</span>
+                </p>
+                <p className="text-[10px] text-neutral-500">
+                  {PLANS?.pro?.included_jades ?? 300} jades incluidos
+                </p>
+              </div>
+            </div>
+
+            <ul className="mt-4 space-y-2 text-[12px] text-neutral-200">
+              {features.pro.map((t) => (
+                <li key={t} className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
+                  <span className="text-neutral-300">{t}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-5">
+              <PayPalSubscribeButton
+                planId={PRO_ID}
+                label="Checkout de suscripción (Pro)"
+                className="rounded-2xl border border-white/10 bg-black/20 p-3"
+              />
+            </div>
+
+            <p className="mt-3 text-[10px] text-neutral-500">
+              Tip: Si el botón no carga, revisa PAYPAL_PLAN_PRO_ID en Vercel.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------
 // Landing (no sesión) con neon + demo
 // ---------------------------------------------------------
@@ -2056,6 +2352,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
+
+  // ⚠️ Asumo que ya existen en tu script global (como antes):
+  // const DEMO_LIMIT = ...
+  // const DAILY_LIMIT = ...
+  // Si ya están fuera, dejalos como estaban. Aquí no los redefino.
+  const DEMO_LIMIT =
+    (typeof window !== "undefined" && window.DEMO_LIMIT) || 3; // fallback
+  const DAILY_LIMIT =
+    (typeof window !== "undefined" && window.DAILY_LIMIT) || 5; // fallback
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
@@ -2089,6 +2394,12 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => scrollToId("planes")}
+              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Planes
+            </button>
             <button
               onClick={() => scrollToId("contacto")}
               className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -2171,6 +2482,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
+        {/* ✅ NUEVO: Planes + Botones de compra */}
+        <PricingSection onOpenAuth={onOpenAuth} />
+
         {/* Contacto */}
         <section id="contacto" className="mt-16 rounded-3xl border border-white/10 bg-black/40 p-6">
           <h3 className="text-lg font-semibold text-white">Contacto</h3>
@@ -2214,6 +2528,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
 // ---------------------------------------------------------
 // Root App
 // ---------------------------------------------------------
+// ⚠️ Asumo que ya existen en tu proyecto:
+// - <DashboardView />
+// - <AuthModal />
+// - <CreatorPanel />
+// Si en tu archivo original estaban importados, dejalos igual.
+import DashboardView from "./DashboardView";
+import AuthModal from "./components/AuthModal";
+import CreatorPanel from "./components/CreatorPanel";
+
 export default function App() {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
@@ -2241,17 +2564,11 @@ export default function App() {
               </button>
             </div>
 
-            <CreatorPanel
-              isDemo={true}
-              onAuthRequired={() => setAuthOpen(true)}
-            />
+            <CreatorPanel isDemo={true} onAuthRequired={() => setAuthOpen(true)} />
           </div>
         </div>
       ) : (
-        <LandingView
-          onOpenAuth={() => setAuthOpen(true)}
-          onStartDemo={() => setDemoMode(true)}
-        />
+        <LandingView onOpenAuth={() => setAuthOpen(true)} onStartDemo={() => setDemoMode(true)} />
       )}
     </>
   );
