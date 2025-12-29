@@ -10,7 +10,7 @@ import {
   deleteGenerationFromSupabase,
 } from "./lib/generations";
 
-import { PLANS } from "./lib/pricing";
+import { PLANS, COSTS } from "./lib/pricing";
 
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
@@ -263,9 +263,7 @@ function AuthModal({ open, onClose }) {
         await signInWithEmail(email, password);
       } else {
         await signUpWithEmail(email, password);
-        alert(
-          "Cuenta creada. Si Supabase lo requiere, revisa tu correo para confirmar la cuenta."
-        );
+        alert("Cuenta creada. Si Supabase lo requiere, revisa tu correo para confirmar la cuenta.");
       }
       onClose();
     } catch (err) {
@@ -294,10 +292,7 @@ function AuthModal({ open, onClose }) {
           <h3 className="text-lg font-semibold text-white">
             {mode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
           </h3>
-          <button
-            onClick={onClose}
-            className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10"
-          >
+          <button onClick={onClose} className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10">
             ✕
           </button>
         </div>
@@ -328,9 +323,7 @@ function AuthModal({ open, onClose }) {
             />
           </div>
 
-          {error && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
 
           <button
             type="submit"
@@ -353,22 +346,14 @@ function AuthModal({ open, onClose }) {
           {mode === "login" ? (
             <>
               ¿No tienes cuenta?{" "}
-              <button
-                type="button"
-                onClick={() => setMode("register")}
-                className="text-cyan-300 underline"
-              >
+              <button type="button" onClick={() => setMode("register")} className="text-cyan-300 underline">
                 Regístrate aquí
               </button>
             </>
           ) : (
             <>
               ¿Ya tienes cuenta?{" "}
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className="text-cyan-300 underline"
-              >
+              <button type="button" onClick={() => setMode("login")} className="text-cyan-300 underline">
                 Inicia sesión
               </button>
             </>
@@ -574,9 +559,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
         <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
-        <p className="mt-1 text-xs text-yellow-200/80">
-          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
-        </p>
+        <p className="mt-1 text-xs text-yellow-200/80">Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.</p>
       </div>
     );
   }
@@ -588,8 +571,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         {isDemo && (
           <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
-            Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y biblioteca requieren
-            cuenta.
+            Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y biblioteca requieren cuenta.
           </div>
         )}
 
@@ -749,9 +731,7 @@ function LibraryView() {
 
   const handleDeleteSelected = async () => {
     if (!selected || !user) return;
-    const ok = window.confirm(
-      "¿Seguro que quieres eliminar este resultado? Esto también lo borrará de Supabase."
-    );
+    const ok = window.confirm("¿Seguro que quieres eliminar este resultado? Esto también lo borrará de Supabase.");
     if (!ok) return;
 
     try {
@@ -799,11 +779,7 @@ function LibraryView() {
                   selected?.id === item.id ? "border-cyan-400" : "border-white/10"
                 } bg-black/60`}
               >
-                <img
-                  src={item.src}
-                  alt="Generación"
-                  className="h-24 w-full object-cover group-hover:opacity-80"
-                />
+                <img src={item.src} alt="Generación" className="h-24 w-full object-cover group-hover:opacity-80" />
                 <div className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-[10px] text-neutral-300">
                   {new Date(item.createdAt).toLocaleString()}
                 </div>
@@ -944,8 +920,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         await new Promise((r) => setTimeout(r, 3000));
         const stData = await pollVideoStatus(jid);
 
-        const st =
-          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
+        const st = stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
@@ -956,13 +931,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
         const out = stData.output || stData.result || stData.data || null;
         const maybeUrl =
-          out?.video_url ||
-          out?.url ||
-          out?.mp4_url ||
-          out?.video ||
-          stData.video_url ||
-          stData.url ||
-          null;
+          out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
@@ -1244,8 +1213,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         await new Promise((r) => setTimeout(r, 3000));
         const stData = await pollVideoStatus(jid);
 
-        const st =
-          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
+        const st = stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
@@ -1256,13 +1224,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 
         const out = stData.output || stData.result || stData.data || null;
         const maybeUrl =
-          out?.video_url ||
-          out?.url ||
-          out?.mp4_url ||
-          out?.video ||
-          stData.video_url ||
-          stData.url ||
-          null;
+          out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
@@ -1333,13 +1295,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
             >
               {dataUrl ? "Cambiar imagen" : "Haz clic para subir una imagen"}
             </button>
-            <input
-              id={fileInputId}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
+            <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
                 <img src={dataUrl} alt="Imagen base" className="w-full object-cover" />
@@ -1580,13 +1536,7 @@ function XmasPhotoPanel({ userStatus }) {
             >
               {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
             </button>
-            <input
-              id={fileInputId}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
+            <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
                 <img src={dataUrl} alt="Foto base" className="w-full object-cover" />
@@ -1605,9 +1555,7 @@ function XmasPhotoPanel({ userStatus }) {
             />
           </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado: {statusText || "Listo."}
-          </div>
+          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">Estado: {statusText || "Listo."}</div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
 
@@ -1617,9 +1565,7 @@ function XmasPhotoPanel({ userStatus }) {
             disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64 || !user}
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando..."
-              : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
+            {status === "IN_QUEUE" || status === "IN_PROGRESS" ? "Generando..." : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
           </button>
         </div>
       </div>
@@ -1762,9 +1708,7 @@ function DashboardView() {
               <span className="mx-1 h-3 w-px bg-white/10" />
               <span className="text-[11px] text-neutral-300">
                 Jades:{" "}
-                <span className="font-semibold text-white">
-                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
-                </span>
+                <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
               </span>
             </div>
 
@@ -1789,9 +1733,7 @@ function DashboardView() {
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
             <div className="flex items-center justify-between gap-2">
               <span className="text-neutral-400">{userPlanLabel}</span>
-              <span className="font-semibold text-white">
-                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
-              </span>
+              <span className="font-semibold text-white">Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
             </div>
           </div>
 
@@ -1867,23 +1809,17 @@ function DashboardView() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
                     Estado:{" "}
-                    <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : userStatus.subscription_status}
-                    </span>
+                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.subscription_status}</span>
                   </span>
 
                   <span className="text-neutral-400">
                     Plan:{" "}
-                    <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : userStatus.plan || "none"}
-                    </span>
+                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.plan || "none"}</span>
                   </span>
 
                   <span className="text-neutral-400">
                     Jades:{" "}
-                    <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : userStatus.jades ?? 0}
-                    </span>
+                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
                   </span>
                 </div>
               </div>
@@ -1908,7 +1844,9 @@ function DashboardView() {
                         customId={user.id}
                         containerId="pp-sub-basic"
                         onPaid={() => {
-                          alert("Suscripción Basic creada. En breve se acreditan tus jades cuando el webhook confirme.");
+                          alert(
+                            "Suscripción Basic creada. En breve se acreditan tus jades cuando el webhook confirme."
+                          );
                         }}
                       />
                     )}
@@ -1943,17 +1881,14 @@ function DashboardView() {
               </div>
 
               <p className="mt-4 text-[10px] text-neutral-500">
-                Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal confirma el evento.
+                Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal
+                confirma el evento.
               </p>
             </section>
 
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
-            {appViewMode === "video_prompt" && (
-              <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
-            )}
-            {appViewMode === "img2video" && (
-              <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
-            )}
+            {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
+            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "xmas" && <XmasPhotoPanel userStatus={userStatus} />}
           </div>
@@ -1986,6 +1921,21 @@ function PricingSection({ onOpenAuth }) {
     }),
     []
   );
+
+  const estimate = (includedJades = 0) => {
+    const cImg = Number(COSTS?.img_prompt ?? 1);
+    const cVidPrompt = Number(COSTS?.vid_prompt ?? 10);
+    const cImg2Vid = Number(COSTS?.vid_img2vid ?? 12);
+
+    const images = cImg > 0 ? Math.floor(includedJades / cImg) : 0;
+    const videosPrompt = cVidPrompt > 0 ? Math.floor(includedJades / cVidPrompt) : 0;
+    const videosImg2Vid = cImg2Vid > 0 ? Math.floor(includedJades / cImg2Vid) : 0;
+
+    return { images, videosPrompt, videosImg2Vid };
+  };
+
+  const estBasic = estimate(PLANS?.basic?.included_jades ?? 100);
+  const estPro = estimate(PLANS?.pro?.included_jades ?? 300);
 
   return (
     <section id="planes" className="mt-16">
@@ -2023,9 +1973,7 @@ function PricingSection({ onOpenAuth }) {
                   ${PLANS?.basic?.price_usd ?? 19}
                   <span className="text-xs text-neutral-400">/mes</span>
                 </p>
-                <p className="text-[10px] text-neutral-500">
-                  {PLANS?.basic?.included_jades ?? 100} jades incluidos
-                </p>
+                <p className="text-[10px] text-neutral-500">{PLANS?.basic?.included_jades ?? 100} jades incluidos</p>
               </div>
             </div>
 
@@ -2038,18 +1986,29 @@ function PricingSection({ onOpenAuth }) {
               ))}
             </ul>
 
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
+              <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
+              <div className="mt-1">
+                • <span className="text-white font-semibold">{estBasic.images}</span> imágenes
+              </div>
+              <div>
+                • <span className="text-white font-semibold">{estBasic.videosPrompt}</span> videos (desde prompt)
+              </div>
+              <div>
+                • <span className="text-white font-semibold">{estBasic.videosImg2Vid}</span> videos (imagen → video)
+              </div>
+            </div>
+
             <div className="mt-5">
-              {!PAYPAL_PLAN_ID_BASIC ? (
-                <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                  Falta VITE_PAYPAL_PLAN_ID_BASIC en Vercel
-                </div>
-              ) : (
-                <PayPalButton
-                  mode="subscription"
-                  planId={PAYPAL_PLAN_ID_BASIC}
-                  containerId="pp-landing-basic"
-                />
-              )}
+              <button
+                onClick={onOpenAuth}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+              >
+                Inicia sesión para suscribirte
+              </button>
+              <p className="mt-2 text-[10px] text-neutral-500 text-center">
+                (El pago solo se realiza dentro de tu cuenta para poder asignar plan y jades al usuario.)
+              </p>
             </div>
           </div>
 
@@ -2072,9 +2031,7 @@ function PricingSection({ onOpenAuth }) {
                   ${PLANS?.pro?.price_usd ?? 39}
                   <span className="text-xs text-neutral-400">/mes</span>
                 </p>
-                <p className="text-[10px] text-neutral-500">
-                  {PLANS?.pro?.included_jades ?? 300} jades incluidos
-                </p>
+                <p className="text-[10px] text-neutral-500">{PLANS?.pro?.included_jades ?? 300} jades incluidos</p>
               </div>
             </div>
 
@@ -2087,14 +2044,29 @@ function PricingSection({ onOpenAuth }) {
               ))}
             </ul>
 
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
+              <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
+              <div className="mt-1">
+                • <span className="text-white font-semibold">{estPro.images}</span> imágenes
+              </div>
+              <div>
+                • <span className="text-white font-semibold">{estPro.videosPrompt}</span> videos (desde prompt)
+              </div>
+              <div>
+                • <span className="text-white font-semibold">{estPro.videosImg2Vid}</span> videos (imagen → video)
+              </div>
+            </div>
+
             <div className="mt-5">
-              {!PAYPAL_PLAN_ID_PRO ? (
-                <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                  Falta VITE_PAYPAL_PLAN_ID_PRO en Vercel
-                </div>
-              ) : (
-                <PayPalButton mode="subscription" planId={PAYPAL_PLAN_ID_PRO} containerId="pp-landing-pro" />
-              )}
+              <button
+                onClick={onOpenAuth}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+              >
+                Inicia sesión para suscribirte
+              </button>
+              <p className="mt-2 text-[10px] text-neutral-500 text-center">
+                (El pago solo se realiza dentro de tu cuenta para poder asignar plan y jades al usuario.)
+              </p>
             </div>
           </div>
         </div>
@@ -2188,7 +2160,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
-              No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo de producción visual.
+              No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo
+              de producción visual.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -2254,15 +2227,18 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               placeholder="Mensaje"
               className="md:col-span-2 h-28 resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <button
-              type="submit"
-              className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-            >
+            <button type="submit" className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white">
               Enviar
             </button>
           </form>
         </section>
       </main>
+
+      <footer className="border-t border-white/10 bg-black/30">
+        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
+          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
+        </div>
+      </footer>
     </div>
   );
 }
