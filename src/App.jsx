@@ -2138,6 +2138,58 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+
+        {/* ========================================================= */}
+        {/* NUEVA SECCIÓN — GENERACIÓN DE VIDEO CON GPU (AÑADIDA) */}
+        {/* ========================================================= */}
+        <section className="mb-16 rounded-3xl border border-white/10 bg-black/40 p-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              Generación de video acelerada por GPU
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs text-neutral-400">
+              Los siguientes videos fueron generados utilizando los pipelines de video de IsabelaOS Studio,
+              ejecutando inferencia sobre GPU NVIDIA y modelos de video basados en arquitecturas WAN.
+              El motor prioriza movimiento coherente, consistencia visual y control cinematográfico.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <video
+                src="/gallery/video1.mp4"
+                controls
+                muted
+                loop
+                className="w-full h-auto object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Video generado por IA · Inferencia en GPU NVIDIA · Modelo de video basado en WAN
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
+              <video
+                src="/gallery/video2.mp4"
+                controls
+                muted
+                loop
+                className="w-full h-auto object-cover"
+              />
+              <div className="px-3 py-2 text-[11px] text-neutral-400">
+                Video generado por IA · Inferencia en GPU NVIDIA · Modelo de video basado en WAN
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-3 text-[10px] text-neutral-500">
+            *Resultados generados por el motor en fase beta como pruebas internas del sistema.
+          </p>
+        </section>
+        {/* ========================================================= */}
+        {/* FIN SECCIÓN AÑADIDA */}
+        {/* ========================================================= */}
+
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
@@ -2180,7 +2232,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text-white mb-3">Calidad de estudio · Render del motor actual</h2>
+            <h2 className="text-sm font-semibold text-white mb-3">
+              Calidad de estudio · Render del motor actual
+            </h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
@@ -2227,7 +2281,10 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               placeholder="Mensaje"
               className="md:col-span-2 h-28 resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <button type="submit" className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white">
+            <button
+              type="submit"
+              className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+            >
               Enviar
             </button>
           </form>
