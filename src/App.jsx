@@ -1987,7 +1987,7 @@ function PricingSection({ onOpenAuth }) {
             </ul>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
-              <div <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
+              <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
               <div className="mt-1">
                 • <span className="text-white font-semibold">{estBasic.images}</span> imágenes
               </div>
