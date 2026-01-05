@@ -1987,7 +1987,7 @@ function PricingSection({ onOpenAuth }) {
             </ul>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
-              <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
+              <div <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
               <div className="mt-1">
                 • <span className="text-white font-semibold">{estBasic.images}</span> imágenes
               </div>
@@ -2305,6 +2305,31 @@ export default function App() {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+
+  // ✅ (AGREGADO) Router por hash para retorno/cancelación de PayPal
+  const hash = typeof window !== "undefined" ? window.location.hash : "";
+
+  if (hash.startsWith("#/billing/return")) {
+    return <BillingReturn />;
+  }
+
+  if (hash.startsWith("#/billing/cancel")) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white grid place-items-center">
+        <div className="max-w-md w-full p-6 rounded-xl bg-white/5 border border-white/10">
+          <h2 className="text-xl font-semibold mb-2">Pago cancelado</h2>
+          <p className="text-white/80">No se completó la suscripción. Puedes intentarlo de nuevo.</p>
+          <button
+            className="mt-4 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10"
+            onClick={() => (window.location.href = "/#")}
+          >
+            Volver
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ✅ FIN AGREGADO
 
   if (user) return <DashboardView />;
 
