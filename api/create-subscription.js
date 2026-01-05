@@ -8,6 +8,9 @@ const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
 const PAYPAL_PLAN_ID_BASIC = process.env.PAYPAL_PLAN_ID_BASIC;
 const PAYPAL_PLAN_ID_PRO = process.env.PAYPAL_PLAN_ID_PRO;
 
+// IMPORTANTE: URL pública de tu web (ej: https://isabelaos-web.vercel.app o https://isabelaos.com)
+const APP_BASE_URL = process.env.APP_BASE_URL;
+
 const PAYPAL_API_BASE =
   PAYPAL_MODE === "live"
     ? "https://api-m.paypal.com"
@@ -43,7 +46,6 @@ export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
 
-    // auth
     const auth = await requireUser(req);
     if (!auth.ok) {
       return res.status(auth.code || 401).json({ ok: false, error: auth.error });
@@ -53,6 +55,7 @@ export default async function handler(req, res) {
     must("PAYPAL_CLIENT_SECRET", PAYPAL_CLIENT_SECRET);
     must("PAYPAL_PLAN_ID_BASIC", PAYPAL_PLAN_ID_BASIC);
     must("PAYPAL_PLAN_ID_PRO", PAYPAL_PLAN_ID_PRO);
+    must("APP_BASE_URL", APP_BASE_URL);
 
     const { tier } = req.body || {};
     const t = String(tier || "").toLowerCase();
@@ -64,7 +67,11 @@ export default async function handler(req, res) {
 
     const accessToken = await paypalAccessToken();
 
-    // IMPORTANTE: custom_id = user_id (UUID supabase)
+    // URLs de retorno/cancelación (SIN popup)
+    const return_url = `${APP_BASE_URL}/billing/return?tier=${encodeURIComponent(t)}`;
+    const cancel_url = `${APP_BASE_URL}/billing/cancel?tier=${encodeURIComponent(t)}`;
+
+    // ✅ custom_id = user_id (UUID Supabase)
     const payload = {
       plan_id,
       custom_id: auth.user.id,
@@ -72,6 +79,13 @@ export default async function handler(req, res) {
         brand_name: "IsabelaOS Studio",
         user_action: "SUBSCRIBE_NOW",
         shipping_preference: "NO_SHIPPING",
+
+        // 🔥 clave para flujo estable en móvil/tablet
+        return_url,
+        cancel_url,
+
+        // recomendado
+        locale: "es-GT",
       },
     };
 
@@ -100,7 +114,6 @@ export default async function handler(req, res) {
       plan_id,
       subscription_id: j?.id || null,
       approve_url: approveUrl,
-      raw: j,
     });
   } catch (e) {
     return res.status(500).json({
