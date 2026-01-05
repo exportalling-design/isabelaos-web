@@ -12,6 +12,9 @@ import {
 
 import { PLANS, COSTS } from "./lib/pricing";
 
+// ✅ NUEVO: helper de redirect (usa /api/create-subscription)
+import { startPayPalSubscriptionRedirect } from "./lib/PaypalCheckout";
+
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
@@ -76,6 +79,57 @@ async function getAuthHeadersGlobal() {
   } catch {
     return {};
   }
+}
+
+// ---------------------------------------------------------
+// ✅ NUEVO (ALTERNATIVO): Botón de Suscripción por REDIRECT
+// Evita el popup/embebido del SDK en navegadores que lo cierran.
+// Usa tu endpoint /api/create-subscription para obtener approve_url.
+// ---------------------------------------------------------
+function PayPalSubscriptionRedirectButton({
+  tier = "basic", // "basic" | "pro"
+  label = "Continuar con PayPal",
+  className = "",
+  onStart,
+  onError,
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    try {
+      setLoading(true);
+      if (typeof onStart === "function") onStart();
+
+      const headers = await getAuthHeadersGlobal();
+
+      // Llama helper (tu archivo en src/lib/PaypalCheckout.js)
+      // y redirige a PayPal con approve_url en la misma pestaña.
+      await startPayPalSubscriptionRedirect({
+        tier,
+        headers,
+      });
+    } catch (e) {
+      console.error("PayPal redirect subscribe error:", e);
+      if (typeof onError === "function") onError(e);
+      alert("No se pudo abrir PayPal. Intenta de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={loading}
+      className={
+        className ||
+        "w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+      }
+    >
+      {loading ? "Abriendo PayPal..." : label}
+    </button>
+  );
 }
 
 // ---------------------------------------------------------
