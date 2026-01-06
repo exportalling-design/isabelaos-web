@@ -1,3 +1,4 @@
+
 // /api/jades-spend.js
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
