@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 
@@ -12,9 +11,6 @@ import {
 } from "./lib/generations";
 
 import { PLANS, COSTS } from "./lib/pricing";
-
-// ✅ NUEVO: helper de redirect (usa /api/create-subscription)
-import { startPayPalSubscriptionRedirect } from "./lib/PaypalCheckout";
 
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
@@ -80,57 +76,6 @@ async function getAuthHeadersGlobal() {
   } catch {
     return {};
   }
-}
-
-// ---------------------------------------------------------
-// ✅ NUEVO (ALTERNATIVO): Botón de Suscripción por REDIRECT
-// Evita el popup/embebido del SDK en navegadores que lo cierran.
-// Usa tu endpoint /api/create-subscription para obtener approve_url.
-// ---------------------------------------------------------
-function PayPalSubscriptionRedirectButton({
-  tier = "basic", // "basic" | "pro"
-  label = "Continuar con PayPal",
-  className = "",
-  onStart,
-  onError,
-}) {
-  const [loading, setLoading] = useState(false);
-
-  const handleClick = async () => {
-    try {
-      setLoading(true);
-      if (typeof onStart === "function") onStart();
-
-      const headers = await getAuthHeadersGlobal();
-
-      // Llama helper (tu archivo en src/lib/PaypalCheckout.js)
-      // y redirige a PayPal con approve_url en la misma pestaña.
-      await startPayPalSubscriptionRedirect({
-        tier,
-        headers,
-      });
-    } catch (e) {
-      console.error("PayPal redirect subscribe error:", e);
-      if (typeof onError === "function") onError(e);
-      alert("No se pudo abrir PayPal. Intenta de nuevo.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={loading}
-      className={
-        className ||
-        "w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
-      }
-    >
-      {loading ? "Abriendo PayPal..." : label}
-    </button>
-  );
 }
 
 // ---------------------------------------------------------
@@ -2193,7 +2138,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* HERO */}
         <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
           <div>
             <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
@@ -2236,9 +2180,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           <div className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text-white mb-3">
-              Calidad de estudio · Render del motor actual
-            </h2>
+            <h2 className="text-sm font-semibold text-white mb-3">Calidad de estudio · Render del motor actual</h2>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
@@ -2258,55 +2200,6 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             </p>
           </div>
         </section>
-
-        {/* ================= VIDEO GPU (REUBICADO AQUÍ) ================= */}
-        <section className="mt-16 mb-16 rounded-3xl border border-white/10 bg-black/40 p-6">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-white">
-              Generación de video acelerada por GPU
-            </h2>
-            <p className="mt-1 max-w-2xl text-xs text-neutral-400">
-              Los siguientes videos fueron generados utilizando los pipelines de video de IsabelaOS Studio,
-              ejecutando inferencia sobre GPU NVIDIA y modelos de video basados en arquitecturas WAN.
-              El motor prioriza movimiento coherente, consistencia visual y control cinematográfico.
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
-              <video
-                src="/gallery/video1.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="w-full h-auto object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Video generado por IA · Inferencia en GPU NVIDIA · Modelo de video basado en WAN
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/60">
-              <video
-                src="/gallery/video2.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="w-full h-auto object-cover"
-              />
-              <div className="px-3 py-2 text-[11px] text-neutral-400">
-                Video generado por IA · Inferencia en GPU NVIDIA · Modelo de video basado en WAN
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-3 text-[10px] text-neutral-500">
-            *Resultados generados por el motor en fase beta como pruebas internas del sistema.
-          </p>
-        </section>
-        {/* ============================================================= */}
 
         <PricingSection onOpenAuth={onOpenAuth} />
 
@@ -2334,10 +2227,7 @@ function LandingView({ onOpenAuth, onStartDemo }) {
               placeholder="Mensaje"
               className="md:col-span-2 h-28 resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-            <button
-              type="submit"
-              className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-            >
+            <button type="submit" className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white">
               Enviar
             </button>
           </form>
@@ -2360,31 +2250,6 @@ export default function App() {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
-
-  // ✅ (AGREGADO) Router por hash para retorno/cancelación de PayPal
-  const hash = typeof window !== "undefined" ? window.location.hash : "";
-
-  if (hash.startsWith("#/billing/return")) {
-    return <BillingReturn />;
-  }
-
-  if (hash.startsWith("#/billing/cancel")) {
-    return (
-      <div className="min-h-screen bg-neutral-950 text-white grid place-items-center">
-        <div className="max-w-md w-full p-6 rounded-xl bg-white/5 border border-white/10">
-          <h2 className="text-xl font-semibold mb-2">Pago cancelado</h2>
-          <p className="text-white/80">No se completó la suscripción. Puedes intentarlo de nuevo.</p>
-          <button
-            className="mt-4 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10"
-            onClick={() => (window.location.href = "/#")}
-          >
-            Volver
-          </button>
-        </div>
-      </div>
-    );
-  }
-  // ✅ FIN AGREGADO
 
   if (user) return <DashboardView />;
 
