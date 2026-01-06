@@ -1,51 +1,68 @@
 // /api/_auth.js
+// ============================================================
+// Auth helper (Supabase Admin) para APIs.
+// Soporta:
+// - Edge runtime (req.headers.get)
+// - Node runtime (req.headers.authorization)
+// ============================================================
+
 import { createClient } from "@supabase/supabase-js";
 
-/**
- * requireUser(req)
- * - Verifica JWT del usuario con Supabase (anon key)
- * - Devuelve { ok:true, user } o { ok:false, error, code }
- *
- * Requiere:
- * - SUPABASE_URL (o VITE_SUPABASE_URL)
- * - SUPABASE_ANON_KEY (o VITE_SUPABASE_ANON_KEY)
- */
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function sbAdmin() {
+if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+
+return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+auth: { persistSession: false },
+});
+}
+
+// Lee header compatible con Edge y Node
+function getHeader(req, name) {
+// Edge: Headers
+if (req?.headers && typeof req.headers.get === "function") {
+return req.headers.get(name) || req.headers.get(name.toLowerCase()) || "";
+}
+// Node: plain object
+const h = req?.headers || {};
+return h[name] || h[name.toLowerCase()] || "";
+}
+
 export async function requireUser(req) {
-  try {
-    const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-    const ANON_KEY =
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.VITE_SUPABASE_ANON_KEY ||
-      process.env.VITE_SUPABASE_ANON;
+try {
+const authHeader = getHeader(req, "authorization");
 
-    if (!SUPABASE_URL || !ANON_KEY) {
-      return { ok: false, code: 500, error: "MISSING_SUPABASE_ANON_ENV" };
-    }
+const token =  
+  typeof authHeader === "string" && authHeader.startsWith("Bearer ")  
+    ? authHeader.slice(7).trim()  
+    : null;  
 
-    // 1) Token desde header Authorization
-    const authHeader = req.headers?.authorization || req.headers?.Authorization || "";
-    let token = "";
-    if (authHeader.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+if (!token) return { ok: false, code: 401, error: "MISSING_AUTH_TOKEN" };  
 
-    // 2) (Opcional) Token desde cookie si existiera
-    if (!token) {
-      const cookie = req.headers?.cookie || "";
-      // si alguna vez guardás sb-access-token como cookie:
-      const m = cookie.match(/sb-access-token=([^;]+)/);
-      if (m) token = decodeURIComponent(m[1]);
-    }
+const sb = sbAdmin();  
+const { data, error } = await sb.auth.getUser(token);  
 
-    if (!token) return { ok: false, code: 401, error: "MISSING_AUTH_TOKEN" };
+if (error || !data?.user) {  
+  return { ok: false, code: 401, error: "INVALID_AUTH_TOKEN" };  
+}  
 
-    const supabase = createClient(SUPABASE_URL, ANON_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+return { ok: true, user: data.user, sb };
 
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return { ok: false, code: 401, error: "INVALID_TOKEN" };
-    }
+} catch (e) {
+console.error("[AUTH] requireUser crashed:", e);
+return { ok: false, code: 500, error: "AUTH_INTERNAL_ERROR" };
+}
+}
+Y supabase_admin // lib/supabaseAdmin.js
+import { createClient } from "@supabase/supabase-js";
 
-    return { ok: true, user: data.user };
-  } catch (e) {
-    return { ok: false, code: 500, error: e?.message
+export function sbAdmin() {
+const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!url) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
+if (!key) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+return createClient(url, key);
+}
