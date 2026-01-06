@@ -1,3 +1,4 @@
+
 // pages/api/charge-jades.js
 import { requireUser } from "../../api/_auth.js"; // ajusta si tu _auth está en otra ruta
 import { sbAdmin } from "../../lib/supabaseAdmin";
