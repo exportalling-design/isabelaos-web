@@ -75,7 +75,7 @@ async function getAuthHeadersGlobal() {
     if (error) return {};
     const token = data?.session?.access_token;
     if (!token) return {};
-    return { Authorization: Bearer ${token} };
+    return { Authorization: `Bearer ${token}` };
   } catch {
     return {};
   }
