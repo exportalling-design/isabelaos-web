@@ -551,7 +551,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
     if (!imageB64) return;
     const link = document.createElement("a");
-    link.href = data:image/png;base64,${imageB64};
+    link.href = `data:image/png;base64,${imageB64}`;
     link.download = "isabelaos-image.png";
     document.body.appendChild(link);
     link.click();
