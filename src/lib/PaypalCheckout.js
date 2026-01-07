@@ -48,3 +48,4 @@ export async function verifyPaypalOrderAndGrantJades({ orderID, pack }) {
   if (!r.ok || !j?.ok) throw new Error(j?.error || "PAYPAL_VERIFY_AND_GRANT_FAILED");
   return j;
 }
+
