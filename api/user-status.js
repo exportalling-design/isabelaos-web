@@ -21,26 +21,49 @@ export default async function handler(req, res) {
     const user_id = auth.user.id;
     const sb = auth.sb; // admin client (por tu helper)
 
-    // 1) Balance desde profiles (tu wallet real)
-    const { data: profRow, error: profErr } = await sb
-      .from("profiles")
-      .select("jade_balance, plan, updated_at, created_at, email")
-      .eq("id", user_id)
-      .maybeSingle();
+    // ---------------------------------------------------------
+    // 1) PROFILE (wallet real)
+    //    ⚠️ Parche: NO pedimos updated_at/created_at si a veces falla.
+    //    (Si existen, igual podemos intentar traerlos en un 2do paso opcional)
+    // ---------------------------------------------------------
+    let profRow = null;
 
-    if (profErr) {
-      console.error("[USER_STATUS] PROFILES_SELECT_ERROR", profErr);
-      return res.status(500).json({
-        ok: false,
-        error: "PROFILES_SELECT_ERROR",
-        details: profErr.message || String(profErr),
-      });
+    // Intento 1 (completo)
+    {
+      const { data, error } = await sb
+        .from("profiles")
+        .select("jade_balance, plan, updated_at, created_at, email")
+        .eq("id", user_id)
+        .maybeSingle();
+
+      if (!error) profRow = data;
+      else {
+        // Si falla por columnas, hacemos fallback mínimo
+        const { data: data2, error: error2 } = await sb
+          .from("profiles")
+          .select("jade_balance, plan, email")
+          .eq("id", user_id)
+          .maybeSingle();
+
+        if (error2) {
+          console.error("[USER_STATUS] PROFILES_SELECT_ERROR", error2);
+          return res.status(500).json({
+            ok: false,
+            error: "PROFILES_SELECT_ERROR",
+            details: error2.message || String(error2),
+          });
+        }
+
+        profRow = data2;
+      }
     }
 
     const jades = Number(profRow?.jade_balance || 0);
     const profile_plan = profRow?.plan || "free";
 
-    // 2) Última suscripción por user_id (requiere que webhook guarde user_id)
+    // ---------------------------------------------------------
+    // 2) Última suscripción por user_id
+    // ---------------------------------------------------------
     const { data: subRow, error: subErr } = await sb
       .from("paypal_subscriptions")
       .select("status, plan_id, updated_at, subscription_id, payer_id, custom_id, user_id")
@@ -89,10 +112,10 @@ export default async function handler(req, res) {
             subscription_id: subRow.subscription_id,
             plan_id: subRow.plan_id,
             status: subRow.status,
-            updated_at: subRow.updated_at,
-            payer_id: subRow.payer_id,
-            custom_id: subRow.custom_id,
-            user_id: subRow.user_id,
+            updated_at: subRow.updated_at || null,
+            payer_id: subRow.payer_id || null,
+            custom_id: subRow.custom_id || null,
+            user_id: subRow.user_id || null,
           }
         : null,
     });
