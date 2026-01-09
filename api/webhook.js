@@ -12,6 +12,12 @@ const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
 const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
 const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
 
+// Plan mapping + jades incluidos
+const PAYPAL_PLAN_ID_BASIC = process.env.PAYPAL_PLAN_ID_BASIC;
+const PAYPAL_PLAN_ID_PRO = process.env.PAYPAL_PLAN_ID_PRO;
+const BASIC_INCLUDED_JADES = process.env.BASIC_INCLUDED_JADES;
+const PRO_INCLUDED_JADES = process.env.PRO_INCLUDED_JADES;
+
 const PAYPAL_API_BASE =
   PAYPAL_MODE === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
@@ -115,40 +121,56 @@ function normalizeSubscriptionLike(resource) {
   return { subscription_id, status, plan_id, payer_id, custom_id, user_id };
 }
 
+// ✅ PARCHE #2: UPSERT SIN PISAR CON NULL (merge con lo existente)
 async function upsertPaypalSubscription({ supabase, resource }) {
   const n = normalizeSubscriptionLike(resource);
   if (!n.subscription_id) return { ok: false, reason: "no_subscription_id" };
 
-  const row = {
+  // leer existente
+  const { data: existing, error: readErr } = await supabase
+    .from("paypal_subscriptions")
+    .select("subscription_id, user_id, custom_id, plan_id, status, payer_id, credited_once")
+    .eq("subscription_id", n.subscription_id)
+    .maybeSingle();
+
+  if (readErr) return { ok: false, error: readErr };
+
+  const merged = {
     subscription_id: n.subscription_id,
-    status: n.status,
-    plan_id: n.plan_id,
-    payer_id: n.payer_id,
-    custom_id: n.custom_id,
-    user_id: n.user_id,
+
+    status: n.status ?? existing?.status ?? null,
+    plan_id: n.plan_id ?? existing?.plan_id ?? null,
+    payer_id: n.payer_id ?? existing?.payer_id ?? null,
+
+    // 🔥 clave: NO borrar mapping si PayPal no manda custom_id
+    custom_id: n.custom_id ?? existing?.custom_id ?? null,
+    user_id: n.user_id ?? existing?.user_id ?? null,
+
+    // si no existe, queda null y no pasa nada
+    credited_once: existing?.credited_once ?? false,
+
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const { error: upsertErr } = await supabase
     .from("paypal_subscriptions")
-    .upsert(row, { onConflict: "subscription_id" });
+    .upsert(merged, { onConflict: "subscription_id" });
 
-  if (error) return { ok: false, error };
-  return { ok: true, ...n };
+  if (upsertErr) return { ok: false, error: upsertErr };
+
+  return { ok: true, ...merged };
 }
 
 // plan_id -> plan
 function planFromPayPalPlanId(plan_id) {
-  const basic = process.env.PAYPAL_PLAN_ID_BASIC;
-  const pro = process.env.PAYPAL_PLAN_ID_PRO;
-  if (plan_id && basic && plan_id === basic) return "basic";
-  if (plan_id && pro && plan_id === pro) return "pro";
+  if (plan_id && PAYPAL_PLAN_ID_BASIC && plan_id === PAYPAL_PLAN_ID_BASIC) return "basic";
+  if (plan_id && PAYPAL_PLAN_ID_PRO && plan_id === PAYPAL_PLAN_ID_PRO) return "pro";
   return null;
 }
 
 function includedJadesForPlan(plan) {
-  if (plan === "basic") return Number(process.env.BASIC_INCLUDED_JADES || 0);
-  if (plan === "pro") return Number(process.env.PRO_INCLUDED_JADES || 0);
+  if (plan === "basic") return Number(BASIC_INCLUDED_JADES || 0);
+  if (plan === "pro") return Number(PRO_INCLUDED_JADES || 0);
   return 0;
 }
 
@@ -239,40 +261,53 @@ export default async function handler(req, res) {
         payer_id: subRes?.payer_id,
         custom_id: subRes?.custom_id,
         user_id: subRes?.user_id,
+        credited_once: subRes?.credited_once,
       });
 
-      // Acreditar 1 vez cuando ACTIVE y con user_id
+      // ✅ acreditar SOLO 1 vez cuando ACTIVE y con user_id
       if (subRes.ok && subRes.user_id && isActiveStatus(subRes.status)) {
-        const plan = planFromPayPalPlanId(subRes.plan_id);
-        const amount = includedJadesForPlan(plan);
-
-        if (plan && amount > 0) {
-          const ref = `ppsub:${subRes.subscription_id}:first`;
-
-          const { error: creditErr } = await supabase.rpc("add_jades", {
-            p_user_id: subRes.user_id,
-            p_amount: amount,
-            p_reason: `subscription:${plan}`,
-            p_ref: ref,
-          });
-
-          if (creditErr) {
-            console.error("[PP_WEBHOOK] credit_failed", creditErr);
-          } else {
-            console.log("[PP_WEBHOOK] credit_ok", { user_id: subRes.user_id, plan, amount });
-          }
+        if (subRes.credited_once) {
+          console.log("[PP_WEBHOOK] already_credited_once", subRes.subscription_id);
         } else {
-          console.log("[PP_WEBHOOK] no_plan_mapping_or_amount", {
-            plan_id: subRes.plan_id,
-            plan,
-            amount,
-          });
+          const plan = planFromPayPalPlanId(subRes.plan_id);
+          const amount = includedJadesForPlan(plan);
+
+          if (plan && amount > 0) {
+            const ref = `ppsub:${subRes.subscription_id}:first`;
+
+            const { error: creditErr } = await supabase.rpc("add_jades", {
+              p_user_id: subRes.user_id,
+              p_amount: amount,
+              p_reason: `subscription:${plan}`,
+              p_ref: ref,
+            });
+
+            if (creditErr) {
+              console.error("[PP_WEBHOOK] credit_failed", creditErr);
+            } else {
+              console.log("[PP_WEBHOOK] credit_ok", { user_id: subRes.user_id, plan, amount });
+
+              // marcar acreditado
+              const { error: markErr } = await supabase
+                .from("paypal_subscriptions")
+                .update({ credited_once: true, updated_at: new Date().toISOString() })
+                .eq("subscription_id", subRes.subscription_id);
+
+              if (markErr) console.error("[PP_WEBHOOK] mark_credited_once_failed", markErr);
+            }
+          } else {
+            console.log("[PP_WEBHOOK] no_plan_mapping_or_amount", {
+              plan_id: subRes.plan_id,
+              plan,
+              amount,
+            });
+          }
         }
       } else {
         console.log("[PP_WEBHOOK] no_credit_yet", {
           has_user_id: !!subRes?.user_id,
           status: subRes?.status,
-          note: "Si custom_id viene NULL, nunca sabremos a qué usuario acreditar.",
+          note: "Si user_id viene NULL, revisa que create-subscription haya guardado mapping.",
         });
       }
     }
