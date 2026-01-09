@@ -146,7 +146,6 @@ async function upsertPaypalSubscription({ supabase, resource }) {
     custom_id: n.custom_id ?? existing?.custom_id ?? null,
     user_id: n.user_id ?? existing?.user_id ?? null,
 
-    // si no existe, queda null y no pasa nada
     credited_once: existing?.credited_once ?? false,
 
     updated_at: new Date().toISOString(),
@@ -176,6 +175,24 @@ function includedJadesForPlan(plan) {
 
 function isActiveStatus(status) {
   return String(status || "").toLowerCase() === "active";
+}
+
+// ✅ NUEVO: sincroniza profiles.plan cuando la subscripción ya es ACTIVE
+async function syncProfilePlanIfActive({ supabase, user_id, plan, subscription_id }) {
+  if (!user_id || !plan) return { ok: false, skipped: true, reason: "missing_user_or_plan" };
+
+  const { error: updErr } = await supabase
+    .from("profiles")
+    .update({ plan, updated_at: new Date().toISOString() })
+    .eq("id", user_id);
+
+  if (updErr) {
+    console.error("[PP_WEBHOOK] profiles_plan_update_failed", { user_id, plan, subscription_id, updErr });
+    return { ok: false, error: updErr };
+  }
+
+  console.log("[PP_WEBHOOK] profiles_plan_updated", { user_id, plan, subscription_id });
+  return { ok: true };
 }
 
 export default async function handler(req, res) {
@@ -263,6 +280,24 @@ export default async function handler(req, res) {
         user_id: subRes?.user_id,
         credited_once: subRes?.credited_once,
       });
+
+      // ✅ NUEVO: si ya está ACTIVE, sincroniza plan a profiles (aunque todavía no se acrediten jades)
+      if (subRes.ok && subRes.user_id && isActiveStatus(subRes.status)) {
+        const plan = planFromPayPalPlanId(subRes.plan_id);
+        if (plan) {
+          await syncProfilePlanIfActive({
+            supabase,
+            user_id: subRes.user_id,
+            plan,
+            subscription_id: subRes.subscription_id,
+          });
+        } else {
+          console.log("[PP_WEBHOOK] cannot_sync_plan_no_mapping", {
+            plan_id: subRes.plan_id,
+            subscription_id: subRes.subscription_id,
+          });
+        }
+      }
 
       // ✅ acreditar SOLO 1 vez cuando ACTIVE y con user_id
       if (subRes.ok && subRes.user_id && isActiveStatus(subRes.status)) {
