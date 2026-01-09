@@ -1,6 +1,9 @@
 // /api/user-status.js
 import { requireUser } from "./_auth.js";
 
+// -------------------------------
+// Mapeo PayPal plan_id -> plan (basic/pro)
+// -------------------------------
 function planFromPayPalPlanId(plan_id) {
   const basic = process.env.PAYPAL_PLAN_ID_BASIC;
   const pro = process.env.PAYPAL_PLAN_ID_PRO;
@@ -17,26 +20,31 @@ export default async function handler(req, res) {
     }
 
     const user_id = auth.user.id;
-    const sb = auth.sb; // ✅ ya es admin client por tu helper
+    const sb = auth.sb; // ✅ admin client del helper
 
-    // 1) Wallet (jades)
-    const { data: walletRow, error: walletErr } = await sb
-      .from("user_wallet")
-      .select("balance,updated_at")
-      .eq("user_id", user_id)
+    // ===================================================
+    // 1) Jades desde profiles.jade_balance
+    // ===================================================
+    const { data: profRow, error: profErr } = await sb
+      .from("profiles")
+      .select("jade_balance, plan, updated_at")
+      .eq("id", user_id)
       .maybeSingle();
 
-    if (walletErr) {
+    if (profErr) {
       return res.status(500).json({
         ok: false,
-        error: "WALLET_SELECT_ERROR",
-        details: walletErr.message || walletErr,
+        error: "PROFILES_SELECT_ERROR",
+        details: profErr.message || profErr,
       });
     }
 
-    const balance = Number(walletRow?.balance || 0);
+    const jades = Number(profRow?.jade_balance || 0);
+    const profile_plan = profRow?.plan || "free";
 
-    // 2) Última suscripción (si existe)
+    // ===================================================
+    // 2) Última suscripción desde paypal_subscriptions
+    // ===================================================
     const { data: subRow, error: subErr } = await sb
       .from("paypal_subscriptions")
       .select("status, plan_id, updated_at, subscription_id")
@@ -61,12 +69,16 @@ export default async function handler(req, res) {
       user_id,
 
       // ✅ lo que usa tu UI
-      jades: balance,
+      jades,
       plan,
       subscription_status,
 
-      // (extras por si querés debug)
-      balance,
+      // extras debug (opcional)
+      profile: {
+        plan: profile_plan,
+        jade_balance: jades,
+        updated_at: profRow?.updated_at || null,
+      },
       paypal: subRow
         ? {
             subscription_id: subRow.subscription_id,
