@@ -2308,6 +2308,9 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
   );
 }
 
+// ✅ arriba con tus imports
+import ContactView from "./components/ContactView";
+
 // ---------------------------------------------------------
 // Root App
 // ---------------------------------------------------------
@@ -2316,7 +2319,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
-  // ✅ NUEVO: “páginas” dentro del landing (home/contact)
+  // ✅ NUEVO: navegación simple en landing
   const [landingPage, setLandingPage] = useState("home"); // "home" | "contact"
 
   if (user) return <DashboardView />;
@@ -2344,14 +2347,20 @@ export default function App() {
             <CreatorPanel isDemo={true} onAuthRequired={() => setAuthOpen(true)} />
           </div>
         </div>
-      ) : landingPage === "home" ? (
-        <LandingView
-          onOpenAuth={() => setAuthOpen(true)}
-          onStartDemo={() => setDemoMode(true)}
-          onOpenContact={() => setLandingPage("contact")}
-        />
       ) : (
-        <ContactView onBack={() => setLandingPage("home")} />
+        <>
+          {landingPage === "home" && (
+            <LandingView
+              onOpenAuth={() => setAuthOpen(true)}
+              onStartDemo={() => setDemoMode(true)}
+              onOpenContact={() => setLandingPage("contact")}
+            />
+          )}
+
+          {landingPage === "contact" && (
+            <ContactView onBack={() => setLandingPage("home")} />
+          )}
+        </>
       )}
     </>
   );
