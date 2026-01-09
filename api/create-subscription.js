@@ -15,8 +15,7 @@ const PAYPAL_MODE =
   (process.env.PAYPAL_MODE ||
     process.env.PAYPAL_ENV ||
     process.env.VITE_PAYPAL_ENV ||
-    "live"
-  ).toLowerCase();
+    "live").toLowerCase();
 
 const PAYPAL_PLAN_ID_BASIC =
   process.env.PAYPAL_PLAN_ID_BASIC || process.env.VITE_PAYPAL_PLAN_ID_BASIC;
@@ -45,7 +44,9 @@ function must(name, val) {
 }
 
 async function paypalAccessToken() {
-  const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
+  const basic = Buffer.from(
+    `${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`
+  ).toString("base64");
 
   const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
     method: "POST",
@@ -102,9 +103,12 @@ export default async function handler(req, res) {
 
     const accessToken = await paypalAccessToken();
 
-    // URLs de retorno/cancelación (SIN popup)
-    const return_url = `${APP_BASE_URL}/billing/return?tier=${encodeURIComponent(t)}`;
-    const cancel_url = `${APP_BASE_URL}/billing/cancel?tier=${encodeURIComponent(t)}`;
+    // ✅ URLs de retorno/cancelación (SIN popup)
+    // Cambiado para volver al Dashboard ("/") con query params de estado
+    // - Si está logueado: App.jsx renderiza DashboardView
+    // - Si no: caerá en Landing y el usuario inicia sesión
+    const return_url = `${APP_BASE_URL}/?pp=success&tier=${encodeURIComponent(t)}`;
+    const cancel_url = `${APP_BASE_URL}/?pp=cancel&tier=${encodeURIComponent(t)}`;
 
     const payload = {
       plan_id,
