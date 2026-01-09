@@ -370,7 +370,10 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
-// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN
+// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN (CORREGIDO: plan/jades)
+// - No depende de useAuth().profile
+// - Lee profiles(plan, jade_balance) directo de Supabase
+// - Límite 5 SOLO si (plan free/none) Y jade_balance <= 0
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -391,8 +394,71 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [dailyCount, setDailyCount] = useState(0);
   const [demoCount, setDemoCount] = useState(0);
 
+  // ✅ Perfil (profiles)
+  const [profilePlan, setProfilePlan] = useState("free");
+  const [profileJades, setProfileJades] = useState(0);
+
+  // ---------------------------------------------------------
+  // Cargar profile desde Supabase (plan + jade_balance)
+  // Usa tu helper getAuthHeadersGlobal() y REST /profiles
+  // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) {
+      setProfilePlan("free");
+      setProfileJades(0);
+      return;
+    }
+
+    (async () => {
+      try {
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+        const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        if (!SUPABASE_URL || !SUPABASE_ANON) {
+          console.warn("Faltan VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
+          return;
+        }
+
+        const authHeaders = await getAuthHeadersGlobal(); // debe incluir Authorization Bearer user JWT
+        const url =
+          `${SUPABASE_URL.replace(/\/$/, "")}` +
+          `/rest/v1/profiles?id=eq.${user.id}&select=plan,jade_balance`;
+
+        const r = await fetch(url, {
+          headers: {
+            apikey: SUPABASE_ANON,
+            ...authHeaders,
+          },
+        });
+
+        const rows = await r.json().catch(() => []);
+        const row = Array.isArray(rows) ? rows[0] : null;
+
+        const plan = String(row?.plan || "free").toLowerCase();
+        const jades = Number(row?.jade_balance || 0);
+
+        setProfilePlan(plan);
+        setProfileJades(jades);
+      } catch (e) {
+        console.error("Error cargando profiles:", e);
+      }
+    })();
+  }, [userLoggedIn, user?.id]);
+
+  // ✅ Regla correcta:
+  // - Si plan !== free/none  OR  jade_balance > 0  => NO límite 5
+  // - Si plan === free/none y jade_balance <= 0   => sí límite 5
+  const isFreeUser = !profilePlan || profilePlan === "free" || profilePlan === "none";
+  const hasPaidAccess = !isFreeUser || profileJades > 0;
+
+  // ---------------------------------------------------------
+  // Contador diario (solo si aplica límite)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!userLoggedIn) {
+      setDailyCount(0);
+      return;
+    }
+    if (hasPaidAccess) {
       setDailyCount(0);
       return;
     }
@@ -405,8 +471,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         setDailyCount(0);
       }
     })();
-  }, [userLoggedIn, user?.id]);
+  }, [userLoggedIn, user?.id, hasPaidAccess]);
 
+  // ---------------------------------------------------------
+  // Demo count
+  // ---------------------------------------------------------
   useEffect(() => {
     if (!isDemo) return;
     try {
@@ -417,20 +486,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }, [isDemo]);
 
-  const currentLimit = isDemo ? DEMO_LIMIT : DAILY_LIMIT;
-  const currentCount = isDemo ? demoCount : dailyCount;
-  const remaining = Math.max(0, currentLimit - currentCount);
+  const limitReached = !isDemo && !hasPaidAccess && dailyCount >= DAILY_LIMIT;
 
   const disabled =
     status === "IN_QUEUE" ||
     status === "IN_PROGRESS" ||
     (!isDemo && !userLoggedIn) ||
-    currentCount >= currentLimit;
-
-  const getAuthHeaders = async () => {
-    if (isDemo) return {};
-    return await getAuthHeadersGlobal();
-  };
+    limitReached ||
+    (isDemo && demoCount >= DEMO_LIMIT);
 
   const handleGenerate = async () => {
     setError("");
@@ -440,20 +503,22 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
 
-    if (currentCount >= currentLimit) {
+    if (isDemo && demoCount >= DEMO_LIMIT) {
+      setStatus("ERROR");
+      setStatusText("Límite de demo alcanzado.");
+      alert(
+        `Has agotado tus ${DEMO_LIMIT} pruebas. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} renders al día, guardar tu historial y descargar.`
+      );
+      onAuthRequired?.();
+      return;
+    }
+
+    if (!isDemo && limitReached) {
       setStatus("ERROR");
       setStatusText("Límite de generación alcanzado.");
-
-      if (isDemo && onAuthRequired) {
-        alert(
-          `Has agotado tus ${DEMO_LIMIT} pruebas. Crea tu cuenta GRATIS para obtener ${DAILY_LIMIT} renders al día, guardar tu historial y descargar.`
-        );
-        onAuthRequired();
-      } else if (userLoggedIn) {
-        setError(
-          `Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Activa una suscripción mensual para generar sin límite.`
-        );
-      }
+      setError(
+        `Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Activa una suscripción o compra jades para generar sin límite.`
+      );
       return;
     }
 
@@ -462,7 +527,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setStatusText("Enviando job a RunPod...");
 
     try {
-      const authHeaders = await getAuthHeaders();
+      const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
 
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -492,10 +557,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
-        const authHeaders2 = await getAuthHeaders();
-        const statusRes = await fetch(`/api/status?id=${jobId}`, {
-          headers: { ...authHeaders2 },
-        });
+        const authHeaders2 = isDemo ? {} : await getAuthHeadersGlobal();
+        const statusRes = await fetch(`/api/status?id=${jobId}`, { headers: { ...authHeaders2 } });
 
         const statusData = await statusRes.json().catch(() => null);
         if (!statusRes.ok || statusData?.error) {
@@ -520,7 +583,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             setDemoCount(next);
             localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
-            setDailyCount((prev) => prev + 1);
+            // ✅ Solo cuenta daily si aplica límite (free sin jades)
+            if (!hasPaidAccess) setDailyCount((prev) => prev + 1);
 
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
@@ -571,6 +635,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     );
   }
 
+  // UI: remaining
+  const remaining =
+    isDemo ? Math.max(0, DEMO_LIMIT - demoCount) : hasPaidAccess ? Infinity : Math.max(0, DAILY_LIMIT - dailyCount);
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
@@ -582,9 +650,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           </div>
         )}
 
-        {!isDemo && remaining <= 2 && remaining > 0 && (
+        {!isDemo && !hasPaidAccess && remaining <= 2 && remaining > 0 && (
           <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
             Atención: solo te quedan {remaining} renders hoy.
+          </div>
+        )}
+
+        {!isDemo && hasPaidAccess && (
+          <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-[11px] text-emerald-100">
+            Acceso premium activo: renders ilimitados (por plan o jades).
+            <span className="ml-2 text-emerald-200/80">Jades: {profileJades}</span>
           </div>
         )}
 
@@ -649,7 +724,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             Estado actual: {statusText || "Listo para ejecutar el motor."}
             <br />
             <span className="text-[11px] text-neutral-400">
-              Uso: {currentCount} / {currentLimit}
+              {isDemo ? (
+                <>Uso: {demoCount} / {DEMO_LIMIT}</>
+              ) : hasPaidAccess ? (
+                <>Uso: ilimitado (por plan o jades)</>
+              ) : (
+                <>Uso: {dailyCount} / {DAILY_LIMIT}</>
+              )}
+              <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
             </span>
           </div>
 
@@ -660,7 +742,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             disabled={disabled}
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {currentCount >= currentLimit
+            {isDemo && demoCount >= DEMO_LIMIT
+              ? "Límite alcanzado"
+              : !isDemo && limitReached
               ? "Límite alcanzado"
               : status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Ejecutando..."
