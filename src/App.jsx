@@ -12,7 +12,7 @@ import {
 
 import { PLANS, COSTS } from "./lib/pricing";
 
-// ✅ App.jsx — Cambio #1 (1 línea)
+// ✅ PayPal checkout (redirect, NO popup)
 import { startPaypalSubscription } from "./lib/PaypalCheckout";
 
 // ---------------------------------------------------------
