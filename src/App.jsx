@@ -2101,20 +2101,7 @@ function PricingSection({ onOpenAuth }) {
 // ---------------------------------------------------------
 // Landing (no sesión) + demo
 // ---------------------------------------------------------
-function LandingView({ onOpenAuth, onStartDemo }) {
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactMessage, setContactMessage] = useState("");
-
-  const handleContactSubmit = (e) => {
-    e.preventDefault();
-    const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
-    const body = encodeURIComponent(
-      `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
-    );
-    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
-  };
-
+function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -2144,12 +2131,15 @@ function LandingView({ onOpenAuth, onStartDemo }) {
             >
               Planes
             </button>
+
+            {/* ✅ Antes hacía scroll a #contacto. Ahora abre "página" (vista) Contacto */}
             <button
-              onClick={() => scrollToId("contacto")}
+              onClick={onOpenContact}
               className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
             >
               Contacto
             </button>
+
             <button
               onClick={onOpenAuth}
               className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -2305,40 +2295,8 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
+        {/* ✅ Planes (se queda en Home) */}
         <PricingSection onOpenAuth={onOpenAuth} />
-
-        <section id="contacto" className="mt-16 rounded-3xl border border-white/10 bg-black/40 p-6">
-          <h3 className="text-lg font-semibold text-white">Contacto</h3>
-          <p className="mt-2 text-xs text-neutral-400">Escríbenos y te respondemos lo antes posible.</p>
-
-          <form onSubmit={handleContactSubmit} className="mt-5 grid gap-3 md:grid-cols-2">
-            <input
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              placeholder="Nombre"
-              className="rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            />
-            <input
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              placeholder="Correo"
-              type="email"
-              className="rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            />
-            <textarea
-              value={contactMessage}
-              onChange={(e) => setContactMessage(e.target.value)}
-              placeholder="Mensaje"
-              className="md:col-span-2 h-28 resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            />
-            <button
-              type="submit"
-              className="md:col-span-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-            >
-              Enviar
-            </button>
-          </form>
-        </section>
       </main>
 
       <footer className="border-t border-white/10 bg-black/30">
