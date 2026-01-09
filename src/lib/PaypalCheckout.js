@@ -1,5 +1,5 @@
 // src/lib/PaypalCheckout.js
-import { supabase } from "./supabaseClient"; // ajusta si tu ruta es distinta
+import { supabase } from "./supabaseClient";
 
 async function getAccessTokenOrThrow() {
   const { data, error } = await supabase.auth.getSession();
@@ -9,9 +9,19 @@ async function getAccessTokenOrThrow() {
   return accessToken;
 }
 
+// ✅ Nuevo helper: sacar user_id del session
+async function getUserIdOrThrow() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const userId = data?.session?.user?.id;
+  if (!userId) throw new Error("NO_SESSION_USER");
+  return userId;
+}
+
 // Suscripciones (redirect)
 export async function startPaypalSubscription(tier) {
   const accessToken = await getAccessTokenOrThrow();
+  const user_id = await getUserIdOrThrow(); // ✅
 
   const r = await fetch("/api/create-subscription", {
     method: "POST",
@@ -19,36 +29,17 @@ export async function startPaypalSubscription(tier) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ tier }),
+    // ✅ AQUÍ está el cambio importante
+    body: JSON.stringify({ tier, user_id }),
   });
 
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j?.ok) throw new Error(j?.error || "PAYPAL_CREATE_SUB_FAILED");
   if (!j?.approve_url) throw new Error("NO_APPROVE_URL_FROM_PAYPAL");
 
-  // Redirect normal (móvil friendly)
   window.location.href = j.approve_url;
 }
 
-// Alias por compatibilidad (por si en tu app.jsx llamas el nombre viejo)
 export async function startPayPalSubscriptionRedirect(tier) {
   return startPaypalSubscription(tier);
-}
-
-// Packs (ordenes one-time)
-export async function verifyPaypalOrderAndGrantJades({ orderID, pack }) {
-  const accessToken = await getAccessTokenOrThrow();
-
-  const r = await fetch("/api/paypal-verify-and-grant", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ orderID, pack }),
-  });
-
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.ok) throw new Error(j?.error || "PAYPAL_VERIFY_AND_GRANT_FAILED");
-  return j;
 }
