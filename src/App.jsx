@@ -2309,9 +2309,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
   );
 }
 
-// ✅ arriba con tus imports
-import ContactView from "./components/ContactView";
-
 // ---------------------------------------------------------
 // Root App
 // ---------------------------------------------------------
