@@ -1,15 +1,31 @@
 // /api/create-subscription.js
 import { requireUser } from "./_auth.js";
 
-const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
-const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
-const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
+// =====================
+// ENV (soporta con y sin VITE_)
+// =====================
+const PAYPAL_CLIENT_ID =
+  process.env.PAYPAL_CLIENT_ID || process.env.VITE_PAYPAL_CLIENT_ID;
 
-const PAYPAL_PLAN_ID_BASIC = process.env.PAYPAL_PLAN_ID_BASIC;
-const PAYPAL_PLAN_ID_PRO = process.env.PAYPAL_PLAN_ID_PRO;
+const PAYPAL_CLIENT_SECRET =
+  process.env.PAYPAL_CLIENT_SECRET || process.env.VITE_PAYPAL_CLIENT_SECRET;
 
-// IMPORTANTE: URL pública de tu web (ej: https://isabelaos-web.vercel.app o https://isabelaos.com)
-const APP_BASE_URL = process.env.APP_BASE_URL;
+const PAYPAL_MODE =
+  (process.env.PAYPAL_MODE ||
+    process.env.PAYPAL_ENV ||
+    process.env.VITE_PAYPAL_ENV ||
+    "live"
+  ).toLowerCase();
+
+const PAYPAL_PLAN_ID_BASIC =
+  process.env.PAYPAL_PLAN_ID_BASIC || process.env.VITE_PAYPAL_PLAN_ID_BASIC;
+
+const PAYPAL_PLAN_ID_PRO =
+  process.env.PAYPAL_PLAN_ID_PRO || process.env.VITE_PAYPAL_PLAN_ID_PRO;
+
+// URL pública de tu web (ej: https://isabelaos-web.vercel.app o https://isabelaos.com)
+const APP_BASE_URL =
+  process.env.APP_BASE_URL || process.env.VITE_APP_BASE_URL || process.env.NEXT_PUBLIC_APP_BASE_URL;
 
 const PAYPAL_API_BASE =
   PAYPAL_MODE === "live"
@@ -23,6 +39,7 @@ function must(name, val) {
 
 async function paypalAccessToken() {
   const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
+
   const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
     method: "POST",
     headers: {
@@ -31,6 +48,7 @@ async function paypalAccessToken() {
     },
     body: "grant_type=client_credentials",
   });
+
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(j)}`);
   return j.access_token;
@@ -44,17 +62,19 @@ function planIdForTier(tier) {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+    }
 
     const auth = await requireUser(req);
     if (!auth.ok) {
       return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     }
 
-    must("PAYPAL_CLIENT_ID", PAYPAL_CLIENT_ID);
-    must("PAYPAL_CLIENT_SECRET", PAYPAL_CLIENT_SECRET);
-    must("PAYPAL_PLAN_ID_BASIC", PAYPAL_PLAN_ID_BASIC);
-    must("PAYPAL_PLAN_ID_PRO", PAYPAL_PLAN_ID_PRO);
+    must("PAYPAL_CLIENT_ID(or VITE_PAYPAL_CLIENT_ID)", PAYPAL_CLIENT_ID);
+    must("PAYPAL_CLIENT_SECRET(or VITE_PAYPAL_CLIENT_SECRET)", PAYPAL_CLIENT_SECRET);
+    must("PAYPAL_PLAN_ID_BASIC(or VITE_PAYPAL_PLAN_ID_BASIC)", PAYPAL_PLAN_ID_BASIC);
+    must("PAYPAL_PLAN_ID_PRO(or VITE_PAYPAL_PLAN_ID_PRO)", PAYPAL_PLAN_ID_PRO);
     must("APP_BASE_URL", APP_BASE_URL);
 
     const { tier } = req.body || {};
@@ -71,7 +91,6 @@ export default async function handler(req, res) {
     const return_url = `${APP_BASE_URL}/billing/return?tier=${encodeURIComponent(t)}`;
     const cancel_url = `${APP_BASE_URL}/billing/cancel?tier=${encodeURIComponent(t)}`;
 
-    // ✅ custom_id = user_id (UUID Supabase)
     const payload = {
       plan_id,
       custom_id: auth.user.id,
@@ -79,12 +98,8 @@ export default async function handler(req, res) {
         brand_name: "IsabelaOS Studio",
         user_action: "SUBSCRIBE_NOW",
         shipping_preference: "NO_SHIPPING",
-
-        // 🔥 clave para flujo estable en móvil/tablet
         return_url,
         cancel_url,
-
-        // recomendado
         locale: "es-GT",
       },
     };
@@ -103,10 +118,9 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: "PAYPAL_CREATE_SUB_FAILED", details: j });
     }
 
-    const approveUrl =
-      Array.isArray(j?.links)
-        ? j.links.find((x) => x?.rel === "approve")?.href
-        : null;
+    const approveUrl = Array.isArray(j?.links)
+      ? j.links.find((x) => x?.rel === "approve")?.href
+      : null;
 
     return res.status(200).json({
       ok: true,
