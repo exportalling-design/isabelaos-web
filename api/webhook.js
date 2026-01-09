@@ -13,9 +13,7 @@ const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
 const PAYPAL_MODE = (process.env.PAYPAL_MODE || "sandbox").toLowerCase();
 
 const PAYPAL_API_BASE =
-  PAYPAL_MODE === "live"
-    ? "https://api-m.paypal.com"
-    : "https://api-m.sandbox.paypal.com";
+  PAYPAL_MODE === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
 function must(name, val) {
   if (!val) throw new Error(`Missing env: ${name}`);
@@ -25,7 +23,7 @@ function must(name, val) {
 function isDuplicateKeyError(err) {
   return (
     err?.code === "23505" ||
-    (typeof err?.message === "string" && err.message.includes("duplicate key"))
+    (typeof err?.message === "string" && err.message.toLowerCase().includes("duplicate key"))
   );
 }
 
@@ -36,23 +34,16 @@ function isUuid(s) {
   );
 }
 
-// -------------------------------
 // Headers case-insensitive
-// -------------------------------
 function getHeaderCI(headers, name) {
   if (!headers) return "";
   const target = String(name || "").toLowerCase();
-
-  // Next/Vercel node: headers es objeto {k:v}
-  if (typeof headers === "object") {
-    const keys = Object.keys(headers);
-    const foundKey = keys.find((k) => String(k).toLowerCase() === target);
-    if (!foundKey) return "";
-    const v = headers[foundKey];
-    if (Array.isArray(v)) return v[0] || "";
-    return v || "";
-  }
-  return "";
+  const keys = Object.keys(headers);
+  const foundKey = keys.find((k) => String(k).toLowerCase() === target);
+  if (!foundKey) return "";
+  const v = headers[foundKey];
+  if (Array.isArray(v)) return v[0] || "";
+  return v || "";
 }
 
 async function paypalAccessToken() {
@@ -65,7 +56,6 @@ async function paypalAccessToken() {
     },
     body: "grant_type=client_credentials",
   });
-
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`PayPal token error: ${r.status} ${JSON.stringify(j)}`);
   return j.access_token;
@@ -78,7 +68,6 @@ async function verifyWebhookSignature({ event, headers }) {
   const authAlgo = getHeaderCI(headers, "paypal-auth-algo");
   const transmissionSig = getHeaderCI(headers, "paypal-transmission-sig");
 
-  // En sandbox/simuladores a veces faltan headers: no rompemos todo
   if (!transmissionId || !transmissionTime || !certUrl || !authAlgo || !transmissionSig) {
     return { verified: false, error: "Missing PayPal signature headers" };
   }
@@ -109,11 +98,6 @@ async function verifyWebhookSignature({ event, headers }) {
   return { verified: ok, error: ok ? null : `verify_failed: ${JSON.stringify(j)}` };
 }
 
-/**
- * Normaliza subscription-like:
- * - V2 Subscriptions: resource.status, resource.plan_id, resource.subscriber.payer_id, resource.custom_id
- * - V1 Agreements: resource.state, payer.payer_info.payer_id
- */
 function normalizeSubscriptionLike(resource) {
   const subscription_id = resource?.id || null;
   const status = resource?.status || resource?.state || null;
@@ -128,7 +112,7 @@ function normalizeSubscriptionLike(resource) {
   const custom_id = resource?.custom_id || null;
   const user_id = isUuid(custom_id) ? custom_id : null;
 
-  return { subscription_id, status, plan_id, payer_id, user_id };
+  return { subscription_id, status, plan_id, payer_id, custom_id, user_id };
 }
 
 async function upsertPaypalSubscription({ supabase, resource }) {
@@ -140,6 +124,7 @@ async function upsertPaypalSubscription({ supabase, resource }) {
     status: n.status,
     plan_id: n.plan_id,
     payer_id: n.payer_id,
+    custom_id: n.custom_id,
     user_id: n.user_id,
     updated_at: new Date().toISOString(),
   };
@@ -152,9 +137,7 @@ async function upsertPaypalSubscription({ supabase, resource }) {
   return { ok: true, ...n };
 }
 
-// ===================================================
-// MAPEO plan_id -> (basic/pro) + jades incluidos
-// ===================================================
+// plan_id -> plan
 function planFromPayPalPlanId(plan_id) {
   const basic = process.env.PAYPAL_PLAN_ID_BASIC;
   const pro = process.env.PAYPAL_PLAN_ID_PRO;
@@ -170,8 +153,7 @@ function includedJadesForPlan(plan) {
 }
 
 function isActiveStatus(status) {
-  const s = String(status || "").toLowerCase();
-  return s === "active";
+  return String(status || "").toLowerCase() === "active";
 }
 
 export default async function handler(req, res) {
@@ -202,7 +184,7 @@ export default async function handler(req, res) {
     const eventType = event?.event_type || null;
     const resourceType = event?.resource_type || null;
 
-    // verify signature (sandbox/sim puede fallar)
+    // verify (en sandbox a veces falla)
     let verified = false;
     let verifyError = null;
     try {
@@ -214,7 +196,7 @@ export default async function handler(req, res) {
       verifyError = `verify_exception: ${String(e?.message || e)}`;
     }
 
-    // idempotencia
+    // idempotencia de evento
     const { data: alreadyProcessed } = await supabase
       .from("paypal_events_processed")
       .select("event_id")
@@ -222,7 +204,6 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (alreadyProcessed?.event_id) {
-      console.log("[PP_WEBHOOK] ya_procesado", { id: eventId, tipo: eventType });
       return res.status(200).json({ ok: true, already_processed: true, verified });
     }
 
@@ -238,80 +219,61 @@ export default async function handler(req, res) {
       received_at: new Date().toISOString(),
     };
 
-    const { error: rawInsertErr } = await supabase
-      .from("paypal_events_raw")
-      .insert(insertPayload);
-
+    const { error: rawInsertErr } = await supabase.from("paypal_events_raw").insert(insertPayload);
     if (rawInsertErr && !isDuplicateKeyError(rawInsertErr)) {
       console.error("[PP_WEBHOOK] raw_insert_error", rawInsertErr);
-      return res.status(200).json({
-        ok: false,
-        stored: false,
-        verified,
-        supabase_error: rawInsertErr.message,
-      });
+      return res.status(200).json({ ok: false, stored: false, verified });
     }
 
-    // procesar subscriptions
+    // procesar suscripción
     const resource = event?.resource || null;
 
     if (eventType && eventType.startsWith("BILLING.SUBSCRIPTION.") && resource) {
       const subRes = await upsertPaypalSubscription({ supabase, resource });
 
-      if (!subRes.ok) {
-        console.error("[PP_WEBHOOK] subscription_upsert_failed", subRes);
-      } else {
-        console.log("[PP_WEBHOOK] subscription_upsert_ok", {
-          subscription_id: subRes.subscription_id,
-          status: subRes.status,
-          plan_id: subRes.plan_id,
-          payer_id: subRes.payer_id,
-          has_user_id: !!subRes.user_id,
-        });
+      console.log("[PP_WEBHOOK] subscription_seen", {
+        eventType,
+        subscription_id: subRes?.subscription_id,
+        status: subRes?.status,
+        plan_id: subRes?.plan_id,
+        payer_id: subRes?.payer_id,
+        custom_id: subRes?.custom_id,
+        user_id: subRes?.user_id,
+      });
 
-        // ===================================================
-        // ✅ ACREDITAR JADES (1 VEZ) CUANDO SEA ACTIVA
-        // ===================================================
-        if (subRes.user_id && isActiveStatus(subRes.status)) {
-          const plan = planFromPayPalPlanId(subRes.plan_id);
-          const amount = includedJadesForPlan(plan);
+      // Acreditar 1 vez cuando ACTIVE y con user_id
+      if (subRes.ok && subRes.user_id && isActiveStatus(subRes.status)) {
+        const plan = planFromPayPalPlanId(subRes.plan_id);
+        const amount = includedJadesForPlan(plan);
 
-          if (plan && amount > 0) {
-            // idempotente por ref único
-            const ref = `ppsub:${subRes.subscription_id}:first`;
+        if (plan && amount > 0) {
+          const ref = `ppsub:${subRes.subscription_id}:first`;
 
-            const { error: creditErr } = await supabase.rpc("add_jades", {
-              p_user_id: subRes.user_id,
-              p_amount: amount,
-              p_reason: `subscription:${plan}`,
-              p_ref: ref,
-            });
+          const { error: creditErr } = await supabase.rpc("add_jades", {
+            p_user_id: subRes.user_id,
+            p_amount: amount,
+            p_reason: `subscription:${plan}`,
+            p_ref: ref,
+          });
 
-            if (creditErr) {
-              console.error("[PP_WEBHOOK] credit_subscription_failed", creditErr);
-            } else {
-              console.log("[PP_WEBHOOK] credit_subscription_ok", {
-                user_id: subRes.user_id,
-                subscription_id: subRes.subscription_id,
-                plan,
-                amount,
-              });
-            }
+          if (creditErr) {
+            console.error("[PP_WEBHOOK] credit_failed", creditErr);
           } else {
-            console.log("[PP_WEBHOOK] subscription_no_plan_mapping_or_amount", {
-              plan_id: subRes.plan_id,
-              plan,
-              amount,
-            });
+            console.log("[PP_WEBHOOK] credit_ok", { user_id: subRes.user_id, plan, amount });
           }
         } else {
-          console.log("[PP_WEBHOOK] no_credit (missing user_id or not active yet)", {
-            subscription_id: subRes.subscription_id,
-            status: subRes.status,
+          console.log("[PP_WEBHOOK] no_plan_mapping_or_amount", {
             plan_id: subRes.plan_id,
-            has_user_id: !!subRes.user_id,
+            plan,
+            amount,
           });
         }
+      } else {
+        console.log("[PP_WEBHOOK] no_credit_yet", {
+          has_user_id: !!subRes?.user_id,
+          status: subRes?.status,
+          note: "Si custom_id viene NULL, nunca sabremos a qué usuario acreditar.",
+        });
       }
     }
 
@@ -324,7 +286,6 @@ export default async function handler(req, res) {
       console.error("[PP_WEBHOOK] processed_insert_error", processedErr);
     }
 
-    console.log("[PP_WEBHOOK] stored", { id: eventId, verified, eventType });
     return res.status(200).json({ ok: true, stored: true, verified });
   } catch (e) {
     console.error("[PP_WEBHOOK] exception", e);
