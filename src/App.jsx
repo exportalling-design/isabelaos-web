@@ -2224,6 +2224,87 @@ function LandingView({ onOpenAuth, onStartDemo }) {
           </div>
         </section>
 
+        {/* ---------------------------------------------------------
+            NUEVO: Videos en Home (entre texto y planes)
+           --------------------------------------------------------- */}
+        <section className="mt-12">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                Demo real · Generado desde el motor
+              </p>
+              <h3 className="mt-1 text-xl font-semibold text-white">
+                Videos de prueba (pipeline actual)
+              </h3>
+              <p className="mt-1 max-w-2xl text-xs text-neutral-400">
+                Estos clips están generados por el sistema en beta. La prioridad ahora es estabilizar el flujo, mejorar
+                velocidad y pulir la calidad final del render.
+              </p>
+            </div>
+
+            <div className="mt-3 sm:mt-0">
+              <button
+                onClick={onStartDemo}
+                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
+              >
+                Probar el motor ahora
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            {[
+              {
+                src: "/gallery/video1.mp4?v=2",
+                title: "Video Demo 1",
+                desc: "Generación de video desde prompt (beta).",
+              },
+              {
+                src: "/gallery/video2.mp4?v=2",
+                title: "Video Demo 2",
+                desc: "Prueba de consistencia visual (beta).",
+              },
+            ].map((v) => (
+              <div
+                key={v.src}
+                className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/35 shadow-[0_0_60px_rgba(34,211,238,0.08)]"
+              >
+                <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/14 via-transparent to-fuchsia-500/16 blur-3xl" />
+
+                <div className="relative">
+                  <video
+                    className="w-full aspect-video object-cover"
+                    src={v.src}
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
+
+                  <div className="absolute left-4 top-4">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-1 text-[10px] font-semibold text-white">
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                      Demo real
+                    </span>
+                  </div>
+
+                  <div className="absolute bottom-3 left-4 right-4">
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">{v.title}</div>
+                        <div className="text-[11px] text-neutral-200/80">{v.desc}</div>
+                      </div>
+                      <div className="hidden sm:block text-[10px] text-neutral-300/80">
+                        /gallery/{v.title === "Video Demo 1" ? "video1.mp4" : "video2.mp4"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <PricingSection onOpenAuth={onOpenAuth} />
 
         <section id="contacto" className="mt-16 rounded-3xl border border-white/10 bg-black/40 p-6">
