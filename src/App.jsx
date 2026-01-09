@@ -2316,6 +2316,9 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
+  // ✅ NUEVO: “páginas” dentro del landing (home/contact)
+  const [landingPage, setLandingPage] = useState("home"); // "home" | "contact"
+
   if (user) return <DashboardView />;
 
   return (
@@ -2341,8 +2344,14 @@ export default function App() {
             <CreatorPanel isDemo={true} onAuthRequired={() => setAuthOpen(true)} />
           </div>
         </div>
+      ) : landingPage === "home" ? (
+        <LandingView
+          onOpenAuth={() => setAuthOpen(true)}
+          onStartDemo={() => setDemoMode(true)}
+          onOpenContact={() => setLandingPage("contact")}
+        />
       ) : (
-        <LandingView onOpenAuth={() => setAuthOpen(true)} onStartDemo={() => setDemoMode(true)} />
+        <ContactView onBack={() => setLandingPage("home")} />
       )}
     </>
   );
