@@ -562,7 +562,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
         <p className="font-medium">Debes iniciar sesión para usar el motor de producción visual.</p>
-        <p className="mt-1 text-xs text-yellow-200/80">Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.</p>
+        <p className="mt-1 text-xs text-yellow-200/80">
+          Desde tu cuenta podrás ejecutar renders con el motor conectado a GPU.
+        </p>
       </div>
     );
   }
@@ -838,7 +840,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
-    const r = await fetch(/api/video-status?job_id=${encodeURIComponent(job_id)}, {
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
       headers: { ...auth },
     });
     const data = await r.json().catch(() => null);
@@ -1124,7 +1126,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
-    const r = await fetch(/api/video-status?job_id=${encodeURIComponent(job_id)}, {
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
       headers: { ...auth },
     });
     const data = await r.json().catch(() => null);
@@ -1441,9 +1443,7 @@ function XmasPhotoPanel({ userStatus }) {
       return;
     }
     if (!isPremium) {
-      setError(
-        "Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA."
-      );
+      setError("Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA.");
       return;
     }
     if (!pureB64) {
@@ -1517,7 +1517,7 @@ function XmasPhotoPanel({ userStatus }) {
   const handleDownload = () => {
     if (!resultB64) return;
     const link = document.createElement("a");
-    link.href = data:image/png;base64,${resultB64};
+    link.href = `data:image/png;base64,${resultB64}`;
     link.download = "isabelaos-xmas-photo.png";
     document.body.appendChild(link);
     link.click();
@@ -1558,7 +1558,9 @@ function XmasPhotoPanel({ userStatus }) {
             />
           </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">Estado: {statusText || "Listo."}</div>
+          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+            Estado: {statusText || "Listo."}
+          </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
 
@@ -1568,7 +1570,9 @@ function XmasPhotoPanel({ userStatus }) {
             disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64 || !user}
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {status === "IN_QUEUE" || status === "IN_PROGRESS" ? "Generando..." : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
+            {status === "IN_QUEUE" || status === "IN_PROGRESS"
+              ? "Generando..."
+              : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
           </button>
         </div>
       </div>
@@ -1668,7 +1672,7 @@ function DashboardView() {
   const userPlanLabel = useMemo(() => {
     if (userStatus.loading) return "Cargando...";
     if (userStatus.subscription_status === "active" && userStatus.plan) {
-      return Usuario beta – Plan ${userStatus.plan} activo (sin límite);
+      return `Usuario beta – Plan ${userStatus.plan} activo (sin límite)`;
     }
     return "Usuario beta – Plan Basic activo (sin límite)";
   }, [userStatus.loading, userStatus.subscription_status, userStatus.plan]);
@@ -1676,7 +1680,7 @@ function DashboardView() {
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
     const body = encodeURIComponent("Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)");
-    window.location.href = mailto:contacto@isabelaos.com?subject=${subject}&body=${body};
+    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
   return (
@@ -1736,7 +1740,9 @@ function DashboardView() {
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
             <div className="flex items-center justify-between gap-2">
               <span className="text-neutral-400">{userPlanLabel}</span>
-              <span className="font-semibold text-white">Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+              <span className="font-semibold text-white">
+                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
+              </span>
             </div>
           </div>
 
@@ -1812,17 +1818,23 @@ function DashboardView() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
                     Estado:{" "}
-                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.subscription_status}</span>
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : userStatus.subscription_status}
+                    </span>
                   </span>
 
                   <span className="text-neutral-400">
                     Plan:{" "}
-                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.plan || "none"}</span>
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : userStatus.plan || "none"}
+                    </span>
                   </span>
 
                   <span className="text-neutral-400">
                     Jades:{" "}
-                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+                    <span className="font-semibold text-white">
+                      {userStatus.loading ? "..." : userStatus.jades ?? 0}
+                    </span>
                   </span>
                 </div>
               </div>
@@ -1917,14 +1929,14 @@ function PricingSection({ onOpenAuth }) {
     () => ({
       basic: [
         "Acceso al motor en la web",
-        Incluye ${PLANS?.basic?.included_jades ?? 100} jades / mes,
+        `Incluye ${PLANS?.basic?.included_jades ?? 100} jades / mes`,
         "Biblioteca personal (historial y descargas)",
         "Actualizaciones del motor (beta)",
         "Soporte básico por contacto",
       ],
       pro: [
         "Todo lo de Basic",
-        Incluye ${PLANS?.pro?.included_jades ?? 300} jades / mes,
+        `Incluye ${PLANS?.pro?.included_jades ?? 300} jades / mes`,
         "Más capacidad de generación (prioridad)",
         "Acceso anticipado a nuevas funciones",
         "Soporte prioritario (beta)",
@@ -2098,9 +2110,9 @@ function LandingView({ onOpenAuth, onStartDemo }) {
     e.preventDefault();
     const subject = encodeURIComponent("Contacto desde IsabelaOS Studio");
     const body = encodeURIComponent(
-      Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}
+      `Nombre: ${contactName}\nCorreo: ${contactEmail}\n\nMensaje:\n${contactMessage}`
     );
-    window.location.href = mailto:contacto@isabelaos.com?subject=${subject}&body=${body};
+    window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
   return (
