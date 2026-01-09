@@ -1,4 +1,5 @@
 // /api/create-subscription.js
+import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
 // =====================
@@ -25,7 +26,13 @@ const PAYPAL_PLAN_ID_PRO =
 
 // URL pública de tu web (ej: https://isabelaos-web.vercel.app o https://isabelaos.com)
 const APP_BASE_URL =
-  process.env.APP_BASE_URL || process.env.VITE_APP_BASE_URL || process.env.NEXT_PUBLIC_APP_BASE_URL;
+  process.env.APP_BASE_URL ||
+  process.env.VITE_APP_BASE_URL ||
+  process.env.NEXT_PUBLIC_APP_BASE_URL;
+
+// ✅ Supabase (service role para escribir mapping server-side)
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const PAYPAL_API_BASE =
   PAYPAL_MODE === "live"
@@ -77,12 +84,20 @@ export default async function handler(req, res) {
     must("PAYPAL_PLAN_ID_PRO(or VITE_PAYPAL_PLAN_ID_PRO)", PAYPAL_PLAN_ID_PRO);
     must("APP_BASE_URL", APP_BASE_URL);
 
+    // ✅ necesario para guardar mapping antes del approve
+    must("SUPABASE_URL (o VITE_SUPABASE_URL)", SUPABASE_URL);
+    must("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
+
     const { tier } = req.body || {};
     const t = String(tier || "").toLowerCase();
     const plan_id = planIdForTier(t);
 
     if (!plan_id) {
-      return res.status(400).json({ ok: false, error: "INVALID_TIER", allowed: ["basic", "pro"] });
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_TIER",
+        allowed: ["basic", "pro"],
+      });
     }
 
     const accessToken = await paypalAccessToken();
@@ -93,7 +108,7 @@ export default async function handler(req, res) {
 
     const payload = {
       plan_id,
-      custom_id: auth.user.id,
+      custom_id: auth.user.id, // ✅ lo mandamos igual, pero ya NO dependemos de que vuelva en webhook
       application_context: {
         brand_name: "IsabelaOS Studio",
         user_action: "SUBSCRIBE_NOW",
@@ -115,7 +130,43 @@ export default async function handler(req, res) {
 
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      return res.status(500).json({ ok: false, error: "PAYPAL_CREATE_SUB_FAILED", details: j });
+      return res.status(500).json({
+        ok: false,
+        error: "PAYPAL_CREATE_SUB_FAILED",
+        details: j,
+      });
+    }
+
+    const subscription_id = j?.id || null;
+
+    // ✅ PARCHE #1: Guardar mapping subscription_id -> user_id ANTES del approve
+    if (subscription_id) {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const row = {
+        subscription_id,
+        user_id: auth.user.id,
+        custom_id: auth.user.id,
+        plan_id,
+        status: "APPROVAL_PENDING",
+        updated_at: new Date().toISOString(),
+        // requiere columna en tabla; si no existe, Supabase devolverá error:
+        credited_once: false,
+      };
+
+      const { error } = await supabase
+        .from("paypal_subscriptions")
+        .upsert(row, { onConflict: "subscription_id" });
+
+      if (error) {
+        return res.status(500).json({
+          ok: false,
+          error: "SUPABASE_SUB_INSERT_FAILED",
+          details: error,
+        });
+      }
     }
 
     const approveUrl = Array.isArray(j?.links)
@@ -126,7 +177,7 @@ export default async function handler(req, res) {
       ok: true,
       tier: t,
       plan_id,
-      subscription_id: j?.id || null,
+      subscription_id,
       approve_url: approveUrl,
     });
   } catch (e) {
