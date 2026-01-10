@@ -904,9 +904,11 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// Video desde prompt (logueado) ✅ AUTH + spend jades
+// Video desde prompt (logueado)
+// ✅ AUTH (token)
+// ✅ NO cobra en frontend (cobra backend)
 // ---------------------------------------------------------
-function VideoFromPromptPanel({ userStatus, spendJades }) {
+function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
@@ -920,7 +922,10 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
   const [error, setError] = useState("");
 
   const canUse = !!user;
+
+  const COST_VIDEO_FROM_PROMPT = 10; // ✅ 10 jades
   const cost = COST_VIDEO_FROM_PROMPT;
+
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
@@ -931,25 +936,6 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
     });
     const data = await r.json().catch(() => null);
     if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
-    return data;
-  };
-
-  const spendJadesFallback = async ({ amount, reason }) => {
-    const auth = await getAuthHeadersGlobal();
-    if (!auth.Authorization) throw new Error("No hay sesión/token.");
-
-    const r = await fetch("/api/jades-spend", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...auth },
-      body: JSON.stringify({
-        user_id: user?.id || null,
-        amount: Number(amount),
-        reason: reason || "spend",
-      }),
-    });
-
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
     return data;
   };
 
@@ -965,23 +951,17 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
       return;
     }
 
+    if (!hasEnough) {
+      setStatus("ERROR");
+      setStatusText("No tienes jades suficientes.");
+      setError(`Necesitas ${cost} jades para generar este video.`);
+      return;
+    }
+
     setStatus("IN_QUEUE");
     setStatusText("Enviando job de video a RunPod...");
 
     try {
-      if (!hasEnough) {
-        setStatus("ERROR");
-        setStatusText("No tienes jades suficientes.");
-        setError(`Necesitas ${cost} jades para generar este video.`);
-        return;
-      }
-
-      if (typeof spendJades === "function") {
-        await spendJades({ amount: cost, reason: "video_from_prompt" });
-      } else {
-        await spendJadesFallback({ amount: cost, reason: "video_from_prompt" });
-      }
-
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
@@ -989,7 +969,6 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
-          user_id: user?.id || null,
           prompt,
           negative_prompt: negative,
           steps: Number(steps),
@@ -1006,12 +985,14 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
       setStatus("IN_PROGRESS");
       setStatusText(`Job enviado. ID: ${jid}. Generando...`);
 
+      // Poll
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 3000));
         const stData = await pollVideoStatus(jid);
 
-        const st = stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
+        const st =
+          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
@@ -1020,20 +1001,12 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
         finished = true;
 
-        const out = stData.output || stData.result || stData.data || null;
-        const maybeUrl =
-          out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
-
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          if (maybeUrl) {
-            setVideoUrl(maybeUrl);
+          if (stData.video_url) {
+            setVideoUrl(stData.video_url);
             setStatusText("Video generado con éxito.");
           } else {
-            const b64 = out?.video_b64 || out?.mp4_b64 || stData.video_b64 || null;
-            if (!b64) throw new Error("Terminado pero sin video.");
-            const blob = b64ToBlob(b64, "video/mp4");
-            setVideoUrl(URL.createObjectURL(blob));
-            setStatusText("Video generado con éxito.");
+            throw new Error("Terminado pero sin video_url en video_jobs.");
           }
         } else {
           throw new Error(stData.error || "Error al generar el video.");
@@ -1114,6 +1087,7 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
                 onChange={(e) => setSteps(Number(e.target.value))}
               />
             </div>
+
             <div className="flex items-end">
               <button
                 type="button"
