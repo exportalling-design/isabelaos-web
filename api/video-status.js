@@ -17,11 +17,8 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Método no permitido" });
     }
 
-    // ✅ AUTH ÚNICO
     const auth = await requireUser(req);
-    if (!auth.ok) {
-      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
-    }
+    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
     const job_id = req.query.job_id;
@@ -37,7 +34,6 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
-    // ✅ SOLO EL DUEÑO PUEDE VER SU JOB
     if (!data?.user_id || data.user_id !== user_id) {
       return res.status(403).json({ ok: false, error: "FORBIDDEN" });
     }
@@ -52,3 +48,7 @@ export default async function handler(req, res) {
       worker_url: data.worker_url || null,
       updated_at: data.updated_at,
     });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+}
