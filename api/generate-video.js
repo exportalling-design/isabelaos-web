@@ -1,11 +1,10 @@
 // /api/generate-video.js
 // ============================================================
-// IsabelaOS Studio - Video Generate API (Vercel Serverless Function)
+// IsabelaOS Studio - Video Generate API (Vercel Serverless)
 //
-// MODO B (Pods): crea Pod nuevo por job y DISPATCH async (sin esperar MP4)
-//
-// + AUTH UNIFICADO (requireUser)
-// + COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
+// MODO B: crea Pod nuevo por job y DISPATCH async (sin esperar MP4)
+// ✅ AUTH UNIFICADO (requireUser)
+// ✅ COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -15,7 +14,7 @@ import { requireUser } from "./_auth";
 // =====================
 // COSTOS (JADE)
 // =====================
-const COST_VIDEO_PROMPT_JADES = 3; // <- AJUSTA AQUÍ
+const COST_VIDEO_PROMPT_JADES = 10; // ✅ 10 jades por video
 
 // =====================
 // ENV (Vercel)
@@ -92,7 +91,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
 }
 
 // =====================
-// ✅ Cobro unificado
+// ✅ Cobro unificado (RPC spend_jades)
 // =====================
 async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
@@ -146,7 +145,7 @@ async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
         const txt = await r.text().catch(() => "");
         console.log("[GV] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
         if (r.ok) return true;
-        if (r.status === 405) return true;
+        if (r.status === 405) return true; // POST-only endpoint, pero responde
         lastInfo = `${url} -> ${r.status} ${txt.slice(0, 120)}`;
       } catch (e) {
         lastInfo = `${url} -> ERR ${String(e)}`;
@@ -178,7 +177,6 @@ async function acquireLock(sb) {
   if (current && current > now) return { ok: false, locked_until: row.locked_until };
 
   const { error: updErr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: lockedUntil }).eq("id", 1);
-
   if (updErr) return { ok: false, locked_until: row.locked_until };
 
   return { ok: true, locked_until: lockedUntil };
@@ -202,7 +200,8 @@ async function waitForUnlock(sb) {
 // =====================
 async function runpodCreatePodFromTemplate() {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID)
+    throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
 
   const body = {
     name: `isabela-video-${Date.now()}`,
@@ -249,19 +248,7 @@ async function runpodWaitUntilRunning(podId) {
     const pod = await runpodGetPod(podId);
     const status = pickPodStatus(pod);
 
-    if (!status) {
-      const sample = {
-        keys: Object.keys(pod || {}),
-        status: pod?.status,
-        state: pod?.state,
-        desiredStatus: pod?.desiredStatus,
-        runtime: pod?.runtime,
-      };
-      lastSample = JSON.stringify(sample).slice(0, 900);
-      console.log("[GV] waitRunning status=EMPTY sample=", lastSample, "podId=", podId);
-    } else {
-      console.log("[GV] waitRunning status=", status, "podId=", podId);
-    }
+    console.log("[GV] waitRunning status=", status || "EMPTY", "podId=", podId);
 
     if (status === "RUNNING" || status === "READY" || status === "ACTIVE") return pod;
     await sleep(POLL_MS);
@@ -379,7 +366,7 @@ export default async function handler(req, res) {
 
     console.log("[GV] payload steps=", payload.steps, "MAX_STEPS=", MAX_STEPS, "FAST_TEST_MODE=", FAST_TEST_MODE);
 
-    // ✅ COBRO ANTES de pod/job
+    // ✅ COBRO SOLO AQUÍ (no en frontend)
     await spendJadesOrThrow(user_id, COST_VIDEO_PROMPT_JADES, "generation:video_prompt", payloadRaw.ref || null);
 
     // 1) Pod nuevo + worker ready
@@ -427,25 +414,6 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString(),
       });
       throw new Error(`Worker dispatch failed: ${r.status}`);
-    }
-
-    // Normaliza respuesta del worker para debug
-    let workerReply = null;
-    try {
-      const raw = txt ? JSON.parse(txt) : null;
-      workerReply = Array.isArray(raw) ? raw[0] : raw;
-    } catch {
-      workerReply = { raw_text: txt?.slice(0, 500) || "" };
-    }
-
-    try {
-      await updateVideoJob(sb, job_id, {
-        status: workerReply?.status || "IN_PROGRESS",
-        worker_reply: workerReply,
-        updated_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.log("[GV] warn: no pude guardar worker_reply en video_jobs:", String(e));
     }
 
     return res.status(200).json({
