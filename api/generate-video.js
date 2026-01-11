@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       steps,
       guidance_scale,
       image_base64,
-      workerBase, // opcional: si ya lo calculas en tu flow actual
+      workerBase, // ✅ si tu backend ya lo calcula, puedes enviarlo; si no, usa ENV
     } = req.body || {};
 
     if (!user_id) return res.status(400).json({ ok: false, error: "Missing user_id" });
@@ -55,12 +55,21 @@ export default async function handler(req, res) {
     // -----------------------------
     // 2) Worker URL
     // -----------------------------
-    if (!workerBase) {
-      return res.status(400).json({ ok: false, error: "Missing workerBase (RunPod worker base URL)" });
+    // ✅ Prioridad:
+    //  - workerBase del body (si tu flujo ya lo calcula)
+    //  - o ENV fijo (si estás usando un pod fijo)
+    const workerBaseFinal =
+      workerBase || process.env.WORKER_BASE || process.env.RUNPOD_WORKER_BASE;
+
+    if (!workerBaseFinal) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing workerBase (RunPod worker base URL) and no WORKER_BASE env set",
+      });
     }
 
-    // ✅ Normaliza para evitar doble slash y cosas raras
-    const wb = String(workerBase).replace(/\/+$/, ""); // quita trailing slashes
+    // ✅ Normaliza para evitar doble slash
+    const wb = String(workerBaseFinal).replace(/\/+$/, "");
     const workerUrl = `${wb}/api/video_async`;
 
     // -----------------------------
@@ -68,7 +77,7 @@ export default async function handler(req, res) {
     // -----------------------------
     const payload = {
       mode,
-      user_id,
+      user_id, // el worker puede ignorarlo; aquí lo usamos para folder en Storage
       prompt,
       negative_prompt,
       height,
@@ -80,9 +89,9 @@ export default async function handler(req, res) {
       image_base64,
     };
 
-    // ✅ Timeout (evita colgadas infinitas)
+    // ✅ Timeout para evitar colgadas infinitas
     const ac = new AbortController();
-    const timeoutMs = Number(process.env.WORKER_TIMEOUT_MS || 15 * 60 * 1000); // 15 min default
+    const timeoutMs = Number(process.env.WORKER_TIMEOUT_MS || 15 * 60 * 1000); // 15 min
     const t = setTimeout(() => ac.abort(), timeoutMs);
 
     const r = await fetch(workerUrl, {
@@ -91,7 +100,6 @@ export default async function handler(req, res) {
       body: JSON.stringify(payload),
       signal: ac.signal,
     }).catch((err) => {
-      // AbortError / network errors
       throw new Error(`Worker fetch failed: ${String(err?.message || err)}`);
     });
 
@@ -110,6 +118,7 @@ export default async function handler(req, res) {
       });
     }
 
+    // ✅ esperamos MP4 binario
     const mp4ArrayBuffer = await r.arrayBuffer();
     const mp4Bytes = Buffer.from(mp4ArrayBuffer);
 
@@ -118,17 +127,17 @@ export default async function handler(req, res) {
         ok: false,
         error: "Worker returned empty/too small MP4",
         bytes: mp4Bytes?.length || 0,
+        workerUrl,
       });
     }
 
     // -----------------------------
-    // 4) Upload to Supabase Storage
+    // 4) Upload to Supabase Storage (desde Vercel)
     // -----------------------------
     const now = new Date();
     const yyyy = String(now.getUTCFullYear());
     const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
 
-    // ✅ randomUUID seguro en serverless node
     const fileKey = `${user_id}/${yyyy}/${mm}/${crypto.randomUUID()}.mp4`;
 
     const up = await sb.storage.from(SUPABASE_BUCKET).upload(fileKey, mp4Bytes, {
@@ -146,8 +155,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // signed url 7 days
-    const signed = await sb.storage.from(SUPABASE_BUCKET).createSignedUrl(fileKey, 60 * 60 * 24 * 7);
+    // ✅ signed url 7 días
+    const signed = await sb.storage
+      .from(SUPABASE_BUCKET)
+      .createSignedUrl(fileKey, 60 * 60 * 24 * 7);
 
     let video_url = null;
     if (signed?.data?.signedUrl) {
@@ -169,7 +180,6 @@ export default async function handler(req, res) {
   } catch (e) {
     const msg = String(e?.message || e);
 
-    // ✅ si fue timeout
     if (msg.toLowerCase().includes("aborted") || msg.toLowerCase().includes("abort")) {
       return res.status(504).json({ ok: false, error: "Worker timeout", detail: msg });
     }
