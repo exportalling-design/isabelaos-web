@@ -1,4 +1,4 @@
-// /api/generar-video.js
+// /api/generate-video.js
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
@@ -27,7 +27,6 @@ export default async function handler(req, res) {
       width = 1280,
       num_frames = 121,
       guidance_scale = 5.0,
-      image_base64 = null,
     } = req.body || {};
 
     if (!user_id) {
@@ -39,9 +38,9 @@ export default async function handler(req, res) {
     }
 
     const sb = sbAdmin();
-
     const job_id = crypto.randomUUID();
 
+    // ✅ INSERT SOLO COLUMNAS QUE EXISTEN
     const { error } = await sb.from("video_jobs").insert({
       job_id,
       user_id,
@@ -53,7 +52,6 @@ export default async function handler(req, res) {
       width,
       num_frames,
       guidance_scale,
-      image_base64,
       status: "PENDING",
     });
 
