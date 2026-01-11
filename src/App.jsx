@@ -930,6 +930,10 @@ function VideoFromPromptPanel({ userStatus }) {
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
+  // Seguridad: evita loop infinito si algo no cambia
+  const POLL_EVERY_MS = 3000;
+  const POLL_MAX_MS = 20 * 60 * 1000; // 20 min
+
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
     const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
@@ -966,16 +970,18 @@ function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
-      // ✅ Opción A: backend crea job y responde {ok:true, job_id}
+      // ✅ Endpoint en INGLÉS
+      // ✅ Mandar user_id (tu API lo necesita)
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
+          user_id: user.id, // ✅ FIX: evita Missing user_id
           mode: "t2v",
           prompt,
           negative_prompt: negative,
           steps: Number(steps),
-          // Si quieres exponer más params:
+          // Opcional: params extra
           // height: 704, width: 1280, num_frames: 121, fps: 24, guidance_scale: 5.0
         }),
       });
@@ -990,10 +996,16 @@ function VideoFromPromptPanel({ userStatus }) {
       setStatus("DISPATCHED");
       setStatusText(`Job creado. ID: ${jid}. Esperando resultado...`);
 
-      // Poll
+      // Poll con timeout
+      const startedAt = Date.now();
       let finished = false;
+
       while (!finished) {
-        await new Promise((r) => setTimeout(r, 3000));
+        if (Date.now() - startedAt > POLL_MAX_MS) {
+          throw new Error("Timeout esperando el video. Intenta de nuevo o revisa el worker.");
+        }
+
+        await new Promise((r) => setTimeout(r, POLL_EVERY_MS));
         const stData = await pollVideoStatus(jid);
 
         const st =
@@ -1002,7 +1014,9 @@ function VideoFromPromptPanel({ userStatus }) {
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
+        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "PENDING"].includes(st)) {
+          continue;
+        }
 
         finished = true;
 
@@ -1042,6 +1056,10 @@ function VideoFromPromptPanel({ userStatus }) {
       </div>
     );
   }
+
+  const isBusy = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING"].includes(
+    status
+  );
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -1097,14 +1115,10 @@ function VideoFromPromptPanel({ userStatus }) {
               <button
                 type="button"
                 onClick={handleGenerateVideo}
-                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !hasEnough}
+                disabled={isBusy || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {status === "IN_QUEUE" || status === "IN_PROGRESS"
-                  ? "Generando..."
-                  : !hasEnough
-                  ? "Sin jades"
-                  : "Generar video"}
+                {isBusy ? "Generando..." : !hasEnough ? "Sin jades" : "Generar video"}
               </button>
             </div>
           </div>
