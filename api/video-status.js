@@ -1,6 +1,5 @@
-// /api/video-status.js
 import { createClient } from "@supabase/supabase-js";
-import { requireUser } from "./_auth";
+import { requireUser } from "./_auth.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -13,41 +12,49 @@ function sbAdmin() {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "GET") {
-      return res.status(405).json({ ok: false, error: "Method not allowed" });
+    const { job_id } = req.query || {};
+    if (!job_id) {
+      return res.status(400).json({ ok: false, error: "Missing job_id" });
     }
 
+    // ✅ Auth (recomendado)
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
-
-    const job_id = req.query?.job_id;
-    if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
 
     const sb = sbAdmin();
 
     const { data: job, error } = await sb
       .from("video_jobs")
-      .select("job_id,user_id,status,video_url,error,created_at,updated_at")
+      .select("*")
       .eq("job_id", job_id)
+      .eq("user_id", user_id) // ✅ evita que alguien consulte jobs de otro usuario
       .single();
 
-    if (error || !job) return res.status(404).json({ ok: false, error: "Job not found" });
-
-    // Seguridad: el job debe ser del usuario logueado
-    if (job.user_id !== user_id) {
-      return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+    if (error || !job) {
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
+    // ✅ Si aún no hay worker_url/pod_id → NO es error
+    if (!job.worker_url && !job.pod_id) {
+      return res.status(200).json({
+        ok: true,
+        status: job.status || "PENDING",
+      });
+    }
+
+    // ✅ Cuando ya exista video_url, lo devolvemos
     return res.status(200).json({
       ok: true,
-      job_id: job.job_id,
-      status: job.status || "PENDING",
+      status: job.status || "IN_PROGRESS",
       video_url: job.video_url || null,
       error: job.error || null,
-      updated_at: job.updated_at || null,
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    console.error(e);
+    return res.status(500).json({
+      ok: false,
+      error: String(e.message || e),
+    });
   }
 }
