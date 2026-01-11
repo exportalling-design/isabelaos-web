@@ -1,7 +1,7 @@
 // /api/generate-video.js
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
-import { requireUser } from "./_auth";
+import { requireUser } from "./_auth.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
