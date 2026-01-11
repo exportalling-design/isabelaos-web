@@ -906,7 +906,7 @@ function LibraryView() {
 // ---------------------------------------------------------
 // Video desde prompt (logueado)
 // ✅ AUTH (token)
-// ✅ NO cobra en frontend (cobra backend)
+// ✅ NO polling / NO job_id (Opción A)
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
@@ -917,7 +917,6 @@ function VideoFromPromptPanel({ userStatus }) {
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
-  const [jobId, setJobId] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
@@ -929,20 +928,14 @@ function VideoFromPromptPanel({ userStatus }) {
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
-  const pollVideoStatus = async (job_id) => {
-    const auth = await getAuthHeadersGlobal();
-    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
-      headers: { ...auth },
-    });
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
-    return data;
+  const getUserId = () => {
+    // dependiendo de tu auth, puede ser user.id o user.user.id
+    return user?.id || user?.user?.id || null;
   };
 
   const handleGenerateVideo = async () => {
     setError("");
     setVideoUrl(null);
-    setJobId(null);
 
     if (!canUse) {
       setStatus("ERROR");
@@ -958,60 +951,52 @@ function VideoFromPromptPanel({ userStatus }) {
       return;
     }
 
-    setStatus("IN_QUEUE");
-    setStatusText("Enviando job de video a RunPod...");
+    const uid = getUserId();
+    if (!uid) {
+      setStatus("ERROR");
+      setStatusText("Sesión inválida.");
+      setError("Missing user_id (no se encontró el id del usuario en sesión).");
+      return;
+    }
+
+    setStatus("IN_PROGRESS");
+    setStatusText("Generando video...");
 
     try {
       const auth = await getAuthHeadersGlobal();
-      if (!auth.Authorization) throw new Error("No hay sesión/token.");
+      if (!auth?.Authorization) throw new Error("No hay sesión/token.");
 
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
+          user_id: uid, // ✅ FIX
+          mode: "t2v",
           prompt,
           negative_prompt: negative,
           steps: Number(steps),
+          // opcional: si quieres mandar defaults desde UI:
+          // height: 512,
+          // width: 896,
+          // num_frames: 49,
+          // fps: 24,
+          // guidance_scale: 5.0,
         }),
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok || !data?.job_id) {
-        throw new Error(data?.error || "Error /api/generate-video");
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || data?.detail || "Error /api/generate-video");
       }
 
-      const jid = data.job_id;
-      setJobId(jid);
-      setStatus("IN_PROGRESS");
-      setStatusText(`Job enviado. ID: ${jid}. Generando...`);
-
-      // Poll
-      let finished = false;
-      while (!finished) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const stData = await pollVideoStatus(jid);
-
-        const st =
-          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
-
-        setStatus(st);
-        setStatusText(`Estado actual: ${st}...`);
-
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
-
-        finished = true;
-
-        if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          if (stData.video_url) {
-            setVideoUrl(stData.video_url);
-            setStatusText("Video generado con éxito.");
-          } else {
-            throw new Error("Terminado pero sin video_url en video_jobs.");
-          }
-        } else {
-          throw new Error(stData.error || "Error al generar el video.");
-        }
+      if (!data?.video_url) {
+        throw new Error("El backend respondió ok pero sin video_url.");
       }
+
+      setVideoUrl(data.video_url);
+      setStatus("COMPLETED");
+      setStatusText("Video generado con éxito.");
     } catch (err) {
       console.error(err);
       setStatus("ERROR");
@@ -1053,7 +1038,6 @@ function VideoFromPromptPanel({ userStatus }) {
           <div className="mt-1 text-[11px] text-neutral-400">
             Costo: <span className="font-semibold text-white">{cost}</span> jades por video
           </div>
-          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -1092,10 +1076,10 @@ function VideoFromPromptPanel({ userStatus }) {
               <button
                 type="button"
                 onClick={handleGenerateVideo}
-                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !hasEnough}
+                disabled={status === "IN_PROGRESS" || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {status === "IN_QUEUE" || status === "IN_PROGRESS"
+                {status === "IN_PROGRESS"
                   ? "Generando..."
                   : !hasEnough
                   ? "Sin jades"
