@@ -1,4 +1,3 @@
-// /api/generate-video.js
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { requireUser } from "./_auth.js";
@@ -18,6 +17,7 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
+    // ✅ Auth real: user_id sale del token (no del body)
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
@@ -56,6 +56,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true, job_id, status: "PENDING" });
   } catch (e) {
+    console.error(e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 }
