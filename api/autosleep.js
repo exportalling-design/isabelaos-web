@@ -6,8 +6,8 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// ✅ pon AUTOSLEEP_IDLE_MINUTES=5 en Vercel
-const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "60", 10);
+// ✅ default 5 min
+const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "5", 10);
 
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
@@ -37,7 +37,7 @@ async function runpodStopPod(podId) {
   return true;
 }
 
-// Mini-lock (best-effort)
+// Mini-lock: intenta tomar lock por X segundos (sin pisar un lock activo)
 async function tryAcquireLock(sb, seconds = 120) {
   const now = new Date();
   const until = new Date(now.getTime() + seconds * 1000).toISOString();
@@ -46,9 +46,7 @@ async function tryAcquireLock(sb, seconds = 120) {
   if (lerr) throw lerr;
 
   const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
-  if (lockedUntil && lockedUntil > now) {
-    return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
-  }
+  if (lockedUntil && lockedUntil > now) return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
 
   const { error: uerr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: until }).eq("id", 1);
   if (uerr) throw uerr;
@@ -68,23 +66,23 @@ export default async function handler(req, res) {
       .single();
     if (psErr) throw psErr;
 
-    const status = String(podState?.status || "").toUpperCase();
     const podId = podState?.pod_id || null;
     const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
 
-    // ✅ 2) SOLO bloquea cuando realmente no se puede dormir
-    //    (RUNNING sí puede dormirse si está idle)
-    if (["BUSY", "STARTING", "CREATING"].includes(status)) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: `pod_state.status=${status}` });
+    // ✅ TU ESQUEMA: busy boolean manda
+    const busy = Boolean(podState?.busy);
+
+    // 2) si está busy, no dormir
+    if (busy) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "pod_state.busy=true" });
     }
 
     // 3) si hay jobs activos, no dormir
     const { data: activeJobs, error: ajErr } = await sb
       .from(VIDEO_JOBS_TABLE)
       .select("id,status,updated_at")
-      .in("status", ["PENDING", "DISPATCHED", "RUNNING", "IN_PROGRESS", "QUEUED"])
+      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING", "RUNNING"])
       .limit(1);
-
     if (ajErr) throw ajErr;
 
     if (activeJobs && activeJobs.length > 0) {
@@ -108,28 +106,29 @@ export default async function handler(req, res) {
         reason: "not idle enough",
         idle_minutes: idleMin,
         threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
-        pod_state_status: status,
       });
     }
 
-    // 6) lock anti-race con START
+    // 6) toma mini-lock
     const lock = await tryAcquireLock(sb, 120);
     if (!lock.ok) {
       return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason, locked_until: lock.locked_until });
     }
 
-    // 7) STOP pod
+    // 7) STOP pod (PAUSA)
     await runpodStopPod(podId);
 
     // 8) actualizar pod_state
     await sb.from(POD_STATE_TABLE).update({
       status: "SLEEPING",
+      busy: false,
       last_used_at: now.toISOString(),
     }).eq("id", 1);
 
-    return res.status(200).json({ ok: true, action: "STOPPED", podId, idle_minutes: idleMin });
+    return res.status(200).json({ ok: true, action: "STOPPED", podId });
 
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    const msg = String(e?.message || e);
+    return res.status(500).json({ ok: false, error: msg });
   }
 }
