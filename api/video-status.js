@@ -27,7 +27,8 @@ export default async function handler(req, res) {
     const { data: job, error } = await sb
       .from("video_jobs")
       .select("*")
-      .eq("job_id", job_id)
+      // ✅ FIX REAL: en tu tabla el id del job es "id" (uuid), NO "job_id"
+      .eq("id", job_id)
       .eq("user_id", user_id) // ✅ evita que alguien consulte jobs de otro usuario
       .single();
 
