@@ -1,3 +1,4 @@
+// /api/generate-video.js
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { requireUser } from "./_auth.js";
@@ -109,6 +110,7 @@ export default async function handler(req, res) {
       width = 1280,
       num_frames = 121,
       guidance_scale = 5.0,
+      // image_base64 (si luego querés i2v, agregalo aquí)
     } = req.body || {};
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
@@ -158,6 +160,7 @@ export default async function handler(req, res) {
 
       const shouldWake = ["SLEEPING", "STOPPED"].includes(status);
 
+      // ✅ 1) Si está STOPPED/SLEEPING -> wake normal
       if (shouldWake) {
         const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
         if (!lock.ok) {
@@ -184,39 +187,69 @@ export default async function handler(req, res) {
             wakeInfo = { attempted: true, ok: true, action: "WOKE", pod_id: currentPodId, health_url: ready.url };
           }
         }
+
+      // ✅ 2) Si NO está STOPPED/SLEEPING (incluye BUSY/STARTING/RUNNING/UNKNOWN)
+      //    igual probamos health. Si health falla => hacemos start.
       } else {
-        // ✅ Si dice RUNNING, igual verificamos health rápido (sin romper)
-        if (status === "RUNNING") {
-          const ready = await waitForWorker(currentPodId);
-          if (!ready.ok) {
-            // Intento extra: start “idempotente” (no debería dañar)
-            const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
-            if (lock.ok) {
+        const ready = await waitForWorker(currentPodId);
+
+        if (ready.ok) {
+          wakeInfo = {
+            attempted: true,
+            ok: true,
+            action: "NO_WAKE_NEEDED",
+            pod_status: status || "UNKNOWN",
+            pod_id: currentPodId,
+            health_url: ready.url,
+          };
+        } else {
+          // health no responde => start “a prueba de status”
+          const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
+          if (!lock.ok) {
+            wakeInfo = {
+              attempted: true,
+              ok: false,
+              action: "DEAD_BUT_LOCKED",
+              pod_status: status || "UNKNOWN",
+              error: ready.error,
+              health_url: ready.url,
+              locked_until: lock.locked_until,
+            };
+          } else {
+            await sb.from(POD_STATE_TABLE).update({
+              status: "STARTING",
+              last_used_at: new Date().toISOString(),
+              pod_id: currentPodId,
+            }).eq("id", 1);
+
+            await runpodStartPod(currentPodId);
+
+            const ready2 = await waitForWorker(currentPodId);
+            if (ready2.ok) {
               await sb.from(POD_STATE_TABLE).update({
-                status: "STARTING",
+                status: "RUNNING",
                 last_used_at: new Date().toISOString(),
               }).eq("id", 1);
 
-              await runpodStartPod(currentPodId);
-
-              const ready2 = await waitForWorker(currentPodId);
-              if (ready2.ok) {
-                await sb.from(POD_STATE_TABLE).update({
-                  status: "RUNNING",
-                  last_used_at: new Date().toISOString(),
-                }).eq("id", 1);
-                wakeInfo = { attempted: true, ok: true, action: "RECOVERED", pod_id: currentPodId, health_url: ready2.url };
-              } else {
-                wakeInfo = { attempted: true, ok: false, action: "RUNNING_BUT_DEAD", error: ready2.error, health_url: ready2.url };
-              }
+              wakeInfo = {
+                attempted: true,
+                ok: true,
+                action: "RECOVERED",
+                pod_status: status || "UNKNOWN",
+                pod_id: currentPodId,
+                health_url: ready2.url,
+              };
             } else {
-              wakeInfo = { attempted: true, ok: false, action: "RUNNING_BUT_DEAD_LOCKED", error: ready.error, health_url: ready.url };
+              wakeInfo = {
+                attempted: true,
+                ok: false,
+                action: "STARTED_BUT_NOT_READY",
+                pod_status: status || "UNKNOWN",
+                error: ready2.error,
+                health_url: ready2.url,
+              };
             }
-          } else {
-            wakeInfo = { attempted: true, ok: true, action: "NO_WAKE_NEEDED", pod_status: status, pod_id: currentPodId };
           }
-        } else {
-          wakeInfo = { attempted: true, ok: true, action: "NO_WAKE_NEEDED", pod_status: status || "UNKNOWN", pod_id: currentPodId };
         }
       }
     } catch (wakeErr) {
