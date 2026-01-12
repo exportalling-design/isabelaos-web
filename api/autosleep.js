@@ -6,7 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// ✅ ahora lo controlas por ENV en Vercel: AUTOSLEEP_IDLE_MINUTES=5
+// ✅ pon AUTOSLEEP_IDLE_MINUTES=5 en Vercel
 const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "60", 10);
 
 const POD_STATE_TABLE = "pod_state";
@@ -37,12 +37,11 @@ async function runpodStopPod(podId) {
   return true;
 }
 
-// Mini-lock: intenta tomar lock por X segundos (sin pisar un lock activo)
+// Mini-lock (best-effort)
 async function tryAcquireLock(sb, seconds = 120) {
   const now = new Date();
   const until = new Date(now.getTime() + seconds * 1000).toISOString();
 
-  // Lee lock actual
   const { data: lockRow, error: lerr } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
   if (lerr) throw lerr;
 
@@ -51,11 +50,7 @@ async function tryAcquireLock(sb, seconds = 120) {
     return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
   }
 
-  // Toma lock
-  const { error: uerr } = await sb
-    .from(POD_LOCK_TABLE)
-    .update({ locked_until: until })
-    .eq("id", 1);
+  const { error: uerr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: until }).eq("id", 1);
   if (uerr) throw uerr;
 
   return { ok: true, locked_until: until };
@@ -77,13 +72,13 @@ export default async function handler(req, res) {
     const podId = podState?.pod_id || null;
     const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
 
-    // 2) si está BUSY/RUNNING/STARTING/CREATING, no dormir
-    if (["BUSY", "RUNNING", "STARTING", "CREATING"].includes(status)) {
+    // ✅ 2) SOLO bloquea cuando realmente no se puede dormir
+    //    (RUNNING sí puede dormirse si está idle)
+    if (["BUSY", "STARTING", "CREATING"].includes(status)) {
       return res.status(200).json({ ok: true, action: "SKIP", reason: `pod_state.status=${status}` });
     }
 
     // 3) si hay jobs activos, no dormir
-    // ✅ IMPORTANTE: agregamos RUNNING porque tu worker usa RUNNING real
     const { data: activeJobs, error: ajErr } = await sb
       .from(VIDEO_JOBS_TABLE)
       .select("id,status,updated_at")
@@ -93,12 +88,7 @@ export default async function handler(req, res) {
     if (ajErr) throw ajErr;
 
     if (activeJobs && activeJobs.length > 0) {
-      return res.status(200).json({
-        ok: true,
-        action: "SKIP",
-        reason: "active video job exists",
-        sample: activeJobs[0],
-      });
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "active video job exists", sample: activeJobs[0] });
     }
 
     // 4) si no hay podId, nada que hacer
@@ -118,35 +108,28 @@ export default async function handler(req, res) {
         reason: "not idle enough",
         idle_minutes: idleMin,
         threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
+        pod_state_status: status,
       });
     }
 
-    // 6) toma mini-lock para que no haya race con un START
+    // 6) lock anti-race con START
     const lock = await tryAcquireLock(sb, 120);
     if (!lock.ok) {
-      return res.status(200).json({
-        ok: true,
-        action: "SKIP",
-        reason: lock.reason,
-        locked_until: lock.locked_until,
-      });
+      return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason, locked_until: lock.locked_until });
     }
 
-    // 7) STOP pod (PAUSA)
+    // 7) STOP pod
     await runpodStopPod(podId);
 
-    // 8) actualizar pod_state (NO borres pod_id)
-    await sb
-      .from(POD_STATE_TABLE)
-      .update({
-        status: "SLEEPING",
-        last_used_at: now.toISOString(),
-      })
-      .eq("id", 1);
+    // 8) actualizar pod_state
+    await sb.from(POD_STATE_TABLE).update({
+      status: "SLEEPING",
+      last_used_at: now.toISOString(),
+    }).eq("id", 1);
 
-    return res.status(200).json({ ok: true, action: "STOPPED", podId });
+    return res.status(200).json({ ok: true, action: "STOPPED", podId, idle_minutes: idleMin });
+
   } catch (e) {
-    const msg = String(e?.message || e);
-    return res.status(500).json({ ok: false, error: msg });
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 }
