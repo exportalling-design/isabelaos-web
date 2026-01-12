@@ -6,10 +6,8 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// ✅ más tiempo (default 60 min)
 const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "60", 10);
 
-// Tablas
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 const VIDEO_JOBS_TABLE = "video_jobs";
@@ -28,14 +26,36 @@ function runpodHeaders() {
   };
 }
 
-async function runpodTerminatePod(podId) {
-  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-    method: "DELETE",
+async function runpodStopPod(podId) {
+  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
+    method: "POST",
     headers: runpodHeaders(),
   });
   const t = await r.text().catch(() => "");
-  if (!r.ok) throw new Error(`RunPod terminate failed (${r.status}): ${t}`);
+  if (!r.ok) throw new Error(`RunPod stop failed (${r.status}): ${t}`);
   return true;
+}
+
+// Mini-lock: intenta tomar lock por X segundos (sin pisar un lock activo)
+async function tryAcquireLock(sb, seconds = 120) {
+  const now = new Date();
+  const until = new Date(now.getTime() + seconds * 1000).toISOString();
+
+  // Lee lock actual
+  const { data: lockRow, error: lerr } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
+  if (lerr) throw lerr;
+
+  const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
+  if (lockedUntil && lockedUntil > now) return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
+
+  // Toma lock
+  const { error: uerr } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: until })
+    .eq("id", 1);
+  if (uerr) throw uerr;
+
+  return { ok: true, locked_until: until };
 }
 
 export default async function handler(req, res) {
@@ -48,44 +68,35 @@ export default async function handler(req, res) {
       .select("*")
       .eq("id", 1)
       .single();
-
     if (psErr) throw psErr;
 
     const status = String(podState?.status || "").toUpperCase();
     const podId = podState?.pod_id || null;
     const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
 
-    // 2) si está BUSY/RUNNING, no dormir
-    if (status === "BUSY" || status === "RUNNING" || status === "STARTING" || status === "CREATING") {
+    // 2) si está BUSY/RUNNING/STARTING/CREATING, no dormir
+    if (["BUSY", "RUNNING", "STARTING", "CREATING"].includes(status)) {
       return res.status(200).json({ ok: true, action: "SKIP", reason: `pod_state.status=${status}` });
     }
 
-    // 3) si el lock está activo, no dormir
-    const { data: lockRow } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
-    const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
-    if (lockedUntil && lockedUntil > new Date()) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "lock active", locked_until: lockRow.locked_until });
-    }
-
-    // 4) si hay jobs activos, no dormir
+    // 3) si hay jobs activos, no dormir
     const { data: activeJobs, error: ajErr } = await sb
       .from(VIDEO_JOBS_TABLE)
-      .select("job_id,status,updated_at")
-      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS"])
+      .select("id,status,updated_at")
+      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING"])
       .limit(1);
-
     if (ajErr) throw ajErr;
 
     if (activeJobs && activeJobs.length > 0) {
       return res.status(200).json({ ok: true, action: "SKIP", reason: "active video job exists", sample: activeJobs[0] });
     }
 
-    // 5) si no hay podId, nada que hacer
+    // 4) si no hay podId, nada que hacer
     if (!podId) {
       return res.status(200).json({ ok: true, action: "SKIP", reason: "no pod_id in pod_state" });
     }
 
-    // 6) idle check
+    // 5) idle check
     const now = new Date();
     const idleMs = lastUsedAt ? (now - lastUsedAt) : Number.POSITIVE_INFINITY;
     const idleMin = idleMs / 60000;
@@ -100,16 +111,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // 7) terminar pod
-    await runpodTerminatePod(podId);
+    // 6) toma mini-lock para que no haya race con un START
+    const lock = await tryAcquireLock(sb, 120);
+    if (!lock.ok) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason, locked_until: lock.locked_until });
+    }
 
-    // 8) actualizar pod_state
+    // 7) STOP pod (PAUSA)
+    await runpodStopPod(podId); // 2
+
+    // 8) actualizar pod_state (NO borres pod_id)
     await sb.from(POD_STATE_TABLE).update({
       status: "SLEEPING",
       last_used_at: now.toISOString(),
     }).eq("id", 1);
 
-    return res.status(200).json({ ok: true, action: "TERMINATED", podId });
+    return res.status(200).json({ ok: true, action: "STOPPED", podId });
 
   } catch (e) {
     const msg = String(e?.message || e);
