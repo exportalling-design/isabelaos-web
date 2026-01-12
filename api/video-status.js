@@ -24,30 +24,43 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    const { data: job, error } = await sb
-      .from("video_jobs")
-      .select("*")
-      // ✅ FIX REAL: en tu tabla el id del job es "id" (uuid), NO "job_id"
-      .eq("id", job_id)
-      .eq("user_id", user_id) // ✅ evita que alguien consulte jobs de otro usuario
-      .single();
+    // ✅ FIX MÍNIMO:
+    // En tu tabla el PK es "id" (uuid). Tu frontend manda job_id = ese uuid.
+    // Entonces se busca por id. (Dejo fallback por si existe columna job_id en algún entorno.)
+    let job = null;
 
-    if (error || !job) {
+    // 1) Buscar por id
+    {
+      const { data, error } = await sb
+        .from("video_jobs")
+        .select("*")
+        .eq("id", job_id)       // ✅ CAMBIO CLAVE
+        .eq("user_id", user_id) // ✅ evita que otro usuario consulte
+        .single();
+
+      if (!error && data) job = data;
+    }
+
+    // 2) Fallback: si existiera columna job_id en algún entorno viejo
+    if (!job) {
+      const { data } = await sb
+        .from("video_jobs")
+        .select("*")
+        .eq("job_id", job_id)
+        .eq("user_id", user_id)
+        .single();
+      if (data) job = data;
+    }
+
+    if (!job) {
       return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
-    // ✅ Si aún no hay worker_url/pod_id → NO es error
-    if (!job.worker_url && !job.pod_id) {
-      return res.status(200).json({
-        ok: true,
-        status: job.status || "PENDING",
-      });
-    }
-
-    // ✅ Cuando ya exista video_url, lo devolvemos
+    // ✅ Siempre devolvemos status (aunque no haya pod/worker_url todavía)
+    // ✅ Y cuando exista video_url, lo devolvemos.
     return res.status(200).json({
       ok: true,
-      status: job.status || "IN_PROGRESS",
+      status: job.status || "PENDING",
       video_url: job.video_url || null,
       error: job.error || null,
     });
