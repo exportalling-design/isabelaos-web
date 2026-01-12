@@ -907,7 +907,8 @@ function LibraryView() {
 // Video desde prompt (logueado)
 // ✅ AUTH (token)
 // ✅ NO cobra en frontend (cobra backend)
-// ✅ Opción A: /api/generate-video responde rápido con job_id
+// ✅ /api/generate-video responde rápido con job_id
+// ✅ FIX: normaliza status + tolera latencia de video_url + soporta keys alternativas
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
@@ -934,6 +935,44 @@ function VideoFromPromptPanel({ userStatus }) {
   const POLL_EVERY_MS = 3000;
   const POLL_MAX_MS = 20 * 60 * 1000; // 20 min
 
+  // ✅ FIX: cuando status ya es COMPLETED pero video_url tarda en aparecer,
+  // damos un "grace period" extra para reintentar.
+  const COMPLETED_URL_GRACE_MS = 45 * 1000; // 45s
+  const COMPLETED_URL_RETRY_EVERY_MS = 3000;
+
+  const normalizeStatus = (raw) => {
+    const s = String(raw ?? "").trim();
+    if (!s) return "IN_PROGRESS";
+    return s.toUpperCase();
+  };
+
+  const extractVideoUrl = (stData) => {
+    if (!stData) return null;
+
+    // ✅ casos comunes
+    const direct =
+      stData.video_url ||
+      stData.videoUrl ||
+      stData.url ||
+      stData.signed_url ||
+      stData.signedUrl ||
+      stData.public_url ||
+      stData.publicUrl;
+
+    if (direct) return direct;
+
+    // ✅ por si viene dentro de data/result
+    const nested =
+      stData.data?.video_url ||
+      stData.data?.videoUrl ||
+      stData.result?.video_url ||
+      stData.result?.videoUrl ||
+      stData.payload?.video_url ||
+      stData.payload?.videoUrl;
+
+    return nested || null;
+  };
+
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
     const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
@@ -943,6 +982,8 @@ function VideoFromPromptPanel({ userStatus }) {
     if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
     return data;
   };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const handleGenerateVideo = async () => {
     setError("");
@@ -970,18 +1011,16 @@ function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
-      // ✅ Endpoint en INGLÉS
-      // ✅ Mandar user_id (tu API lo necesita)
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
-          user_id: user.id, // ✅ FIX: evita Missing user_id
+          user_id: user.id, // ✅ requerido por tu esquema del worker
           mode: "t2v",
           prompt,
           negative_prompt: negative,
           steps: Number(steps),
-          // Opcional: params extra
+          // opcional:
           // height: 704, width: 1280, num_frames: 121, fps: 24, guidance_scale: 5.0
         }),
       });
@@ -996,40 +1035,60 @@ function VideoFromPromptPanel({ userStatus }) {
       setStatus("DISPATCHED");
       setStatusText(`Job creado. ID: ${jid}. Esperando resultado...`);
 
-      // Poll con timeout
       const startedAt = Date.now();
-      let finished = false;
 
-      while (!finished) {
+      while (true) {
         if (Date.now() - startedAt > POLL_MAX_MS) {
           throw new Error("Timeout esperando el video. Intenta de nuevo o revisa el worker.");
         }
 
-        await new Promise((r) => setTimeout(r, POLL_EVERY_MS));
+        await sleep(POLL_EVERY_MS);
+
         const stData = await pollVideoStatus(jid);
 
-        const st =
+        // ✅ FIX: normaliza status (puede venir en status/state/job_status/phase)
+        const rawSt =
           stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
+        const st = normalizeStatus(rawSt);
 
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "PENDING"].includes(st)) {
+        // Estados “en progreso”
+        if (
+          ["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "PENDING"].includes(st)
+        ) {
           continue;
         }
 
-        finished = true;
-
+        // ✅ Cuando ya finaliza, intentamos extraer url
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          if (stData.video_url) {
-            setVideoUrl(stData.video_url);
-            setStatusText("Video generado con éxito.");
-          } else {
-            throw new Error("Terminado pero sin video_url en video_jobs.");
+          let url = extractVideoUrl(stData);
+
+          // ✅ FIX: grace period por si el backend marca COMPLETED y la URL se llena unos segundos después
+          if (!url) {
+            const graceStart = Date.now();
+            setStatusText("Finalizado. Esperando URL del video (sincronizando)...");
+            while (Date.now() - graceStart < COMPLETED_URL_GRACE_MS) {
+              await sleep(COMPLETED_URL_RETRY_EVERY_MS);
+              const stData2 = await pollVideoStatus(jid);
+              url = extractVideoUrl(stData2);
+              if (url) break;
+            }
           }
-        } else {
-          throw new Error(stData.error || "Error al generar el video.");
+
+          if (url) {
+            setVideoUrl(url);
+            setStatusText("Video generado con éxito.");
+            return;
+          }
+
+          // si de verdad no aparece tras el grace period, ahora sí error
+          throw new Error("Terminado pero sin video_url en video_jobs (tras reintentos).");
         }
+
+        // Estados de error
+        throw new Error(stData.error || "Error al generar el video.");
       }
     } catch (err) {
       console.error(err);
