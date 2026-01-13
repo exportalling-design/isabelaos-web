@@ -2,16 +2,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
-// ============================================================
-// IsabelaOS Studio — Video Status
-// - Busca job por id (PK uuid) (principal)
-// - Fallback por job_id (si existiera)
-// - Importante: permite user_id NULL (jobs viejos) para no dar "Job not found"
-// ============================================================
-
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
 const VIDEO_JOBS_TABLE = "video_jobs";
 
 function sbAdmin() {
@@ -23,6 +15,11 @@ function sbAdmin() {
 }
 
 export default async function handler(req, res) {
+  // ✅ anti-cache (arregla 304)
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+
   try {
     const { job_id } = req.query || {};
     if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
@@ -33,29 +30,26 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // Helper: permitir job con user_id = usuario actual O user_id NULL (legacy)
-    const userOrNull = `user_id.eq.${user_id},user_id.is.null`;
-
-    // 1) Principal: por PK id
+    // ✅ 1) PK id (primera columna id uuid)
     let job = null;
     {
       const { data, error } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("*")
         .eq("id", job_id)
-        .or(userOrNull)
+        .eq("user_id", user_id)
         .maybeSingle();
 
       if (!error && data) job = data;
     }
 
-    // 2) Fallback: por job_id (si existiera esa columna/uso)
+    // ✅ 2) Fallback por job_id si existiera
     if (!job) {
       const { data, error } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("*")
         .eq("job_id", job_id)
-        .or(userOrNull)
+        .eq("user_id", user_id)
         .maybeSingle();
 
       if (!error && data) job = data;
@@ -71,8 +65,6 @@ export default async function handler(req, res) {
       error: job.error || null,
       created_at: job.created_at || null,
       updated_at: job.updated_at || null,
-      // debug opcional (puedes quitarlo si no quieres)
-      user_id: job.user_id || null,
     });
   } catch (e) {
     console.error("[video-status] fatal:", e);
