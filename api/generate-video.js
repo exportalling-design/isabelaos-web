@@ -16,6 +16,8 @@
 // Solo tiene: `id` y `locked_until`.
 // Por eso el lock se implementa con un único registro id=1.
 //
+// IMPORTANTE (SERVERLESS):
+// NO liberamos el lock manualmente. El lock vive por TTL (locked_until).
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -34,7 +36,9 @@ const VIDEO_TEMPLATE_ID =
 
 // (Opcional) si tu template monta Network Volume
 const VIDEO_NETWORK_VOLUME_ID =
-  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || process.env.RUNPOD_NETWORK_VOLUME_ID || null;
+  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID ||
+  process.env.RUNPOD_NETWORK_VOLUME_ID ||
+  null;
 
 // Tablas
 const POD_LOCK_TABLE = "pod_lock";
@@ -47,7 +51,10 @@ const VIDEO_JOBS_TABLE = "video_jobs";
 const COSTO_JADES_VIDEO = 10;
 
 // Lock: cuánto tiempo se reserva el lock (segundos)
-const LOCK_TTL_SECONDS = parseInt(process.env.VIDEO_LOCK_TTL_SECONDS || "120", 10);
+const LOCK_TTL_SECONDS = parseInt(
+  process.env.VIDEO_LOCK_TTL_SECONDS || "120",
+  10
+);
 
 // Esperas / reintentos
 const WAIT_RUNNING_TIMEOUT_MS = parseInt(
@@ -75,7 +82,8 @@ const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 // ------------------------------------------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
-  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_SERVICE_ROLE_KEY)
+    throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
@@ -95,7 +103,8 @@ function sumarSegundosIso(segundos) {
 }
 
 async function runpodFetch(path, { method = "GET", body } = {}) {
-  if (!RUNPOD_API_KEY) throw new Error("Falta RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
+  if (!RUNPOD_API_KEY)
+    throw new Error("Falta RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
 
   const url = `https://api.runpod.io${path}`;
   const res = await fetch(url, {
@@ -128,25 +137,21 @@ async function runpodFetch(path, { method = "GET", body } = {}) {
 }
 
 // ------------------------------------------------------------
-// LOCK (Supabase) usando pod_lock(id=1, locked_until)
+// LOCK (Supabase) usando pod_lock(id=1, locked_until) - SOLO TTL
 // ------------------------------------------------------------
 //
 // Idea:
 // - Si locked_until > ahora => lock ocupado.
 // - Si locked_until <= ahora (o null) => tomamos lock actualizando locked_until = ahora + TTL.
-// - Hacemos update condicional para que sea "casi atómico" usando filtros.
+// - Update condicional para minimizar colisiones.
 //
-// Nota:
-// En PostgREST/Supabase no es 100% perfecto como advisory_lock,
-// pero con un solo front + vercel suele ser suficiente.
-// Si más adelante quieres perfección total: hacemos un RPC con SQL.
-//
+// IMPORTANTE:
+// No liberamos el lock en serverless; expira por TTL.
 // ------------------------------------------------------------
 async function adquirirLock(sb) {
   const nowIso = ahoraIso();
   const untilIso = sumarSegundosIso(LOCK_TTL_SECONDS);
 
-  // Intento de tomar lock: actualizar solo si está libre
   const { data, error } = await sb
     .from(POD_LOCK_TABLE)
     .update({ locked_until: untilIso })
@@ -156,7 +161,6 @@ async function adquirirLock(sb) {
 
   if (error) throw error;
 
-  // Si no actualizó nada, significa que estaba ocupado
   if (!data || data.length === 0) {
     return { ok: false, motivo: "LOCK_OCUPADO" };
   }
@@ -164,42 +168,25 @@ async function adquirirLock(sb) {
   return { ok: true, locked_until: untilIso };
 }
 
-async function liberarLock(sb) {
-  const pastIso = new Date(Date.now() - 1000).toISOString();
-  await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
-}
-
 // ------------------------------------------------------------
 // RunPod - Crear pod desde template
-// ------------------------------------------------------------
-//
-// OJO: Este payload puede variar según la versión/API.
-// Como ya viste antes, RunPod se queja si mandas keys que no existen.
-// Aquí solo enviamos lo mínimo.
-//
-// Si tu template ya define GPU y demás, NO mandes gpuTypeId(s).
-//
 // ------------------------------------------------------------
 async function runpodCrearPodDesdeTemplate() {
   if (!VIDEO_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
 
-  // Payload mínimo típico para "create pod from template"
-  // Si tu API espera otra ruta, la ajustamos.
-  // (En tu código anterior ya lo tenías funcionando con tu endpoint.)
   const body = {
     templateId: VIDEO_TEMPLATE_ID,
   };
 
-  // Si tu implementación anterior usaba otra ruta, cámbiala aquí.
-  // Ejemplo común:
-  // POST /v2/pods
-  // Pero algunos setups usan /v2/pods/templates/{id}/deploy (depende).
+  // Nota: VIDEO_NETWORK_VOLUME_ID se deja por compatibilidad con tu env,
+  // pero NO lo mandamos si tu template ya lo maneja.
+  // (Si algún día lo necesitas en API: lo agregamos con la key exacta que RunPod espere.)
+
   const created = await runpodFetch(`/v2/pods`, {
     method: "POST",
     body,
   });
 
-  // Algunas respuestas devuelven { id } u otra forma.
   const podId =
     created?.id ||
     created?.podId ||
@@ -208,7 +195,9 @@ async function runpodCrearPodDesdeTemplate() {
     null;
 
   if (!podId) {
-    throw new Error(`No pude obtener podId al crear pod: ${JSON.stringify(created)}`);
+    throw new Error(
+      `No pude obtener podId al crear pod: ${JSON.stringify(created)}`
+    );
   }
 
   return podId;
@@ -219,7 +208,6 @@ async function runpodGetPod(podId) {
 }
 
 async function runpodTerminarPod(podId) {
-  // Ruta típica (puede variar)
   await runpodFetch(`/v2/pods/${podId}`, { method: "DELETE" });
 }
 
@@ -234,7 +222,6 @@ async function esperarPodRunning(podId) {
     const status =
       pod?.status || pod?.state || pod?.pod?.status || pod?.data?.status || null;
 
-    // Normalmente viene "RUNNING"
     if (status === "RUNNING") return pod;
 
     await sleep(POLL_MS);
@@ -254,10 +241,9 @@ async function esperarWorker(workerBase) {
       const res = await fetch(`${workerBase}${WORKER_HEALTH_PATH}`, {
         method: "GET",
       });
-
       if (res.ok) return true;
     } catch {
-      // ignoramos y reintentamos
+      // reintentar
     }
 
     await sleep(POLL_MS);
@@ -270,7 +256,6 @@ async function esperarWorker(workerBase) {
 // Utilidad: construir URL pública del worker vía proxy runpod
 // ------------------------------------------------------------
 function construirWorkerBase(podId) {
-  // Puerto 8000, como en tu worker
   return `https://${podId}-8000.proxy.runpod.net`;
 }
 
@@ -278,24 +263,20 @@ function construirWorkerBase(podId) {
 // Handler principal
 // ------------------------------------------------------------
 export default async function handler(req, res) {
-  // Solo POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Método no permitido" });
   }
 
   const sb = sbAdmin();
-
-  // Logs estilo [GV]
   const log = (...args) => console.log("[GV]", ...args);
 
   let podId = null;
-  let lockTomado = false;
 
   try {
     log("step=INICIO");
 
     // --------------------------------------------------------
-    // 1) LOCK
+    // 1) LOCK (solo TTL)
     // --------------------------------------------------------
     log("step=LOCK_INICIO");
 
@@ -303,11 +284,11 @@ export default async function handler(req, res) {
     if (!lock.ok) {
       log("step=LOCK_OCUPADO");
       return res.status(429).json({
-        error: "Sistema ocupado: ya hay una generación en proceso. Intenta de nuevo en unos segundos.",
+        error:
+          "Sistema ocupado: ya hay una generación en proceso. Intenta de nuevo en unos segundos.",
         code: "LOCK_OCUPADO",
       });
     }
-    lockTomado = true;
 
     log("step=LOCK_OK", { locked_until: lock.locked_until });
 
@@ -318,7 +299,6 @@ export default async function handler(req, res) {
       prompt = "",
       negativePrompt = "",
       steps = 25,
-      // user_id / email / etc (depende tu front)
       userId = null,
     } = req.body || {};
 
@@ -329,8 +309,6 @@ export default async function handler(req, res) {
     // --------------------------------------------------------
     // 3) (Opcional) Registrar job en Supabase
     // --------------------------------------------------------
-    // Si tu tabla video_jobs tiene campos diferentes, ajustamos.
-    // Aquí lo dejo genérico.
     let jobRow = null;
     try {
       const insertJob = await sb
@@ -350,8 +328,6 @@ export default async function handler(req, res) {
 
       jobRow = insertJob?.data || null;
     } catch (e) {
-      // No bloqueamos si falla el insert (depende tu esquema),
-      // pero es útil tenerlo.
       log("Aviso: no pude insertar video_job (continuo igual).", e?.message || e);
     }
 
@@ -412,8 +388,6 @@ export default async function handler(req, res) {
       prompt,
       negative_prompt: negativePrompt,
       steps: Number(steps) || 25,
-      // si tu worker requiere otros campos, los agregamos aquí
-      // width, height, frames, seed, model, etc.
     };
 
     const wRes = await fetch(`${workerBase}${WORKER_API_PATH}`, {
@@ -432,7 +406,9 @@ export default async function handler(req, res) {
 
     if (!wRes.ok) {
       throw new Error(
-        `Worker respondió error (${wRes.status}): ${typeof wText === "string" ? wText : JSON.stringify(wJson)}`
+        `Worker respondió error (${wRes.status}): ${
+          typeof wText === "string" ? wText : JSON.stringify(wJson)
+        }`
       );
     }
 
@@ -476,10 +452,8 @@ export default async function handler(req, res) {
 
     // Intento de guardar error en video_jobs si existe
     try {
-      const sb = sbAdmin();
-      // Si no sabemos jobId, no lo forzamos.
-      // (Si quieres, puedes pasar jobId desde el front.)
-      await sb.from(VIDEO_JOBS_TABLE).insert([
+      const sb2 = sbAdmin();
+      await sb2.from(VIDEO_JOBS_TABLE).insert([
         {
           status: "ERROR",
           error: msg,
@@ -490,21 +464,11 @@ export default async function handler(req, res) {
       // ignorar
     }
 
-    return res.status(500).json({
-      error: msg,
-    });
+    return res.status(500).json({ error: msg });
   } finally {
     // --------------------------------------------------------
-    // Liberar lock siempre
+    // NO liberar lock manualmente (expira por TTL)
     // --------------------------------------------------------
-    try {
-      if (lockTomado) {
-        const sb = sbAdmin();
-        await liberarLock(sb);
-      }
-    } catch {
-      // ignorar
-    }
 
     // (Opcional) terminar pod al final si tu modo es efímero
     try {
@@ -516,3 +480,4 @@ export default async function handler(req, res) {
     }
   }
 }
+```0
