@@ -6,8 +6,16 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
+const VIDEO_TEMPLATE_ID =
+  process.env.VIDEO_RUNPOD_TEMPLATE_ID || process.env.RUNPOD_TEMPLATE_ID || null;
+
 // ✅ default 5 min
 const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "5", 10);
+
+// timeouts
+const WORKER_HEALTH_TIMEOUT_MS = parseInt(process.env.WORKER_HEALTH_TIMEOUT_MS || "45000", 10);
+const POD_START_TIMEOUT_MS = parseInt(process.env.POD_START_TIMEOUT_MS || "120000", 10);
+const POLL_MS = parseInt(process.env.AUTOSLEEP_POLL_MS || "3000", 10);
 
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
@@ -16,7 +24,7 @@ const VIDEO_JOBS_TABLE = "video_jobs";
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 }
 
 function runpodHeaders() {
@@ -27,7 +35,30 @@ function runpodHeaders() {
   };
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function workerBaseFromPodId(podId) {
+  return `https://${podId}-8000.proxy.runpod.net`;
+}
+
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 10000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    return r;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------------------------------------------------------
+// RunPod helpers (probamos varias rutas)
+// ---------------------------------------------------------
 async function runpodStopPod(podId) {
+  // stop (pausa)
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
     method: "POST",
     headers: runpodHeaders(),
@@ -37,98 +68,122 @@ async function runpodStopPod(podId) {
   return true;
 }
 
-// Mini-lock: intenta tomar lock por X segundos (sin pisar un lock activo)
-async function tryAcquireLock(sb, seconds = 120) {
-  const now = new Date();
-  const until = new Date(now.getTime() + seconds * 1000).toISOString();
+async function runpodStartPod(podId) {
+  // start/resume (depende del endpoint; probamos varios)
+  const candidates = [
+    `https://rest.runpod.io/v1/pods/${podId}/start`,
+    `https://rest.runpod.io/v1/pods/${podId}/resume`,
+    `https://rest.runpod.io/v1/pods/${podId}/unpause`,
+  ];
 
-  const { data: lockRow, error: lerr } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
-  if (lerr) throw lerr;
-
-  const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
-  if (lockedUntil && lockedUntil > now) return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
-
-  const { error: uerr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: until }).eq("id", 1);
-  if (uerr) throw uerr;
-
-  return { ok: true, locked_until: until };
+  let lastErr = null;
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { method: "POST", headers: runpodHeaders() });
+      if (r.ok) return true;
+      const t = await r.text().catch(() => "");
+      lastErr = new Error(`start endpoint failed ${url} (${r.status}): ${t}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("RunPod start failed (no endpoint worked)");
 }
 
-export default async function handler(req, res) {
+async function runpodTerminatePod(podId) {
+  // Intento API v2 delete (como en tu generate-video viejo)
   try {
-    const sb = sbAdmin();
+    const r = await fetch(`https://api.runpod.io/v2/pods/${podId}`, {
+      method: "DELETE",
+      headers: runpodHeaders(),
+    });
+    if (r.ok) return true;
+  } catch {}
 
-    // 1) leer pod_state
-    const { data: podState, error: psErr } = await sb
-      .from(POD_STATE_TABLE)
-      .select("*")
-      .eq("id", 1)
-      .single();
-    if (psErr) throw psErr;
-
-    const podId = podState?.pod_id || null;
-    const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
-
-    // ✅ TU ESQUEMA: busy boolean manda
-    const busy = Boolean(podState?.busy);
-
-    // 2) si está busy, no dormir
-    if (busy) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "pod_state.busy=true" });
-    }
-
-    // 3) si hay jobs activos, no dormir
-    const { data: activeJobs, error: ajErr } = await sb
-      .from(VIDEO_JOBS_TABLE)
-      .select("id,status,updated_at")
-      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING", "RUNNING"])
-      .limit(1);
-    if (ajErr) throw ajErr;
-
-    if (activeJobs && activeJobs.length > 0) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "active video job exists", sample: activeJobs[0] });
-    }
-
-    // 4) si no hay podId, nada que hacer
-    if (!podId) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "no pod_id in pod_state" });
-    }
-
-    // 5) idle check
-    const now = new Date();
-    const idleMs = lastUsedAt ? (now - lastUsedAt) : Number.POSITIVE_INFINITY;
-    const idleMin = idleMs / 60000;
-
-    if (idleMin < AUTOSLEEP_IDLE_MINUTES) {
-      return res.status(200).json({
-        ok: true,
-        action: "SKIP",
-        reason: "not idle enough",
-        idle_minutes: idleMin,
-        threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
-      });
-    }
-
-    // 6) toma mini-lock
-    const lock = await tryAcquireLock(sb, 120);
-    if (!lock.ok) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason, locked_until: lock.locked_until });
-    }
-
-    // 7) STOP pod (PAUSA)
-    await runpodStopPod(podId);
-
-    // 8) actualizar pod_state
-    await sb.from(POD_STATE_TABLE).update({
-      status: "SLEEPING",
-      busy: false,
-      last_used_at: now.toISOString(),
-    }).eq("id", 1);
-
-    return res.status(200).json({ ok: true, action: "STOPPED", podId });
-
-  } catch (e) {
-    const msg = String(e?.message || e);
-    return res.status(500).json({ ok: false, error: msg });
+  // Fallback rest terminate/delete
+  {
+    const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/terminate`, {
+      method: "POST",
+      headers: runpodHeaders(),
+    });
+    if (r.ok) return true;
+  }
+  {
+    const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+      method: "DELETE",
+      headers: runpodHeaders(),
+    });
+    const t = await r.text().catch(() => "");
+    if (!r.ok) throw new Error(`RunPod terminate failed (${r.status}): ${t}`);
+    return true;
   }
 }
+
+async function runpodCreatePodFromTemplate() {
+  if (!VIDEO_TEMPLATE_ID) throw new Error("Missing VIDEO_RUNPOD_TEMPLATE_ID / RUNPOD_TEMPLATE_ID");
+
+  const r = await fetch(`https://api.runpod.io/v2/pods`, {
+    method: "POST",
+    headers: runpodHeaders(),
+    body: JSON.stringify({ templateId: VIDEO_TEMPLATE_ID }),
+  });
+  const t = await r.text().catch(() => "");
+  if (!r.ok) throw new Error(`RunPod create pod failed (${r.status}): ${t}`);
+
+  let j = null;
+  try { j = t ? JSON.parse(t) : null; } catch { j = { raw: t }; }
+
+  const podId = j?.id || j?.podId || j?.data?.id || j?.data?.podId || null;
+  if (!podId) throw new Error(`Could not parse podId from create response: ${t}`);
+  return podId;
+}
+
+async function waitWorkerHealthy(podId) {
+  const base = workerBaseFromPodId(podId);
+  const deadline = Date.now() + WORKER_HEALTH_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetchWithTimeout(`${base}/health`, { method: "GET" }, 8000);
+      if (r.ok) return { ok: true, base };
+    } catch {}
+    await sleep(POLL_MS);
+  }
+  return { ok: false, base, error: "worker health timeout" };
+}
+
+// ---------------------------------------------------------
+// Lock atómico simple (sin RPC)
+// ---------------------------------------------------------
+async function tryAcquireLockAtomic(sb, seconds = 120) {
+  const nowIso = new Date().toISOString();
+  const untilIso = new Date(Date.now() + seconds * 1000).toISOString();
+
+  // update ... where locked_until is null OR locked_until <= now
+  const { data, error } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: untilIso })
+    .eq("id", 1)
+    .or(`locked_until.is.null,locked_until.lte.${nowIso}`)
+    .select("id,locked_until");
+
+  if (error) throw error;
+  if (!data || data.length === 0) return { ok: false, reason: "lock active" };
+  return { ok: true, locked_until: untilIso };
+}
+
+// ---------------------------------------------------------
+// Job checks
+// ---------------------------------------------------------
+async function hasActiveOrPendingJobs(sb) {
+  // Estados que realmente significan “hay trabajo”
+  const statuses = ["PENDING", "DISPATCHED", "RUNNING", "QUEUED", "IN_PROGRESS", "CREANDO_POD", "EN_PROCESO"];
+
+  const { data, error } = await sb
+    .from(VIDEO_JOBS_TABLE)
+    .select("id,status,created_at,updated_at")
+    .in("status", statuses)
+    .limit(1);
+
+  if (error) throw error;
+  return data && data.length > 0 ?
