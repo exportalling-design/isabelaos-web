@@ -10,6 +10,7 @@
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
+import { requireUser } from "./_auth.js";
 
 // ------------------------------------------------------------
 // ENV (Vercel)
@@ -34,7 +35,9 @@ function sbAdmin() {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Método no permitido" });
+  }
 
   const sb = sbAdmin();
   const log = (...args) => console.log("[GV]", ...args);
@@ -42,12 +45,18 @@ export default async function handler(req, res) {
   try {
     log("step=ENQUEUE_INICIO");
 
+    // ✅ User real (NO confiar en req.body.userId)
+    const auth = await requireUser(req);
+    if (!auth.ok) {
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    }
+    const user_id = auth.user.id;
+
     const {
       // básicos
       prompt = "",
       negativePrompt = "",
       steps = 25,
-      userId = null,
 
       // opcionales para el worker
       mode = "t2v",
@@ -57,20 +66,24 @@ export default async function handler(req, res) {
       fps = 24,
       guidance_scale = 5.0,
       image_base64 = null, // si algún día usás i2v
+
+      // (legacy) lo ignoramos a propósito
+      userId = null,
     } = req.body || {};
 
     if (!prompt || typeof prompt !== "string") {
-      return res.status(400).json({ ok: false, error: "Falta prompt (texto) para generar el video." });
+      return res.status(400).json({
+        ok: false,
+        error: "Falta prompt (texto) para generar el video.",
+      });
     }
 
-    // ✅ IMPORTANTE:
-    // Usamos status=PENDING porque tu worker runner procesa PENDING/DISPATCHED.
     const { data, error } = await sb
       .from(VIDEO_JOBS_TABLE)
       .insert([
         {
-          user_id: userId,                 // puede ser null, tu worker ya lo soporta
-          status: "PENDING",               // 👈 clave para que el runner lo procese
+          user_id, // ✅ SIEMPRE el real
+          status: "PENDING",
           mode,
           prompt,
           negative_prompt: negativePrompt,
@@ -90,15 +103,18 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
-    log("step=ENQUEUE_OK", { id: data?.id });
+    log("step=ENQUEUE_OK", { id: data?.id, user_id });
 
-    // Respuesta inmediata: no hay timeout de Vercel.
     return res.status(200).json({
       ok: true,
       job_id: data.id,
       status: data.status,
       costo_jades: COSTO_JADES_VIDEO,
-      mensaje: "Tu video quedó en cola. Revisa el estado con /api/video-status?job_id=...",
+      mensaje:
+        "Tu video quedó en cola. Revisa el estado con /api/video-status?job_id=...",
+      // debug opcional (si no quieres, lo quitas)
+      user_id,
+      ignored_body_userId: userId,
     });
   } catch (err) {
     const msg = err?.message || String(err);
