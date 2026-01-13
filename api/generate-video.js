@@ -5,10 +5,10 @@ import { requireUser } from "./_auth.js";
 
 // ============================================================
 // IsabelaOS Studio — Generate Video (Dynamic Pod + Wake + Dispatch)
-// - Si el pod perdió GPU: crea uno NUEVO desde TEMPLATE automáticamente
+// - Si el pod perdió GPU o fue TERMINATED: crea uno NUEVO desde TEMPLATE automáticamente
 // - Monta tu Network Volume (persistencia) siempre
 // - Fuerza puertos 8000/8888
-// - Opcional: TERMINATE_AFTER_JOB (se termina el pod al finalizar -> ver video-status.js)
+// - Async real: Vercel SOLO dispara (dispatch) y devuelve rápido
 // ============================================================
 
 // ---------------------
@@ -28,7 +28,7 @@ const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspa
 const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || null; // ej: A100_SXM
 
 // Si quieres “pod fijo”, déjalo vacío y el sistema usará pod_state.pod_id.
-// Si lo pones, forzará a usar ese pod (no recomendado con el problema de GPU).
+// Si lo pones, forzará a usar ese pod.
 const FIXED_POD_ID = process.env.VIDEO_FIXED_POD_ID || "";
 
 // Worker config
@@ -111,12 +111,17 @@ async function waitForWorker(podId) {
   return { ok: false, error: `Worker not ready after ${WAIT_WORKER_TIMEOUT_MS}ms`, url };
 }
 
+// ✅ FIX: si el pod fue TERMINATED, RunPod devuelve 404.
+// En ese caso, devolvemos {__notFound:true} para que ensureWorkingPod() lo recree.
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
     method: "GET",
     headers: runpodHeaders(),
   });
   const t = await r.text().catch(() => "");
+
+  if (r.status === 404) return { __notFound: true, raw: t };
+
   if (!r.ok) throw new Error(`RunPod get pod failed (${r.status}): ${t}`);
 
   try {
@@ -145,7 +150,7 @@ async function runpodTerminatePod(podId) {
     });
     if (r.ok) return true;
   }
-  // Intento 2: DELETE (algunas variantes lo soportan)
+  // Intento 2: DELETE
   {
     const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
       method: "DELETE",
@@ -161,11 +166,16 @@ async function waitForRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
+
+    // si en medio del wait el pod desapareció, salimos
+    if (pod?.__notFound) {
+      return { ok: false, status: "NOT_FOUND", error: "Pod not found while waiting RUNNING" };
+    }
+
     const status = String(
       pod?.desiredStatus || pod?.status || pod?.pod?.status || ""
     ).toUpperCase();
 
-    // Algunos pods reportan "RUNNING" o "RUNNING (something)".
     if (status.includes("RUNNING")) return { ok: true, status };
     if (status.includes("FAILED") || status.includes("ERROR")) {
       return { ok: false, status, error: "Pod entered FAILED/ERROR" };
@@ -210,16 +220,12 @@ async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_VOLUME_MOUNT_PATH) throw new Error("Missing VIDEO_VOLUME_MOUNT_PATH");
   if (!RUNPOD_GPU_TYPE) throw new Error("Missing RUNPOD_GPU_TYPE (e.g. A100_SXM)");
 
-  // ⚠️ RunPod API ha cambiado varias veces.
-  // Este payload es compatible con el patrón que ustedes ya usaban (templateId + networkVolumeId + mount).
-  // Si en tu cuenta el create devuelve otro formato, igual capturamos y lo imprimimos en error.
   const payload = {
     name,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
     gpuTypeId: RUNPOD_GPU_TYPE,
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-    // fuerza puertos (además de que en tu template ya los tienes: 8000 + 8888)
     ports: [
       { containerPort: 8000, protocol: "http" },
       { containerPort: 8888, protocol: "http" },
@@ -249,14 +255,13 @@ async function runpodCreatePodFromTemplate({ name }) {
     json?.data?.id ||
     null;
 
-  if (!podId) {
-    throw new Error(`RunPod create returned no podId. Raw: ${t}`);
-  }
+  if (!podId) throw new Error(`RunPod create returned no podId. Raw: ${t}`);
+
   return { podId, raw: json };
 }
 
 // ------------------------------------------------------------
-// Ensure we have a usable pod (start or recreate if GPU lost)
+// Ensure we have a usable pod (start or recreate if GPU lost / terminated)
 // ------------------------------------------------------------
 async function ensureWorkingPod(sb) {
   const nowIso = new Date().toISOString();
@@ -284,6 +289,7 @@ async function ensureWorkingPod(sb) {
     }).eq("id", 1);
 
     await runpodStartPod(created.podId);
+
     const running = await waitForRunning(created.podId);
     if (!running.ok) throw new Error(`Pod not running after create: ${running.error || running.status}`);
 
@@ -301,6 +307,35 @@ async function ensureWorkingPod(sb) {
   // Si hay un pod_id, intentamos validar y arrancar si es necesario
   try {
     const podReal = await runpodGetPod(desiredPodId);
+
+    // ✅ FIX: si fue TERMINATED (404), recrear
+    if (podReal?.__notFound) {
+      const created = await runpodCreatePodFromTemplate({
+        name: `isabela-video-${Date.now()}`,
+      });
+
+      await sb.from(POD_STATE_TABLE).update({
+        pod_id: created.podId,
+        status: "STARTING",
+        last_used_at: nowIso,
+      }).eq("id", 1);
+
+      await runpodStartPod(created.podId);
+
+      const running = await waitForRunning(created.podId);
+      if (!running.ok) throw new Error(`New pod not RUNNING: ${running.error || running.status}`);
+
+      const ready = await waitForWorker(created.podId);
+      if (!ready.ok) throw new Error(`New worker not ready: ${ready.error}`);
+
+      await sb.from(POD_STATE_TABLE).update({
+        status: "RUNNING",
+        last_used_at: nowIso,
+      }).eq("id", 1);
+
+      return { podId: created.podId, action: "RECREATED_NOT_FOUND", oldPodId: desiredPodId };
+    }
+
     const realStatus = String(
       podReal?.desiredStatus || podReal?.status || podReal?.pod?.status || ""
     ).toUpperCase();
@@ -349,6 +384,7 @@ async function ensureWorkingPod(sb) {
       }).eq("id", 1);
 
       await runpodStartPod(created.podId);
+
       const running = await waitForRunning(created.podId);
       if (!running.ok) throw new Error(`New pod not RUNNING: ${running.error || running.status}`);
 
@@ -360,9 +396,8 @@ async function ensureWorkingPod(sb) {
         last_used_at: nowIso,
       }).eq("id", 1);
 
-      // IMPORTANTE: no terminamos el viejo aquí porque puede estar en estado raro.
-      // Lo limpiamos en autosleep o manual, o si quieres puedes forzar:
-      // await runpodTerminatePod(oldPodId).catch(()=>{});
+      // Si quieres limpiar el viejo aquí, lo puedes intentar (silencioso):
+      // await runpodTerminatePod(oldPodId).catch(() => {});
       return { podId: created.podId, action: "RECREATED_GPU_LOST", oldPodId };
     }
 
@@ -395,7 +430,6 @@ export default async function handler(req, res) {
       width = 1280,
       num_frames = 121,
       guidance_scale = 5.0,
-      // si tu worker soporta seed u otros, los pasas aquí:
       seed = null,
     } = req.body || {};
 
@@ -426,7 +460,6 @@ export default async function handler(req, res) {
     // 3) Lock corto para wake (evita 2 starts al mismo tiempo)
     const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
-      // igual devolvemos job_id, pero avisamos que está locked
       return res.status(200).json({
         ok: true,
         job_id,
@@ -435,10 +468,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Ensure pod is usable (start or recreate if GPU lost)
-    let podInfo = null;
+    // 4) Ensure pod is usable (start or recreate if GPU lost / terminated)
     await sb.from(POD_STATE_TABLE).update({ status: "STARTING" }).eq("id", 1);
-    podInfo = await ensureWorkingPod(sb);
+    const podInfo = await ensureWorkingPod(sb);
 
     // 5) Dispatch job to worker (async)
     const podId = podInfo.podId;
@@ -457,11 +489,11 @@ export default async function handler(req, res) {
       num_frames,
       guidance_scale,
       seed,
-      // para que el status endpoint pueda saber si debe terminar pods:
       terminate_after_job: TERMINATE_AFTER_JOB ? 1 : 0,
     };
 
     let dispatch = { ok: true, url: dispatchUrl };
+
     try {
       const rr = await fetch(dispatchUrl, {
         method: "POST",
@@ -469,8 +501,8 @@ export default async function handler(req, res) {
         body: JSON.stringify(payload),
       });
       const tt = await rr.text().catch(() => "");
+
       if (!rr.ok) {
-        // si esto falla, marcamos el job como FAILED para que el frontend no quede colgado
         await sb.from(VIDEO_JOBS_TABLE).update({
           status: "FAILED",
           error: `Worker dispatch failed (${rr.status}): ${tt}`,
@@ -478,10 +510,7 @@ export default async function handler(req, res) {
 
         dispatch = { ok: false, url: dispatchUrl, error: `Dispatch failed (${rr.status}): ${tt}` };
       } else {
-        // opcional: marcar status en DB
-        await sb.from(VIDEO_JOBS_TABLE).update({
-          status: "RUNNING",
-        }).eq("job_id", job_id);
+        await sb.from(VIDEO_JOBS_TABLE).update({ status: "RUNNING" }).eq("job_id", job_id);
       }
     } catch (e) {
       await sb.from(VIDEO_JOBS_TABLE).update({
