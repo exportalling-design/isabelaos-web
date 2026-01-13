@@ -4,8 +4,9 @@ import { requireUser } from "./_auth.js";
 
 // ============================================================
 // IsabelaOS Studio — Video Status
-// - Busca job por id (PK) (y fallback por job_id si existiera)
-// - Devuelve status + video_url + error
+// - Busca job por id (PK uuid) (principal)
+// - Fallback por job_id (si existiera)
+// - Importante: permite user_id NULL (jobs viejos) para no dar "Job not found"
 // ============================================================
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -32,27 +33,30 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // 1) Primero intenta por PK id (lo que devuelve generate-video)
+    // Helper: permitir job con user_id = usuario actual O user_id NULL (legacy)
+    const userOrNull = `user_id.eq.${user_id},user_id.is.null`;
+
+    // 1) Principal: por PK id
     let job = null;
     {
       const { data, error } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("*")
         .eq("id", job_id)
-        .eq("user_id", user_id)
-        .single();
+        .or(userOrNull)
+        .maybeSingle();
 
       if (!error && data) job = data;
     }
 
-    // 2) Fallback por job_id (si algún día usás otro identificador)
+    // 2) Fallback: por job_id (si existiera esa columna/uso)
     if (!job) {
       const { data, error } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("*")
         .eq("job_id", job_id)
-        .eq("user_id", user_id)
-        .single();
+        .or(userOrNull)
+        .maybeSingle();
 
       if (!error && data) job = data;
     }
@@ -67,6 +71,8 @@ export default async function handler(req, res) {
       error: job.error || null,
       created_at: job.created_at || null,
       updated_at: job.updated_at || null,
+      // debug opcional (puedes quitarlo si no quieres)
+      user_id: job.user_id || null,
     });
   } catch (e) {
     console.error("[video-status] fatal:", e);
