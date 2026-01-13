@@ -6,16 +6,19 @@ import { requireUser } from "./_auth.js";
 // ============================================================
 // IsabelaOS Studio — Generar Video (Pod dinámico + Encendido + Dispatch)
 // ------------------------------------------------------------
-// OBJETIVO:
-// - Si no hay pod (o se perdió): crea UNO NUEVO desde TEMPLATE
-// - Monta SIEMPRE tu Network Volume (persistencia)
-// - Espera a que el pod esté RUNNING
-// - Espera a que el worker responda /health
-// - Envía el trabajo al worker (modo asíncrono)
+// QUÉ HACE ESTE ENDPOINT:
+// 1) Crea un job en Supabase (video_jobs)
+// 2) Toma un lock corto para que NO se despierten/creen 2 pods al mismo tiempo
+// 3) Asegura que exista un Pod válido en RunPod:
+//    - Si NO hay pod_id: crea uno desde TEMPLATE
+//    - Si hay pod_id pero RunPod responde 404 "pod not found": crea uno nuevo (el id quedó viejo)
+//    - Si está detenido/pausado: lo arranca
+// 4) Espera /health del worker
+// 5) Envía el trabajo al worker (POST /api/video_async)
 // ------------------------------------------------------------
-// NOTA IMPORTANTE (RunPod REST):
-// - El error que viste (400) era por "ports": RunPod aquí espera STRINGS,
-//   no objetos. Ej: ["8000/http", "8888/http"].
+// CORRECCIÓN CLAVE (RunPod REST):
+// - "ports" debe ser un ARRAY DE STRINGS: ["8000/http", "8888/http"]
+// - NO debe ser array de objetos (eso fue el 400 de schema).
 // ============================================================
 
 // ---------------------
@@ -34,8 +37,7 @@ const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_I
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace"; // ej: /workspace
 const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || null; // ej: A100_SXM
 
-// Si quieres “pod fijo”, déjalo vacío y el sistema usará pod_state.pod_id.
-// Si lo pones, forzará a usar ese pod.
+// Si quieres forzar un pod fijo, ponlo aquí. Si NO existe (404), lanzamos error para que lo arregles.
 const FIXED_POD_ID = process.env.VIDEO_FIXED_POD_ID || "";
 
 // Config del Worker
@@ -87,6 +89,11 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function esPodNoEncontrado(err) {
+  const s = String(err?.message || err || "");
+  return s.includes("(404)") || s.toLowerCase().includes("pod not found") || s.toLowerCase().includes('"status":404');
+}
+
 function pareceGpuNoDisponible(msg) {
   const s = String(msg || "").toLowerCase();
   return (
@@ -125,8 +132,17 @@ async function runpodGetPod(podId) {
     method: "GET",
     headers: runpodHeaders(),
   });
+
   const t = await r.text().catch(() => "");
-  if (!r.ok) throw new Error(`RunPod get pod falló (${r.status}): ${t}`);
+
+  // ✅ Si es 404, devolvemos un error claro para que el caller pueda recrear.
+  if (r.status === 404) {
+    throw new Error(`RunPod get pod falló (404): ${t}`);
+  }
+
+  if (!r.ok) {
+    throw new Error(`RunPod get pod falló (${r.status}): ${t}`);
+  }
 
   try {
     return JSON.parse(t);
@@ -140,6 +156,7 @@ async function runpodStartPod(podId) {
     method: "POST",
     headers: runpodHeaders(),
   });
+
   const t = await r.text().catch(() => "");
   if (!r.ok) throw new Error(`RunPod start falló (${r.status}): ${t}`);
   return true;
@@ -153,6 +170,7 @@ async function esperarRunning(podId) {
     const status = String(pod?.desiredStatus || pod?.status || pod?.pod?.status || "").toUpperCase();
 
     if (status.includes("RUNNING")) return { ok: true, status };
+
     if (status.includes("FAILED") || status.includes("ERROR")) {
       return { ok: false, status, error: "El pod entró en FAILED/ERROR" };
     }
@@ -197,11 +215,7 @@ async function runpodCrearPodDesdeTemplate({ name }) {
   if (!VIDEO_VOLUME_MOUNT_PATH) throw new Error("Falta VIDEO_VOLUME_MOUNT_PATH");
   if (!RUNPOD_GPU_TYPE) throw new Error("Falta RUNPOD_GPU_TYPE (ej. A100_SXM)");
 
-  // ✅ CORRECCIÓN CLAVE:
-  // RunPod REST aquí espera ports como STRING, no como objeto.
-  // Ejemplos válidos:
-  // - ["8000/http"]
-  // - ["8000/http", "8888/http"]
+  // ✅ CORRECCIÓN CLAVE: ports como STRING (RunPod schema)
   const payload = {
     name,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
@@ -234,7 +248,8 @@ async function runpodCrearPodDesdeTemplate({ name }) {
 }
 
 // ------------------------------------------------------------
-// ASEGURAR POD UTILIZABLE (arranca o recrea si se perdió)
+// ASEGURAR POD OPERATIVO
+// - Si el pod guardado ya NO existe (404): crea uno nuevo y actualiza pod_state
 // ------------------------------------------------------------
 async function asegurarPodOperativo(sb) {
   const nowIso = new Date().toISOString();
@@ -249,7 +264,7 @@ async function asegurarPodOperativo(sb) {
   const statePodId = String(podState?.pod_id || "");
   const desiredPodId = FIXED_POD_ID ? FIXED_POD_ID : statePodId;
 
-  // Caso 1: no hay pod guardado -> crear
+  // Caso 1: No hay pod guardado -> crear
   if (!desiredPodId) {
     const creado = await runpodCrearPodDesdeTemplate({ name: `isabela-video-${Date.now()}` });
 
@@ -274,12 +289,14 @@ async function asegurarPodOperativo(sb) {
     return { podId: creado.podId, action: "CREADO_Y_LISTO" };
   }
 
-  // Caso 2: hay pod -> verificar y arrancar si es necesario
+  // Caso 2: Hay pod -> verificar / arrancar / validar worker
   try {
     const podReal = await runpodGetPod(desiredPodId);
     const realStatus = String(podReal?.desiredStatus || podReal?.status || podReal?.pod?.status || "").toUpperCase();
 
-    const debeArrancar = ["STOPPED", "PAUSED", "EXITED", "SLEEPING", "NOT_RUNNING"].some((s) => realStatus.includes(s));
+    const debeArrancar = ["STOPPED", "PAUSED", "EXITED", "SLEEPING", "NOT_RUNNING"].some((s) =>
+      realStatus.includes(s)
+    );
 
     if (debeArrancar) {
       await runpodStartPod(desiredPodId);
@@ -291,6 +308,7 @@ async function asegurarPodOperativo(sb) {
     if (!ready.ok) {
       // reintento: arrancar otra vez y volver a esperar
       await runpodStartPod(desiredPodId);
+
       const running2 = await esperarRunning(desiredPodId);
       if (!running2.ok) throw new Error(`Reintento falló al llegar a RUNNING: ${running2.error || running2.status}`);
 
@@ -305,8 +323,54 @@ async function asegurarPodOperativo(sb) {
 
     return { podId: desiredPodId, action: debeArrancar ? "ARRANCADO" : "YA_CORRIENDO" };
   } catch (e) {
-    // Si parece pérdida de GPU / no disponible -> recrear
+    // ✅ NUEVA CORRECCIÓN POR TU ERROR ACTUAL:
+    // "RunPod get pod falló (404): pod not found"
+    // Eso significa: el pod_id guardado en Supabase YA NO existe en RunPod.
+    // Si NO estás usando FIXED_POD_ID, lo recreamos automáticamente.
+    if (esPodNoEncontrado(e)) {
+      if (FIXED_POD_ID) {
+        throw new Error(
+          `El VIDEO_FIXED_POD_ID está apuntando a un pod que NO existe (404). Quita VIDEO_FIXED_POD_ID o pon un pod válido. Detalle: ${String(
+            e?.message || e
+          )}`
+        );
+      }
+
+      const oldPodId = desiredPodId;
+
+      const creado = await runpodCrearPodDesdeTemplate({ name: `isabela-video-${Date.now()}` });
+
+      await sb
+        .from(POD_STATE_TABLE)
+        .update({ pod_id: creado.podId, status: "STARTING", last_used_at: nowIso })
+        .eq("id", 1);
+
+      await runpodStartPod(creado.podId);
+
+      const running = await esperarRunning(creado.podId);
+      if (!running.ok) throw new Error(`El pod nuevo no llegó a RUNNING: ${running.error || running.status}`);
+
+      const ready = await esperarWorker(creado.podId);
+      if (!ready.ok) throw new Error(`El worker no estuvo listo en el pod nuevo: ${ready.error}`);
+
+      await sb
+        .from(POD_STATE_TABLE)
+        .update({ status: "RUNNING", last_used_at: nowIso })
+        .eq("id", 1);
+
+      return { podId: creado.podId, action: "RECREADO_POR_404", oldPodId };
+    }
+
+    // Caso GPU no disponible -> recrear
     if (pareceGpuNoDisponible(e?.message || e)) {
+      if (FIXED_POD_ID) {
+        throw new Error(
+          `No se puede recrear automáticamente porque estás usando VIDEO_FIXED_POD_ID. Quita VIDEO_FIXED_POD_ID para permitir recreación automática. Detalle: ${String(
+            e?.message || e
+          )}`
+        );
+      }
+
       const oldPodId = desiredPodId;
 
       const creado = await runpodCrearPodDesdeTemplate({ name: `isabela-video-${Date.now()}` });
@@ -332,6 +396,7 @@ async function asegurarPodOperativo(sb) {
       return { podId: creado.podId, action: "RECREADO_POR_GPU", oldPodId };
     }
 
+    // Si no cae en ningún caso, re-lanzar error
     throw e;
   }
 }
@@ -370,7 +435,7 @@ export default async function handler(req, res) {
     const sb = sbAdmin();
     const job_id = crypto.randomUUID();
 
-    // 1) Insertar job en la tabla
+    // 1) Insertar job
     const { error: insErr } = await sb.from(VIDEO_JOBS_TABLE).insert({
       job_id,
       user_id,
@@ -389,7 +454,7 @@ export default async function handler(req, res) {
     // 2) Marcar uso reciente (para autosleep)
     await sb.from(POD_STATE_TABLE).update({ last_used_at: new Date().toISOString() }).eq("id", 1);
 
-    // 3) Lock corto para evitar 2 “wake/start” simultáneos
+    // 3) Lock corto para “wake/start/create”
     const lock = await intentarLock(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
       return res.status(200).json({
@@ -400,7 +465,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Asegurar pod operativo
+    // 4) Asegurar pod operativo (incluye recreación si 404)
     await sb.from(POD_STATE_TABLE).update({ status: "STARTING" }).eq("id", 1);
     const podInfo = await asegurarPodOperativo(sb);
 
@@ -421,7 +486,6 @@ export default async function handler(req, res) {
       num_frames,
       guidance_scale,
       seed,
-      // para que el worker / status sepan si deben terminar pods
       terminate_after_job: TERMINATE_AFTER_JOB ? 1 : 0,
     };
 
@@ -465,7 +529,6 @@ export default async function handler(req, res) {
       })
       .eq("id", 1);
 
-    // 7) Respuesta al frontend
     return res.status(200).json({
       ok: true,
       job_id,
