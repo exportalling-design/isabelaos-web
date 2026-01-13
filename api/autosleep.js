@@ -186,4 +186,178 @@ async function hasActiveOrPendingJobs(sb) {
     .limit(1);
 
   if (error) throw error;
-  return data && data.length > 0 ?
+  return data && data.length > 0 ? { ok: true, exists: true, sample: data[0] } : { ok: true, exists: false };
+}
+
+// ---------------------------------------------------------
+// Main
+// ---------------------------------------------------------
+export default async function handler(req, res) {
+  const log = (...a) => console.log("[AUTOSLEEP]", ...a);
+
+  try {
+    const sb = sbAdmin();
+
+    // mini lock para que no corran 2 autosleeps a la vez
+    const lock = await tryAcquireLockAtomic(sb, 120);
+    if (!lock.ok) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason });
+    }
+
+    // 1) leer pod_state
+    const { data: podState, error: psErr } = await sb
+      .from(POD_STATE_TABLE)
+      .select("*")
+      .eq("id", 1)
+      .single();
+    if (psErr) throw psErr;
+
+    let podId = podState?.pod_id || null;
+    const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
+    const busy = Boolean(podState?.busy);
+    const status = String(podState?.status || "");
+
+    // 2) ¿hay jobs?
+    const jobs = await hasActiveOrPendingJobs(sb);
+
+    // -------------------------------------------------------
+    // A) Si hay trabajo: asegurar pod RUNNING + worker healthy
+    // -------------------------------------------------------
+    if (jobs.exists) {
+      log("jobs exist, ensure pod", jobs.sample);
+
+      // Si worker está ocupado, no tocamos (evita cortar render)
+      if (busy) {
+        return res.status(200).json({ ok: true, action: "SKIP", reason: "pod_state.busy=true" });
+      }
+
+      // Si no hay pod, crear uno nuevo
+      if (!podId) {
+        log("no podId -> create new pod from template");
+        const newPodId = await runpodCreatePodFromTemplate();
+
+        await sb.from(POD_STATE_TABLE).update({
+          pod_id: newPodId,
+          status: "RUNNING",
+          busy: false,
+          last_used_at: new Date().toISOString(),
+        }).eq("id", 1);
+
+        const health = await waitWorkerHealthy(newPodId);
+        if (!health.ok) {
+          // si ni nuevo responde, lo terminamos para no quemar dinero
+          await runpodTerminatePod(newPodId).catch(() => {});
+          throw new Error("New pod created but worker health failed");
+        }
+
+        return res.status(200).json({ ok: true, action: "CREATED_POD", podId: newPodId, workerBase: health.base });
+      }
+
+      // Si hay podId: intenta health directo
+      let health = await waitWorkerHealthy(podId);
+      if (health.ok) {
+        // todo bien: solo tocar last_used_at para evitar autosleep agresivo
+        await sb.from(POD_STATE_TABLE).update({
+          status: "RUNNING",
+          busy: false,
+          last_used_at: new Date().toISOString(),
+        }).eq("id", 1);
+
+        return res.status(200).json({ ok: true, action: "OK", podId, workerBase: health.base });
+      }
+
+      // Si health falla, intentamos start/resume (por si está pausado)
+      log("health failed, try start/resume pod", { podId, status });
+
+      try {
+        await runpodStartPod(podId);
+        // esperar un poco a que levante proxy/worker
+        await sleep(2000);
+        health = await waitWorkerHealthy(podId);
+        if (health.ok) {
+          await sb.from(POD_STATE_TABLE).update({
+            status: "RUNNING",
+            busy: false,
+            last_used_at: new Date().toISOString(),
+          }).eq("id", 1);
+
+          return res.status(200).json({ ok: true, action: "RESUMED", podId, workerBase: health.base });
+        }
+      } catch (e) {
+        log("start/resume failed", String(e?.message || e));
+      }
+
+      // Si reanudar no sirve, entonces GPU/worker/proxy están muertos → crear nuevo y terminar viejo
+      log("pod unhealthy after resume -> rotate pod (create new, terminate old)", { oldPodId: podId });
+
+      const oldPodId = podId;
+      const newPodId = await runpodCreatePodFromTemplate();
+
+      await sb.from(POD_STATE_TABLE).update({
+        pod_id: newPodId,
+        status: "RUNNING",
+        busy: false,
+        last_used_at: new Date().toISOString(),
+      }).eq("id", 1);
+
+      const newHealth = await waitWorkerHealthy(newPodId);
+      if (!newHealth.ok) {
+        // si el nuevo tampoco responde, terminamos ambos para no quemar dinero
+        await runpodTerminatePod(newPodId).catch(() => {});
+        throw new Error("Rotated pod created but worker health failed");
+      }
+
+      // terminar viejo al final
+      await runpodTerminatePod(oldPodId).catch(() => {});
+
+      return res.status(200).json({
+        ok: true,
+        action: "ROTATED",
+        oldPodId,
+        podId: newPodId,
+        workerBase: newHealth.base
+      });
+    }
+
+    // -------------------------------------------------------
+    // B) Si NO hay trabajo: autosleep si idle y no busy
+    // -------------------------------------------------------
+    if (busy) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "busy=true (but no jobs found)" });
+    }
+
+    if (!podId) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "no pod_id in pod_state" });
+    }
+
+    const now = new Date();
+    const idleMs = lastUsedAt ? (now - lastUsedAt) : Number.POSITIVE_INFINITY;
+    const idleMin = idleMs / 60000;
+
+    if (idleMin < AUTOSLEEP_IDLE_MINUTES) {
+      return res.status(200).json({
+        ok: true,
+        action: "SKIP",
+        reason: "not idle enough",
+        idle_minutes: idleMin,
+        threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
+      });
+    }
+
+    // STOP pod
+    await runpodStopPod(podId);
+
+    await sb.from(POD_STATE_TABLE).update({
+      status: "SLEEPING",
+      busy: false,
+      last_used_at: now.toISOString(),
+    }).eq("id", 1);
+
+    return res.status(200).json({ ok: true, action: "STOPPED", podId });
+
+  } catch (e) {
+    const msg = String(e?.message || e);
+    console.error("[AUTOSLEEP] fatal:", msg);
+    return res.status(500).json({ ok: false, error: msg });
+  }
+}
