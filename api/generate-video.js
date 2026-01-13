@@ -3,21 +3,10 @@
 // IsabelaOS Studio - API de Generación de Video (Vercel Function)
 // ============================================================
 //
-// Objetivo:
-// - Cobrar 10 jades por video (si lo tienes en tu lógica).
-// - Evitar 2 generaciones simultáneas con un LOCK en Supabase.
-// - Crear un POD en RunPod desde un TEMPLATE.
-// - Esperar a que el POD esté RUNNING.
-// - Esperar a que el WORKER responda.
-// - Enviar el trabajo al worker (async) y devolver jobId / urls.
-//
-// IMPORTANTE (TU CASO):
-// Tu tabla `pod_lock` NO tiene `lock_key`.
-// Solo tiene: `id` y `locked_until`.
-// Por eso el lock se implementa con un único registro id=1.
-//
-// IMPORTANTE (SERVERLESS):
-// NO liberamos el lock manualmente. El lock vive por TTL (locked_until).
+// Cambios CLAVE:
+// 1) Lock atómico REAL con RPC (Postgres) para evitar falsos LOCK_OCUPADO.
+// 2) Si ya existe jobRow y falla algo -> update status=ERROR (no más PENDING infinito).
+// 3) 429 SOLO cuando lock realmente está tomado.
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -34,7 +23,6 @@ const RUNPOD_API_KEY =
 const VIDEO_TEMPLATE_ID =
   process.env.VIDEO_RUNPOD_TEMPLATE_ID || process.env.RUNPOD_TEMPLATE_ID || null;
 
-// (Opcional) si tu template monta Network Volume
 const VIDEO_NETWORK_VOLUME_ID =
   process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID ||
   process.env.RUNPOD_NETWORK_VOLUME_ID ||
@@ -50,11 +38,8 @@ const VIDEO_JOBS_TABLE = "video_jobs";
 // ------------------------------------------------------------
 const COSTO_JADES_VIDEO = 10;
 
-// Lock: cuánto tiempo se reserva el lock (segundos)
-const LOCK_TTL_SECONDS = parseInt(
-  process.env.VIDEO_LOCK_TTL_SECONDS || "120",
-  10
-);
+// TTL del lock (segundos)
+const LOCK_TTL_SECONDS = parseInt(process.env.VIDEO_LOCK_TTL_SECONDS || "120", 10);
 
 // Esperas / reintentos
 const WAIT_RUNNING_TIMEOUT_MS = parseInt(
@@ -69,12 +54,9 @@ const WAIT_WORKER_TIMEOUT_MS = parseInt(
 
 const POLL_MS = parseInt(process.env.VIDEO_POLL_MS || "3000", 10);
 
-// Worker endpoints
 const WORKER_HEALTH_PATH = process.env.VIDEO_WORKER_HEALTH_PATH || "/health";
-// Cambia esto si tu worker usa otra ruta
 const WORKER_API_PATH = process.env.VIDEO_WORKER_API_PATH || "/api/video_async";
 
-// Terminar pod al final (si tu modo es crear/terminar)
 const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
 // ------------------------------------------------------------
@@ -82,8 +64,7 @@ const TERMINATE_AFTER_JOB = (process.env.TERMINATE_AFTER_JOB || "0") === "1";
 // ------------------------------------------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
-  if (!SUPABASE_SERVICE_ROLE_KEY)
-    throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
@@ -94,17 +75,8 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function ahoraIso() {
-  return new Date().toISOString();
-}
-
-function sumarSegundosIso(segundos) {
-  return new Date(Date.now() + segundos * 1000).toISOString();
-}
-
 async function runpodFetch(path, { method = "GET", body } = {}) {
-  if (!RUNPOD_API_KEY)
-    throw new Error("Falta RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
+  if (!RUNPOD_API_KEY) throw new Error("Falta RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
 
   const url = `https://api.runpod.io${path}`;
   const res = await fetch(url, {
@@ -125,9 +97,7 @@ async function runpodFetch(path, { method = "GET", body } = {}) {
   }
 
   if (!res.ok) {
-    const err = new Error(
-      `RunPod ${method} ${path} falló (${res.status}): ${text}`
-    );
+    const err = new Error(`RunPod ${method} ${path} falló (${res.status}): ${text}`);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -137,35 +107,70 @@ async function runpodFetch(path, { method = "GET", body } = {}) {
 }
 
 // ------------------------------------------------------------
-// LOCK (Supabase) usando pod_lock(id=1, locked_until) - SOLO TTL
+// LOCK - SOLUCIÓN REAL: RPC atómico en Postgres
 // ------------------------------------------------------------
 //
-// Idea:
-// - Si locked_until > ahora => lock ocupado.
-// - Si locked_until <= ahora (o null) => tomamos lock actualizando locked_until = ahora + TTL.
-// - Update condicional para minimizar colisiones.
+// Requiere 2 RPC en Supabase (te paso el SQL abajo):
+// - acquire_pod_lock(ttl_seconds int) -> devuelve { ok, locked_until, now_utc }
+// - release_pod_lock() -> libera
 //
-// IMPORTANTE:
-// No liberamos el lock en serverless; expira por TTL.
+// Si NO existen aún, hace fallback al método viejo,
+// pero el recomendado (y el que corta el problema de raíz) es el RPC.
+//
 // ------------------------------------------------------------
-async function adquirirLock(sb) {
-  const nowIso = ahoraIso();
-  const untilIso = sumarSegundosIso(LOCK_TTL_SECONDS);
+async function adquirirLock(sb, log) {
+  // 1) Intentar RPC
+  try {
+    const { data, error } = await sb.rpc("acquire_pod_lock", {
+      ttl_seconds: LOCK_TTL_SECONDS,
+    });
+    if (error) throw error;
+
+    // data puede venir como objeto o array según cómo lo definiste
+    const row = Array.isArray(data) ? data?.[0] : data;
+
+    if (row?.ok) {
+      return { ok: true, locked_until: row.locked_until, via: "rpc" };
+    }
+    return { ok: false, motivo: "LOCK_OCUPADO", via: "rpc", debug: row || data };
+  } catch (e) {
+    log("lock_rpc_fallo, uso fallback", e?.message || e);
+  }
+
+  // 2) Fallback (menos confiable)
+  const now = new Date().toISOString();
+  const until = new Date(Date.now() + LOCK_TTL_SECONDS * 1000).toISOString();
 
   const { data, error } = await sb
     .from(POD_LOCK_TABLE)
-    .update({ locked_until: untilIso })
+    .update({ locked_until: until })
     .eq("id", 1)
-    .or(`locked_until.is.null,locked_until.lte.${nowIso}`)
-    .select("*");
+    .or(`locked_until.is.null,locked_until.lte.${now}`)
+    .select("id, locked_until");
 
   if (error) throw error;
 
   if (!data || data.length === 0) {
-    return { ok: false, motivo: "LOCK_OCUPADO" };
+    return { ok: false, motivo: "LOCK_OCUPADO", via: "fallback" };
   }
 
-  return { ok: true, locked_until: untilIso };
+  return { ok: true, locked_until: until, via: "fallback" };
+}
+
+async function liberarLock(sb, log) {
+  // 1) Intentar RPC
+  try {
+    const { error } = await sb.rpc("release_pod_lock");
+    if (error) throw error;
+    return { ok: true, via: "rpc" };
+  } catch (e) {
+    log("release_rpc_fallo, uso fallback", e?.message || e);
+  }
+
+  // 2) Fallback
+  const pastIso = new Date(Date.now() - 1000).toISOString();
+  await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
+  return { ok: true, via: "fallback" };
 }
 
 // ------------------------------------------------------------
@@ -174,13 +179,7 @@ async function adquirirLock(sb) {
 async function runpodCrearPodDesdeTemplate() {
   if (!VIDEO_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
 
-  const body = {
-    templateId: VIDEO_TEMPLATE_ID,
-  };
-
-  // Nota: VIDEO_NETWORK_VOLUME_ID se deja por compatibilidad con tu env,
-  // pero NO lo mandamos si tu template ya lo maneja.
-  // (Si algún día lo necesitas en API: lo agregamos con la key exacta que RunPod espere.)
+  const body = { templateId: VIDEO_TEMPLATE_ID };
 
   const created = await runpodFetch(`/v2/pods`, {
     method: "POST",
@@ -195,9 +194,7 @@ async function runpodCrearPodDesdeTemplate() {
     null;
 
   if (!podId) {
-    throw new Error(
-      `No pude obtener podId al crear pod: ${JSON.stringify(created)}`
-    );
+    throw new Error(`No pude obtener podId al crear pod: ${JSON.stringify(created)}`);
   }
 
   return podId;
@@ -211,50 +208,31 @@ async function runpodTerminarPod(podId) {
   await runpodFetch(`/v2/pods/${podId}`, { method: "DELETE" });
 }
 
-// ------------------------------------------------------------
-// Esperar a RUNNING
-// ------------------------------------------------------------
 async function esperarPodRunning(podId) {
   const t0 = Date.now();
-
   while (Date.now() - t0 < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
     const status =
       pod?.status || pod?.state || pod?.pod?.status || pod?.data?.status || null;
 
     if (status === "RUNNING") return pod;
-
     await sleep(POLL_MS);
   }
-
   throw new Error("Tiempo de espera agotado: el pod no llegó a RUNNING");
 }
 
-// ------------------------------------------------------------
-// Esperar worker vivo
-// ------------------------------------------------------------
 async function esperarWorker(workerBase) {
   const t0 = Date.now();
-
   while (Date.now() - t0 < WAIT_WORKER_TIMEOUT_MS) {
     try {
-      const res = await fetch(`${workerBase}${WORKER_HEALTH_PATH}`, {
-        method: "GET",
-      });
+      const res = await fetch(`${workerBase}${WORKER_HEALTH_PATH}`, { method: "GET" });
       if (res.ok) return true;
-    } catch {
-      // reintentar
-    }
-
+    } catch {}
     await sleep(POLL_MS);
   }
-
   throw new Error("Tiempo de espera agotado: el worker no respondió");
 }
 
-// ------------------------------------------------------------
-// Utilidad: construir URL pública del worker vía proxy runpod
-// ------------------------------------------------------------
 function construirWorkerBase(podId) {
   return `https://${podId}-8000.proxy.runpod.net`;
 }
@@ -271,30 +249,30 @@ export default async function handler(req, res) {
   const log = (...args) => console.log("[GV]", ...args);
 
   let podId = null;
+  let lockTomado = false;
+  let jobRow = null; // <- importante para poder cerrarlo en ERROR si algo falla
 
   try {
     log("step=INICIO");
 
-    // --------------------------------------------------------
-    // 1) LOCK (solo TTL)
-    // --------------------------------------------------------
+    // 1) LOCK
     log("step=LOCK_INICIO");
+    const lock = await adquirirLock(sb, log);
 
-    const lock = await adquirirLock(sb);
     if (!lock.ok) {
-      log("step=LOCK_OCUPADO");
+      log("step=LOCK_OCUPADO", { via: lock.via, debug: lock.debug || null });
       return res.status(429).json({
         error:
           "Sistema ocupado: ya hay una generación en proceso. Intenta de nuevo en unos segundos.",
         code: "LOCK_OCUPADO",
+        via: lock.via,
       });
     }
 
-    log("step=LOCK_OK", { locked_until: lock.locked_until });
+    lockTomado = true;
+    log("step=LOCK_OK", { locked_until: lock.locked_until, via: lock.via });
 
-    // --------------------------------------------------------
-    // 2) Leer payload
-    // --------------------------------------------------------
+    // 2) Payload
     const {
       prompt = "",
       negativePrompt = "",
@@ -306,10 +284,7 @@ export default async function handler(req, res) {
       throw new Error("Falta prompt (texto) para generar el video.");
     }
 
-    // --------------------------------------------------------
-    // 3) (Opcional) Registrar job en Supabase
-    // --------------------------------------------------------
-    let jobRow = null;
+    // 3) Insert job (solo después del lock OK)
     try {
       const insertJob = await sb
         .from(VIDEO_JOBS_TABLE)
@@ -331,16 +306,12 @@ export default async function handler(req, res) {
       log("Aviso: no pude insertar video_job (continuo igual).", e?.message || e);
     }
 
-    // --------------------------------------------------------
     // 4) Crear pod
-    // --------------------------------------------------------
     log("step=CREATE_POD_REQUEST");
-
     podId = await runpodCrearPodDesdeTemplate();
-
     log("step=CREATE_POD_OK", { podId });
 
-    // (Opcional) guardar estado pod en pod_state
+    // pod_state (opcional)
     try {
       await sb
         .from(POD_STATE_TABLE)
@@ -356,32 +327,22 @@ export default async function handler(req, res) {
           { onConflict: "id" }
         );
     } catch (e) {
-      log("Aviso: no pude actualizar pod_state (continuo igual).", e?.message || e);
+      log("Aviso: no pude actualizar pod_state.", e?.message || e);
     }
 
-    // --------------------------------------------------------
     // 5) Esperar RUNNING
-    // --------------------------------------------------------
     log("step=WAIT_RUNNING_INICIO", { podId });
-
     await esperarPodRunning(podId);
-
     log("step=WAIT_RUNNING_OK", { podId });
 
     const workerBase = construirWorkerBase(podId);
 
-    // --------------------------------------------------------
     // 6) Esperar worker
-    // --------------------------------------------------------
     log("step=WAIT_WORKER_INICIO", { workerBase });
-
     await esperarWorker(workerBase);
-
     log("step=WAIT_WORKER_OK", { workerBase });
 
-    // --------------------------------------------------------
-    // 7) Enviar job al worker (async)
-    // --------------------------------------------------------
+    // 7) Enviar job al worker
     log("step=WORKER_REQUEST_INICIO");
 
     const workerPayload = {
@@ -414,9 +375,7 @@ export default async function handler(req, res) {
 
     log("step=WORKER_REQUEST_OK");
 
-    // --------------------------------------------------------
-    // 8) Actualizar job en Supabase (si existe)
-    // --------------------------------------------------------
+    // 8) Update job
     try {
       if (jobRow?.id) {
         await sb
@@ -431,12 +390,10 @@ export default async function handler(req, res) {
           .eq("id", jobRow.id);
       }
     } catch (e) {
-      log("Aviso: no pude actualizar video_job (continuo igual).", e?.message || e);
+      log("Aviso: no pude actualizar video_job.", e?.message || e);
     }
 
-    // --------------------------------------------------------
     // 9) Responder al front
-    // --------------------------------------------------------
     return res.status(200).json({
       ok: true,
       podId,
@@ -447,36 +404,51 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     const msg = err?.message || String(err);
-
     console.error("[GV] fatal:", msg);
 
-    // Intento de guardar error en video_jobs si existe
+    // ✅ FIX: si ya existe jobRow, lo cerramos en ERROR (no dejamos PENDING)
     try {
       const sb2 = sbAdmin();
-      await sb2.from(VIDEO_JOBS_TABLE).insert([
-        {
-          status: "ERROR",
-          error: msg,
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      if (jobRow?.id) {
+        await sb2
+          .from(VIDEO_JOBS_TABLE)
+          .update({
+            status: "ERROR",
+            error: msg,
+            pod_id: podId || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobRow.id);
+      } else {
+        // si no existía job, insert opcional de error (no es PENDING)
+        await sb2.from(VIDEO_JOBS_TABLE).insert([
+          {
+            status: "ERROR",
+            error: msg,
+            pod_id: podId || null,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
     } catch {
       // ignorar
     }
 
     return res.status(500).json({ error: msg });
   } finally {
-    // --------------------------------------------------------
-    // NO liberar lock manualmente (expira por TTL)
-    // --------------------------------------------------------
+    // Liberar lock siempre
+    try {
+      if (lockTomado) {
+        const sb3 = sbAdmin();
+        await liberarLock(sb3, log);
+      }
+    } catch {}
 
-    // (Opcional) terminar pod al final si tu modo es efímero
+    // Terminar pod al final si aplica
     try {
       if (TERMINATE_AFTER_JOB && podId) {
         await runpodTerminarPod(podId);
       }
-    } catch {
-      // ignorar
-    }
+    } catch {}
   }
 }
