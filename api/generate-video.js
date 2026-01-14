@@ -55,8 +55,10 @@ const LOCK_WAIT_INTERVAL_MS = parseInt(
 );
 
 const POD_STATE_TABLE = "pod_state";
-const POD_LOCK_TABLE = "pod_lock";
 
+// -----------------------------------------------------
+// Supabase
+// -----------------------------------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY)
@@ -66,6 +68,9 @@ function sbAdmin() {
   });
 }
 
+// -----------------------------------------------------
+// RunPod headers
+// -----------------------------------------------------
 function runpodHeaders() {
   if (!RUNPOD_API_KEY) throw new Error("Falta RUNPOD_API_KEY");
   return {
@@ -142,18 +147,38 @@ async function runpodTerminatePod(podId) {
   }
 }
 
+// ✅ FIX CLAVE: status en REST v1 suele venir en runtime.status
+function extractRunpodStatus(pod) {
+  const candidates = [
+    pod?.runtime?.status,
+    pod?.runtime?.desiredStatus,
+    pod?.desiredStatus,
+    pod?.status,
+    pod?.pod?.status,
+    pod?.pod?.desiredStatus,
+  ];
+  for (const c of candidates) {
+    if (c) return String(c).toUpperCase();
+  }
+  return "";
+}
+
 async function waitForRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
-    const status = String(
-      pod?.desiredStatus || pod?.status || pod?.pod?.status || ""
-    ).toUpperCase();
+    const status = extractRunpodStatus(pod);
 
     if (status.includes("RUNNING")) return { ok: true, status };
+
+    // algunos estados comunes
     if (status.includes("FAILED") || status.includes("ERROR")) {
       return { ok: false, status, error: "Pod entró en FAILED/ERROR" };
     }
+    if (status.includes("TERMINATED") || status.includes("EXITED")) {
+      return { ok: false, status, error: "Pod está TERMINATED/EXITED" };
+    }
+
     await sleep(WAIT_RUNNING_INTERVAL_MS);
   }
   return {
@@ -195,10 +220,11 @@ async function runpodCreatePodFromTemplate({ name, log }) {
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-    ports: ["8000/http", "8888/http"],
+    // ✅ usa WORKER_PORT (no hardcode)
+    ports: [`${WORKER_PORT}/http`, "8888/http"],
   };
 
-  // helper de “no-op” (evita JSON circular)
+  // noop (evita problemas si alguien mete objetos raros)
   see(payload);
 
   const r = await fetch(`https://rest.runpod.io/v1/pods`, {
@@ -316,6 +342,7 @@ async function ensureWorkingPod(sb, log) {
       .eq("id", 1);
   }
 
+  // Caso: no existe pod guardado
   if (!statePodId) {
     const created = await runpodCreatePodFromTemplate({
       name: `isabela-video-${Date.now()}`,
@@ -349,6 +376,7 @@ async function ensureWorkingPod(sb, log) {
     return { podId: created.podId, action: "CREADO_Y_LISTO" };
   }
 
+  // Caso: existe pod guardado -> reusar
   try {
     await runpodGetPod(statePodId);
 
