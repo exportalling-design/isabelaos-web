@@ -18,6 +18,9 @@ import { PLANS, COSTS } from "./lib/pricing";
 // ✅ PayPal checkout (redirect, NO popup)
 import { startPaypalSubscription } from "./lib/PaypalCheckout";
 
+// ✅ NUEVO (necesario para VideoFromPromptPanel)
+import { getAuthHeadersGlobal } from "./lib/authHeaders";
+
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
