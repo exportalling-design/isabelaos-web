@@ -2,8 +2,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
+// ============================================================
+// IsabelaOS Studio — Video Status
+// - Primero busca por id (PK) porque generate-video devuelve job_id = id
+// - Fallback por job_id si existiera en algún entorno viejo
+// ============================================================
+
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
 const VIDEO_JOBS_TABLE = "video_jobs";
 
 function sbAdmin() {
@@ -15,11 +22,6 @@ function sbAdmin() {
 }
 
 export default async function handler(req, res) {
-  // ✅ anti-cache (arregla 304)
-  res.setHeader("Cache-Control", "no-store, max-age=0");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-
   try {
     const { job_id } = req.query || {};
     if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
@@ -30,7 +32,7 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // ✅ 1) PK id (primera columna id uuid)
+    // 1) PK id
     let job = null;
     {
       const { data, error } = await sb
@@ -38,19 +40,19 @@ export default async function handler(req, res) {
         .select("*")
         .eq("id", job_id)
         .eq("user_id", user_id)
-        .maybeSingle();
+        .single();
 
       if (!error && data) job = data;
     }
 
-    // ✅ 2) Fallback por job_id si existiera
+    // 2) Fallback job_id (si existiera)
     if (!job) {
       const { data, error } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("*")
         .eq("job_id", job_id)
         .eq("user_id", user_id)
-        .maybeSingle();
+        .single();
 
       if (!error && data) job = data;
     }
@@ -66,6 +68,7 @@ export default async function handler(req, res) {
       created_at: job.created_at || null,
       updated_at: job.updated_at || null,
     });
+
   } catch (e) {
     console.error("[video-status] fatal:", e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
