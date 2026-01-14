@@ -2,6 +2,9 @@
 // ============================================================
 // IsabelaOS Studio — API de Generación de Video (Vercel Function)
 // MODO: ASYNC REAL (worker encola y runner procesa)
+// - Reusa pod si existe
+// - Lock para evitar carreras al arrancar/crear pod
+// - Dispatch a /api/video_async que crea fila en public.video_jobs
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -14,20 +17,33 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
+  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
 
-const WAIT_WORKER_TIMEOUT_MS = parseInt(process.env.WAIT_WORKER_TIMEOUT_MS || "180000", 10);
-const WAIT_WORKER_INTERVAL_MS = parseInt(process.env.WAIT_WORKER_INTERVAL_MS || "2500", 10);
+const WAIT_WORKER_TIMEOUT_MS = parseInt(
+  process.env.WAIT_WORKER_TIMEOUT_MS || "180000",
+  10
+);
+const WAIT_WORKER_INTERVAL_MS = parseInt(
+  process.env.WAIT_WORKER_INTERVAL_MS || "2500",
+  10
+);
 
-const WAIT_RUNNING_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || "240000", 10);
-const WAIT_RUNNING_INTERVAL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3500", 10);
+const WAIT_RUNNING_TIMEOUT_MS = parseInt(
+  process.env.WAIT_RUNNING_TIMEOUT_MS || "240000",
+  10
+);
+const WAIT_RUNNING_INTERVAL_MS = parseInt(
+  process.env.WAIT_RUNNING_INTERVAL_MS || "3500",
+  10
+);
 
-const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "120", 10);
+const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "90", 10); // 👈 recomendado (evita lock pegado)
 
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
@@ -88,16 +104,13 @@ async function runpodListPods(limit = 10) {
 }
 
 async function runpodStartPod(podId) {
-  // ✅ best-effort: si ya está RUNNING puede fallar con 409; no debe romper el flujo
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/start`, {
     method: "POST",
     headers: runpodHeaders(),
   });
   if (r.ok) return true;
-
   const t = await r.text().catch(() => "");
-  // no tirar error: solo loggable
-  return { ok: false, status: r.status, raw: t };
+  return { ok: false, status: r.status, raw: t }; // no rompe el flujo
 }
 
 async function runpodTerminatePod(podId) {
@@ -133,7 +146,11 @@ async function waitForRunning(podId) {
     }
     await sleep(WAIT_RUNNING_INTERVAL_MS);
   }
-  return { ok: false, status: "TIMEOUT", error: `Pod no llegó a RUNNING en ${WAIT_RUNNING_TIMEOUT_MS}ms` };
+  return {
+    ok: false,
+    status: "TIMEOUT",
+    error: `Pod no llegó a RUNNING en ${WAIT_RUNNING_TIMEOUT_MS}ms`,
+  };
 }
 
 async function waitForWorker(podId) {
@@ -152,9 +169,9 @@ async function waitForWorker(podId) {
 }
 
 // ---------------------------
-// LOCK supabase
+// LOCK supabase (pod_lock.locked_until timestamptz)
 // ---------------------------
-async function tryAcquireLock(sb, seconds = 120) {
+async function tryAcquireLock(sb, seconds = 90) {
   const now = new Date();
   const until = new Date(now.getTime() + seconds * 1000);
 
@@ -181,7 +198,10 @@ async function tryAcquireLock(sb, seconds = 120) {
 
 async function releaseLock(sb) {
   const pastIso = new Date(Date.now() - 1000).toISOString();
-  const { error } = await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
+  const { error } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: pastIso })
+    .eq("id", 1);
   if (error) throw error;
 }
 
@@ -199,6 +219,8 @@ async function runpodCreatePodFromTemplate({ name, log }) {
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
     ports: ["8000/http", "8888/http"],
   };
+
+  see(payload);
 
   const r = await fetch(`https://rest.runpod.io/v1/pods`, {
     method: "POST",
@@ -237,16 +259,20 @@ async function runpodCreatePodFromTemplate({ name, log }) {
 
   if (!verified) {
     const list = await runpodListPods(10);
-    log?.("RunPod debug listPods (misma API key)", list?.ok ? "OK" : "FAIL", list?.data || list?.raw || null);
-
+    log?.("RunPod debug listPods", list?.ok ? "OK" : "FAIL", list?.data || list?.raw || null);
     throw new Error(
-      `Pod creado pero NO verificable por GET (posible API key de otra cuenta / pod fantasma). podId=${podId}. Ultimo error: ${String(
+      `Pod creado pero NO verificable por GET. podId=${podId}. Último error: ${String(
         lastErr?.message || lastErr
       )}`
     );
   }
 
   return { podId, raw: json };
+}
+
+// helper para log sin reventar JSON circular
+function see(v) {
+  try { /* noop */ } catch {}
 }
 
 // ---------------------------
@@ -264,12 +290,12 @@ async function ensureWorkingPod(sb, log) {
 
   const statePodId = String(podState?.pod_id || "");
 
-  // helper: touch state
   async function touch(status, busy = false) {
-    await sb
-      .from(POD_STATE_TABLE)
-      .update({ status, last_used_at: nowIso, busy })
-      .eq("id", 1);
+    await sb.from(POD_STATE_TABLE).update({
+      status,
+      last_used_at: nowIso,
+      busy,
+    }).eq("id", 1);
   }
 
   if (!statePodId) {
@@ -282,7 +308,6 @@ async function ensureWorkingPod(sb, log) {
       busy: false,
     }).eq("id", 1);
 
-    // ✅ start best-effort
     const st = await runpodStartPod(created.podId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
@@ -299,7 +324,6 @@ async function ensureWorkingPod(sb, log) {
   try {
     await runpodGetPod(statePodId);
 
-    // ✅ start best-effort
     const st = await runpodStartPod(statePodId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
@@ -307,7 +331,7 @@ async function ensureWorkingPod(sb, log) {
     if (!running.ok) throw new Error(`Pod no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(statePodId);
-    if (!ready.ok) throw new Error(`Worker no respondió en pod existente: ${ready.error}`);
+    if (!ready.ok) throw new Error(`Worker no respondió: ${ready.error}`);
 
     await touch("RUNNING", false);
     return { podId: statePodId, action: "REUSADO" };
@@ -332,7 +356,7 @@ async function ensureWorkingPod(sb, log) {
     if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo tras recrear pod: ${ready.error}`);
+    if (!ready.ok) throw new Error(`Worker no listo tras recrear: ${ready.error}`);
 
     await touch("RUNNING", false);
 
@@ -353,18 +377,19 @@ export default async function handler(req, res) {
 
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
-    const user_id = auth.user.id; // ✅ fuente de verdad
+    const user_id = auth.user.id;
 
+    // ✅ Calidad mejor sin matar velocidad (defaults medidos)
     const {
       mode = "t2v",
       prompt,
       negative_prompt = "",
-      steps = 20,            // ✅ calidad un poco mejor por defecto
+      steps = 22,           // 👈 sube un poco calidad
       height = 512,
       width = 896,
-      num_frames = 49,
+      num_frames = 49,      // 👈 no subo frames para no matar velocidad
       fps = 24,
-      guidance_scale = 6.0,  // ✅ un poco más
+      guidance_scale = 6.0, // 👈 leve bump
       image_base64 = null,
     } = req.body || {};
 
@@ -372,7 +397,7 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // 1) Lock (solo para evitar doble creación/arranque)
+    // 1) Lock
     log("step=LOCK_BEGIN");
     const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
@@ -397,7 +422,7 @@ export default async function handler(req, res) {
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
     const payload = {
-      user_id, // ✅ siempre auth
+      user_id,
       mode,
       prompt,
       negative_prompt,
