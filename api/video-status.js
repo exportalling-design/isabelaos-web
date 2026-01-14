@@ -2,6 +2,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
+// ============================================================
+// IsabelaOS Studio — Video Status
+// - Busca por PK id (uuid) porque generate-video devuelve job_id = id
+// - Fallback por job_id si existiera legado
+// ============================================================
+
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -26,31 +32,40 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // PK id
-    const { data: job, error } = await sb
-      .from(VIDEO_JOBS_TABLE)
-      .select("*")
-      .eq("id", job_id)
-      .eq("user_id", user_id)
-      .single();
+    let job = null;
 
-    if (error || !job) return res.status(404).json({ ok: false, error: "Job not found" });
+    // 1) PK id
+    {
+      const { data, error } = await sb
+        .from(VIDEO_JOBS_TABLE)
+        .select("*")
+        .eq("id", job_id)
+        .eq("user_id", user_id)
+        .single();
+      if (!error && data) job = data;
+    }
+
+    // 2) Fallback job_id (legado)
+    if (!job) {
+      const { data, error } = await sb
+        .from(VIDEO_JOBS_TABLE)
+        .select("*")
+        .eq("job_id", job_id)
+        .eq("user_id", user_id)
+        .single();
+      if (!error && data) job = data;
+    }
+
+    if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
 
     return res.status(200).json({
       ok: true,
       id: job.id,
-      status: job.status || "QUEUED",
-      progress: typeof job.progress === "number" ? job.progress : 0,
-      phase: job.phase || null,
-      queue_position: job.queue_position ?? null,
-      eta_seconds: job.eta_seconds ?? null,
+      status: job.status || "PENDING",
       video_url: job.video_url || null,
       error: job.error || null,
       created_at: job.created_at || null,
       updated_at: job.updated_at || null,
-      started_at: job.started_at || null,
-      completed_at: job.completed_at || null,
-      worker_id: job.worker_id || null,
     });
 
   } catch (e) {
