@@ -905,17 +905,16 @@ function LibraryView() {
 
 // ---------------------------------------------------------
 // Video desde prompt (logueado)
-// ✅ AUTH (token)
-// ✅ NO cobra en frontend (cobra backend)
-// ✅ /api/generate-video responde rápido con job_id
-// ✅ FIX: normaliza status + tolera latencia de video_url + soporta keys alternativas
+// - Cola real: QUEUED -> STARTING -> RUNNING -> COMPLETED
+// - Barra real: progress (0-100) + phase
+// - Si /api/generate-video tarda por lock: no falla, igual crea job
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
   const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
-  const [steps, setSteps] = useState(25);
+  const [steps, setSteps] = useState(20);
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -923,55 +922,48 @@ function VideoFromPromptPanel({ userStatus }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState(null);
+  const [queuePos, setQueuePos] = useState(null);
+  const [eta, setEta] = useState(null);
+
   const canUse = !!user;
 
-  const COST_VIDEO_FROM_PROMPT = 10; // ✅ 10 jades
+  const COST_VIDEO_FROM_PROMPT = 10;
   const cost = COST_VIDEO_FROM_PROMPT;
 
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
-  // Seguridad: evita loop infinito si algo no cambia
-  const POLL_EVERY_MS = 3000;
-  const POLL_MAX_MS = 20 * 60 * 1000; // 20 min
+  const POLL_EVERY_MS = 2500;
+  const POLL_MAX_MS = 25 * 60 * 1000;
 
-  // ✅ FIX: cuando status ya es COMPLETED pero video_url tarda en aparecer,
-  // damos un "grace period" extra para reintentar.
-  const COMPLETED_URL_GRACE_MS = 45 * 1000; // 45s
-  const COMPLETED_URL_RETRY_EVERY_MS = 3000;
+  const COMPLETED_URL_GRACE_MS = 45 * 1000;
+  const COMPLETED_URL_RETRY_EVERY_MS = 2500;
 
   const normalizeStatus = (raw) => {
     const s = String(raw ?? "").trim();
-    if (!s) return "IN_PROGRESS";
+    if (!s) return "QUEUED";
     return s.toUpperCase();
   };
 
   const extractVideoUrl = (stData) => {
     if (!stData) return null;
-
-    // ✅ casos comunes
-    const direct =
+    return (
       stData.video_url ||
       stData.videoUrl ||
       stData.url ||
       stData.signed_url ||
       stData.signedUrl ||
       stData.public_url ||
-      stData.publicUrl;
-
-    if (direct) return direct;
-
-    // ✅ por si viene dentro de data/result
-    const nested =
+      stData.publicUrl ||
       stData.data?.video_url ||
-      stData.data?.videoUrl ||
       stData.result?.video_url ||
-      stData.result?.videoUrl ||
-      stData.payload?.video_url ||
-      stData.payload?.videoUrl;
-
-    return nested || null;
+      null
+    );
   };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const pollVideoStatus = async (job_id) => {
     const auth = await getAuthHeadersGlobal();
@@ -983,12 +975,27 @@ function VideoFromPromptPanel({ userStatus }) {
     return data;
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const prettyStatus = (st, data) => {
+    if (st === "QUEUED") {
+      const qp = data?.queue_position ?? queuePos;
+      return qp ? `Tu video está en cola (#${qp}).` : "Tu video está en cola…";
+    }
+    if (st === "STARTING") return "Arranque en frío… cargando motor (danos unos segundos).";
+    if (st === "RUNNING") return data?.phase ? `Generando… ${data.phase}` : "Generando…";
+    if (st === "UPLOADING") return "Finalizando… subiendo/exportando…";
+    if (st === "COMPLETED") return "Video generado con éxito.";
+    if (st === "ERROR" || st === "FAILED") return "Error al generar el video.";
+    return `Estado: ${st}`;
+  };
 
   const handleGenerateVideo = async () => {
     setError("");
     setVideoUrl(null);
     setJobId(null);
+    setProgress(0);
+    setPhase(null);
+    setQueuePos(null);
+    setEta(null);
 
     if (!canUse) {
       setStatus("ERROR");
@@ -1004,8 +1011,8 @@ function VideoFromPromptPanel({ userStatus }) {
       return;
     }
 
-    setStatus("IN_QUEUE");
-    setStatusText("Creando job de video...");
+    setStatus("QUEUED");
+    setStatusText("Creando job de video…");
 
     try {
       const auth = await getAuthHeadersGlobal();
@@ -1015,13 +1022,17 @@ function VideoFromPromptPanel({ userStatus }) {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
-          user_id: user.id, // ✅ requerido por tu esquema del worker
+          user_id: user.id,
           mode: "t2v",
           prompt,
           negative_prompt: negative,
           steps: Number(steps),
-          // opcional:
-          // height: 704, width: 1280, num_frames: 121, fps: 24, guidance_scale: 5.0
+          // calidad base (puedes ajustar en backend caps)
+          height: 704,
+          width: 1280,
+          num_frames: 81,
+          fps: 24,
+          guidance_scale: 5.0,
         }),
       });
 
@@ -1032,8 +1043,14 @@ function VideoFromPromptPanel({ userStatus }) {
 
       const jid = data.job_id;
       setJobId(jid);
-      setStatus("DISPATCHED");
-      setStatusText(`Job creado. ID: ${jid}. Esperando resultado...`);
+
+      if (typeof data.queue_position === "number") setQueuePos(data.queue_position);
+      setStatus("QUEUED");
+      setStatusText(
+        typeof data.queue_position === "number"
+          ? `Tu video está en cola (#${data.queue_position}).`
+          : "Tu video está en cola…"
+      );
 
       const startedAt = Date.now();
 
@@ -1045,30 +1062,27 @@ function VideoFromPromptPanel({ userStatus }) {
         await sleep(POLL_EVERY_MS);
 
         const stData = await pollVideoStatus(jid);
+        const st = normalizeStatus(stData.status);
 
-        // ✅ FIX: normaliza status (puede venir en status/state/job_status/phase)
-        const rawSt =
-          stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
-        const st = normalizeStatus(rawSt);
+        // estado extra
+        setProgress(typeof stData.progress === "number" ? stData.progress : 0);
+        setPhase(stData.phase || null);
+        setQueuePos(stData.queue_position ?? null);
+        setEta(stData.eta_seconds ?? null);
 
         setStatus(st);
-        setStatusText(`Estado actual: ${st}...`);
+        setStatusText(prettyStatus(st, stData));
 
-        // Estados “en progreso”
-        if (
-          ["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "PENDING"].includes(st)
-        ) {
+        if (["QUEUED", "STARTING", "RUNNING", "UPLOADING", "PENDING", "IN_PROGRESS", "DISPATCHED"].includes(st)) {
           continue;
         }
 
-        // ✅ Cuando ya finaliza, intentamos extraer url
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           let url = extractVideoUrl(stData);
 
-          // ✅ FIX: grace period por si el backend marca COMPLETED y la URL se llena unos segundos después
           if (!url) {
             const graceStart = Date.now();
-            setStatusText("Finalizado. Esperando URL del video (sincronizando)...");
+            setStatusText("Finalizado. Esperando URL del video (sincronizando)…");
             while (Date.now() - graceStart < COMPLETED_URL_GRACE_MS) {
               await sleep(COMPLETED_URL_RETRY_EVERY_MS);
               const stData2 = await pollVideoStatus(jid);
@@ -1080,14 +1094,13 @@ function VideoFromPromptPanel({ userStatus }) {
           if (url) {
             setVideoUrl(url);
             setStatusText("Video generado con éxito.");
+            setProgress(100);
             return;
           }
 
-          // si de verdad no aparece tras el grace period, ahora sí error
           throw new Error("Terminado pero sin video_url en video_jobs (tras reintentos).");
         }
 
-        // Estados de error
         throw new Error(stData.error || "Error al generar el video.");
       }
     } catch (err) {
@@ -1116,9 +1129,7 @@ function VideoFromPromptPanel({ userStatus }) {
     );
   }
 
-  const isBusy = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING"].includes(
-    status
-  );
+  const isBusy = ["QUEUED", "STARTING", "RUNNING", "UPLOADING", "PENDING", "IN_PROGRESS", "DISPATCHED"].includes(status);
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -1132,10 +1143,30 @@ function VideoFromPromptPanel({ userStatus }) {
               Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
             </span>
           </div>
+
           <div className="mt-1 text-[11px] text-neutral-400">
             Costo: <span className="font-semibold text-white">{cost}</span> jades por video
+            {queuePos ? <span className="ml-2 text-neutral-500">• Cola: #{queuePos}</span> : null}
+            {eta ? <span className="ml-2 text-neutral-500">• ETA: ~{Math.ceil(eta / 60)} min</span> : null}
           </div>
+
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+
+          {/* Barra progreso */}
+          {isBusy && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] text-neutral-400">
+                <span>{phase ? `Fase: ${phase}` : "Procesando…"}</span>
+                <span>{Math.max(0, Math.min(100, progress || 0))}%</span>
+              </div>
+              <div className="mt-1 h-2 w-full rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-500"
+                  style={{ width: `${Math.max(0, Math.min(100, progress || 0))}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
