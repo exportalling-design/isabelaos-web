@@ -906,8 +906,9 @@ function LibraryView() {
 
 // ---------------------------------------------------------
 // Video desde prompt (logueado) - ASYNC REAL + PROGRESS + RESUME
+// (OPCIÓN B): NO export default (porque App.jsx ya tiene export default App)
 // ---------------------------------------------------------
-export default function VideoFromPromptPanel({ userStatus }) {
+function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
@@ -982,16 +983,26 @@ export default function VideoFromPromptPanel({ userStatus }) {
   const STORAGE_KEY = "isabelaos_video_job_id_v1";
 
   const saveJobId = (id) => {
-    try { localStorage.setItem(STORAGE_KEY, String(id)); } catch {}
+    try {
+      localStorage.setItem(STORAGE_KEY, String(id));
+    } catch {}
   };
   const loadJobId = () => {
-    try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+    try {
+      return localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
   };
   const clearJobId = () => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
   };
 
-  const isBusyLocal = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING", "LOCK_BUSY"].includes(status);
+  const isBusyLocal = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING", "LOCK_BUSY"].includes(
+    status
+  );
   const effectiveBusy = isBusyLocal || !!loadJobId();
 
   const formatEta = (s) => {
@@ -1341,9 +1352,7 @@ export default function VideoFromPromptPanel({ userStatus }) {
                 value={steps}
                 onChange={(e) => setSteps(Number(e.target.value))}
               />
-              <div className="mt-1 text-[10px] text-neutral-500">
-                Recomendado: 20–24. Máx permitido: 25.
-              </div>
+              <div className="mt-1 text-[10px] text-neutral-500">Recomendado: 20–24. Máx permitido: 25.</div>
             </div>
 
             <div className="flex items-end">
@@ -1372,8 +1381,8 @@ export default function VideoFromPromptPanel({ userStatus }) {
               {queuePos && queuePos > 1
                 ? `Tu video está en cola (posición ${queuePos}).`
                 : effectiveBusy
-                  ? "Procesando… vuelve en unos segundos (puedes cambiar de módulo, el progreso se guarda)."
-                  : "Aquí verás el video cuando termine."}
+                ? "Procesando… vuelve en unos segundos (puedes cambiar de módulo, el progreso se guarda)."
+                : "Aquí verás el video cuando termine."}
             </p>
           )}
         </div>
