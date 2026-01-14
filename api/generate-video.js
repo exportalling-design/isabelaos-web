@@ -11,12 +11,6 @@
 //      con Network Volume + puertos 8000/8888, guarda pod_state.pod_id,
 //      y TERMINA el pod viejo.
 // 3) NO espera render, NO espera /health (eso lo hace el worker dentro del pod).
-//
-// IMPORTANTE:
-// - No rompemos el async real: el worker/runner consume la cola.
-// - Evitamos abrir pods “a lo loco”: SOLO 1 pod activo guardado en pod_state.
-// - Para evitar carreras (2 users generando al mismo tiempo): usamos pod_lock (id=1)
-//   solo para la parte WAKE/CREATE, no para encolar.
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -34,9 +28,9 @@ const RUNPOD_API_KEY =
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
 const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
-const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || "A100_SXM"; // tu caso: A100 siempre
+const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || "A100_SXM";
 
-// Puertos que vos necesitás (8000 para worker, 8888 opcional)
+// Puertos
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 
 // Tablas
@@ -47,7 +41,7 @@ const POD_LOCK_TABLE = "pod_lock";
 // Config
 const COSTO_JADES_VIDEO = 10;
 
-// Lock solo para WAKE/CREATE (no para la cola)
+// Lock solo para WAKE/CREATE
 const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "120", 10);
 
 // ---------------------
@@ -74,12 +68,11 @@ function nowIso() {
 }
 
 function workerBaseUrl(podId) {
-  // Proxy RunPod
   return `https://${podId}-${WORKER_PORT}.proxy.runpod.net`;
 }
 
 // ---------------------
-// RunPod REST (v1) - tus scripts ya usaban rest.runpod.io
+// RunPod REST (v1)
 // ---------------------
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
@@ -88,7 +81,6 @@ async function runpodGetPod(podId) {
   });
   const t = await r.text().catch(() => "");
   if (!r.ok) {
-    // 404 típico cuando el pod ya no existe
     const err = new Error(`RunPod get pod failed (${r.status}): ${t}`);
     err.status = r.status;
     throw err;
@@ -131,13 +123,11 @@ async function runpodTerminatePod(podId) {
   }
 }
 
-// Crear pod desde template (con volumen + puertos)
-// NOTA: RunPod API puede variar. Este payload te lo dejo con tus parámetros CLAVE.
 async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
   if (!VIDEO_VOLUME_MOUNT_PATH) throw new Error("Falta VIDEO_VOLUME_MOUNT_PATH");
-  if (!RUNPOD_GPU_TYPE) throw new Error("Falta RUNPOD_GPU_TYPE (A100_SXM)");
+  if (!RUNPOD_GPU_TYPE) throw new Error("Falta RUNPOD_GPU_TYPE");
 
   const payload = {
     name,
@@ -173,31 +163,33 @@ async function runpodCreatePodFromTemplate({ name }) {
   return { podId, raw: json };
 }
 
-// Heurística: detectar “pod roto / sin GPU / muerto”
 function podPareceInusable(podJson) {
   const s = String(podJson?.desiredStatus || podJson?.status || podJson?.pod?.status || "").toUpperCase();
-  // si está TERMINATED/EXITED/DELETED/etc => inusable
-  if (s.includes("TERMINAT") || s.includes("EXIT") || s.includes("DELET") || s.includes("ERROR") || s.includes("FAIL")) return true;
+  if (
+    s.includes("TERMINAT") ||
+    s.includes("EXIT") ||
+    s.includes("DELET") ||
+    s.includes("ERROR") ||
+    s.includes("FAIL")
+  ) return true;
   return false;
 }
 
 // ---------------------
-// Lock para WAKE/CREATE (tabla pod_lock con id=1, locked_until)
+// Lock WAKE/CREATE
 // ---------------------
+async function ensureLockRow(sb) {
+  const { data } = await sb.from(POD_LOCK_TABLE).select("id").eq("id", 1).maybeSingle();
+  if (!data) {
+    await sb.from(POD_LOCK_TABLE).insert([{ id: 1, locked_until: new Date(0).toISOString() }]);
+  }
+}
+
 async function tryAcquireWakeLock(sb, seconds, log) {
+  await ensureLockRow(sb);
+
   const now = new Date();
   const until = new Date(now.getTime() + seconds * 1000).toISOString();
-
-  // Asegura que exista fila id=1 (si no existe, la crea)
-  // Esto evita el “lock ocupado” fantasma por fila inexistente.
-  {
-    const { data } = await sb.from(POD_LOCK_TABLE).select("id").eq("id", 1).maybeSingle();
-    if (!data) {
-      await sb.from(POD_LOCK_TABLE).insert([{ id: 1, locked_until: new Date(0).toISOString() }]);
-    }
-  }
-
-  // Intento de lock "condicional"
   const nowIso = now.toISOString();
 
   const { data, error } = await sb
@@ -219,17 +211,17 @@ async function tryAcquireWakeLock(sb, seconds, log) {
 }
 
 async function releaseWakeLock(sb) {
+  await ensureLockRow(sb);
   const pastIso = new Date(Date.now() - 1000).toISOString();
   await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
 }
 
 // ---------------------
-// WAKE / RECREATE (rápido, sin esperar health)
+// WAKE / RECREATE (rápido)
 // ---------------------
 async function wakeOrRecreatePod(sb, log) {
   const now = nowIso();
 
-  // leer pod_state
   const { data: podState, error: psErr } = await sb
     .from(POD_STATE_TABLE)
     .select("*")
@@ -240,14 +232,12 @@ async function wakeOrRecreatePod(sb, log) {
   const currentPodId = podState?.pod_id ? String(podState.pod_id) : "";
   const busy = Boolean(podState?.busy);
 
-  // Si está busy, NO hacemos nada (ya hay worker trabajando)
   if (busy && currentPodId) {
     return { ok: true, action: "SKIP_BUSY", pod_id: currentPodId };
   }
 
-  // Si no hay pod, crear
   if (!currentPodId) {
-    log("no_hay_pod_state_pod_id => creo nuevo pod");
+    log("no_hay_pod => creo nuevo pod");
     const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
 
     await sb.from(POD_STATE_TABLE).update({
@@ -257,7 +247,6 @@ async function wakeOrRecreatePod(sb, log) {
       last_used_at: now,
     }).eq("id", 1);
 
-    // start (rápido)
     await runpodStartPod(created.podId).catch((e) => {
       log("warn_start_new_pod", String(e?.message || e));
     });
@@ -265,15 +254,10 @@ async function wakeOrRecreatePod(sb, log) {
     return { ok: true, action: "CREATED", pod_id: created.podId };
   }
 
-  // Hay pod: validar rápido
   try {
     const podReal = await runpodGetPod(currentPodId);
+    if (podPareceInusable(podReal)) throw new Error("Pod inusable por status");
 
-    if (podPareceInusable(podReal)) {
-      throw new Error("Pod parece inusable (status error/terminated/etc)");
-    }
-
-    // Intentar start SIEMPRE es seguro: si ya está running no pasa nada grave.
     await sb.from(POD_STATE_TABLE).update({
       status: "STARTING",
       last_used_at: now,
@@ -281,14 +265,11 @@ async function wakeOrRecreatePod(sb, log) {
     }).eq("id", 1);
 
     await runpodStartPod(currentPodId);
-
     return { ok: true, action: "STARTED_OR_RESUMED", pod_id: currentPodId };
   } catch (e) {
-    // Si el pod no existe / falló / perdió GPU: crear nuevo y terminar el viejo
     log("pod_actual_fallo => recreo", String(e?.message || e));
 
     const oldPodId = currentPodId;
-
     const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
 
     await sb.from(POD_STATE_TABLE).update({
@@ -302,12 +283,16 @@ async function wakeOrRecreatePod(sb, log) {
       log("warn_start_created", String(err?.message || err));
     });
 
-    // Terminar viejo (best effort)
     await runpodTerminatePod(oldPodId).catch((err) => {
       log("warn_terminate_old", String(err?.message || err));
     });
 
-    return { ok: true, action: "RECREATED_AND_TERMINATED_OLD", pod_id: created.podId, old_pod_id: oldPodId };
+    return {
+      ok: true,
+      action: "RECREATED_AND_TERMINATED_OLD",
+      pod_id: created.podId,
+      old_pod_id: oldPodId,
+    };
   }
 }
 
@@ -322,14 +307,14 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Método no permitido" });
     }
 
-    // Auth real (tu sistema)
+    // Auth
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
     const sb = sbAdmin();
 
-    // 1) ENCOLAR job (esto SIEMPRE pasa)
+    // 1) ENCOLAR
     const {
       mode = "t2v",
       prompt,
@@ -368,12 +353,9 @@ export default async function handler(req, res) {
 
     if (insErr) throw insErr;
 
-    // 2) Responder INMEDIATO (async real, sin timeout)
-    //    Nota: el WAKE lo intentamos después, pero NO bloquea la respuesta si se demora.
-    //    Igual te devuelvo info del wake en respuesta para debug.
+    // 2) WAKE (con lock)
     let wake = { attempted: true, ok: false, action: "NOT_RUN" };
 
-    // 3) WAKE con lock corto (evita 10 users creando pods a la vez)
     try {
       const lock = await tryAcquireWakeLock(sb, WAKE_LOCK_SECONDS, log);
       if (!lock.ok) {
@@ -390,16 +372,25 @@ export default async function handler(req, res) {
       wake = { attempted: true, ok: false, action: "WAKE_ERROR", error: String(e?.message || e) };
     }
 
-    // Touch last_used_at para autosleep
-    await sb.from(POD_STATE_TABLE).update({ last_used_at: nowIso() }).eq("id", 1).catch(() => {});
+    // ✅ FIX AQUÍ: NO usar .catch() sobre el builder. Se hace con await + error.
+    try {
+      const { error: touchErr } = await sb
+        .from(POD_STATE_TABLE)
+        .update({ last_used_at: nowIso() })
+        .eq("id", 1);
+
+      if (touchErr) log("warn_touch_last_used_at", String(touchErr?.message || touchErr));
+    } catch (e) {
+      log("warn_touch_last_used_at_try", String(e?.message || e));
+    }
 
     return res.status(200).json({
       ok: true,
-      job_id: job.id,          // ✅ PK id (esto es lo que debe usar video-status)
+      job_id: job.id,          // ✅ PK
       status: job.status,
       costo_jades: COSTO_JADES_VIDEO,
       wake,
-      mensaje: "Job en cola. El pod se reanudó/creó si era necesario. Revisa estado en /api/video-status?job_id=...",
+      mensaje: "Job en cola. Pod reanudado/creado si era necesario. Revisa estado en /api/video-status?job_id=...",
     });
 
   } catch (e) {
