@@ -3,7 +3,7 @@
 // IsabelaOS Studio — API de Generación de Video (Vercel Function)
 // MODO: ASYNC REAL (worker encola y runner procesa)
 // - Reusa pod si existe
-// - Lock para evitar carreras al arrancar/crear pod
+// - Lock atómico + heartbeat para evitar lock pegado / carreras
 // - Dispatch a /api/video_async que crea fila en public.video_jobs
 // ============================================================
 
@@ -43,7 +43,9 @@ const WAIT_RUNNING_INTERVAL_MS = parseInt(
   10
 );
 
-const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "90", 10); // 👈 recomendado (evita lock pegado)
+// ✅ Lease corto pero con heartbeat (no se pega, no expira mientras trabaja)
+const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "60", 10);
+const LOCK_HEARTBEAT_EVERY_MS = parseInt(process.env.LOCK_HEARTBEAT_EVERY_MS || "25000", 10);
 
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
@@ -110,7 +112,7 @@ async function runpodStartPod(podId) {
   });
   if (r.ok) return true;
   const t = await r.text().catch(() => "");
-  return { ok: false, status: r.status, raw: t }; // no rompe el flujo
+  return { ok: false, status: r.status, raw: t };
 }
 
 async function runpodTerminatePod(podId) {
@@ -169,40 +171,84 @@ async function waitForWorker(podId) {
 }
 
 // ---------------------------
-// LOCK supabase (pod_lock.locked_until timestamptz)
+// LOCK Supabase (ATÓMICO) + heartbeat
+// Tabla: pod_lock(id int4 pk, locked_until timestamptz)
 // ---------------------------
-async function tryAcquireLock(sb, seconds = 90) {
+async function tryAcquireLockAtomic(sb, seconds = 60) {
   const now = new Date();
   const until = new Date(now.getTime() + seconds * 1000);
 
-  const { data: lockRow, error: lerr } = await sb
-    .from(POD_LOCK_TABLE)
-    .select("*")
-    .eq("id", 1)
-    .single();
-  if (lerr) throw lerr;
+  // ✅ UPDATE con condición (locked_until < now OR null) => atómico
+  // Si NO actualiza filas => lock ocupado
+  const nowIso = now.toISOString();
 
-  const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
-  if (lockedUntil && lockedUntil > now) {
-    return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
-  }
-
-  const { error: uerr } = await sb
+  const { data, error } = await sb
     .from(POD_LOCK_TABLE)
     .update({ locked_until: until.toISOString() })
-    .eq("id", 1);
-  if (uerr) throw uerr;
+    .eq("id", 1)
+    .or(`locked_until.is.null,locked_until.lt.${nowIso}`)
+    .select("locked_until")
+    .maybeSingle();
 
-  return { ok: true, locked_until: until.toISOString() };
+  if (error) throw error;
+
+  if (!data?.locked_until) {
+    // lock ocupado => leemos locked_until actual solo para informar
+    const { data: row, error: rerr } = await sb
+      .from(POD_LOCK_TABLE)
+      .select("locked_until")
+      .eq("id", 1)
+      .maybeSingle();
+    if (rerr) throw rerr;
+
+    return { ok: false, reason: "lock active", locked_until: row?.locked_until || null };
+  }
+
+  return { ok: true, locked_until: data.locked_until };
+}
+
+async function extendLock(sb, seconds = 60) {
+  const until = new Date(Date.now() + seconds * 1000).toISOString();
+  const { error } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: until })
+    .eq("id", 1);
+  if (error) throw error;
+  return until;
 }
 
 async function releaseLock(sb) {
-  const pastIso = new Date(Date.now() - 1000).toISOString();
+  const pastIso = new Date(Date.now() - 60_000).toISOString(); // bien al pasado
   const { error } = await sb
     .from(POD_LOCK_TABLE)
     .update({ locked_until: pastIso })
     .eq("id", 1);
   if (error) throw error;
+}
+
+function startLockHeartbeat({ sb, seconds, everyMs, log }) {
+  let stopped = false;
+  let timer = null;
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      const until = await extendLock(sb, seconds);
+      log?.("lock_heartbeat", { locked_until: until });
+    } catch (e) {
+      // No revienta el job, pero deja evidencia en logs
+      log?.("lock_heartbeat_warn", String(e?.message || e));
+    }
+  }
+
+  timer = setInterval(tick, everyMs);
+  // en Vercel, mejor no mantener open handles:
+  if (timer?.unref) timer.unref();
+
+  return () => {
+    stopped = true;
+    try { clearInterval(timer); } catch {}
+  };
 }
 
 // ---------------------------
@@ -219,8 +265,6 @@ async function runpodCreatePodFromTemplate({ name, log }) {
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
     ports: ["8000/http", "8888/http"],
   };
-
-  see(payload);
 
   const r = await fetch(`https://rest.runpod.io/v1/pods`, {
     method: "POST",
@@ -268,11 +312,6 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   }
 
   return { podId, raw: json };
-}
-
-// helper para log sin reventar JSON circular
-function see(v) {
-  try { /* noop */ } catch {}
 }
 
 // ---------------------------
@@ -371,25 +410,27 @@ async function ensureWorkingPod(sb, log) {
 export default async function handler(req, res) {
   const log = (...args) => console.log("[GV]", ...args);
   let lockAcquired = false;
+  let stopHeartbeat = null;
 
   try {
-    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Método no permitido" });
+    }
 
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
-    // ✅ Calidad mejor sin matar velocidad (defaults medidos)
     const {
       mode = "t2v",
       prompt,
       negative_prompt = "",
-      steps = 22,           // 👈 sube un poco calidad
+      steps = 22,
       height = 512,
       width = 896,
-      num_frames = 49,      // 👈 no subo frames para no matar velocidad
+      num_frames = 49,
       fps = 24,
-      guidance_scale = 6.0, // 👈 leve bump
+      guidance_scale = 6.0,
       image_base64 = null,
     } = req.body || {};
 
@@ -397,9 +438,9 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // 1) Lock
+    // 1) Lock ATÓMICO
     log("step=LOCK_BEGIN");
-    const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
+    const lock = await tryAcquireLockAtomic(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
       log("step=LOCK_BUSY", lock);
       return res.status(200).json({
@@ -411,6 +452,14 @@ export default async function handler(req, res) {
     }
     lockAcquired = true;
     log("step=LOCK_OK", { locked_until: lock.locked_until });
+
+    // 1.1) Heartbeat (evita que expire mientras espera RUNNING/health)
+    stopHeartbeat = startLockHeartbeat({
+      sb,
+      seconds: WAKE_LOCK_SECONDS,
+      everyMs: LOCK_HEARTBEAT_EVERY_MS,
+      log: (...a) => log(...a),
+    });
 
     // 2) Ensure pod
     log("step=ENSURE_POD_BEGIN");
@@ -463,6 +512,7 @@ export default async function handler(req, res) {
     console.error("[GV] fatal:", msg);
     return res.status(500).json({ ok: false, error: msg });
   } finally {
+    try { if (stopHeartbeat) stopHeartbeat(); } catch {}
     if (lockAcquired) {
       try {
         const sb = sbAdmin();
