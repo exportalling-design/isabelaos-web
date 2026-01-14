@@ -1,4 +1,5 @@
 
+// App.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import ContactView from "./components/ContactView";
