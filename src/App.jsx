@@ -904,18 +904,14 @@ function LibraryView() {
 }
 
 // ---------------------------------------------------------
-// Video desde prompt (logueado)
-// ✅ AUTH (token)
-// ✅ /api/generate-video responde rápido con job_id (o LOCK_BUSY)
-// ✅ /api/video-status devuelve status + progress + queue_position
-// ✅ UI: cola + arranque en frío + barra progreso
+// Video desde prompt (logueado) - ASYNC REAL + PROGRESS + RESUME
 // ---------------------------------------------------------
-function VideoFromPromptPanel({ userStatus }) {
+export default function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
   const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
-  const [steps, setSteps] = useState(20); // 👈 mejor calidad default
+  const [steps, setSteps] = useState(22); // 👈 default calidad mejor
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -925,6 +921,7 @@ function VideoFromPromptPanel({ userStatus }) {
 
   const [progress, setProgress] = useState(0);
   const [queuePos, setQueuePos] = useState(null);
+  const [etaSeconds, setEtaSeconds] = useState(null);
 
   const canUse = !!user;
 
@@ -944,8 +941,7 @@ function VideoFromPromptPanel({ userStatus }) {
 
   const normalizeStatus = (raw) => {
     const s = String(raw ?? "").trim();
-    if (!s) return "IN_PROGRESS";
-    return s.toUpperCase();
+    return s ? s.toUpperCase() : "PENDING";
   };
 
   const extractVideoUrl = (stData) => {
@@ -971,9 +967,9 @@ function VideoFromPromptPanel({ userStatus }) {
     return nested || null;
   };
 
-  const pollVideoStatus = async (job_id) => {
+  const pollVideoStatus = async (jid) => {
     const auth = await getAuthHeadersGlobal();
-    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
+    const r = await fetch(`/api/video-status?jobId=${encodeURIComponent(jid)}`, {
       headers: { ...auth },
     });
     const data = await r.json().catch(() => null);
@@ -981,7 +977,108 @@ function VideoFromPromptPanel({ userStatus }) {
     return data;
   };
 
-  const isBusy = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING", "LOCK_BUSY"].includes(status);
+  // -------- Persist jobId (para refresh/cambiar módulo) --------
+  const STORAGE_KEY = "isabelaos_video_job_id_v1";
+
+  const saveJobId = (id) => {
+    try { localStorage.setItem(STORAGE_KEY, String(id)); } catch {}
+  };
+  const loadJobId = () => {
+    try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+  };
+  const clearJobId = () => {
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  };
+
+  const isBusyLocal = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING", "LOCK_BUSY"].includes(status);
+  const effectiveBusy = isBusyLocal || !!loadJobId();
+
+  const formatEta = (s) => {
+    if (s == null) return null;
+    const sec = Math.max(0, Number(s));
+    const m = Math.floor(sec / 60);
+    const r = sec % 60;
+    if (m <= 0) return `${r}s`;
+    return `${m}m ${r}s`;
+  };
+
+  // -------- Resume: si hay job activo, continuar UI --------
+  const resumeExistingJob = async () => {
+    setError("");
+    setVideoUrl(null);
+
+    const auth = await getAuthHeadersGlobal();
+    if (!auth?.Authorization) return;
+
+    const fetchCurrentJob = async () => {
+      const r = await fetch("/api/video-current", { headers: { ...auth } });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) return null;
+      return d.job || null;
+    };
+
+    let jid = loadJobId();
+
+    // si no hay storage, intenta encontrar job activo en supabase
+    if (!jid) {
+      const cur = await fetchCurrentJob();
+      if (cur?.id) jid = cur.id;
+    }
+
+    if (!jid) return;
+
+    try {
+      const stData = await pollVideoStatus(jid);
+      const st = normalizeStatus(stData.status);
+      setJobId(jid);
+      saveJobId(jid);
+
+      const qp = typeof stData.queue_position === "number" ? stData.queue_position : null;
+      const pr = typeof stData.progress === "number" ? stData.progress : 0;
+      const eta = typeof stData.eta_seconds === "number" ? stData.eta_seconds : null;
+
+      setQueuePos(qp);
+      setProgress(Math.max(0, Math.min(100, pr)));
+      setEtaSeconds(eta);
+      setStatus(st);
+
+      if (["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"].includes(st)) {
+        if (qp && qp > 1) setStatusText(`Tu video está en cola. Posición: ${qp}.`);
+        else if (qp === 1) setStatusText("Tu video está primero en cola. Preparando render...");
+        else setStatusText("Tu video está en cola...");
+        return;
+      }
+
+      if (st === "RUNNING") {
+        setStatusText(`Generando... ${Math.max(0, Math.min(100, pr))}%`);
+        return;
+      }
+
+      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
+        const url = extractVideoUrl(stData);
+        if (url) setVideoUrl(url);
+        setProgress(100);
+        setStatusText("Video generado con éxito.");
+        clearJobId();
+        return;
+      }
+
+      if (st === "ERROR") {
+        setStatus("ERROR");
+        setStatusText("Error al generar el video.");
+        setError(stData.error || "Error en job");
+        clearJobId();
+      }
+    } catch {
+      clearJobId();
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    resumeExistingJob();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const handleGenerateVideo = async () => {
     setError("");
@@ -989,6 +1086,7 @@ function VideoFromPromptPanel({ userStatus }) {
     setJobId(null);
     setProgress(0);
     setQueuePos(null);
+    setEtaSeconds(null);
 
     if (!canUse) {
       setStatus("ERROR");
@@ -1004,15 +1102,21 @@ function VideoFromPromptPanel({ userStatus }) {
       return;
     }
 
+    // Si hay job guardado, reanuda en vez de crear otro
+    if (loadJobId()) {
+      setStatusText("Ya hay un video en proceso. Reanudando estado...");
+      await resumeExistingJob();
+      return;
+    }
+
     setStatus("IN_QUEUE");
     setStatusText("Enviando job al motor de video...");
+
     try {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
-      // -----------------------------------------
       // 1) Crear job (puede devolver LOCK_BUSY)
-      // -----------------------------------------
       let jid = null;
       let coldStartMsgShown = false;
 
@@ -1026,7 +1130,6 @@ function VideoFromPromptPanel({ userStatus }) {
           method: "POST",
           headers: { "Content-Type": "application/json", ...auth },
           body: JSON.stringify({
-            user_id: user.id,
             mode: "t2v",
             prompt,
             negative_prompt: negative,
@@ -1037,7 +1140,6 @@ function VideoFromPromptPanel({ userStatus }) {
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.error || "Error /api/generate-video");
 
-        // LOCK_BUSY: reintenta
         if (data.status === "LOCK_BUSY") {
           setStatus("LOCK_BUSY");
           setStatusText("Arranque en cola... preparando motor (lock ocupado).");
@@ -1049,11 +1151,10 @@ function VideoFromPromptPanel({ userStatus }) {
           throw new Error(data?.error || "No se recibió job_id.");
         }
 
-        // Cold start UX según pod.action
         const action = data?.pod?.action || "";
         if (!coldStartMsgShown && (action === "CREADO_Y_LISTO" || action === "RECREADO")) {
           coldStartMsgShown = true;
-          setStatusText("Arranque en frío: danos unos segundos... iniciando motor de video.");
+          setStatusText("Arranque en frío: iniciando motor de video...");
         } else if (!coldStartMsgShown && action === "REUSADO") {
           setStatusText("Motor listo. Encolando tu video...");
         }
@@ -1062,12 +1163,11 @@ function VideoFromPromptPanel({ userStatus }) {
       }
 
       setJobId(jid);
+      saveJobId(jid);
       setStatus("DISPATCHED");
-      setStatusText(`Job creado. ID: ${jid}. En cola...`);
+      setStatusText(`Job creado. En cola...`);
 
-      // -----------------------------------------
-      // 2) Poll status: muestra cola + progreso
-      // -----------------------------------------
+      // 2) Poll status
       const startedAt = Date.now();
 
       while (true) {
@@ -1078,33 +1178,29 @@ function VideoFromPromptPanel({ userStatus }) {
         await sleep(POLL_EVERY_MS);
 
         const stData = await pollVideoStatus(jid);
-
-        const rawSt = stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
-        const st = normalizeStatus(rawSt);
+        const st = normalizeStatus(stData.status);
 
         setStatus(st);
 
-        // queue + progress
         const qp = typeof stData.queue_position === "number" ? stData.queue_position : null;
         const pr = typeof stData.progress === "number" ? stData.progress : 0;
+        const eta = typeof stData.eta_seconds === "number" ? stData.eta_seconds : null;
 
         setQueuePos(qp);
         setProgress(Math.max(0, Math.min(100, pr)));
+        setEtaSeconds(eta);
 
         if (["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"].includes(st)) {
-          if (qp && qp > 1) {
-            setStatusText(`Tu video está en cola. Posición: ${qp}.`);
-          } else if (qp === 1) {
-            setStatusText("Tu video está primero en cola. Preparando render...");
-          } else {
-            setStatusText("Tu video está en cola...");
-          }
+          if (qp && qp > 1) setStatusText(`Tu video está en cola. Posición: ${qp}.`);
+          else if (qp === 1) setStatusText("Tu video está primero en cola. Preparando render...");
+          else setStatusText("Tu video está en cola...");
           continue;
         }
 
-        if (["RUNNING"].includes(st)) {
+        if (st === "RUNNING") {
           const pct = Math.max(0, Math.min(100, pr));
-          setStatusText(`Generando... ${pct}%`);
+          const etaStr = formatEta(eta);
+          setStatusText(etaStr ? `Generando... ${pct}% · ETA ${etaStr}` : `Generando... ${pct}%`);
           continue;
         }
 
@@ -1126,18 +1222,25 @@ function VideoFromPromptPanel({ userStatus }) {
             setVideoUrl(url);
             setProgress(100);
             setStatusText("Video generado con éxito.");
+            clearJobId();
             return;
           }
           throw new Error("Terminado pero sin video_url (tras reintentos).");
         }
 
-        throw new Error(stData.error || "Error al generar el video.");
+        if (st === "ERROR") {
+          throw new Error(stData.error || "Error al generar el video.");
+        }
+
+        // status desconocido => error
+        throw new Error(stData.error || `Estado inesperado: ${st}`);
       }
     } catch (err) {
       console.error(err);
       setStatus("ERROR");
       setStatusText("Error al generar el video.");
       setError(err?.message || String(err));
+      clearJobId();
     }
   };
 
@@ -1159,7 +1262,7 @@ function VideoFromPromptPanel({ userStatus }) {
     );
   }
 
-  const showProgressBar = ["RUNNING", "COMPLETED"].includes(status) || (progress > 0 && isBusy);
+  const showProgressBar = ["RUNNING", "COMPLETED"].includes(status) || (progress > 0 && effectiveBusy);
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -1183,6 +1286,12 @@ function VideoFromPromptPanel({ userStatus }) {
           {queuePos != null && status !== "RUNNING" && status !== "COMPLETED" && (
             <div className="mt-1 text-[10px] text-neutral-400">
               Cola: <span className="font-semibold text-white">{queuePos}</span>
+            </div>
+          )}
+
+          {etaSeconds != null && status === "RUNNING" && (
+            <div className="mt-1 text-[10px] text-neutral-400">
+              ETA: <span className="font-semibold text-white">{formatEta(etaSeconds)}</span>
             </div>
           )}
 
@@ -1232,7 +1341,7 @@ function VideoFromPromptPanel({ userStatus }) {
                 onChange={(e) => setSteps(Number(e.target.value))}
               />
               <div className="mt-1 text-[10px] text-neutral-500">
-                Recomendado: 18–22. Máx permitido: 25.
+                Recomendado: 20–24. Máx permitido: 25.
               </div>
             </div>
 
@@ -1240,10 +1349,10 @@ function VideoFromPromptPanel({ userStatus }) {
               <button
                 type="button"
                 onClick={handleGenerateVideo}
-                disabled={isBusy || !hasEnough}
+                disabled={effectiveBusy || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {isBusy ? "Generando..." : !hasEnough ? "Sin jades" : "Generar video"}
+                {effectiveBusy ? "Generando..." : !hasEnough ? "Sin jades" : "Generar video"}
               </button>
             </div>
           </div>
@@ -1261,7 +1370,9 @@ function VideoFromPromptPanel({ userStatus }) {
             <p>
               {queuePos && queuePos > 1
                 ? `Tu video está en cola (posición ${queuePos}).`
-                : "Aquí verás el video cuando termine."}
+                : effectiveBusy
+                  ? "Procesando… vuelve en unos segundos (puedes cambiar de módulo, el progreso se guarda)."
+                  : "Aquí verás el video cuando termine."}
             </p>
           )}
         </div>
