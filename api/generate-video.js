@@ -2,11 +2,11 @@
 // ============================================================
 // IsabelaOS Studio - API de Generación de Video (Vercel Function)
 // ============================================================
-// Objetivo (sin romper el async):
+// Flujo (para 50 usuarios, sin romper async):
 // 1) Inserta job en video_jobs (PENDING)
-// 2) Lock corto (evita 2 pods al mismo tiempo)
+// 2) Lock corto SOLO para el wake/ensure pod (evita crear 2 pods a la vez)
 // 3) Reanuda pod si existe y sirve
-// 4) Si no existe / perdió GPU: crea pod nuevo desde TEMPLATE + VOLUME
+// 4) Si no existe / perdió GPU / o 404 pod not found => crea pod nuevo (template + volume)
 // 5) Espera RUNNING + /health
 // 6) Dispatch rápido a /api/video_async (NO espera render)
 // 7) job pasa a DISPATCHED (el runner lo completa)
@@ -29,7 +29,9 @@ const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_I
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || null;
 
-const FIXED_POD_ID = process.env.VIDEO_FIXED_POD_ID || ""; // opcional
+// ⚠️ Si esto está seteado y es inválido, te provoca 404 siempre.
+// Mejor dejarlo vacío y usar pod_state.
+const FIXED_POD_ID = process.env.VIDEO_FIXED_POD_ID || "";
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
@@ -81,12 +83,21 @@ function looksLikeGpuNotAvailable(msg) {
   );
 }
 
+function isPodNotFoundError(e) {
+  const s = String(e?.message || e || "");
+  return s.includes('"pod not found"') || s.includes("pod not found") || s.includes("(404)");
+}
+
 // ---------------------
 // RunPod REST v1
 // ---------------------
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, { method: "GET", headers: runpodHeaders() });
   const t = await r.text().catch(() => "");
+
+  // ✅ FIX: si el pod no existe, NO tiramos fatal; devolvemos null
+  if (r.status === 404) return null;
+
   if (!r.ok) throw new Error(`RunPod get pod failed (${r.status}): ${t}`);
   return t ? JSON.parse(t) : {};
 }
@@ -116,7 +127,7 @@ async function runpodTerminatePod(podId) {
   }
 }
 
-// ✅ Crea pod desde template (REST v1) — ARREGLADO: ports como strings
+// ✅ Crea pod desde template — ports como strings (válido en REST v1)
 async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
@@ -129,9 +140,6 @@ async function runpodCreatePodFromTemplate({ name }) {
     gpuTypeId: RUNPOD_GPU_TYPE,
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-
-    // ✅ RunPod REST v1 quiere strings, NO objetos
-    // Ejemplos válidos: "8000/http", "22/tcp"
     ports: ["8000/http", "8888/http"],
   };
 
@@ -146,8 +154,8 @@ async function runpodCreatePodFromTemplate({ name }) {
 
   const json = t ? JSON.parse(t) : {};
   const podId = json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
-
   if (!podId) throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
+
   return { podId, raw: json };
 }
 
@@ -155,6 +163,10 @@ async function waitForRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
+
+    // ✅ Si desapareció mientras esperábamos => tratamos como no existente
+    if (!pod) return { ok: false, status: "NOT_FOUND", error: "Pod no existe (404)" };
+
     const status = String(pod?.desiredStatus || pod?.status || pod?.pod?.status || "").toUpperCase();
     if (status.includes("RUNNING")) return { ok: true, status };
     if (status.includes("FAILED") || status.includes("ERROR")) return { ok: false, status, error: "Pod FAILED/ERROR" };
@@ -216,8 +228,8 @@ async function ensureWorkingPod(sb) {
   const statePodId = String(podState?.pod_id || "");
   const desiredPodId = FIXED_POD_ID ? FIXED_POD_ID : statePodId;
 
-  // No hay pod guardado: crear
-  if (!desiredPodId) {
+  // Helper: crear y validar pod nuevo
+  const createFreshPod = async (reason) => {
     const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
 
     await sb.from(POD_STATE_TABLE).update({
@@ -227,24 +239,45 @@ async function ensureWorkingPod(sb) {
       last_used_at: nowIso,
     }).eq("id", 1);
 
+    // Start + wait
     await runpodStartPod(created.podId);
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no llegó a RUNNING: ${running.error || running.status}`);
+    if (!running.ok) throw new Error(`Pod nuevo no llegó a RUNNING (${reason}): ${running.error || running.status}`);
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo en pod nuevo: ${ready.error}`);
+    if (!ready.ok) throw new Error(`Worker no listo en pod nuevo (${reason}): ${ready.error}`);
 
     await sb.from(POD_STATE_TABLE).update({ status: "RUNNING", last_used_at: nowIso }).eq("id", 1);
-    return { podId: created.podId, action: "CREATED" };
+    return { podId: created.podId, action: `CREATED_${reason}` };
+  };
+
+  // No hay pod guardado => crear
+  if (!desiredPodId) {
+    return await createFreshPod("NO_POD");
   }
 
-  // Hay pod: validar y arrancar si está pausado
+  // Hay pod guardado => validar
+  const pod = await runpodGetPod(desiredPodId);
+
+  // ✅ FIX: si devuelve null => pod no existe (404) => limpiar y crear
+  if (!pod) {
+    await sb.from(POD_STATE_TABLE).update({
+      pod_id: null,
+      status: "MISSING",
+      busy: false,
+      last_used_at: nowIso,
+    }).eq("id", 1);
+
+    // Si tenés VIDEO_FIXED_POD_ID seteado, esto igual creará,
+    // pero te conviene borrar esa env porque forzará el id viejo siempre.
+    return await createFreshPod("POD_NOT_FOUND");
+  }
+
+  // Arrancar si está pausado
+  const realStatus = String(pod?.desiredStatus || pod?.status || pod?.pod?.status || "").toUpperCase();
+  const shouldStart = ["STOPPED", "PAUSED", "EXITED", "SLEEPING", "NOT_RUNNING"].some((s) => realStatus.includes(s));
+
   try {
-    const podReal = await runpodGetPod(desiredPodId);
-    const realStatus = String(podReal?.desiredStatus || podReal?.status || podReal?.pod?.status || "").toUpperCase();
-
-    const shouldStart = ["STOPPED", "PAUSED", "EXITED", "SLEEPING", "NOT_RUNNING"].some((s) => realStatus.includes(s));
-
     if (shouldStart) {
       await runpodStartPod(desiredPodId);
       const running = await waitForRunning(desiredPodId);
@@ -265,27 +298,22 @@ async function ensureWorkingPod(sb) {
     // Si GPU se perdió: crear nuevo y terminar viejo
     if (looksLikeGpuNotAvailable(e?.message || e)) {
       const oldPodId = desiredPodId;
+      const fresh = await createFreshPod("GPU_LOST");
 
-      const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+      await runpodTerminatePod(oldPodId).catch(() => {});
+      return { ...fresh, oldPodId, action: "RECREATED_AND_TERMINATED_OLD" };
+    }
 
+    // Si por alguna razón RunPod cambia a not found en este punto
+    if (isPodNotFoundError(e)) {
       await sb.from(POD_STATE_TABLE).update({
-        pod_id: created.podId,
-        status: "STARTING",
+        pod_id: null,
+        status: "MISSING",
         busy: false,
         last_used_at: nowIso,
       }).eq("id", 1);
 
-      await runpodStartPod(created.podId);
-      const running = await waitForRunning(created.podId);
-      if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
-
-      const ready = await waitForWorker(created.podId);
-      if (!ready.ok) throw new Error(`Worker no listo en pod nuevo: ${ready.error}`);
-
-      await runpodTerminatePod(oldPodId).catch(() => {});
-
-      await sb.from(POD_STATE_TABLE).update({ status: "RUNNING", last_used_at: nowIso }).eq("id", 1);
-      return { podId: created.podId, action: "RECREATED_AND_TERMINATED_OLD", oldPodId };
+      return await createFreshPod("POD_NOT_FOUND_LATE");
     }
 
     throw e;
@@ -344,10 +372,10 @@ export default async function handler(req, res) {
     }).select("*").single();
     if (insErr) throw insErr;
 
-    // 2) Lock corto (solo para WAKE)
+    // 2) Lock corto SOLO para wake/ensure
     const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
-      // No fallamos: se queda en cola, otro request despertará
+      // No fallamos: el job queda en cola, otro request despertará
       return res.status(200).json({
         ok: true,
         job_id: job.id,
@@ -357,7 +385,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3) Ensure pod usable
+    // 3) Ensure pod usable (incluye fix 404)
     await sb.from(POD_STATE_TABLE).update({ last_used_at: new Date().toISOString() }).eq("id", 1);
     const podInfo = await ensureWorkingPod(sb);
 
