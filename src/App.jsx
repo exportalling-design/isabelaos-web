@@ -2,7 +2,6 @@
 // App.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
-import { getAuthHeadersGlobal } from "./lib/authHeaders";
 import ContactView from "./components/ContactView";
 
 import { supabase } from "./lib/supabaseClient";
