@@ -9,7 +9,7 @@
 // 4) Si no existe / perdió GPU: crea pod nuevo desde TEMPLATE + VOLUME
 // 5) Espera RUNNING + /health
 // 6) Dispatch rápido a /api/video_async (NO espera render)
-// 7) job pasa a RUNNING (el worker runner lo completa)
+// 7) job pasa a DISPATCHED (el runner lo completa)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -116,7 +116,7 @@ async function runpodTerminatePod(podId) {
   }
 }
 
-// Crea pod desde template (REST v1)
+// ✅ Crea pod desde template (REST v1) — ARREGLADO: ports como strings
 async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
@@ -129,10 +129,10 @@ async function runpodCreatePodFromTemplate({ name }) {
     gpuTypeId: RUNPOD_GPU_TYPE,
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-    ports: [
-      { containerPort: 8000, protocol: "http" },
-      { containerPort: 8888, protocol: "http" },
-    ],
+
+    // ✅ RunPod REST v1 quiere strings, NO objetos
+    // Ejemplos válidos: "8000/http", "22/tcp"
+    ports: ["8000/http", "8888/http"],
   };
 
   const r = await fetch(`https://rest.runpod.io/v1/pods`, {
@@ -282,37 +282,10 @@ async function ensureWorkingPod(sb) {
       const ready = await waitForWorker(created.podId);
       if (!ready.ok) throw new Error(`Worker no listo en pod nuevo: ${ready.error}`);
 
-      // terminar viejo
       await runpodTerminatePod(oldPodId).catch(() => {});
 
       await sb.from(POD_STATE_TABLE).update({ status: "RUNNING", last_used_at: nowIso }).eq("id", 1);
       return { podId: created.podId, action: "RECREATED_AND_TERMINATED_OLD", oldPodId };
-    }
-
-    // Si el podId guardado es falso/no existe -> también recrear
-    const msg = String(e?.message || e);
-    if (msg.toLowerCase().includes("get pod failed (404)") || msg.toLowerCase().includes("not found")) {
-      const oldPodId = desiredPodId;
-      const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
-
-      await sb.from(POD_STATE_TABLE).update({
-        pod_id: created.podId,
-        status: "STARTING",
-        busy: false,
-        last_used_at: nowIso,
-      }).eq("id", 1);
-
-      await runpodStartPod(created.podId);
-      const running = await waitForRunning(created.podId);
-      if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
-
-      const ready = await waitForWorker(created.podId);
-      if (!ready.ok) throw new Error(`Worker no listo en pod nuevo: ${ready.error}`);
-
-      await runpodTerminatePod(oldPodId).catch(() => {});
-
-      await sb.from(POD_STATE_TABLE).update({ status: "RUNNING", last_used_at: nowIso }).eq("id", 1);
-      return { podId: created.podId, action: "RECREATED_BAD_SAVED_ID", oldPodId };
     }
 
     throw e;
@@ -344,7 +317,6 @@ export default async function handler(req, res) {
       fps = 24,
       guidance_scale = 5.0,
       image_base64 = null,
-      seed = null,
     } = req.body || {};
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
@@ -393,7 +365,7 @@ export default async function handler(req, res) {
     const dispatchUrl = `${workerBaseUrl(podInfo.podId)}${WORKER_ASYNC_PATH}`;
 
     const payload = {
-      job_id: job.id,        // PK id (lo que el runner usa si está configurado así)
+      job_id: job.id, // PK id
       user_id,
       mode,
       prompt,
@@ -405,7 +377,6 @@ export default async function handler(req, res) {
       fps,
       guidance_scale,
       image_base64,
-      seed,
     };
 
     const rr = await fetch(dispatchUrl, {
@@ -449,7 +420,7 @@ export default async function handler(req, res) {
     log("fatal:", e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   } finally {
-    // liberamos lock (best effort)
+    // liberar lock (best effort)
     try {
       const sb = sbAdmin();
       await releaseLock(sb);
