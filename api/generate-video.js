@@ -4,20 +4,17 @@
 // ============================================================
 //
 // OBJETIVO (sin romper tu ASYNC real):
-// - Inserta el job en Supabase (video_jobs) para que exista historial/estado.
-// - Toma un lock corto (pod_lock id=1 con locked_until) para evitar 2 "wake/start/create" simultáneos.
-// - Asegura que hay un POD funcional:
-//    - Si hay pod_id guardado -> lo reanuda si está en STOP/PAUSE y espera RUNNING.
-//    - Si el pod ya no existe (404) o perdió GPU -> crea uno nuevo desde TEMPLATE + Network Volume.
-// - Espera que el worker responda en /health.
-// - Despacha el job al worker vía /api/video_async (POST) y retorna job_id inmediatamente.
-// - Si el dispatch falla, marca el job como FAILED (para no dejar PENDING infinito).
+// - Inserta el job en Supabase (video_jobs).
+// - Toma un lock corto (pod_lock id=1) para evitar 2 "wake/start/create" simultáneos.
+// - Asegura un POD funcional:
+//    - Si hay pod_id -> lo reanuda si está pausado y espera RUNNING.
+//    - Si el pod no existe (404) o está roto -> crea uno nuevo desde TEMPLATE + Volume.
+// - Espera /health.
+// - Despacha al worker vía /api/video_async (POST).
 //
-// NOTAS IMPORTANTES:
-// 1) ✅ FIX RunPod REST v1: usa gpuTypeIds (array), NO gpuTypeId.
-// 2) ✅ FIX RunPod REST v1: ports debe ser array de strings (ej "8000/http"), NO objects.
-// 3) ✅ NO usamos .catch() en query builders de Supabase (eso causaba: ".catch is not a function").
-// 4) Comentarios y títulos en español, como pediste.
+// FIX CLAVE HOY:
+// ✅ NO enviar gpuTypeIds. El TEMPLATE ya define GPU.
+// (Tu error era porque RUNPOD_GPU_TYPE no coincide con el ENUM del API)
 //
 // ============================================================
 
@@ -34,17 +31,15 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// Template/Volume/GPU
-const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null; // ej: kcr5u5mdbv
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null; // ej: x4ppgiwpse
-const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace"; // ej: /workspace
-const RUNPOD_GPU_TYPE = process.env.RUNPOD_GPU_TYPE || null; // ej: A100_SXM (se manda como gpuTypeIds:[...])
+// Template/Volume
+const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
+const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 // Si quieres “pod fijo”, déjalo vacío para usar pod_state.pod_id.
-// Si lo pones, fuerza a usar ese pod.
 const FIXED_POD_ID = process.env.VIDEO_FIXED_POD_ID || "";
 
-// Worker config
+// Worker
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
@@ -103,10 +98,7 @@ function looksLikeGpuNotAvailable(msg) {
     s.includes("no longer available") ||
     s.includes("gpu not available") ||
     s.includes("insufficient capacity") ||
-    s.includes("not enough") ||
-    s.includes("cannot allocate") ||
-    s.includes("pod migration") ||
-    s.includes("hardware has been deployed by another user")
+    s.includes("pod migration")
   );
 }
 
@@ -226,27 +218,22 @@ async function releaseLock(sb) {
 }
 
 // ------------------------------------------------------------
-// ✅ CREAR POD DESDE TEMPLATE (RunPod REST v1) — FIXES IMPORTANTES
-// - gpuTypeIds (array) en lugar de gpuTypeId
-// - ports: array de strings, no objects
+// ✅ CREAR POD DESDE TEMPLATE (RunPod REST v1) — SIN gpuTypeIds
+// - ports: array de strings (schema)
 // ------------------------------------------------------------
 async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
   if (!VIDEO_VOLUME_MOUNT_PATH) throw new Error("Falta VIDEO_VOLUME_MOUNT_PATH");
 
-  // Payload compatible con REST v1 (ajustado a los errores que te dio RunPod)
   const payload = {
     name,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
 
-    // ✅ FIX: si defines GPU, RunPod espera gpuTypeIds: ["A100_SXM", ...]
-    ...(RUNPOD_GPU_TYPE ? { gpuTypeIds: [RUNPOD_GPU_TYPE] } : {}),
-
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
 
-    // ✅ FIX: ports son strings en schema REST v1
+    // ✅ schema REST v1: strings
     ports: ["8000/http", "8888/http"],
   };
 
@@ -276,7 +263,7 @@ async function runpodCreatePodFromTemplate({ name }) {
 }
 
 // ------------------------------------------------------------
-// Asegurar que hay un pod usable (reanudar o recrear si GPU perdida / 404)
+// Asegurar que hay un pod usable (reanudar o recrear si 404 / roto)
 // ------------------------------------------------------------
 async function ensureWorkingPod(sb) {
   const nowIso = new Date().toISOString();
@@ -328,7 +315,6 @@ async function ensureWorkingPod(sb) {
 
     const ready = await waitForWorker(desiredPodId);
     if (!ready.ok) {
-      // reintento de recuperación
       await runpodStartPod(desiredPodId);
       const running2 = await waitForRunning(desiredPodId);
       if (!running2.ok) throw new Error(`Recovery start falló: ${running2.error || running2.status}`);
@@ -346,7 +332,6 @@ async function ensureWorkingPod(sb) {
   } catch (e) {
     const msg = String(e?.message || e);
 
-    // Si el pod no existe (404) o GPU perdida => recrear
     const is404 = msg.includes("(404)") || msg.toLowerCase().includes("pod not found");
     if (is404 || looksLikeGpuNotAvailable(msg)) {
       const oldPodId = desiredPodId;
@@ -368,8 +353,7 @@ async function ensureWorkingPod(sb) {
 
       await sb.from(POD_STATE_TABLE).update({ status: "RUNNING", last_used_at: nowIso, busy: false }).eq("id", 1);
 
-      // ✅ Opcional: terminar el viejo (si quieres sí o sí)
-      // Si el viejo era 404, esto fallará y lo ignoramos.
+      // Terminar viejo (si existe)
       await runpodTerminatePod(oldPodId).catch(() => {});
 
       return { podId: created.podId, action: is404 ? "RECREADO_POR_404" : "RECREADO_POR_GPU_PERDIDA", oldPodId };
@@ -391,12 +375,10 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Método no permitido" });
     }
 
-    // Auth (tu lógica actual)
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
-    // Payload
     const {
       mode = "t2v",
       prompt,
@@ -407,19 +389,15 @@ export default async function handler(req, res) {
       num_frames = 121,
       guidance_scale = 5.0,
       seed = null,
-      image_base64 = null, // si usas i2v más adelante
+      image_base64 = null,
     } = req.body || {};
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
 
     const sb = sbAdmin();
-
-    // ✅ job_id para tu tabla si lo usas (además del PK id)
     const job_id = crypto.randomUUID();
 
-    // 1) Insert job (PENDING)
-    // Importante: insertamos primero para tener registro, pero NO dejamos infinito:
-    // si algo falla, marcamos FAILED con error.
+    // 1) Insert job
     let inserted = null;
     {
       const { data, error } = await sb
@@ -460,8 +438,6 @@ export default async function handler(req, res) {
     const lock = await tryAcquireLock(sb, WAKE_LOCK_SECONDS);
 
     if (!lock.ok) {
-      // ✅ No rompemos tu async: devolvemos job_id y queda en PENDING.
-      // El usuario puede reintentar; o si el worker runner procesa cola, lo tomará cuando pueda.
       log("step=LOCK_BUSY", lock);
       return res.status(200).json({
         ok: true,
@@ -474,20 +450,19 @@ export default async function handler(req, res) {
 
     log("step=LOCK_OK", { locked_until: lock.locked_until });
 
-    // 4) Ensure pod usable (reanudar/recrear)
+    // 4) Ensure pod usable
     await sb.from(POD_STATE_TABLE).update({ status: "STARTING" }).eq("id", 1);
 
     log("step=ENSURE_POD_BEGIN");
     const podInfo = await ensureWorkingPod(sb);
     log("step=ENSURE_POD_OK", podInfo);
 
-    // 5) Dispatch async al worker
+    // 5) Dispatch async
     const podId = podInfo.podId;
-    const base = workerBaseUrl(podId);
-    const dispatchUrl = `${base}${WORKER_ASYNC_PATH}`;
+    const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
     const payload = {
-      job_id: inserted?.id || null, // ✅ tu worker puede usar PK id; si no, usa job_id
+      job_id: inserted?.id || null,
       user_id,
       mode,
       prompt,
@@ -527,7 +502,6 @@ export default async function handler(req, res) {
     }
 
     if (!dispatchOk) {
-      // ✅ marcar FAILED (no más PENDING infinito)
       await sb
         .from(VIDEO_JOBS_TABLE)
         .update({
@@ -554,7 +528,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ marcar RUNNING en DB (para que video-status muestre progreso)
     await sb
       .from(VIDEO_JOBS_TABLE)
       .update({ status: "RUNNING", updated_at: new Date().toISOString() })
@@ -578,15 +551,12 @@ export default async function handler(req, res) {
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] fatal:", msg);
-    return res.status(500).json({ ok: false, error:msg });
+    return res.status(500).json({ ok: false, error: msg });
   } finally {
-    // Nota: el lock se libera automáticamente por TTL,
-    // pero si quieres liberarlo aquí también, descomenta:
+    // Libera el lock por si acaso (además del TTL)
     try {
       const sb = sbAdmin();
       await releaseLock(sb);
     } catch (_) {}
-
-    // TERMINATE_AFTER_JOB se maneja en video-status o autosleep, no aquí
   }
 }
