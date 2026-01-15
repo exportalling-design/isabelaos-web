@@ -23,6 +23,24 @@ export default async function handler(req, res) {
 
   const neg = typeof negative_prompt === "string" ? negative_prompt : "";
 
+  // helpers para parse robusto
+  const stripCodeFences = (s) => {
+    const t = String(s || "").trim();
+    // quita ```json ... ``` o ``` ... ```
+    if (t.startsWith("```")) {
+      return t.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
+    }
+    return t;
+  };
+
+  const extractFirstJsonObject = (s) => {
+    const t = String(s || "");
+    const start = t.indexOf("{");
+    const end = t.lastIndexOf("}");
+    if (start >= 0 && end > start) return t.slice(start, end + 1);
+    return null;
+  };
+
   try {
     const completionRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -52,33 +70,60 @@ export default async function handler(req, res) {
       }),
     });
 
-    const json = await completionRes.json();
-    if (!completionRes.ok) {
+    const json = await completionRes.json().catch(() => null);
+    if (!completionRes.ok || !json) {
       console.error("Respuesta OpenAI:", json);
       res.status(500).json({
         ok: false,
-        error: json.error?.message || "Error desde OpenAI",
+        error: json?.error?.message || "Error desde OpenAI",
       });
       return;
     }
 
-    const raw = json.choices?.[0]?.message?.content?.trim() || "";
+    let raw = json.choices?.[0]?.message?.content?.trim() || "";
 
-    // Intentamos parsear JSON. Si falla, fallback: devolvemos prompt original.
-    let optimizedPrompt = prompt;
-    let optimizedNegative = neg || "";
+    // defaults NO vacíos (para que SIEMPRE se vea algo)
+    let optimizedPrompt = String(prompt).trim();
+    let optimizedNegative = String(neg || "").trim();
 
+    // limpiar fences
+    raw = stripCodeFences(raw);
+
+    // parse robusto
     try {
-      const parsed = JSON.parse(raw);
+      let parsed = null;
+
+      // 1) intento directo
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // 2) intento extrayendo el primer {...}
+        const piece = extractFirstJsonObject(raw);
+        if (piece) parsed = JSON.parse(piece);
+      }
+
       if (parsed && typeof parsed === "object") {
-        if (typeof parsed.prompt === "string" && parsed.prompt.trim()) optimizedPrompt = parsed.prompt.trim();
-        if (typeof parsed.negative === "string") optimizedNegative = parsed.negative.trim();
+        if (typeof parsed.prompt === "string" && parsed.prompt.trim()) {
+          optimizedPrompt = parsed.prompt.trim();
+        } else if (typeof parsed.prompt === "string") {
+          // si viene vacío, no lo aceptamos
+        }
+
+        if (typeof parsed.negative === "string") {
+          optimizedNegative = parsed.negative.trim();
+        }
+      } else {
+        // si no hubo JSON válido, usa texto como prompt optimizado (pero no vacío)
+        if (raw && raw.trim()) optimizedPrompt = raw.trim();
       }
     } catch (_) {
-      // fallback: si no vino JSON, usamos el texto completo como prompt optimizado
-      if (raw && raw.length > 0) optimizedPrompt = raw;
-      optimizedNegative = neg || "";
+      // fallback final: deja prompt original (ya está seteado arriba)
+      if (raw && raw.trim()) optimizedPrompt = raw.trim();
     }
+
+    // seguridad extra: nunca devolver vacío
+    if (!optimizedPrompt || !optimizedPrompt.trim()) optimizedPrompt = String(prompt).trim();
+    if (optimizedNegative == null) optimizedNegative = String(neg || "").trim();
 
     res.status(200).json({
       ok: true,
