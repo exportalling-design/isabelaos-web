@@ -377,11 +377,10 @@ function AuthModal({ open, onClose }) {
 // - Lee profiles(plan, jade_balance) directo de Supabase
 // - Límite 5 SOLO si (plan free/none) Y jade_balance <= 0
 //
-// ✅ NUEVO:
-// - Botón/toggle para optimizar prompt con OpenAI (Prompt + Negative)
-// - Mantiene prompt original del usuario
-// - Muestra prompt optimizado pequeño abajo
-// - Si "Optimizar" está activo, manda el optimizado al motor
+// ✅ Optimización de prompt (OpenAI) estilo VIDEO:
+// - Botón "Optimizar con IA" + toggle "Usar prompt optimizado para generar"
+// - Muestra prompt/negative optimizados pequeños abajo
+// - Si está activo y está stale, se re-optimiza al generar
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -407,17 +406,23 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [profileJades, setProfileJades] = useState(0);
 
   // ---------------------------------------------------------
-  // ✅ NUEVO: Optimizador de prompt
+  // ✅ Optimizador de prompt (UI estilo VIDEO)
   // ---------------------------------------------------------
-  const [useOptimizer, setUseOptimizer] = useState(false);
+  const [useOptimizer, setUseOptimizer] = useState(false); // toggle "usar optimizado"
   const [optStatus, setOptStatus] = useState("IDLE"); // IDLE | OPTIMIZING | READY | ERROR
   const [optError, setOptError] = useState("");
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar "stale"
+  const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar stale
+
+  // Si el usuario cambia prompt/negative, marcamos stale (no borramos, pero queda desactualizado)
+  useEffect(() => {
+    setOptError("");
+    // NO borramos optimizedPrompt/Negative para que el usuario lo vea,
+    // pero sí queda stale y se re-optimiza si genera.
+  }, [prompt, negative]);
 
   const isOptStale =
-    useOptimizer &&
     optStatus === "READY" &&
     (optSource.prompt !== prompt || optSource.negative !== negative);
 
@@ -440,13 +445,17 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         throw new Error(j?.error || "Error optimizando prompt.");
       }
 
-      const op = String(j.optimizedPrompt || prompt);
-      const on = String(j.optimizedNegative || negative);
+      const op = String(j.optimizedPrompt || "").trim();
+      const on = String(j.optimizedNegative || "").trim();
 
       setOptimizedPrompt(op);
       setOptimizedNegative(on);
       setOptSource({ prompt, negative });
       setOptStatus("READY");
+
+      // ✅ igual que video: si optimizas, activa el toggle automáticamente
+      setUseOptimizer(true);
+
       return { ok: true, optimizedPrompt: op, optimizedNegative: on };
     } catch (e) {
       setOptStatus("ERROR");
@@ -455,17 +464,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     }
   }
 
-  // Si el usuario apaga el optimizador, no borramos (solo dejamos de usar)
-  // Si lo enciende y no hay optimizado, queda listo para optimizar.
-  useEffect(() => {
-    if (!useOptimizer) return;
-    // Si lo activan por primera vez y no hay optimized, dejamos IDLE (para que presione botón o auto-optimice en Generate)
-    if (!optimizedPrompt && !optimizedNegative) {
-      setOptStatus("IDLE");
-      setOptError("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useOptimizer]);
+  function getEffectivePrompts() {
+    const canUseOpt = useOptimizer && optimizedPrompt && !isOptStale;
+    return {
+      finalPrompt: canUseOpt ? optimizedPrompt : prompt,
+      finalNegative: canUseOpt ? (optimizedNegative || "") : negative,
+      usingOptimized: !!canUseOpt,
+    };
+  }
 
   // ---------------------------------------------------------
   // Cargar profile desde Supabase (plan + jade_balance)
@@ -605,24 +611,25 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         const needsOptimize =
           optStatus !== "READY" ||
           !optimizedPrompt ||
-          !optimizedNegative ||
+          // ojo: optimizedNegative puede venir vacío, no lo forzamos como requerido
           optSource.prompt !== prompt ||
           optSource.negative !== negative;
 
         if (needsOptimize) {
           setStatusText("Optimizando prompt con IA...");
           const opt = await runOptimizeNow();
-          if (!opt.ok) {
+          if (!opt.ok || !opt.optimizedPrompt) {
             // Si falla optimización, seguimos con el prompt original (no bloqueamos)
             finalPrompt = prompt;
             finalNegative = negative;
           } else {
             finalPrompt = opt.optimizedPrompt;
-            finalNegative = opt.optimizedNegative;
+            finalNegative = opt.optimizedNegative || "";
           }
         } else {
-          finalPrompt = optimizedPrompt;
-          finalNegative = optimizedNegative;
+          const eff = getEffectivePrompts();
+          finalPrompt = eff.finalPrompt;
+          finalNegative = eff.finalNegative;
         }
       }
 
@@ -702,7 +709,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               height: Number(height),
               steps: Number(steps),
 
-              // opcional para trazabilidad (si tu helper ignora campos extra no pasa nada)
+              // opcional para trazabilidad
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
@@ -776,61 +783,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         <div className="mt-4 space-y-4 text-sm">
           <div>
-            <div className="flex items-center justify-between">
-              <label className="text-neutral-300">Prompt</label>
-
-              {/* ✅ NUEVO: toggle optimizador */}
-              <label className="flex items-center gap-2 text-[11px] text-neutral-300 select-none">
-                <input
-                  type="checkbox"
-                  checked={useOptimizer}
-                  onChange={(e) => setUseOptimizer(e.target.checked)}
-                  className="h-4 w-4 accent-cyan-400"
-                />
-                Optimizar con IA
-              </label>
-            </div>
-
+            <label className="text-neutral-300">Prompt</label>
             <textarea
               className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
-
-            {/* ✅ NUEVO: botones y salida optimizada */}
-            {useOptimizer && (
-              <div className="mt-2 space-y-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={runOptimizeNow}
-                    disabled={optStatus === "OPTIMIZING"}
-                    className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-60"
-                  >
-                    {optStatus === "OPTIMIZING" ? "Optimizando..." : "Optimizar prompt ahora"}
-                  </button>
-
-                  {isOptStale && (
-                    <span className="text-[11px] text-yellow-200/90">
-                      Cambiaste el prompt: se re-optimizará al generar.
-                    </span>
-                  )}
-
-                  {optStatus === "READY" && !isOptStale && (
-                    <span className="text-[11px] text-emerald-200/90">Optimizado listo ✅</span>
-                  )}
-                </div>
-
-                {optimizedPrompt && (
-                  <div className="rounded-2xl border border-white/10 bg-black/40 px-3 py-2">
-                    <div className="text-[11px] text-neutral-400">Optimized Prompt (se enviará al motor)</div>
-                    <div className="mt-1 whitespace-pre-wrap text-[12px] text-neutral-200">{optimizedPrompt}</div>
-                  </div>
-                )}
-
-                {optError && <div className="text-[11px] text-red-400">{optError}</div>}
-              </div>
-            )}
           </div>
 
           <div>
@@ -840,14 +798,76 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+          </div>
 
-            {/* ✅ NUEVO: salida negative optimizada */}
-            {useOptimizer && optimizedNegative && (
-              <div className="mt-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2">
-                <div className="text-[11px] text-neutral-400">Optimized Negative (se enviará al motor)</div>
-                <div className="mt-1 whitespace-pre-wrap text-[12px] text-neutral-200">{optimizedNegative}</div>
+          {/* ✅ Optimizer UI (IGUAL AL DE VIDEO) */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-neutral-300">
+                Optimización de prompt (OpenAI)
+                {optStatus === "READY" && optimizedPrompt ? (
+                  <span className="ml-2 text-[10px] text-emerald-300/90">{isOptStale ? "Desactualizado" : "Listo ✓"}</span>
+                ) : (
+                  <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={runOptimizeNow}
+                disabled={optStatus === "OPTIMIZING" || !prompt?.trim()}
+                className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-60"
+              >
+                {optStatus === "OPTIMIZING" ? "Optimizando..." : "Optimizar con IA"}
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="useOptImage"
+                type="checkbox"
+                checked={useOptimizer}
+                onChange={(e) => setUseOptimizer(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="useOptImage" className="text-[11px] text-neutral-300">
+                Usar prompt optimizado para generar
+              </label>
+
+              <span className="ml-auto text-[10px] text-neutral-500">
+                {useOptimizer && optStatus === "READY" && optimizedPrompt && !isOptStale
+                  ? "Activo (mandará optimizado)"
+                  : "Mandará tu prompt"}
+              </span>
+            </div>
+
+            {optimizedPrompt ? (
+              <div className="mt-2">
+                <div className="text-[10px] text-neutral-400">
+                  Prompt optimizado (se envía al motor si está activo):
+                </div>
+                <div className="mt-1 max-h-24 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
+                  {optimizedPrompt}
+                </div>
+
+                <div className="mt-2 text-[10px] text-neutral-400">Negative optimizado:</div>
+                <div className="mt-1 max-h-20 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
+                  {optimizedNegative || "(vacío)"}
+                </div>
+
+                {isOptStale && (
+                  <div className="mt-2 text-[10px] text-yellow-200/90">
+                    Cambiaste el prompt/negative: al generar se re-optimizará automáticamente.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2 text-[10px] text-neutral-500">
+                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés) manteniendo tu idea.
               </div>
             )}
+
+            {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
