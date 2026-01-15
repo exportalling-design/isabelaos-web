@@ -435,12 +435,12 @@ export default async function handler(req, res) {
       mode = "t2v",
       prompt,
       negative_prompt = "",
-      steps = 20,
-      height = 512,
-      width = 896,
-      num_frames = 49,
+      steps = 34,
+      height = 720,
+      width = 1280,
+      num_frames = 72,
       fps = 24,
-      guidance_scale = 6.0,
+      guidance_scale = 6.5,
       image_base64 = null,
     } = req.body || {};
 
