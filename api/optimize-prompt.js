@@ -1,12 +1,12 @@
-// api/optimize-prompt.js
-
+// /api/optimize-prompt.js
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ ok: false, error: "Método no permitido" });
     return;
   }
 
-  const { prompt } = req.body || {};
+  const { prompt, negative_prompt } = req.body || {};
+
   if (!prompt || typeof prompt !== "string") {
     res.status(400).json({ ok: false, error: "Falta 'prompt' en el body" });
     return;
@@ -21,33 +21,36 @@ export default async function handler(req, res) {
     return;
   }
 
+  const neg = typeof negative_prompt === "string" ? negative_prompt : "";
+
   try {
-    const completionRes = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Eres un optimizador de prompts para un generador de imágenes. Mejora el prompt haciéndolo más descriptivo, en inglés, manteniendo la idea original, sin agregar contenido sexual explícito ni violento.",
-            },
-            {
-              role: "user",
-              content: `Prompt original: "${prompt}"\n\nDevuélveme SOLO el prompt optimizado, sin explicación.`,
-            },
-          ],
-          temperature: 0.9,
-          max_tokens: 200,
-        }),
-      }
-    );
+    const completionRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Eres un optimizador de prompts para un generador de imágenes. Devuelves prompts mejorados en inglés, más descriptivos, manteniendo la idea original. No agregues contenido sexual explícito ni violento. No agregues explicación.",
+          },
+          {
+            role: "user",
+            content:
+              `Prompt original:\n${prompt}\n\n` +
+              `Negative prompt original:\n${neg}\n\n` +
+              `Devuélveme SOLO el prompt optimizado y el negative optimizado en JSON EXACTO con esta forma:\n` +
+              `{"prompt":"...","negative":"..."}`,
+          },
+        ],
+        temperature: 0.9,
+        max_tokens: 300,
+      }),
+    });
 
     const json = await completionRes.json();
     if (!completionRes.ok) {
@@ -59,12 +62,28 @@ export default async function handler(req, res) {
       return;
     }
 
-    const optimized =
-      json.choices?.[0]?.message?.content?.trim() || prompt;
+    const raw = json.choices?.[0]?.message?.content?.trim() || "";
+
+    // Intentamos parsear JSON. Si falla, fallback: devolvemos prompt original.
+    let optimizedPrompt = prompt;
+    let optimizedNegative = neg || "";
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        if (typeof parsed.prompt === "string" && parsed.prompt.trim()) optimizedPrompt = parsed.prompt.trim();
+        if (typeof parsed.negative === "string") optimizedNegative = parsed.negative.trim();
+      }
+    } catch (_) {
+      // fallback: si no vino JSON, usamos el texto completo como prompt optimizado
+      if (raw && raw.length > 0) optimizedPrompt = raw;
+      optimizedNegative = neg || "";
+    }
 
     res.status(200).json({
       ok: true,
-      optimizedPrompt: optimized,
+      optimizedPrompt,
+      optimizedNegative,
     });
   } catch (err) {
     console.error("Error en /api/optimize-prompt:", err);
