@@ -36,7 +36,7 @@ export default async function handler(req, res) {
           {
             role: "system",
             content:
-              "Eres un optimizador de prompts para un generador de imágenes. Devuelves prompts mejorados en inglés, más descriptivos, manteniendo la idea original. No agregues contenido sexual explícito ni violento. No agregues explicación.",
+              "Eres un optimizador de prompts para un generador de imágenes y video. Devuelves prompts mejorados en inglés, más descriptivos, manteniendo la idea original. No agregues contenido sexual explícito ni violento. No agregues explicación.",
           },
           {
             role: "user",
