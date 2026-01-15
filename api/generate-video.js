@@ -438,7 +438,7 @@ export default async function handler(req, res) {
       steps = 34,
       height = 720,
       width = 1280,
-      num_frames = 72,
+      num_frames = 80,
       fps = 24,
       guidance_scale = 6.5,
       image_base64 = null,
