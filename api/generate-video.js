@@ -20,7 +20,7 @@ const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspa
 
 // ✅ Preferencias de GPU (prioridad) — acepta lo que tú pongas (IDs o nombres).
 // Ejemplo recomendado (por tu UI):
-// "H100 NVL,A100 SXM,A100 PCIe"
+// "H100 NVL,A100 SXM,A100 PCIe,RTX 6000 ADA"
 const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
 
 // ✅ Truco datacenter: ALL suele encontrar más stock (si tu cuenta lo permite)
