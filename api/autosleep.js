@@ -9,14 +9,25 @@ const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_AP
 // ✅ default 5 min
 const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "5", 10);
 
+// ✅ si un job está "activo" pero no se ha actualizado en X min → se considera zombi
+const STALE_JOB_MINUTES = parseInt(process.env.STALE_JOB_MINUTES || "15", 10);
+
+// ✅ opcional: pausar pods huérfanos con prefijo (0=off, 1=on)
+const CLEANUP_ORPHAN_PODS = (process.env.CLEANUP_ORPHAN_PODS || "0") === "1";
+const ORPHAN_POD_NAME_PREFIX = process.env.ORPHAN_POD_NAME_PREFIX || "isabela-video-";
+
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 const VIDEO_JOBS_TABLE = "video_jobs";
 
+const ACTIVE_STATUSES = ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING", "RUNNING"];
+
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
 }
 
 function runpodHeaders() {
@@ -37,29 +48,63 @@ async function runpodStopPod(podId) {
   return true;
 }
 
-// Mini-lock: intenta tomar lock por X segundos (sin pisar un lock activo)
-async function tryAcquireLock(sb, seconds = 120) {
-  const now = new Date();
-  const until = new Date(now.getTime() + seconds * 1000).toISOString();
-
-  // asegurar fila id=1
-  {
-    const { data } = await sb.from(POD_LOCK_TABLE).select("id").eq("id", 1).maybeSingle();
-    if (!data) {
-      await sb.from(POD_LOCK_TABLE).insert([{ id: 1, locked_until: new Date(0).toISOString() }]);
-    }
+async function runpodListPods(limit = 50) {
+  const r = await fetch(`https://rest.runpod.io/v1/pods?limit=${limit}`, {
+    method: "GET",
+    headers: runpodHeaders(),
+  });
+  const t = await r.text().catch(() => "");
+  if (!r.ok) throw new Error(`RunPod list pods failed (${r.status}): ${t}`);
+  try {
+    return JSON.parse(t);
+  } catch {
+    return { raw: t };
   }
+}
 
-  const { data: lockRow, error: lerr } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
-  if (lerr) throw lerr;
+// Mini-lock: usa fila id=1 en pod_lock. (Asume que ya existe.)
+// Si no existe, la crea una sola vez de forma segura.
+async function ensureLockRow(sb) {
+  const { data, error } = await sb.from(POD_LOCK_TABLE).select("id").eq("id", 1).maybeSingle();
+  if (error) throw error;
+  if (data) return true;
 
-  const lockedUntil = lockRow?.locked_until ? new Date(lockRow.locked_until) : null;
-  if (lockedUntil && lockedUntil > now) return { ok: false, reason: "lock active", locked_until: lockRow.locked_until };
+  // crear fila id=1
+  const { error: insErr } = await sb.from(POD_LOCK_TABLE).insert([
+    { id: 1, locked_until: new Date(0).toISOString() },
+  ]);
+  if (insErr) {
+    // si otro proceso la creó al mismo tiempo, ignoramos
+    const msg = String(insErr?.message || insErr);
+    if (!msg.toLowerCase().includes("duplicate")) throw insErr;
+  }
+  return true;
+}
 
-  const { error: uerr } = await sb.from(POD_LOCK_TABLE).update({ locked_until: until }).eq("id", 1);
-  if (uerr) throw uerr;
+// Lock: tomar si expiró
+async function tryAcquireLock(sb, seconds = 120) {
+  await ensureLockRow(sb);
 
-  return { ok: true, locked_until: until };
+  const nowIso = new Date().toISOString();
+  const untilIso = new Date(Date.now() + seconds * 1000).toISOString();
+
+  // ✅ intento "semi-atómico": solo actualiza si locked_until <= now
+  const { data, error } = await sb
+    .from(POD_LOCK_TABLE)
+    .update({ locked_until: untilIso })
+    .eq("id", 1)
+    .lte("locked_until", nowIso)
+    .select("locked_until")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return { ok: false, reason: "lock active" };
+
+  return { ok: true, locked_until: data.locked_until };
+}
+
+function minutesBetween(a, b) {
+  return Math.abs(a.getTime() - b.getTime()) / 60000;
 }
 
 export default async function handler(req, res) {
@@ -77,36 +122,71 @@ export default async function handler(req, res) {
     const podId = podState?.pod_id || null;
     const lastUsedAt = podState?.last_used_at ? new Date(podState.last_used_at) : null;
 
-    // ✅ TU ESQUEMA: busy boolean manda
     const busy = Boolean(podState?.busy);
     const status = String(podState?.status || "").toUpperCase();
 
-    // 2) si está busy o status BUSY, no dormir
+    // 2) si está ocupado, no dormir
     if (busy || status === "BUSY") {
       return res.status(200).json({ ok: true, action: "SKIP", reason: "pod ocupado (busy/status)" });
     }
 
-    // 3) si hay jobs activos, no dormir
+    // 3) check jobs activos, pero ignorar zombis (stale)
     const { data: activeJobs, error: ajErr } = await sb
       .from(VIDEO_JOBS_TABLE)
-      .select("id,status,updated_at")
-      .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING", "RUNNING"])
-      .limit(1);
+      .select("id,status,updated_at,created_at,worker_id,error")
+      .in("status", ACTIVE_STATUSES)
+      .order("updated_at", { ascending: false })
+      .limit(5);
     if (ajErr) throw ajErr;
 
-    if (activeJobs && activeJobs.length > 0) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "hay jobs activos", sample: activeJobs[0] });
+    const now = new Date();
+    const freshActive = (activeJobs || []).filter((j) => {
+      const u = j?.updated_at ? new Date(j.updated_at) : null;
+      if (!u) return true; // si no hay updated_at, lo tratamos como activo para no matar un job raro
+      return minutesBetween(now, u) <= STALE_JOB_MINUTES;
+    });
+
+    const staleActive = (activeJobs || []).filter((j) => !freshActive.includes(j));
+
+    // ✅ si hay activos frescos, no dormir
+    if (freshActive.length > 0) {
+      return res.status(200).json({
+        ok: true,
+        action: "SKIP",
+        reason: "hay jobs activos (frescos)",
+        sample: freshActive[0],
+        stale_detected: staleActive.length,
+      });
+    }
+
+    // ✅ opcional: si hay zombis, marcarlos ERROR para desbloquear el sistema
+    // (esto evita que el sistema quede “para siempre” con PENDING/RUNNING)
+    if (staleActive.length > 0) {
+      const ids = staleActive.map((j) => j.id).filter(Boolean);
+      if (ids.length > 0) {
+        await sb
+          .from(VIDEO_JOBS_TABLE)
+          .update({
+            status: "ERROR",
+            error: `STALE_JOB_AUTOSLEEP (${STALE_JOB_MINUTES}m)`,
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", ids);
+      }
     }
 
     // 4) si no hay podId, nada que hacer
     if (!podId) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "no hay pod_id" });
+      return res.status(200).json({
+        ok: true,
+        action: "SKIP",
+        reason: "no hay pod_id (pod_state vacío)",
+        stale_cleaned: staleActive.length,
+      });
     }
 
     // 5) idle check
-    const now = new Date();
-    const idleMs = lastUsedAt ? (now - lastUsedAt) : Number.POSITIVE_INFINITY;
-    const idleMin = idleMs / 60000;
+    const idleMin = lastUsedAt ? minutesBetween(now, lastUsedAt) : Number.POSITIVE_INFINITY;
 
     if (idleMin < AUTOSLEEP_IDLE_MINUTES) {
       return res.status(200).json({
@@ -115,27 +195,71 @@ export default async function handler(req, res) {
         reason: "aún no está idle",
         idle_minutes: idleMin,
         threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
+        stale_cleaned: staleActive.length,
       });
     }
 
     // 6) toma mini-lock
     const lock = await tryAcquireLock(sb, 120);
     if (!lock.ok) {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: lock.reason, locked_until: lock.locked_until });
+      return res.status(200).json({
+        ok: true,
+        action: "SKIP",
+        reason: "lock active",
+        stale_cleaned: staleActive.length,
+      });
     }
 
-    // 7) STOP pod (PAUSA)
+    // 7) STOP pod principal
     await runpodStopPod(podId);
 
     // 8) actualizar pod_state
-    await sb.from(POD_STATE_TABLE).update({
-      status: "SLEEPING",
-      busy: false,
-      last_used_at: now.toISOString(),
-    }).eq("id", 1);
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({
+        status: "SLEEPING",
+        busy: false,
+        last_used_at: now.toISOString(),
+      })
+      .eq("id", 1);
 
-    return res.status(200).json({ ok: true, action: "STOPPED", podId });
+    // 9) opcional: cleanup pods huérfanos (si tu sistema a veces crea pods extra)
+    let orphanStopped = [];
+    if (CLEANUP_ORPHAN_PODS) {
+      const list = await runpodListPods(50);
 
+      // runpod devuelve diferentes formas; intentamos encontrar array
+      const pods =
+        list?.pods ||
+        list?.data ||
+        list?.items ||
+        (Array.isArray(list) ? list : []);
+
+      for (const p of pods) {
+        const id = p?.id || p?.podId || p?.pod?.id;
+        const name = p?.name || p?.pod?.name || "";
+        if (!id || !name) continue;
+
+        if (id === podId) continue; // ya paramos el principal
+
+        if (String(name).startsWith(ORPHAN_POD_NAME_PREFIX)) {
+          // best-effort: los pausamos (si ya estaban parados, runpod puede responder error)
+          try {
+            await runpodStopPod(id);
+            orphanStopped.push({ id, name });
+          } catch (_) {}
+        }
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      action: "STOPPED",
+      podId,
+      idle_minutes: idleMin,
+      stale_cleaned: staleActive.length,
+      orphanStopped,
+    });
   } catch (e) {
     const msg = String(e?.message || e);
     return res.status(500).json({ ok: false, error: msg });
