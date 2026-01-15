@@ -1079,6 +1079,7 @@ function LibraryView() {
 // ---------------------------------------------------------
 // Video desde prompt (logueado) - ASYNC REAL + PROGRESS + RESUME
 // (OPCIÓN B): NO export default (porque App.jsx ya tiene export default App)
+// + ✅ Prompt Optimizer (OpenAI) con toggle "usar optimizado"
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
@@ -1184,6 +1185,65 @@ function VideoFromPromptPanel({ userStatus }) {
     const r = sec % 60;
     if (m <= 0) return `${r}s`;
     return `${m}m ${r}s`;
+  };
+
+  // ---------------------------------------------------------
+  // ✅ Prompt Optimizer states
+  // ---------------------------------------------------------
+  const [useOptimized, setUseOptimized] = useState(false);
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optError, setOptError] = useState("");
+
+  // Invalida optimizado si cambian los originales
+  useEffect(() => {
+    setOptimizedPrompt("");
+    setOptimizedNegative("");
+    setOptError("");
+  }, [prompt, negative]);
+
+  const handleOptimize = async () => {
+    setOptError("");
+    setIsOptimizing(true);
+
+    try {
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          negative_prompt: negative,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Error optimizando prompt.");
+      }
+
+      setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
+      setOptimizedNegative(String(data.optimizedNegative || "").trim());
+      // Auto-activar toggle si todavía no lo tenía
+      setUseOptimized(true);
+    } catch (e) {
+      setOptError(e?.message || String(e));
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const getEffectivePrompts = () => {
+    const canUseOpt =
+      useOptimized &&
+      typeof optimizedPrompt === "string" &&
+      optimizedPrompt.trim().length > 0;
+
+    return {
+      finalPrompt: canUseOpt ? optimizedPrompt.trim() : prompt,
+      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : negative,
+      usingOptimized: canUseOpt,
+    };
   };
 
   // -------- Resume: si hay job activo, continuar UI --------
@@ -1300,6 +1360,8 @@ function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
+      const { finalPrompt, finalNegative } = getEffectivePrompts();
+
       // 1) Crear job (puede devolver LOCK_BUSY)
       let jid = null;
       let coldStartMsgShown = false;
@@ -1315,8 +1377,8 @@ function VideoFromPromptPanel({ userStatus }) {
           headers: { "Content-Type": "application/json", ...auth },
           body: JSON.stringify({
             mode: "t2v",
-            prompt,
-            negative_prompt: negative,
+            prompt: finalPrompt,
+            negative_prompt: finalNegative,
             steps: Number(steps),
           }),
         });
@@ -1511,6 +1573,66 @@ function VideoFromPromptPanel({ userStatus }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+          </div>
+
+          {/* ✅ Optimizer UI */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-neutral-300">
+                Optimización de prompt (OpenAI)
+                {optimizedPrompt ? (
+                  <span className="ml-2 text-[10px] text-emerald-300/90">Listo ✓</span>
+                ) : (
+                  <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOptimize}
+                disabled={isOptimizing || !prompt?.trim()}
+                className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-60"
+              >
+                {isOptimizing ? "Optimizando..." : "Optimizar con IA"}
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="useOptVideo"
+                type="checkbox"
+                checked={useOptimized}
+                onChange={(e) => setUseOptimized(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="useOptVideo" className="text-[11px] text-neutral-300">
+                Usar prompt optimizado para generar
+              </label>
+
+              <span className="ml-auto text-[10px] text-neutral-500">
+                {useOptimized && optimizedPrompt ? "Activo (mandará optimizado)" : "Mandará tu prompt"}
+              </span>
+            </div>
+
+            {optimizedPrompt ? (
+              <div className="mt-2">
+                <div className="text-[10px] text-neutral-400">Prompt optimizado (se envía al motor si está activo):</div>
+                <div className="mt-1 max-h-24 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
+                  {optimizedPrompt}
+                </div>
+
+                <div className="mt-2 text-[10px] text-neutral-400">Negative optimizado:</div>
+                <div className="mt-1 max-h-20 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
+                  {optimizedNegative || "(vacío)"}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 text-[10px] text-neutral-500">
+                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés) manteniendo tu idea.
+              </div>
+            )}
+
+            {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
