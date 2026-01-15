@@ -376,6 +376,12 @@ function AuthModal({ open, onClose }) {
 // - No depende de useAuth().profile
 // - Lee profiles(plan, jade_balance) directo de Supabase
 // - Límite 5 SOLO si (plan free/none) Y jade_balance <= 0
+//
+// ✅ NUEVO:
+// - Botón/toggle para optimizar prompt con OpenAI (Prompt + Negative)
+// - Mantiene prompt original del usuario
+// - Muestra prompt optimizado pequeño abajo
+// - Si "Optimizar" está activo, manda el optimizado al motor
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -399,6 +405,67 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   // ✅ Perfil (profiles)
   const [profilePlan, setProfilePlan] = useState("free");
   const [profileJades, setProfileJades] = useState(0);
+
+  // ---------------------------------------------------------
+  // ✅ NUEVO: Optimizador de prompt
+  // ---------------------------------------------------------
+  const [useOptimizer, setUseOptimizer] = useState(false);
+  const [optStatus, setOptStatus] = useState("IDLE"); // IDLE | OPTIMIZING | READY | ERROR
+  const [optError, setOptError] = useState("");
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
+  const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar "stale"
+
+  const isOptStale =
+    useOptimizer &&
+    optStatus === "READY" &&
+    (optSource.prompt !== prompt || optSource.negative !== negative);
+
+  async function runOptimizeNow() {
+    setOptError("");
+    setOptStatus("OPTIMIZING");
+
+    try {
+      const r = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          negative_prompt: negative,
+        }),
+      });
+
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || "Error optimizando prompt.");
+      }
+
+      const op = String(j.optimizedPrompt || prompt);
+      const on = String(j.optimizedNegative || negative);
+
+      setOptimizedPrompt(op);
+      setOptimizedNegative(on);
+      setOptSource({ prompt, negative });
+      setOptStatus("READY");
+      return { ok: true, optimizedPrompt: op, optimizedNegative: on };
+    } catch (e) {
+      setOptStatus("ERROR");
+      setOptError(e?.message || String(e));
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  // Si el usuario apaga el optimizador, no borramos (solo dejamos de usar)
+  // Si lo enciende y no hay optimizado, queda listo para optimizar.
+  useEffect(() => {
+    if (!useOptimizer) return;
+    // Si lo activan por primera vez y no hay optimized, dejamos IDLE (para que presione botón o auto-optimice en Generate)
+    if (!optimizedPrompt && !optimizedNegative) {
+      setOptStatus("IDLE");
+      setOptError("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useOptimizer]);
 
   // ---------------------------------------------------------
   // Cargar profile desde Supabase (plan + jade_balance)
@@ -499,6 +566,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const handleGenerate = async () => {
     setError("");
+    setOptError("");
 
     if (!isDemo && !userLoggedIn) {
       onAuthRequired?.();
@@ -526,9 +594,40 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
     setImageB64(null);
     setStatus("IN_QUEUE");
-    setStatusText("Enviando job a RunPod...");
+    setStatusText("Preparando job...");
 
     try {
+      // ✅ Si el optimizador está activo: aseguramos tener prompts optimizados (y no stale)
+      let finalPrompt = prompt;
+      let finalNegative = negative;
+
+      if (useOptimizer) {
+        const needsOptimize =
+          optStatus !== "READY" ||
+          !optimizedPrompt ||
+          !optimizedNegative ||
+          optSource.prompt !== prompt ||
+          optSource.negative !== negative;
+
+        if (needsOptimize) {
+          setStatusText("Optimizando prompt con IA...");
+          const opt = await runOptimizeNow();
+          if (!opt.ok) {
+            // Si falla optimización, seguimos con el prompt original (no bloqueamos)
+            finalPrompt = prompt;
+            finalNegative = negative;
+          } else {
+            finalPrompt = opt.optimizedPrompt;
+            finalNegative = opt.optimizedNegative;
+          }
+        } else {
+          finalPrompt = optimizedPrompt;
+          finalNegative = optimizedNegative;
+        }
+      }
+
+      setStatusText("Enviando job a RunPod...");
+
       const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
 
       const res = await fetch("/api/generate", {
@@ -538,11 +637,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           ...authHeaders,
         },
         body: JSON.stringify({
-          prompt,
-          negative_prompt: negative,
+          prompt: finalPrompt,
+          negative_prompt: finalNegative,
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
+
+          // opcional: para debug (no rompe backend)
+          _ui_original_prompt: prompt,
+          _ui_original_negative: negative,
+          _ui_used_optimizer: !!useOptimizer,
         }),
       });
 
@@ -592,11 +696,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt,
-              negativePrompt: negative,
+              prompt, // guardamos el prompt del usuario (original)
+              negativePrompt: negative, // guardamos el negativo original
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
+
+              // opcional para trazabilidad (si tu helper ignora campos extra no pasa nada)
+              optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
+              optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
+              usedOptimizer: !!useOptimizer,
             }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
         } else {
@@ -667,12 +776,61 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         <div className="mt-4 space-y-4 text-sm">
           <div>
-            <label className="text-neutral-300">Prompt</label>
+            <div className="flex items-center justify-between">
+              <label className="text-neutral-300">Prompt</label>
+
+              {/* ✅ NUEVO: toggle optimizador */}
+              <label className="flex items-center gap-2 text-[11px] text-neutral-300 select-none">
+                <input
+                  type="checkbox"
+                  checked={useOptimizer}
+                  onChange={(e) => setUseOptimizer(e.target.checked)}
+                  className="h-4 w-4 accent-cyan-400"
+                />
+                Optimizar con IA
+              </label>
+            </div>
+
             <textarea
               className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
+
+            {/* ✅ NUEVO: botones y salida optimizada */}
+            {useOptimizer && (
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={runOptimizeNow}
+                    disabled={optStatus === "OPTIMIZING"}
+                    className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-60"
+                  >
+                    {optStatus === "OPTIMIZING" ? "Optimizando..." : "Optimizar prompt ahora"}
+                  </button>
+
+                  {isOptStale && (
+                    <span className="text-[11px] text-yellow-200/90">
+                      Cambiaste el prompt: se re-optimizará al generar.
+                    </span>
+                  )}
+
+                  {optStatus === "READY" && !isOptStale && (
+                    <span className="text-[11px] text-emerald-200/90">Optimizado listo ✅</span>
+                  )}
+                </div>
+
+                {optimizedPrompt && (
+                  <div className="rounded-2xl border border-white/10 bg-black/40 px-3 py-2">
+                    <div className="text-[11px] text-neutral-400">Optimized Prompt (se enviará al motor)</div>
+                    <div className="mt-1 whitespace-pre-wrap text-[12px] text-neutral-200">{optimizedPrompt}</div>
+                  </div>
+                )}
+
+                {optError && <div className="text-[11px] text-red-400">{optError}</div>}
+              </div>
+            )}
           </div>
 
           <div>
@@ -682,6 +840,14 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+
+            {/* ✅ NUEVO: salida negative optimizada */}
+            {useOptimizer && optimizedNegative && (
+              <div className="mt-2 rounded-2xl border border-white/10 bg-black/40 px-3 py-2">
+                <div className="text-[11px] text-neutral-400">Optimized Negative (se enviará al motor)</div>
+                <div className="mt-1 whitespace-pre-wrap text-[12px] text-neutral-200">{optimizedNegative}</div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -727,13 +893,18 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <br />
             <span className="text-[11px] text-neutral-400">
               {isDemo ? (
-                <>Uso: {demoCount} / {DEMO_LIMIT}</>
+                <>
+                  Uso: {demoCount} / {DEMO_LIMIT}
+                </>
               ) : hasPaidAccess ? (
                 <>Uso: ilimitado (por plan o jades)</>
               ) : (
-                <>Uso: {dailyCount} / {DAILY_LIMIT}</>
+                <>
+                  Uso: {dailyCount} / {DAILY_LIMIT}
+                </>
               )}
               <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
+              {useOptimizer && <span className="ml-2 opacity-70">(IA: ON)</span>}
             </span>
           </div>
 
