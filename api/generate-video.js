@@ -18,6 +18,21 @@ const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
 const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
+// ✅ Preferencias de GPU (prioridad) — acepta lo que tú pongas (IDs o nombres).
+// Ejemplo recomendado (por tu UI):
+// "H100 NVL,A100 SXM,A100 PCIe,RTX 6000 Ada,L40S,L40,RTX A6000"
+const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
+
+// ✅ Truco datacenter: ALL suele encontrar más stock (si tu cuenta lo permite)
+const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
+
+// ✅ Fuerza 1 GPU
+const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
+
+// ✅ Si la creación con GPU preferida falla, NO confirmamos falla al usuario:
+// hacemos fallback automático a crear sin gpuTypeIds / sin cloudType.
+const VIDEO_GPU_FALLBACK_ON_FAIL = String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
+
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
@@ -177,20 +192,18 @@ async function releaseLock(sb) {
 }
 
 // ---------------------------
-// Crear pod desde template
+// Crear pod desde template (con preferencia de GPU + fallback)
 // ---------------------------
-async function runpodCreatePodFromTemplate({ name }) {
-  if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
+function parseGpuTypeList() {
+  if (!VIDEO_GPU_TYPE_IDS) return null;
+  const arr = VIDEO_GPU_TYPE_IDS
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return arr.length ? arr : null;
+}
 
-  const payload = {
-    name,
-    templateId: VIDEO_RUNPOD_TEMPLATE_ID,
-    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
-    volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-    ports: ["8000/http", "8888/http"],
-  };
-
+async function runpodCreatePodOnce(payload) {
   const r = await fetch(`https://rest.runpod.io/v1/pods`, {
     method: "POST",
     headers: runpodHeaders(),
@@ -198,7 +211,12 @@ async function runpodCreatePodFromTemplate({ name }) {
   });
 
   const t = await r.text().catch(() => "");
-  if (!r.ok) throw new Error(`RunPod create failed (${r.status}): ${t}`);
+  if (!r.ok) {
+    const err = new Error(`RunPod create failed (${r.status}): ${t}`);
+    err.status = r.status;
+    err.raw = t;
+    throw err;
+  }
 
   let json = null;
   try { json = JSON.parse(t); } catch { json = { raw: t }; }
@@ -207,6 +225,74 @@ async function runpodCreatePodFromTemplate({ name }) {
   if (!podId) throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
 
   return { podId, raw: json };
+}
+
+async function runpodCreatePodFromTemplate({ name, log }) {
+  if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
+
+  const gpuTypeIds = parseGpuTypeList();
+
+  // Intento #1: preferencia GPU + cloudType + gpuCount
+  const basePayload = {
+    name,
+    templateId: VIDEO_RUNPOD_TEMPLATE_ID,
+    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
+    volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
+    ports: ["8000/http", "8888/http"],
+    gpuCount: VIDEO_GPU_COUNT,
+  };
+
+  const attempts = [];
+
+  // A) preferida
+  attempts.push({
+    label: "PREFERRED_GPU",
+    payload: {
+      ...basePayload,
+      cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
+      ...(gpuTypeIds ? { gpuTypeIds } : {}),
+    },
+  });
+
+  if (VIDEO_GPU_FALLBACK_ON_FAIL) {
+    // B) sin gpuTypeIds pero con cloudType (más stock)
+    attempts.push({
+      label: "FALLBACK_CLOUD_ONLY",
+      payload: {
+        ...basePayload,
+        cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
+      },
+    });
+
+    // C) pelado (máxima compatibilidad)
+    attempts.push({
+      label: "FALLBACK_PLAIN",
+      payload: {
+        ...basePayload,
+      },
+    });
+  }
+
+  let lastErr = null;
+  for (const a of attempts) {
+    try {
+      if (log) log(`createPod attempt=${a.label}`, {
+        hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
+        cloudType: a.payload.cloudType || null,
+        gpuCount: a.payload.gpuCount,
+      });
+      const created = await runpodCreatePodOnce(a.payload);
+      return { ...created, attempt: a.label, used: a.payload };
+    } catch (e) {
+      lastErr = e;
+      if (log) log(`createPod failed attempt=${a.label}`, String(e?.message || e));
+      // si no hay fallback, romper de una
+      if (!VIDEO_GPU_FALLBACK_ON_FAIL) throw e;
+    }
+  }
+
+  throw lastErr || new Error("RunPod create failed: sin detalle");
 }
 
 // ---------------------------
@@ -233,7 +319,10 @@ async function ensureWorkingPod(sb, log) {
 
   // Si no hay pod guardado => crear
   if (!statePodId) {
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+    const created = await runpodCreatePodFromTemplate({
+      name: `isabela-video-${Date.now()}`,
+      log,
+    });
 
     await sb
       .from(POD_STATE_TABLE)
@@ -255,7 +344,7 @@ async function ensureWorkingPod(sb, log) {
     if (!ready.ok) throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
 
     await touch("RUNNING", false);
-    return { podId: created.podId, action: "CREADO_Y_LISTO" };
+    return { podId: created.podId, action: "CREADO_Y_LISTO", createAttempt: created.attempt };
   }
 
   // Si ya existe pod => reusar
@@ -279,7 +368,10 @@ async function ensureWorkingPod(sb, log) {
     log("ensureWorkingPod: pod existente falló, recreo", msg);
 
     const oldPodId = statePodId;
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+    const created = await runpodCreatePodFromTemplate({
+      name: `isabela-video-${Date.now()}`,
+      log,
+    });
 
     await sb
       .from(POD_STATE_TABLE)
@@ -303,7 +395,7 @@ async function ensureWorkingPod(sb, log) {
     await touch("RUNNING", false);
 
     await runpodTerminatePod(oldPodId).catch(() => {});
-    return { podId: created.podId, action: "RECREADO", oldPodId };
+    return { podId: created.podId, action: "RECREADO", oldPodId, createAttempt: created.attempt };
   }
 }
 
