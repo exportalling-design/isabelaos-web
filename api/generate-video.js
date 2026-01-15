@@ -3,7 +3,8 @@
 // IsabelaOS Studio — Video Generate API (Vercel)
 // ASYNC REAL: dispatch a worker /api/video_async
 // - Reusa pod si existe (pod_state.id=1.pod_id)
-// - Lock por RPC (TTL corto) + release inmediato en finally
+// - Lock por RPC con owner (TTL corto) + release SIEMPRE en finally
+// - Si lock está ocupado, espera hasta LOCK_WAIT_TIMEOUT_MS
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -56,6 +57,8 @@ const LOCK_WAIT_INTERVAL_MS = parseInt(
   process.env.LOCK_WAIT_INTERVAL_MS || "1200",
   10
 );
+
+const LOCK_OWNER = process.env.LOCK_OWNER || "video-api";
 
 // Tables
 const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
@@ -222,8 +225,10 @@ async function runpodCreatePodFromTemplate({ name }) {
     json = { raw: t };
   }
 
-  const podId = json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
-  if (!podId) throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
+  const podId =
+    json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
+  if (!podId)
+    throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
 
   // verificación rápida
   const verifyStart = Date.now();
@@ -240,43 +245,33 @@ async function runpodCreatePodFromTemplate({ name }) {
 }
 
 // -------------------------
-// RPC Lock (Supabase)
-// ✅ FIX: tu DB tiene 2 overloads acquire_pod_lock:
-//   (p_seconds int) y (p_seconds int, p_owner text)
-//   -> hay que pasar p_owner para que NO haya ambigüedad
+// RPC Lock (Supabase) — owner obligatorio
 // -------------------------
-async function acquireLockWithWait(
-  sb,
-  seconds = WAKE_LOCK_SECONDS,
-  owner = "video-api"
-) {
+async function acquireLockWithWait(sb, seconds = WAKE_LOCK_SECONDS, log = null) {
   const start = Date.now();
 
   while (Date.now() - start < LOCK_WAIT_TIMEOUT_MS) {
     const { data, error } = await sb.rpc("acquire_pod_lock", {
       p_seconds: seconds,
-      p_owner: owner, // 🔥 CLAVE
+      p_owner: LOCK_OWNER,
     });
     if (error) throw error;
 
     const row = Array.isArray(data) ? data[0] : data;
     if (row?.ok) return { ok: true, locked_until: row.locked_until };
 
+    log?.("step=LOCK_BUSY_WAIT", { locked_until: row?.locked_until || null });
     await sleep(LOCK_WAIT_INTERVAL_MS);
   }
-  return { ok: false, error: `Timeout esperando lock (${LOCK_WAIT_TIMEOUT_MS}ms)` };
+  return {
+    ok: false,
+    error: `Timeout esperando lock (${LOCK_WAIT_TIMEOUT_MS}ms)`,
+  };
 }
 
-async function releaseLockRpc(sb, owner = "video-api") {
-  // por si tu release también tiene overload con owner, intentamos con owner
-  const a = await sb.rpc("release_pod_lock", { p_owner: owner }).catch(() => null);
-  if (a && a.error) throw a.error;
-
-  // fallback: versión sin args
-  if (!a) {
-    const { error } = await sb.rpc("release_pod_lock");
-    if (error) throw error;
-  }
+async function releaseLockRpc(sb) {
+  const { error } = await sb.rpc("release_pod_lock", { p_owner: LOCK_OWNER });
+  if (error) throw error;
 }
 
 // -------------------------
@@ -301,6 +296,7 @@ async function ensureWorkingPod(sb, log) {
       .eq("id", 1);
   }
 
+  // No hay pod guardado -> crear
   if (!statePodId) {
     const created = await runpodCreatePodFromTemplate({
       name: `isabela-video-${Date.now()}`,
@@ -333,7 +329,7 @@ async function ensureWorkingPod(sb, log) {
     return { podId: created.podId, action: "CREADO_Y_LISTO" };
   }
 
-  // reusar
+  // Reusar
   try {
     await runpodGetPod(statePodId);
 
@@ -373,7 +369,9 @@ async function ensureWorkingPod(sb, log) {
 
     const running = await waitForRunning(created.podId);
     if (!running.ok)
-      throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
+      throw new Error(
+        `Pod nuevo no RUNNING: ${running.error || running.status}`
+      );
 
     const ready = await waitForWorker(created.podId);
     if (!ready.ok)
@@ -392,7 +390,6 @@ async function ensureWorkingPod(sb, log) {
 export default async function handler(req, res) {
   const log = (...args) => console.log("[GV]", ...args);
   let lockAcquired = false;
-  const owner = "video-api"; // dueño del lock (fijo y consistente)
 
   try {
     if (req.method !== "POST") {
@@ -401,7 +398,9 @@ export default async function handler(req, res) {
 
     const auth = await requireUser(req);
     if (!auth.ok) {
-      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+      return res
+        .status(auth.code || 401)
+        .json({ ok: false, error: auth.error });
     }
     const user_id = auth.user.id;
 
@@ -421,26 +420,35 @@ export default async function handler(req, res) {
       image_base64 = null,
     } = payloadIn;
 
-    if (!prompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: "Falta prompt" });
+    }
 
     const sb = sbAdmin();
 
+    // 1) Lock
     log("step=LOCK_WAIT_BEGIN", {
       ttl_s: WAKE_LOCK_SECONDS,
       wait_ms: LOCK_WAIT_TIMEOUT_MS,
-      owner,
+      interval_ms: LOCK_WAIT_INTERVAL_MS,
+      owner: LOCK_OWNER,
     });
 
-    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS, owner);
-    if (!lock.ok) return res.status(503).json({ ok: false, error: lock.error });
+    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS, log);
+    if (!lock.ok) {
+      log("step=LOCK_WAIT_TIMEOUT", lock);
+      return res.status(503).json({ ok: false, error: lock.error });
+    }
 
     lockAcquired = true;
-    log("step=LOCK_OK", { locked_until: lock.locked_until, owner });
+    log("step=LOCK_OK", { locked_until: lock.locked_until });
 
+    // 2) Ensure pod
     log("step=ENSURE_POD_BEGIN");
     const podInfo = await ensureWorkingPod(sb, log);
     log("step=ENSURE_POD_OK", podInfo);
 
+    // 3) Dispatch async
     const podId = podInfo.podId;
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
@@ -483,7 +491,9 @@ export default async function handler(req, res) {
     }
 
     const job_id = j?.job_id || j?.id || null;
-    if (!job_id) throw new Error(`Worker no devolvió job_id. Respuesta: ${tt}`);
+    if (!job_id) {
+      throw new Error(`Worker no devolvió job_id. Respuesta: ${tt}`);
+    }
 
     log("step=DISPATCH_OK", { job_id });
 
@@ -499,13 +509,18 @@ export default async function handler(req, res) {
     console.error("[GV] fatal:", msg);
     return res.status(500).json({ ok: false, error: msg });
   } finally {
+    // ✅ Release SIEMPRE
     if (lockAcquired) {
       try {
         const sb = sbAdmin();
-        await releaseLockRpc(sb, owner);
-        console.log("[GV] step=LOCK_RELEASED", { owner });
+        await releaseLockRpc(sb);
+        console.log("[GV] step=LOCK_RELEASED", { owner: LOCK_OWNER });
       } catch (e) {
-        console.log("[GV] warn=LOCK_RELEASE_FAIL", String(e?.message || e));
+        console.log(
+          "[GV] warn=LOCK_RELEASE_FAIL",
+          String(e?.message || e),
+          { owner: LOCK_OWNER }
+        );
       }
     }
   }
