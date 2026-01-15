@@ -3,11 +3,10 @@
 // IsabelaOS Studio — Image → Video (Vercel Function)
 //
 // ✅ AUTH UNIFICADO (requireUser)
-// ✅ COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
-// ✅ REUSO de POD (igual que generate-video): pod_state.pod_id
-// ✅ Si hay job activo => devuelve ese job_id (no crea otro)
+// ✅ REUSO de POD (pod_state.pod_id)
+// ✅ Si hay job activo (MISMO MODO i2v) => devuelve ese job_id
 // ✅ Payload NORMALIZADO para el worker (mode=i2v + image_base64/image_url)
-// ✅ Create pod con preferencia de GPU + fallback (opcional, no falla usuarios)
+// ✅ Evita doble cobro: soporta already_billed=true
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -40,18 +39,9 @@ const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
 
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
-// ✅ Preferencias de GPU (prioridad) — acepta lo que tú pongas (IDs o nombres).
-// Ejemplo recomendado (por tu UI):
-// "H100 NVL,H100 SXM,H100 PCIe,A100 SXM,A100 PCIe,RTX 6000 Ada,L40S,L40,RTX A6000"
 const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
-
-// ✅ Truco datacenter
 const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
-
-// ✅ Fuerza 1 GPU
 const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
-
-// ✅ Si falla preferencia, hace fallback automático para no romper a usuarios
 const VIDEO_GPU_FALLBACK_ON_FAIL =
   String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
 
@@ -94,7 +84,6 @@ const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
 const POD_LOCK_TABLE = process.env.POD_LOCK_TABLE || "pod_lock";
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
-// 👇 Estados activos
 const ACTIVE_STATUSES = [
   "PENDING",
   "IN_QUEUE",
@@ -145,7 +134,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
 }
 
 // =====================
-// ✅ Cobro unificado (backend)
+// ✅ Cobro unificado (backend) — opcional si frontend ya cobró
 // =====================
 async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`;
@@ -217,7 +206,7 @@ async function waitForWorkerReady(podId, maxMs = WORKER_READY_TIMEOUT_MS) {
 }
 
 // =====================
-// Lock (simple)
+// Lock
 // =====================
 async function acquireLock(sb) {
   const now = new Date();
@@ -426,12 +415,14 @@ async function updateVideoJob(sb, job_id, patch) {
   if (error) throw error;
 }
 
-async function getActiveJobForUser(sb, user_id) {
+// ✅ job activo SOLO del modo i2v (para este panel)
+async function getActiveJobForUserI2V(sb, user_id) {
   const { data, error } = await sb
     .from(VIDEO_JOBS_TABLE)
-    .select("job_id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at")
+    .select("job_id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at,payload")
     .eq("user_id", user_id)
     .in("status", ACTIVE_STATUSES)
+    .eq("payload->>mode", "i2v")
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -532,7 +523,6 @@ async function ensureWorkingPod(sb, log) {
       const oldPodId = statePodId;
       const fresh = await createAndBoot();
 
-      // best-effort: matar anterior (no bloquea)
       try {
         await fetch(`https://rest.runpod.io/v1/pods/${oldPodId}/terminate`, {
           method: "POST",
@@ -576,21 +566,20 @@ export default async function handler(req, res) {
     }
     const user_id = auth.user.id;
 
-    // Si ya hay job activo => devolverlo
-    const active = await getActiveJobForUser(sb, user_id);
-    if (active) {
+    // ✅ Si ya hay job activo i2v => devolverlo (evita duplicados)
+    const activeI2V = await getActiveJobForUserI2V(sb, user_id);
+    if (activeI2V) {
       return res.status(200).json({
         ok: true,
         status: "ALREADY_RUNNING",
-        job_id: active.job_id,
-        job: active,
+        job_id: activeI2V.job_id,
+        job: activeI2V,
       });
     }
 
     const payloadRaw =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
 
-    // ✅ Acepta tu FRONT tal cual (image_b64) y también soporta otros nombres
     const image_b64 =
       payloadRaw.image_b64 ||
       payloadRaw.image_base64 ||
@@ -619,30 +608,35 @@ export default async function handler(req, res) {
       ? { steps: Math.min(safeSteps, 8), num_frames: 8, fps: 6, width: 384, height: 672 }
       : { steps: safeSteps };
 
-    // ✅ Payload NORMALIZADO para worker (clave)
+    // ✅ Payload NORMALIZADO para worker
     const payload = {
       user_id,
       mode: "i2v",
       prompt: payloadRaw.prompt || "",
       negative_prompt: payloadRaw.negative_prompt || "",
 
-      // defaults (si el front no manda)
       width: typeof payloadRaw.width === "number" ? payloadRaw.width : 896,
       height: typeof payloadRaw.height === "number" ? payloadRaw.height : 512,
       num_frames: typeof payloadRaw.num_frames === "number" ? payloadRaw.num_frames : 49,
       fps: typeof payloadRaw.fps === "number" ? payloadRaw.fps : 24,
       guidance_scale: payloadRaw.guidance_scale ?? 6.0,
 
-      // ✅ el worker recibe ESTO
       image_base64: image_b64 || null,
       image_url: image_url || null,
 
       ...maybeFast,
     };
 
-    // ✅ COBRO (backend)
-    // Si NO quieres cobro aquí (porque ya cobras en el front), comenta esta línea.
-    await spendJadesOrThrow(user_id, COST_IMG2VIDEO_JADES, "generation:img2video", payloadRaw.ref || null);
+    // ✅ COBRO: si frontend ya cobró, manda already_billed=true y no cobramos aquí
+    const alreadyBilled = payloadRaw.already_billed === true;
+    if (!alreadyBilled) {
+      await spendJadesOrThrow(
+        user_id,
+        COST_IMG2VIDEO_JADES,
+        "generation:img2video",
+        payloadRaw.ref || null
+      );
+    }
 
     // Ensure pod
     const ensured = await ensureWorkingPod(sb, log);
@@ -719,8 +713,8 @@ export default async function handler(req, res) {
         createAttempt: ensured.createAttempt || null,
       },
       worker: ensured.workerUrl,
-      billed: { type: "JADE", amount: COST_IMG2VIDEO_JADES },
-      note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=...",
+      billed: alreadyBilled ? { type: "FRONTEND", amount: 0 } : { type: "JADE", amount: COST_IMG2VIDEO_JADES },
+      note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=... o /api/video-status?mode=i2v",
     });
   } catch (e) {
     const msg = String(e?.message || e);
