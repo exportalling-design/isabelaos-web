@@ -1,9 +1,13 @@
 // /api/generate-img2video.js
 // ============================================================
-// IsabelaOS Studio - Image → Video (Pods + async dispatch)
+// IsabelaOS Studio — Image → Video (Vercel Function)
 //
-// + AUTH UNIFICADO (requireUser)
-// + COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
+// ✅ AUTH UNIFICADO (requireUser)
+// ✅ COBRO UNIFICADO (spend_jades) ANTES de crear pod/job
+// ✅ REUSO de POD (igual que generate-video): pod_state.pod_id
+// ✅ Si hay job activo => devuelve ese job_id (no crea otro)
+// ✅ Payload NORMALIZADO para el worker (mode=i2v + image_base64/image_url)
+// ✅ Create pod con preferencia de GPU + fallback (opcional, no falla usuarios)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -15,13 +19,19 @@ import { requireUser } from "./_auth";
 // =====================
 const COST_IMG2VIDEO_JADES = 3; // <- AJUSTA AQUÍ
 
+// =====================
+// ENV (Supabase)
+// =====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// =====================
+// ENV (RunPod)
+// =====================
 const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID;
+const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
 
 const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
   process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID ||
@@ -30,25 +40,75 @@ const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
 
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
+// ✅ Preferencias de GPU (prioridad) — acepta lo que tú pongas (IDs o nombres).
+// Ejemplo recomendado (por tu UI):
+// "H100 NVL,A100 SXM,A100 PCIe,RTX 6000 Ada,L40S,L40,RTX A6000"
+const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
+
+// ✅ Truco datacenter
+const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
+
+// ✅ Fuerza 1 GPU
+const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
+
+// ✅ Si falla preferencia, hace fallback automático para no romper a usuarios
+const VIDEO_GPU_FALLBACK_ON_FAIL =
+  String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
+
+// =====================
+// ENV (Worker)
+// =====================
+const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
+const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
+const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
+
+// =====================
+// VIDEO LIMITS / MODES
+// =====================
 const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10);
 const FAST_TEST_MODE = (process.env.VIDEO_FAST_TEST_MODE || "0") === "1";
 
-const POD_STATE_TABLE = "pod_state";
-const POD_LOCK_TABLE = "pod_lock";
-const VIDEO_JOBS_TABLE = "video_jobs";
+// =====================
+// ENV (Worker)
+// =====================
+const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
+const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
+const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
 
-const LOCK_SECONDS = 180;
-const READY_TIMEOUT_MS = 12 * 60 * 1000;
-const POLL_MS = 3000;
+// =====================
+// VIDEO LIMITS / MODES
+// =====================
+const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10);
+const FAST_TEST_MODE = (process.env.VIDEO_FAST_TEST_MODE || "0") === "1";
 
-const WORKER_READY_TIMEOUT_MS = 10 * 60 * 1000;
+// =====================
+// Timeouts
+// =====================
+const LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "180", 10);
+const READY_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || String(12 * 60 * 1000), 10);
+const POLL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3000", 10);
+
+const WORKER_READY_TIMEOUT_MS = parseInt(process.env.WAIT_WORKER_TIMEOUT_MS || String(10 * 60 * 1000), 10);
 const HEALTH_FETCH_TIMEOUT_MS = 8000;
 const DISPATCH_TIMEOUT_MS = 15000;
 
+// =====================
+// Tablas
+// =====================
+const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
+const POD_LOCK_TABLE = process.env.POD_LOCK_TABLE || "pod_lock";
+const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
+
+// 👇 Estados activos (igual que tu sistema)
+const ACTIVE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS", "RUNNING"];
+
+// =====================
+// Helpers
+// =====================
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -64,6 +124,10 @@ function runpodHeaders() {
     Authorization: `Bearer ${RUNPOD_API_KEY}`,
     "Content-Type": "application/json",
   };
+}
+
+function workerBaseUrl(podId) {
+  return `https://${podId}-${WORKER_PORT}.proxy.runpod.net`;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
@@ -114,34 +178,46 @@ async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   return true;
 }
 
-async function waitForWorkerReady(workerBase, maxMs = WORKER_READY_TIMEOUT_MS) {
+// =====================
+// Worker readiness
+// =====================
+async function waitForWorkerReady(podId, maxMs = WORKER_READY_TIMEOUT_MS) {
   const start = Date.now();
-  const base = workerBase.endsWith("/") ? workerBase.slice(0, -1) : workerBase;
+  const base = workerBaseUrl(podId);
+  const healthUrl = `${base}${WORKER_HEALTH_PATH}`;
+  const asyncUrl = `${base}${WORKER_ASYNC_PATH}`;
 
-  const candidates = [`${base}/health`, `${base}/api/video_async`, `${base}/api/video`];
   let lastInfo = "no-attempt";
 
   while (Date.now() - start < maxMs) {
-    for (const url of candidates) {
-      try {
-        const r = await fetchWithTimeout(url, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
-        const txt = await r.text().catch(() => "");
-        console.log("[I2V] waitWorker url=", url, "status=", r.status, "body=", txt.slice(0, 120));
-        if (r.ok) return true;
-        if (r.status === 405) return true;
-        lastInfo = `${url} -> ${r.status} ${txt.slice(0, 120)}`;
-      } catch (e) {
-        lastInfo = `${url} -> ERR ${String(e)}`;
-        console.log("[I2V] waitWorker error url=", url, "err=", String(e));
-      }
+    // 1) health
+    try {
+      const r = await fetchWithTimeout(healthUrl, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+      if (r.ok) return true;
+      const txt = await r.text().catch(() => "");
+      lastInfo = `${healthUrl} -> ${r.status} ${txt.slice(0, 120)}`;
+    } catch (e) {
+      lastInfo = `${healthUrl} -> ERR ${String(e)}`;
     }
+
+    // 2) async endpoint (si responde 405, igual está vivo)
+    try {
+      const r = await fetchWithTimeout(asyncUrl, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+      if (r.ok || r.status === 405) return true;
+      const txt = await r.text().catch(() => "");
+      lastInfo = `${asyncUrl} -> ${r.status} ${txt.slice(0, 120)}`;
+    } catch (e) {
+      lastInfo = `${asyncUrl} -> ERR ${String(e)}`;
+    }
+
     await sleep(2500);
   }
 
   throw new Error("Worker not ready. Último: " + lastInfo);
 }
 
-// ---------- Lock ----------
+// =====================
+// ---------- Lock (atómico) ----------
 async function acquireLock(sb) {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
@@ -158,6 +234,12 @@ async function acquireLock(sb) {
   return { ok: true, locked_until: lockedUntil };
 }
 
+async function releaseLock(sb) {
+  const pastIso = new Date(Date.now() - 1000).toISOString();
+  const { error } = await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
+  if (error) throw error;
+}
+
 async function waitForUnlock(sb) {
   while (true) {
     const { data, error } = await sb.from(POD_LOCK_TABLE).select("*").eq("id", 1).single();
@@ -171,39 +253,154 @@ async function waitForUnlock(sb) {
   }
 }
 
+// =====================
 // ---------- RunPod Pods ----------
-async function runpodCreatePodFromTemplate() {
-  if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
+function parseGpuTypeList() {
+  if (!VIDEO_GPU_TYPE_IDS) return null;
+  const arr = VIDEO_GPU_TYPE_IDS
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return arr.length ? arr : null;
+}
 
-  const body = {
-    name: `isabela-i2v-${Date.now()}`,
-    templateId: VIDEO_RUNPOD_TEMPLATE_ID,
-    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
-    volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
-  };
-
+async function runpodCreatePodOnce(payload) {
   const r = await fetch("https://rest.runpod.io/v1/pods", {
     method: "POST",
     headers: runpodHeaders(),
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
 
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`RunPod create pod failed (${r.status}): ${JSON.stringify(data)}`);
-  if (!data?.id) throw new Error("RunPod create pod: no devolvió id");
-  return data;
+  const t = await r.text().catch(() => "");
+  if (!r.ok) {
+    const err = new Error(`RunPod create pod failed (${r.status}): ${t}`);
+    err.status = r.status;
+    err.raw = t;
+    throw err;
+  }
+
+  let json = null;
+  try { json = JSON.parse(t); } catch { json = { raw: t }; }
+
+  const podId = json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
+  if (!podId) throw new Error("RunPod create pod: no devolvió id");
+
+  return { id: podId, raw: json };
+}
+
+async function runpodCreatePodFromTemplate({ name, log }) {
+  if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID (necesario para /workspace)");
+
+  const gpuTypeIds = parseGpuTypeList();
+
+  const basePayload = {
+    name,
+    templateId: VIDEO_RUNPOD_TEMPLATE_ID,
+    networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
+    volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
+    ports: ["8000/http", "8888/http"],
+    gpuCount: VIDEO_GPU_COUNT,
+  };
+
+  const attempts = [];
+
+  // A) preferida
+  attempts.push({
+    label: "PREFERRED_GPU",
+    payload: {
+      ...basePayload,
+      cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
+      ...(gpuTypeIds ? { gpuTypeIds } : {}),
+    },
+  });
+
+  if (VIDEO_GPU_FALLBACK_ON_FAIL) {
+    // B) sin gpuTypeIds pero con cloudType
+    attempts.push({
+      label: "FALLBACK_CLOUD_ONLY",
+      payload: {
+        ...basePayload,
+        cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
+      },
+    });
+    // C) pelado
+    attempts.push({
+      label: "FALLBACK_PLAIN",
+      payload: {
+        ...basePayload,
+      },
+    });
+  }
+
+  let lastErr = null;
+  for (const a of attempts) {
+    try {
+      if (log) log(`[I2V] createPod attempt=${a.label}`, {
+        hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
+        cloudType: a.payload.cloudType || null,
+        gpuCount: a.payload.gpuCount,
+      });
+      const created = await runpodCreatePodOnce(a.payload);
+      return { ...created, attempt: a.label, used: a.payload };
+    } catch (e) {
+      lastErr = e;
+      if (log) log(`[I2V] createPod failed attempt=${a.label}`, String(e?.message || e));
+      if (!VIDEO_GPU_FALLBACK_ON_FAIL) throw e;
+    }
+  }
+
+  throw lastErr || new Error("RunPod create failed: sin detalle");
 }
 
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, { headers: runpodHeaders() });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${JSON.stringify(data)}`);
-  return data?.pod || data;
+  const t = await r.text().catch(() => "");
+  if (!r.ok) throw new Error(`RunPod GET pod failed (${r.status}): ${t}`);
+  try {
+    const data = JSON.parse(t);
+    return data?.pod || data;
+  } catch {
+    return { raw: t };
+  }
+}
+
+async function runpodStartPod(podId) {
+  const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/start`, {
+    method: "POST",
+    headers: runpodHeaders(),
+  });
+  if (r.ok) return true;
+  const t = await r.text().catch(() => "");
+  return { ok: false, status: r.status, raw: t };
+}
+
+async function runpodTerminatePod(podId) {
+  // best-effort terminate
+  const r1 = await fetch(`https://rest.runpod.io/v1/pods/${podId}/terminate`, {
+    method: "POST",
+    headers: runpodHeaders(),
+  });
+  if (r1.ok) return true;
+
+  const r2 = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+    method: "DELETE",
+    headers: runpodHeaders(),
+  });
+  if (r2.ok) return true;
+
+  const t = await r2.text().catch(() => "");
+  throw new Error(`RunPod terminate falló: ${t}`);
 }
 
 function pickPodStatus(pod) {
-  const raw = pod?.status ?? pod?.state ?? pod?.desiredStatus ?? pod?.runtime?.status ?? pod?.pod?.status ?? "";
+  const raw =
+    pod?.desiredStatus ??
+    pod?.status ??
+    pod?.state ??
+    pod?.runtime?.status ??
+    pod?.pod?.status ??
+    "";
   return String(raw || "").toUpperCase();
 }
 
@@ -213,16 +410,22 @@ async function runpodWaitUntilRunning(podId) {
     const pod = await runpodGetPod(podId);
     const status = pickPodStatus(pod);
     console.log("[I2V] waitRunning status=", status || "EMPTY", "podId=", podId);
-    if (status === "RUNNING" || status === "READY" || status === "ACTIVE") return pod;
+    if (
+      status.includes("RUNNING") ||
+      status.includes("READY") ||
+      status.includes("ACTIVE")
+    ) {
+      return pod;
+    }
+    if (status.includes("FAILED") || status.includes("ERROR")) {
+      throw new Error("Pod entró en FAILED/ERROR");
+    }
     await sleep(POLL_MS);
   }
   throw new Error("Timeout: pod no llegó a RUNNING/READY.");
 }
 
-function buildProxyUrl(podId) {
-  return `https://${podId}-8000.proxy.runpod.net`;
-}
-
+// =====================
 // ---------- video_jobs ----------
 async function createVideoJob(sb, job) {
   const { error } = await sb.from(VIDEO_JOBS_TABLE).insert(job);
@@ -230,49 +433,138 @@ async function createVideoJob(sb, job) {
 }
 
 async function updateVideoJob(sb, job_id, patch) {
+  // tu tabla usa "job_id" como campo
   const { error } = await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("job_id", job_id);
   if (error) throw error;
 }
 
-// ---------- ensure pod ----------
-async function ensureFreshPod(sb) {
-  console.log("[I2V] step=LOCK_BEGIN");
+async function getActiveJobForUser(sb, user_id) {
+  const { data, error } = await sb
+    .from(VIDEO_JOBS_TABLE)
+    .select("job_id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at")
+    .eq("user_id", user_id)
+    .in("status", ACTIVE_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+// =====================
+// ---------- ensure pod (REUSO como generate-video) ----------
+async function ensureWorkingPod(sb, log) {
+  log("[I2V] step=LOCK_BEGIN");
   const got = await acquireLock(sb);
 
   if (!got.ok) {
-    console.log("[I2V] step=LOCK_BUSY wait...");
+    log("[I2V] step=LOCK_BUSY wait...");
     await waitForUnlock(sb);
-    return await ensureFreshPod(sb);
+    return await ensureWorkingPod(sb, log);
   }
 
-  console.log("[I2V] step=LOCK_OK");
-  await setPodState(sb, { status: "CREATING", last_used_at: new Date().toISOString() });
+  let lockHeld = true;
 
-  console.log("[I2V] step=CREATE_POD_REQUEST");
-  const created = await runpodCreatePodFromTemplate();
-  const podId = created.id;
-  console.log("[I2V] created podId=", podId);
+  try {
+    const nowIso = new Date().toISOString();
 
-  await setPodState(sb, { status: "STARTING", pod_id: podId, worker_url: null, last_used_at: new Date().toISOString() });
+    const { data: podState, error: psErr } = await sb
+      .from(POD_STATE_TABLE)
+      .select("*")
+      .eq("id", 1)
+      .single();
+    if (psErr) throw psErr;
 
-  console.log("[I2V] step=WAIT_RUNNING_BEGIN", { podId });
-  await runpodWaitUntilRunning(podId);
-  console.log("[I2V] step=WAIT_RUNNING_OK", { podId });
+    const statePodId = String(podState?.pod_id || "").trim();
 
-  const workerUrl = buildProxyUrl(podId);
-  console.log("[I2V] workerBase=", workerUrl);
+    async function touch(status, patch = {}) {
+      await setPodState(sb, { status, last_used_at: nowIso, ...patch });
+    }
 
-  await setPodState(sb, { status: "RUNNING", pod_id: podId, worker_url: workerUrl, last_used_at: new Date().toISOString() });
+    async function createAndBoot() {
+      await touch("CREATING");
+      log("[I2V] step=CREATE_POD_REQUEST");
 
-  console.log("[I2V] step=WAIT_WORKER_BEGIN");
-  await waitForWorkerReady(workerUrl);
-  console.log("[I2V] step=WAIT_WORKER_OK");
+      const created = await runpodCreatePodFromTemplate({
+        name: `isabela-i2v-${Date.now()}`,
+        log,
+      });
 
-  return { podId, workerUrl };
+      const podId = created.id;
+      log("[I2V] created podId=", podId, "attempt=", created.attempt);
+
+      await touch("STARTING", { pod_id: podId, worker_url: null });
+
+      const st = await runpodStartPod(podId);
+      if (st !== true) log("[I2V] warn=startPod failed (ignored)", st);
+
+      await runpodWaitUntilRunning(podId);
+
+      const workerUrl = workerBaseUrl(podId);
+      await touch("RUNNING", { pod_id: podId, worker_url: workerUrl });
+
+      log("[I2V] step=WAIT_WORKER_BEGIN");
+      await waitForWorkerReady(podId);
+      log("[I2V] step=WAIT_WORKER_OK");
+
+      return { podId, workerUrl, action: "CREATED", createAttempt: created.attempt };
+    }
+
+    // A) si no hay pod => crear
+    if (!statePodId) {
+      const fresh = await createAndBoot();
+      await releaseLock(sb);
+      lockHeld = false;
+      return fresh;
+    }
+
+    // B) si hay pod => reusar
+    try {
+      await runpodGetPod(statePodId);
+
+      const st = await runpodStartPod(statePodId);
+      if (st !== true) log("[I2V] warn=startPod failed (ignored)", st);
+
+      await touch("STARTING", { pod_id: statePodId });
+
+      await runpodWaitUntilRunning(statePodId);
+
+      const workerUrl = workerBaseUrl(statePodId);
+      await touch("RUNNING", { pod_id: statePodId, worker_url: workerUrl });
+
+      log("[I2V] step=WAIT_WORKER_BEGIN");
+      await waitForWorkerReady(statePodId);
+      log("[I2V] step=WAIT_WORKER_OK");
+
+      await releaseLock(sb);
+      lockHeld = false;
+      return { podId: statePodId, workerUrl, action: "REUSED" };
+    } catch (e) {
+      log("[I2V] existing pod failed => recreating:", String(e?.message || e));
+
+      const oldPodId = statePodId;
+      const fresh = await createAndBoot();
+
+      // reemplazar pod_id en pod_state ya lo hace touch()
+      // best-effort: matar anterior
+      try { await runpodTerminatePod(oldPodId); } catch {}
+
+      await releaseLock(sb);
+      lockHeld = false;
+      return { ...fresh, action: "RECREATED", oldPodId };
+    }
+  } finally {
+    if (lockHeld) {
+      try { await releaseLock(sb); } catch {}
+    }
+  }
 }
 
+// =====================
 // ---------- API ----------
 export default async function handler(req, res) {
+  const log = (...args) => console.log(...args);
+
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
 
   let sb = null;
@@ -286,15 +578,28 @@ export default async function handler(req, res) {
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
+    // ✅ Si ya hay job activo => devuélvelo y NO crees otro
+    const active = await getActiveJobForUser(sb, user_id);
+    if (active) {
+      return res.status(200).json({
+        ok: true,
+        status: "ALREADY_RUNNING",
+        job_id: active.job_id,
+        job: active,
+      });
+    }
+
     const payloadRaw = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
     // Requerido para I2V
-    const image_b64 = payloadRaw.image_b64 || null;
+    const image_b64 = payloadRaw.image_b64 || payloadRaw.image_base64 || null;
     const image_url = payloadRaw.image_url || null;
+
     if (!image_b64 && !image_url) {
-      return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
+      return res.status(400).json({ ok: false, error: "Missing image_b64 (o image_base64) or image_url" });
     }
 
+    // steps (normaliza)
     const requestedSteps =
       typeof payloadRaw.steps === "number"
         ? payloadRaw.steps
@@ -302,31 +607,46 @@ export default async function handler(req, res) {
 
     const safeSteps = requestedSteps == null ? MAX_STEPS : Math.min(requestedSteps, MAX_STEPS);
 
+    // Si FAST_TEST_MODE, fuerza algo ligero
     const maybeFast = FAST_TEST_MODE
       ? { steps: Math.min(safeSteps, 8), num_frames: 8, fps: 6, width: 384, height: 672 }
       : { steps: safeSteps };
 
-    // Payload final para worker
+    // ✅ Payload NORMALIZADO para worker (similar a generate-video)
+    // IMPORTANTE: no metemos ...payloadRaw para que no pise campos críticos
     const payload = {
-      user_id, // ✅ SIEMPRE desde auth
+      user_id,
+      mode: "i2v",
       prompt: payloadRaw.prompt || "",
       negative_prompt: payloadRaw.negative_prompt || "",
-      image_b64,
-      image_url,
-      action: "img2video",
-      kind: "vid_img2vid",
-      ...payloadRaw,
+
+      // defaults razonables (tu front puede mandar otros)
+      width: typeof payloadRaw.width === "number" ? payloadRaw.width : 896,
+      height: typeof payloadRaw.height === "number" ? payloadRaw.height : 512,
+      num_frames: typeof payloadRaw.num_frames === "number" ? payloadRaw.num_frames : 49,
+      fps: typeof payloadRaw.fps === "number" ? payloadRaw.fps : 24,
+      guidance_scale: (payloadRaw.guidance_scale ?? 6.0),
+
+      // imagen
+      image_base64: image_b64 || null,
+      image_url: image_url || null,
+
       ...maybeFast,
     };
 
     // ✅ COBRO ANTES de pod/job
-    await spendJadesOrThrow(user_id, COST_IMG2VIDEO_JADES, "generation:img2video", payloadRaw.ref || null);
+    await spendJadesOrThrow(
+      user_id,
+      COST_IMG2VIDEO_JADES,
+      "generation:img2video",
+      payloadRaw.ref || null
+    );
 
-    // 1) Pod + worker ready
-    const fresh = await ensureFreshPod(sb);
-    podId = fresh.podId;
+    // 1) Ensure pod + worker ready (REUSO)
+    const ensured = await ensureWorkingPod(sb, log);
+    podId = ensured.podId;
 
-    // 2) Crea job en Supabase
+    // 2) Crea job en Supabase (usa job_id)
     const job_id = crypto.randomUUID();
 
     await createVideoJob(sb, {
@@ -335,13 +655,13 @@ export default async function handler(req, res) {
       status: "QUEUED",
       payload,
       pod_id: podId,
-      worker_url: fresh.workerUrl,
+      worker_url: ensured.workerUrl,
       updated_at: new Date().toISOString(),
     });
 
     // 3) Dispatch async al worker
-    const dispatchUrl = `${fresh.workerUrl}/api/video_async`;
-    console.log("[I2V] dispatchUrl=", dispatchUrl);
+    const dispatchUrl = `${ensured.workerUrl}${WORKER_ASYNC_PATH}`;
+    log("[I2V] dispatchUrl=", dispatchUrl);
 
     await setPodState(sb, { status: "BUSY", last_used_at: new Date().toISOString() });
     await updateVideoJob(sb, job_id, { status: "DISPATCHED", updated_at: new Date().toISOString() });
@@ -351,13 +671,14 @@ export default async function handler(req, res) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // ✅ mandamos job_id + payload
         body: JSON.stringify({ job_id, ...payload }),
       },
       DISPATCH_TIMEOUT_MS
     );
 
     const txt = await r.text().catch(() => "");
-    console.log("[I2V] dispatch response status=", r.status, "body=", txt.slice(0, 200));
+    log("[I2V] dispatch response status=", r.status, "body=", txt.slice(0, 200));
 
     if (r.status !== 202 && r.status !== 200) {
       await updateVideoJob(sb, job_id, {
@@ -390,7 +711,8 @@ export default async function handler(req, res) {
       job_id,
       status: "IN_PROGRESS",
       podId,
-      worker: fresh.workerUrl,
+      pod: { action: ensured.action, oldPodId: ensured.oldPodId || null, createAttempt: ensured.createAttempt || null },
+      worker: ensured.workerUrl,
       billed: { type: "JADE", amount: COST_IMG2VIDEO_JADES },
       note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=...",
     });
