@@ -1739,6 +1739,8 @@ function VideoFromPromptPanel({ userStatus }) {
 
 // ---------------------------------------------------------
 // Imagen -> Video (logueado)
+// + ✅ Prompt Optimizer (OpenAI) con toggle "usar optimizado"
+// + ✅ Mostrar optimizado debajo de cada textarea
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1762,6 +1764,64 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const hasEnough = currentJades >= cost;
 
   const fileInputId = "img2video-file-input";
+
+  // ---------------------------------------------------------
+  // ✅ Prompt Optimizer states
+  // ---------------------------------------------------------
+  const [useOptimized, setUseOptimized] = useState(false);
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optError, setOptError] = useState("");
+
+  // Invalida optimizado si cambian los originales
+  useEffect(() => {
+    setOptimizedPrompt("");
+    setOptimizedNegative("");
+    setOptError("");
+  }, [prompt, negative]);
+
+  const handleOptimize = async () => {
+    setOptError("");
+    setIsOptimizing(true);
+
+    try {
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          negative_prompt: negative,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Error optimizando prompt.");
+      }
+
+      setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
+      setOptimizedNegative(String(data.optimizedNegative || "").trim());
+      setUseOptimized(true);
+    } catch (e) {
+      setOptError(e?.message || String(e));
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const getEffectivePrompts = () => {
+    const canUseOpt =
+      useOptimized &&
+      typeof optimizedPrompt === "string" &&
+      optimizedPrompt.trim().length > 0;
+
+    return {
+      finalPrompt: canUseOpt ? optimizedPrompt.trim() : prompt || "",
+      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : negative || "",
+      usingOptimized: canUseOpt,
+    };
+  };
 
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
@@ -1857,13 +1917,15 @@ function Img2VideoPanel({ userStatus, spendJades }) {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
+      const { finalPrompt, finalNegative } = getEffectivePrompts();
+
       const res = await fetch("/api/generate-img2video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           user_id: user?.id || null,
-          prompt: prompt || "",
-          negative_prompt: negative || "",
+          prompt: finalPrompt || "",
+          negative_prompt: finalNegative || "",
           steps: Number(steps),
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
@@ -1993,6 +2055,18 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
+
+            {/* ✅ Mostrar prompt optimizado debajo */}
+            {optimizedPrompt?.trim()?.length > 0 && (
+              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+                <div className="text-[10px] text-neutral-400">
+                  Prompt optimizado {useOptimized ? "(activo)" : "(no activo)"}:
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
+                  {optimizedPrompt.trim()}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -2002,6 +2076,66 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+
+            {/* ✅ Mostrar negative optimizado debajo */}
+            {optimizedNegative?.trim()?.length > 0 && (
+              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+                <div className="text-[10px] text-neutral-400">
+                  Negative optimizado {useOptimized ? "(activo)" : "(no activo)"}:
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
+                  {optimizedNegative.trim()}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ✅ Cuadro de optimización igual que en otros */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-neutral-300">
+                Optimización de prompt (OpenAI)
+                {optimizedPrompt ? (
+                  <span className="ml-2 text-[10px] text-emerald-300/90">Listo ✓</span>
+                ) : (
+                  <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOptimize}
+                disabled={isOptimizing || !prompt?.trim()}
+                className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-60"
+              >
+                {isOptimizing ? "Optimizando..." : "Optimizar con IA"}
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="useOptI2V"
+                type="checkbox"
+                checked={useOptimized}
+                onChange={(e) => setUseOptimized(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="useOptI2V" className="text-[11px] text-neutral-300">
+                Usar prompt optimizado para generar
+              </label>
+
+              <span className="ml-auto text-[10px] text-neutral-500">
+                {useOptimized && optimizedPrompt ? "Activo (mandará optimizado)" : "Mandará tu prompt"}
+              </span>
+            </div>
+
+            {!optimizedPrompt && (
+              <div className="mt-2 text-[10px] text-neutral-500">
+                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés) manteniendo tu idea.
+              </div>
+            )}
+
+            {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
