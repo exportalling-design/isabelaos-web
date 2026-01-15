@@ -21,22 +21,41 @@ const RUNPOD_API_KEY =
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
 const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
   process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
-const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
+const VIDEO_VOLUME_MOUNT_PATH =
+  process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
 
-const WAIT_WORKER_TIMEOUT_MS = parseInt(process.env.WAIT_WORKER_TIMEOUT_MS || "180000", 10);
-const WAIT_WORKER_INTERVAL_MS = parseInt(process.env.WAIT_WORKER_INTERVAL_MS || "2500", 10);
+const WAIT_WORKER_TIMEOUT_MS = parseInt(
+  process.env.WAIT_WORKER_TIMEOUT_MS || "180000",
+  10
+);
+const WAIT_WORKER_INTERVAL_MS = parseInt(
+  process.env.WAIT_WORKER_INTERVAL_MS || "2500",
+  10
+);
 
-const WAIT_RUNNING_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || "240000", 10);
-const WAIT_RUNNING_INTERVAL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3500", 10);
+const WAIT_RUNNING_TIMEOUT_MS = parseInt(
+  process.env.WAIT_RUNNING_TIMEOUT_MS || "240000",
+  10
+);
+const WAIT_RUNNING_INTERVAL_MS = parseInt(
+  process.env.WAIT_RUNNING_INTERVAL_MS || "3500",
+  10
+);
 
 // Lock (RPC)
 const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "60", 10);
-const LOCK_WAIT_TIMEOUT_MS = parseInt(process.env.LOCK_WAIT_TIMEOUT_MS || "45000", 10);
-const LOCK_WAIT_INTERVAL_MS = parseInt(process.env.LOCK_WAIT_INTERVAL_MS || "1200", 10);
+const LOCK_WAIT_TIMEOUT_MS = parseInt(
+  process.env.LOCK_WAIT_TIMEOUT_MS || "45000",
+  10
+);
+const LOCK_WAIT_INTERVAL_MS = parseInt(
+  process.env.LOCK_WAIT_INTERVAL_MS || "1200",
+  10
+);
 
 // Tables
 const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
@@ -46,7 +65,8 @@ const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
 // -------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
-  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_SERVICE_ROLE_KEY)
+    throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
@@ -146,7 +166,11 @@ async function waitForRunning(podId) {
     }
     await sleep(WAIT_RUNNING_INTERVAL_MS);
   }
-  return { ok: false, status: "TIMEOUT", error: `Pod no llegó a RUNNING en ${WAIT_RUNNING_TIMEOUT_MS}ms` };
+  return {
+    ok: false,
+    status: "TIMEOUT",
+    error: `Pod no llegó a RUNNING en ${WAIT_RUNNING_TIMEOUT_MS}ms`,
+  };
 }
 
 async function waitForWorker(podId) {
@@ -161,12 +185,18 @@ async function waitForWorker(podId) {
     } catch (_) {}
     await sleep(WAIT_WORKER_INTERVAL_MS);
   }
-  return { ok: false, url, error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms` };
+  return {
+    ok: false,
+    url,
+    error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms`,
+  };
 }
 
 async function runpodCreatePodFromTemplate({ name }) {
-  if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
+  if (!VIDEO_RUNPOD_TEMPLATE_ID)
+    throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID)
+    throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
 
   const payload = {
     name,
@@ -211,12 +241,22 @@ async function runpodCreatePodFromTemplate({ name }) {
 
 // -------------------------
 // RPC Lock (Supabase)
+// ✅ FIX: tu DB tiene 2 overloads acquire_pod_lock:
+//   (p_seconds int) y (p_seconds int, p_owner text)
+//   -> hay que pasar p_owner para que NO haya ambigüedad
 // -------------------------
-async function acquireLockWithWait(sb, seconds = WAKE_LOCK_SECONDS) {
+async function acquireLockWithWait(
+  sb,
+  seconds = WAKE_LOCK_SECONDS,
+  owner = "video-api"
+) {
   const start = Date.now();
 
   while (Date.now() - start < LOCK_WAIT_TIMEOUT_MS) {
-    const { data, error } = await sb.rpc("acquire_pod_lock", { p_seconds: seconds });
+    const { data, error } = await sb.rpc("acquire_pod_lock", {
+      p_seconds: seconds,
+      p_owner: owner, // 🔥 CLAVE
+    });
     if (error) throw error;
 
     const row = Array.isArray(data) ? data[0] : data;
@@ -227,9 +267,16 @@ async function acquireLockWithWait(sb, seconds = WAKE_LOCK_SECONDS) {
   return { ok: false, error: `Timeout esperando lock (${LOCK_WAIT_TIMEOUT_MS}ms)` };
 }
 
-async function releaseLockRpc(sb) {
-  const { error } = await sb.rpc("release_pod_lock");
-  if (error) throw error;
+async function releaseLockRpc(sb, owner = "video-api") {
+  // por si tu release también tiene overload con owner, intentamos con owner
+  const a = await sb.rpc("release_pod_lock", { p_owner: owner }).catch(() => null);
+  if (a && a.error) throw a.error;
+
+  // fallback: versión sin args
+  if (!a) {
+    const { error } = await sb.rpc("release_pod_lock");
+    if (error) throw error;
+  }
 }
 
 // -------------------------
@@ -255,21 +302,32 @@ async function ensureWorkingPod(sb, log) {
   }
 
   if (!statePodId) {
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+    const created = await runpodCreatePodFromTemplate({
+      name: `isabela-video-${Date.now()}`,
+    });
 
     await sb
       .from(POD_STATE_TABLE)
-      .update({ pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false })
+      .update({
+        pod_id: created.podId,
+        status: "STARTING",
+        last_used_at: nowIso,
+        busy: false,
+      })
       .eq("id", 1);
 
     const st = await runpodStartPod(created.podId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no llegó a RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(
+        `Pod nuevo no llegó a RUNNING: ${running.error || running.status}`
+      );
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
+    if (!ready.ok)
+      throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
 
     await touch("RUNNING", false);
     return { podId: created.podId, action: "CREADO_Y_LISTO" };
@@ -283,7 +341,8 @@ async function ensureWorkingPod(sb, log) {
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(statePodId);
-    if (!running.ok) throw new Error(`Pod no RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(`Pod no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(statePodId);
     if (!ready.ok) throw new Error(`Worker no respondió: ${ready.error}`);
@@ -295,21 +354,30 @@ async function ensureWorkingPod(sb, log) {
     log("ensureWorkingPod: pod existente falló, recreo", msg);
 
     const oldPodId = statePodId;
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+    const created = await runpodCreatePodFromTemplate({
+      name: `isabela-video-${Date.now()}`,
+    });
 
     await sb
       .from(POD_STATE_TABLE)
-      .update({ pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false })
+      .update({
+        pod_id: created.podId,
+        status: "STARTING",
+        last_used_at: nowIso,
+        busy: false,
+      })
       .eq("id", 1);
 
     const st = await runpodStartPod(created.podId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo tras recrear: ${ready.error}`);
+    if (!ready.ok)
+      throw new Error(`Worker no listo tras recrear: ${ready.error}`);
 
     await touch("RUNNING", false);
 
@@ -324,6 +392,7 @@ async function ensureWorkingPod(sb, log) {
 export default async function handler(req, res) {
   const log = (...args) => console.log("[GV]", ...args);
   let lockAcquired = false;
+  const owner = "video-api"; // dueño del lock (fijo y consistente)
 
   try {
     if (req.method !== "POST") {
@@ -356,12 +425,17 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    log("step=LOCK_WAIT_BEGIN", { ttl_s: WAKE_LOCK_SECONDS, wait_ms: LOCK_WAIT_TIMEOUT_MS });
-    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS);
+    log("step=LOCK_WAIT_BEGIN", {
+      ttl_s: WAKE_LOCK_SECONDS,
+      wait_ms: LOCK_WAIT_TIMEOUT_MS,
+      owner,
+    });
+
+    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS, owner);
     if (!lock.ok) return res.status(503).json({ ok: false, error: lock.error });
 
     lockAcquired = true;
-    log("step=LOCK_OK", { locked_until: lock.locked_until });
+    log("step=LOCK_OK", { locked_until: lock.locked_until, owner });
 
     log("step=ENSURE_POD_BEGIN");
     const podInfo = await ensureWorkingPod(sb, log);
@@ -394,7 +468,10 @@ export default async function handler(req, res) {
 
     const tt = await rr.text().catch(() => "");
     if (!rr.ok) {
-      log("step=DISPATCH_FAIL", { status: rr.status, body: tt?.slice?.(0, 500) || tt });
+      log("step=DISPATCH_FAIL", {
+        status: rr.status,
+        body: tt?.slice?.(0, 500) || tt,
+      });
       throw new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
     }
 
@@ -425,8 +502,8 @@ export default async function handler(req, res) {
     if (lockAcquired) {
       try {
         const sb = sbAdmin();
-        await releaseLockRpc(sb);
-        console.log("[GV] step=LOCK_RELEASED");
+        await releaseLockRpc(sb, owner);
+        console.log("[GV] step=LOCK_RELEASED", { owner });
       } catch (e) {
         console.log("[GV] warn=LOCK_RELEASE_FAIL", String(e?.message || e));
       }
