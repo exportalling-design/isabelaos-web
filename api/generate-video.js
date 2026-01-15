@@ -12,25 +12,30 @@ const RUNPOD_API_KEY =
 // plantilla / infra
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID; // required
 const VIDEO_RUNPOD_GPU_TYPE = process.env.VIDEO_RUNPOD_GPU_TYPE || ""; // optional
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || "";
-const TERMINATE_AFTER_JOB = String(process.env.TERMINATE_AFTER_JOB || "0") === "1";
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
+  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || "";
+const TERMINATE_AFTER_JOB =
+  String(process.env.TERMINATE_AFTER_JOB || "0") === "1";
 
 // Lock
 const LOCK_NAME = "video-api";
-const LOCK_TTL_SECONDS = parseInt(process.env.LOCK_TTL_SECONDS || "90", 10); // TTL real
+const LOCK_TTL_SECONDS = parseInt(process.env.LOCK_TTL_SECONDS || "90", 10);
 const LOCK_WAIT_MS = parseInt(process.env.LOCK_WAIT_MS || "45000", 10);
 const LOCK_POLL_MS = parseInt(process.env.LOCK_POLL_MS || "1500", 10);
-const LOCK_HEARTBEAT_MS = parseInt(process.env.LOCK_HEARTBEAT_MS || "25000", 10);
+const LOCK_HEARTBEAT_MS = parseInt(
+  process.env.LOCK_HEARTBEAT_MS || "25000",
+  10
+);
 
 // Worker probe
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
-const WORKER_HEALTH_PATHS = ["/health", "/api/health", "/"]; // intenta varias
+const WORKER_HEALTH_PATHS = ["/health", "/api/health", "/"];
 const WORKER_WAIT_MS = parseInt(process.env.WORKER_WAIT_MS || "120000", 10);
 const WORKER_POLL_MS = parseInt(process.env.WORKER_POLL_MS || "2500", 10);
 
-// Endpoint del worker para generar (ajusta si tu worker usa otro)
+// Endpoint del worker para generar
 const WORKER_GENERATE_PATH =
-  process.env.WORKER_GENERATE_PATH || "/api/video_async"; // o "/api/video"
+  process.env.WORKER_GENERATE_PATH || "/api/video_async";
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -53,7 +58,7 @@ async function fetchWithTimeout(url, opts = {}, ms = 15000) {
   }
 }
 
-async function runpodRequest(path, payload) {
+async function runpodRequest(payload) {
   const r = await fetch(`https://api.runpod.io/graphql`, {
     method: "POST",
     headers: {
@@ -69,9 +74,7 @@ async function runpodRequest(path, payload) {
           }
         }
       `,
-      variables: {
-        input: payload,
-      },
+      variables: { input: payload },
     }),
   });
 
@@ -98,15 +101,7 @@ async function runpodGetPod(podId) {
             id
             desiredStatus
             runtime {
-              podId
               uptimeInSeconds
-              ports {
-                ip
-                isIpPublic
-                privatePort
-                publicPort
-                type
-              }
             }
           }
         }
@@ -144,7 +139,11 @@ async function waitWorkerReady(baseUrl) {
   while (Date.now() - t0 < WORKER_WAIT_MS) {
     for (const p of WORKER_HEALTH_PATHS) {
       try {
-        const r = await fetchWithTimeout(`${baseUrl}${p}`, { method: "GET" }, 8000);
+        const r = await fetchWithTimeout(
+          `${baseUrl}${p}`,
+          { method: "GET" },
+          8000
+        );
         if (r.ok) return true;
       } catch (_) {}
     }
@@ -154,7 +153,6 @@ async function waitWorkerReady(baseUrl) {
 }
 
 async function terminatePod(podId) {
-  // opcional: termina pod (si lo usas)
   const r = await fetch(`https://api.runpod.io/graphql`, {
     method: "POST",
     headers: {
@@ -170,36 +168,40 @@ async function terminatePod(podId) {
       variables: { podId },
     }),
   });
+
   const data = await r.json().catch(() => ({}));
   if (!r.ok || data.errors) {
-    throw new Error(`RunPod terminate error: ${r.status} ${JSON.stringify(data.errors || data)}`);
+    throw new Error(
+      `RunPod terminate error: ${r.status} ${JSON.stringify(data.errors || data)}`
+    );
   }
   return true;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+  if (req.method !== "POST")
+    return json(res, 405, { error: "Method not allowed" });
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
+    return json(res, 500, { error: "Missing SUPABASE env (URL or SERVICE_ROLE_KEY)" });
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  // payload desde front
   let body = {};
   try {
-    body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
-  } catch (e) {
+    body =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+  } catch {
     return json(res, 400, { error: "Invalid JSON body" });
   }
 
-  // owner único por request
   const owner = `video-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
   let heartbeat = null;
   let podId = null;
   let workerBase = null;
 
   const log = (...a) => console.log("[GV]", ...a);
 
-  // -------------- LOCK ACQUIRE (definitivo) --------------
   async function acquireLockOrWait() {
     const t0 = Date.now();
     while (Date.now() - t0 < LOCK_WAIT_MS) {
@@ -209,15 +211,12 @@ export default async function handler(req, res) {
         p_ttl_seconds: LOCK_TTL_SECONDS,
       });
 
-      if (error) {
-        // si tuvieras errors raros, se ven aquí
-        throw new Error(`Lock RPC error: ${error.message}`);
-      }
+      if (error) throw new Error(`Lock RPC error: ${error.message}`);
 
-      const ok = Array.isArray(data) ? data[0]?.ok : data?.ok;
-      const until = Array.isArray(data) ? data[0]?.locked_until : data?.locked_until;
+      const row = Array.isArray(data) ? data[0] : data;
+      const ok = !!row?.ok;
 
-      if (ok) return { ok: true, until };
+      if (ok) return { ok: true, until: row?.locked_until || null };
       await sleep(LOCK_POLL_MS);
     }
     return { ok: false };
@@ -231,8 +230,10 @@ export default async function handler(req, res) {
           p_owner: owner,
           p_ttl_seconds: LOCK_TTL_SECONDS,
         });
-        if (error) log("heartbeat error:", error.message);
-        if (!data) log("heartbeat lost lock (will auto-expire soon)");
+        if (error) return log("heartbeat error:", error.message);
+
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row?.ok) log("heartbeat lost lock (will auto-expire soon)");
       } catch (e) {
         log("heartbeat exception:", String(e?.message || e));
       }
@@ -249,12 +250,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
-    if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Missing VIDEO_RUNPOD_TEMPLATE_ID");
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
-      throw new Error("Missing SUPABASE env (URL or SERVICE_ROLE_KEY)");
+    if (!RUNPOD_API_KEY)
+      throw new Error("Missing RUNPOD_API_KEY / VIDEO_RUNPOD_API_KEY");
+    if (!VIDEO_RUNPOD_TEMPLATE_ID)
+      throw new Error("Missing VIDEO_RUNPOD_TEMPLATE_ID");
 
-    log("step=LOCK_WAIT_BEGIN", { ttl_s: LOCK_TTL_SECONDS, wait_ms: LOCK_WAIT_MS, owner });
+    log("step=LOCK_WAIT_BEGIN", {
+      ttl_s: LOCK_TTL_SECONDS,
+      wait_ms: LOCK_WAIT_MS,
+      owner,
+    });
 
     const got = await acquireLockOrWait();
     if (!got.ok) {
@@ -264,7 +269,6 @@ export default async function handler(req, res) {
     log("step=LOCK_OK");
     await startHeartbeat();
 
-    // -------------- CREATE POD --------------
     log("step=CREATE_POD_REQUEST");
 
     const deployPayload = {
@@ -272,33 +276,27 @@ export default async function handler(req, res) {
       gpuTypeId: VIDEO_RUNPOD_GPU_TYPE || undefined,
       templateId: VIDEO_RUNPOD_TEMPLATE_ID,
       name: `isabela-video-${Date.now()}`,
-      volumeInGb: undefined,
-      containerDiskInGb: undefined,
       networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID || undefined,
       ports: `${WORKER_PORT}/http`,
-      env: {
-        // tus env del worker acá si aplica
-      },
+      env: {},
     };
 
-    const created = await runpodRequest("/pods", deployPayload);
+    const created = await runpodRequest(deployPayload);
     podId = created?.id;
     if (!podId) throw new Error("RunPod did not return podId");
     log("created podId=", podId);
 
-    // -------------- WAIT RUNNING --------------
     log("step=WAIT_RUNNING_BEGIN", { podId });
     await waitPodRunning(podId);
     log("step=WAIT_RUNNING_OK", { podId });
 
-    // -------------- WAIT WORKER READY --------------
     workerBase = workerBaseFromPodId(podId);
     log("workerBase=", workerBase);
+
     log("step=WAIT_WORKER_BEGIN");
     await waitWorkerReady(workerBase);
     log("step=WAIT_WORKER_OK");
 
-    // -------------- DISPATCH JOB TO WORKER --------------
     log("step=DISPATCH_BEGIN", { path: WORKER_GENERATE_PATH });
 
     const wr = await fetchWithTimeout(
@@ -308,12 +306,14 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-      600000 // 10 min timeout del fetch; ajusta si tu worker responde rápido con job_id
+      600000
     );
 
     const wtxt = await wr.text().catch(() => "");
     let wjson = null;
-    try { wjson = JSON.parse(wtxt); } catch (_) {}
+    try {
+      wjson = JSON.parse(wtxt);
+    } catch (_) {}
 
     if (!wr.ok) {
       throw new Error(`Worker dispatch failed (${wr.status}): ${wtxt || "no body"}`);
@@ -321,7 +321,6 @@ export default async function handler(req, res) {
 
     log("step=DISPATCH_OK");
 
-    // si worker devuelve job_id para polling:
     return json(res, 200, {
       ok: true,
       podId,
@@ -334,13 +333,12 @@ export default async function handler(req, res) {
     return json(res, 500, { error: msg, podId, workerBase });
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-
-    // IMPORTANTE: liberar lock siempre
     await releaseLock();
 
-    // opcional: termina pod si lo querés
     if (TERMINATE_AFTER_JOB && podId) {
-      try { await terminatePod(podId); } catch (_) {}
+      try {
+        await terminatePod(podId);
+      } catch (_) {}
     }
   }
 }
