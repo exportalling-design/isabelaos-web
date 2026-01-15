@@ -1740,7 +1740,7 @@ function VideoFromPromptPanel({ userStatus }) {
 // ---------------------------------------------------------
 // Imagen -> Video (logueado)
 // + ✅ Prompt Optimizer (OpenAI) con toggle "usar optimizado"
-// + ✅ Mostrar optimizado debajo de cada textarea
+// + ✅ Rehidratación de estado (aunque cambies de módulo / refresh)
 // ---------------------------------------------------------
 function Img2VideoPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
@@ -1774,7 +1774,6 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optError, setOptError] = useState("");
 
-  // Invalida optimizado si cambian los originales
   useEffect(() => {
     setOptimizedPrompt("");
     setOptimizedNegative("");
@@ -1861,6 +1860,46 @@ function Img2VideoPanel({ userStatus, spendJades }) {
     return data;
   };
 
+  // ✅ Rehidrata job activo (modo i2v) aunque no tengamos jobId
+  const rehydrateActiveI2V = async () => {
+    if (!user) return null;
+    const auth = await getAuthHeadersGlobal();
+    if (!auth.Authorization) return null;
+
+    const r = await fetch(`/api/video-status?mode=i2v`, { headers: { ...auth } });
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.ok) return null;
+
+    // Si está IDLE, no hay job activo
+    if (data.status === "IDLE" || !data.job_id) return null;
+
+    // Aplicar estado al panel
+    setJobId(data.job_id);
+    setStatus(data.status || "IN_PROGRESS");
+    setStatusText(`Estado actual: ${data.status || "IN_PROGRESS"}... (rehidratado)`);
+
+    if (data.video_url) setVideoUrl(data.video_url);
+    return data;
+  };
+
+  // ✅ Auto-rehidratación al entrar al módulo / cambiar usuario
+  useEffect(() => {
+    setError("");
+    setVideoUrl(null);
+
+    // si no hay user, limpia
+    if (!user) {
+      setJobId(null);
+      setStatus("IDLE");
+      setStatusText("");
+      return;
+    }
+
+    // intenta recuperar job activo i2v
+    rehydrateActiveI2V().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   const spendJadesFallback = async ({ amount, reason }) => {
     const auth = await getAuthHeadersGlobal();
     if (!auth.Authorization) throw new Error("No hay sesión/token.");
@@ -1881,12 +1920,18 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const handleGenerate = async () => {
     setError("");
     setVideoUrl(null);
-    setJobId(null);
 
     if (!canUse) {
       setStatus("ERROR");
       setStatusText("Debes iniciar sesión.");
       setError("Debes iniciar sesión para usar Imagen → Video.");
+      return;
+    }
+
+    // ✅ Si ya hay un job activo, solo rehidrata y listo (no crear otro)
+    if (jobId && ["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(status)) {
+      setStatusText("Ya hay una generación en curso. Rehidratando estado...");
+      await rehydrateActiveI2V();
       return;
     }
 
@@ -1908,6 +1953,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
         return;
       }
 
+      // ✅ Cobro (FRONTEND)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "img2video" });
       } else {
@@ -1929,6 +1975,9 @@ function Img2VideoPanel({ userStatus, spendJades }) {
           steps: Number(steps),
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
+
+          // ✅ evita doble cobro en backend
+          already_billed: true,
         }),
       });
 
@@ -1945,7 +1994,22 @@ function Img2VideoPanel({ userStatus, spendJades }) {
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 3000));
-        const stData = await pollVideoStatus(jid);
+
+        let stData = null;
+        try {
+          stData = await pollVideoStatus(jid);
+        } catch (e) {
+          // ✅ Si el status endpoint dice "Job not found", rehidrata por mode=i2v
+          const msg = String(e?.message || e);
+          if (msg.toLowerCase().includes("job not found")) {
+            const re = await rehydrateActiveI2V();
+            if (re?.job_id) {
+              // seguimos con el job rehidratado
+              continue;
+            }
+          }
+          throw e;
+        }
 
         const st = stData.status || stData.state || stData.job_status || stData.phase || "IN_PROGRESS";
 
@@ -1958,7 +2022,13 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 
         const out = stData.output || stData.result || stData.data || null;
         const maybeUrl =
-          out?.video_url || out?.url || out?.mp4_url || out?.video || stData.video_url || stData.url || null;
+          out?.video_url ||
+          out?.url ||
+          out?.mp4_url ||
+          out?.video ||
+          stData.video_url ||
+          stData.url ||
+          null;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
           if (maybeUrl) {
@@ -2056,7 +2126,6 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               onChange={(e) => setPrompt(e.target.value)}
             />
 
-            {/* ✅ Mostrar prompt optimizado debajo */}
             {optimizedPrompt?.trim()?.length > 0 && (
               <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
                 <div className="text-[10px] text-neutral-400">
@@ -2077,7 +2146,6 @@ function Img2VideoPanel({ userStatus, spendJades }) {
               onChange={(e) => setNegative(e.target.value)}
             />
 
-            {/* ✅ Mostrar negative optimizado debajo */}
             {optimizedNegative?.trim()?.length > 0 && (
               <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
                 <div className="text-[10px] text-neutral-400">
@@ -2090,7 +2158,6 @@ function Img2VideoPanel({ userStatus, spendJades }) {
             )}
           </div>
 
-          {/* ✅ Cuadro de optimización igual que en otros */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
