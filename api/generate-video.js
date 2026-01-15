@@ -1,7 +1,17 @@
 // /api/generate-video.js
-import { createClient }s from "@supabase/supabase-js";
+// ============================================================
+// IsabelaOS Studio — Video Generate API (Vercel)
+// ASYNC REAL: dispatch a worker /api/video_async
+// - Reusa pod si existe (pod_state.id=1.pod_id)
+// - Lock por RPC (TTL corto) + release inmediato en finally
+// ============================================================
+
+import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
+// -------------------------
+// ENV
+// -------------------------
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -23,13 +33,17 @@ const WAIT_WORKER_INTERVAL_MS = parseInt(process.env.WAIT_WORKER_INTERVAL_MS || 
 const WAIT_RUNNING_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || "240000", 10);
 const WAIT_RUNNING_INTERVAL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3500", 10);
 
-// ✅ lock “rápido” + auto-expirable (la BD hace steal si venció)
-const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "20", 10);
-const LOCK_WAIT_TIMEOUT_MS = parseInt(process.env.LOCK_WAIT_TIMEOUT_MS || "12000", 10);
-const LOCK_WAIT_INTERVAL_MS = parseInt(process.env.LOCK_WAIT_INTERVAL_MS || "900", 10);
+// Lock (RPC)
+const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "60", 10);
+const LOCK_WAIT_TIMEOUT_MS = parseInt(process.env.LOCK_WAIT_TIMEOUT_MS || "45000", 10);
+const LOCK_WAIT_INTERVAL_MS = parseInt(process.env.LOCK_WAIT_INTERVAL_MS || "1200", 10);
 
-const POD_STATE_TABLE = "pod_state";
+// Tables
+const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
 
+// -------------------------
+// Helpers
+// -------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
@@ -54,6 +68,9 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// -------------------------
+// RunPod REST v1
+// -------------------------
 async function runpodGetPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
     method: "GET",
@@ -61,7 +78,11 @@ async function runpodGetPod(podId) {
   });
   const t = await r.text().catch(() => "");
   if (!r.ok) throw new Error(`RunPod get pod falló (${r.status}): ${t}`);
-  try { return JSON.parse(t); } catch { return { raw: t }; }
+  try {
+    return JSON.parse(t);
+  } catch {
+    return { raw: t };
+  }
 }
 
 async function runpodStartPod(podId) {
@@ -75,6 +96,7 @@ async function runpodStartPod(podId) {
 }
 
 async function runpodTerminatePod(podId) {
+  // intenta /terminate y si no, DELETE
   {
     const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/terminate`, {
       method: "POST",
@@ -87,8 +109,8 @@ async function runpodTerminatePod(podId) {
       method: "DELETE",
       headers: runpodHeaders(),
     });
-    if (r.ok) return true;
     const t = await r.text().catch(() => "");
+    if (r.ok) return true;
     throw new Error(`RunPod terminate falló: ${t}`);
   }
 }
@@ -102,7 +124,9 @@ function extractRunpodStatus(pod) {
     pod?.pod?.status,
     pod?.pod?.desiredStatus,
   ];
-  for (const c of candidates) if (c) return String(c).toUpperCase();
+  for (const c of candidates) {
+    if (c) return String(c).toUpperCase();
+  }
   return "";
 }
 
@@ -111,11 +135,15 @@ async function waitForRunning(podId) {
   while (Date.now() - start < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
     const status = extractRunpodStatus(pod);
+
     if (status.includes("RUNNING")) return { ok: true, status };
-    if (status.includes("FAILED") || status.includes("ERROR"))
+
+    if (status.includes("FAILED") || status.includes("ERROR")) {
       return { ok: false, status, error: "Pod entró en FAILED/ERROR" };
-    if (status.includes("TERMINATED") || status.includes("EXITED"))
+    }
+    if (status.includes("TERMINATED") || status.includes("EXITED")) {
       return { ok: false, status, error: "Pod está TERMINATED/EXITED" };
+    }
     await sleep(WAIT_RUNNING_INTERVAL_MS);
   }
   return { ok: false, status: "TIMEOUT", error: `Pod no llegó a RUNNING en ${WAIT_RUNNING_TIMEOUT_MS}ms` };
@@ -125,6 +153,7 @@ async function waitForWorker(podId) {
   const base = workerBaseUrl(podId);
   const url = `${base}${WORKER_HEALTH_PATH}`;
   const start = Date.now();
+
   while (Date.now() - start < WAIT_WORKER_TIMEOUT_MS) {
     try {
       const r = await fetch(url, { method: "GET" });
@@ -132,10 +161,10 @@ async function waitForWorker(podId) {
     } catch (_) {}
     await sleep(WAIT_WORKER_INTERVAL_MS);
   }
-  return { ok: false, error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms`, url };
+  return { ok: false, url, error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms` };
 }
 
-async function runpodCreatePodFromTemplate({ name, log }) {
+async function runpodCreatePodFromTemplate({ name }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
 
@@ -157,43 +186,55 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   if (!r.ok) throw new Error(`RunPod create failed (${r.status}): ${t}`);
 
   let json = null;
-  try { json = JSON.parse(t); } catch { json = { raw: t }; }
+  try {
+    json = JSON.parse(t);
+  } catch {
+    json = { raw: t };
+  }
 
   const podId = json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
   if (!podId) throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
 
-  // verificación básica
+  // verificación rápida
   const verifyStart = Date.now();
-  while (Date.now() - verifyStart < 20000) {
-    try { await runpodGetPod(podId); return { podId, raw: json }; }
-    catch { await sleep(1200); }
+  while (Date.now() - verifyStart < 30000) {
+    try {
+      await runpodGetPod(podId);
+      return { podId, raw: json };
+    } catch {
+      await sleep(1500);
+    }
   }
 
-  log?.("warn=createPod not verifiable quickly", podId);
-  return { podId, raw: json };
+  throw new Error(`Pod creado pero NO verificable por GET. podId=${podId}`);
 }
 
-// ✅ acquire con wait corto, owner = userId (para debug)
-async function acquireLockWithWait(sb, seconds, owner) {
+// -------------------------
+// RPC Lock (Supabase)
+// -------------------------
+async function acquireLockWithWait(sb, seconds = WAKE_LOCK_SECONDS) {
   const start = Date.now();
+
   while (Date.now() - start < LOCK_WAIT_TIMEOUT_MS) {
-    const { data, error } = await sb.rpc("acquire_pod_lock", {
-      p_seconds: seconds,
-      p_owner: owner || null,
-    });
+    const { data, error } = await sb.rpc("acquire_pod_lock", { p_seconds: seconds });
     if (error) throw error;
+
     const row = Array.isArray(data) ? data[0] : data;
-    if (row?.ok) return { ok: true, locked_until: row.locked_until, locked_by: row.locked_by };
+    if (row?.ok) return { ok: true, locked_until: row.locked_until };
+
     await sleep(LOCK_WAIT_INTERVAL_MS);
   }
   return { ok: false, error: `Timeout esperando lock (${LOCK_WAIT_TIMEOUT_MS}ms)` };
 }
 
-// NO dependemos de release, el lock expira solo
-async function releaseLockBestEffort(sb) {
-  try { await sb.rpc("release_pod_lock"); } catch (_) {}
+async function releaseLockRpc(sb) {
+  const { error } = await sb.rpc("release_pod_lock");
+  if (error) throw error;
 }
 
+// -------------------------
+// Ensure pod
+// -------------------------
 async function ensureWorkingPod(sb, log) {
   const nowIso = new Date().toISOString();
 
@@ -207,30 +248,37 @@ async function ensureWorkingPod(sb, log) {
   const statePodId = String(podState?.pod_id || "");
 
   async function touch(status, busy = false) {
-    await sb.from(POD_STATE_TABLE).update({ status, last_used_at: nowIso, busy }).eq("id", 1);
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({ status, last_used_at: nowIso, busy })
+      .eq("id", 1);
   }
 
   if (!statePodId) {
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}`, log });
-    await sb.from(POD_STATE_TABLE).update({
-      pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false,
-    }).eq("id", 1);
+    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({ pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false })
+      .eq("id", 1);
 
     const st = await runpodStartPod(created.podId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
+    if (!running.ok) throw new Error(`Pod nuevo no llegó a RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo: ${ready.error}`);
+    if (!ready.ok) throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
 
     await touch("RUNNING", false);
     return { podId: created.podId, action: "CREADO_Y_LISTO" };
   }
 
+  // reusar
   try {
     await runpodGetPod(statePodId);
+
     const st = await runpodStartPod(statePodId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
@@ -243,13 +291,16 @@ async function ensureWorkingPod(sb, log) {
     await touch("RUNNING", false);
     return { podId: statePodId, action: "REUSADO" };
   } catch (e) {
-    const oldPodId = statePodId;
-    log("ensureWorkingPod: pod existente falló, recreo", String(e?.message || e));
+    const msg = String(e?.message || e);
+    log("ensureWorkingPod: pod existente falló, recreo", msg);
 
-    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}`, log });
-    await sb.from(POD_STATE_TABLE).update({
-      pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false,
-    }).eq("id", 1);
+    const oldPodId = statePodId;
+    const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}` });
+
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({ pod_id: created.podId, status: "STARTING", last_used_at: nowIso, busy: false })
+      .eq("id", 1);
 
     const st = await runpodStartPod(created.podId);
     if (st !== true) log("warn=startPod failed (ignored)", st);
@@ -261,21 +312,32 @@ async function ensureWorkingPod(sb, log) {
     if (!ready.ok) throw new Error(`Worker no listo tras recrear: ${ready.error}`);
 
     await touch("RUNNING", false);
+
     await runpodTerminatePod(oldPodId).catch(() => {});
     return { podId: created.podId, action: "RECREADO", oldPodId };
   }
 }
 
+// -------------------------
+// Handler
+// -------------------------
 export default async function handler(req, res) {
   const log = (...args) => console.log("[GV]", ...args);
   let lockAcquired = false;
 
   try {
-    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Método no permitido" });
+    }
 
     const auth = await requireUser(req);
-    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    if (!auth.ok) {
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    }
     const user_id = auth.user.id;
+
+    const body = req.body || {};
+    const payloadIn = typeof body === "string" ? JSON.parse(body) : body;
 
     const {
       mode = "t2v",
@@ -288,28 +350,23 @@ export default async function handler(req, res) {
       fps = 24,
       guidance_scale = 6.0,
       image_base64 = null,
-    } = req.body || {};
+    } = payloadIn;
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
 
     const sb = sbAdmin();
 
-    // 1) Lock corto (si está ocupado, devolvemos rápido)
     log("step=LOCK_WAIT_BEGIN", { ttl_s: WAKE_LOCK_SECONDS, wait_ms: LOCK_WAIT_TIMEOUT_MS });
-    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS, user_id);
-    if (!lock.ok) {
-      // ✅ NO 500: es "ocupado", frontend reintenta
-      return res.status(429).json({ ok: false, error: lock.error, code: "LOCK_BUSY" });
-    }
-    lockAcquired = true;
-    log("step=LOCK_OK", lock);
+    const lock = await acquireLockWithWait(sb, WAKE_LOCK_SECONDS);
+    if (!lock.ok) return res.status(503).json({ ok: false, error: lock.error });
 
-    // 2) Ensure pod
+    lockAcquired = true;
+    log("step=LOCK_OK", { locked_until: lock.locked_until });
+
     log("step=ENSURE_POD_BEGIN");
     const podInfo = await ensureWorkingPod(sb, log);
     log("step=ENSURE_POD_OK", podInfo);
 
-    // 3) Dispatch async
     const podId = podInfo.podId;
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
@@ -336,13 +393,22 @@ export default async function handler(req, res) {
     });
 
     const tt = await rr.text().catch(() => "");
-    if (!rr.ok) throw new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
+    if (!rr.ok) {
+      log("step=DISPATCH_FAIL", { status: rr.status, body: tt?.slice?.(0, 500) || tt });
+      throw new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
+    }
 
     let j = null;
-    try { j = JSON.parse(tt); } catch { j = null; }
+    try {
+      j = JSON.parse(tt);
+    } catch {
+      j = null;
+    }
 
     const job_id = j?.job_id || j?.id || null;
     if (!job_id) throw new Error(`Worker no devolvió job_id. Respuesta: ${tt}`);
+
+    log("step=DISPATCH_OK", { job_id });
 
     return res.status(200).json({
       ok: true,
@@ -356,13 +422,14 @@ export default async function handler(req, res) {
     console.error("[GV] fatal:", msg);
     return res.status(500).json({ ok: false, error: msg });
   } finally {
-    // best-effort, NO depende de esto
     if (lockAcquired) {
       try {
         const sb = sbAdmin();
-        await releaseLockBestEffort(sb);
-        log("step=LOCK_RELEASE_BESTEFFORT");
-      } catch (_) {}
+        await releaseLockRpc(sb);
+        console.log("[GV] step=LOCK_RELEASED");
+      } catch (e) {
+        console.log("[GV] warn=LOCK_RELEASE_FAIL", String(e?.message || e));
+      }
     }
   }
 }
