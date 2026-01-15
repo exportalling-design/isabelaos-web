@@ -1584,6 +1584,18 @@ function VideoFromPromptPanel({ userStatus }) {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
+
+            {/* ✅ NUEVO: Mostrar prompt optimizado debajo del cuadro */}
+            {optimizedPrompt?.trim()?.length > 0 && (
+              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+                <div className="text-[10px] text-neutral-400">
+                  Prompt optimizado {useOptimized ? "(activo)" : "(no activo)"}:
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
+                  {optimizedPrompt.trim()}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -1593,9 +1605,21 @@ function VideoFromPromptPanel({ userStatus }) {
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />
+
+            {/* ✅ NUEVO: Mostrar negative optimizado debajo del cuadro */}
+            {optimizedNegative?.trim()?.length > 0 && (
+              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+                <div className="text-[10px] text-neutral-400">
+                  Negative optimizado {useOptimized ? "(activo)" : "(no activo)"}:
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
+                  {optimizedNegative.trim()}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* ✅ Optimizer UI */}
+          {/* ✅ Optimizer UI (igual al actual) */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
