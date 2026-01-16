@@ -27,7 +27,7 @@ const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
 const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
 const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
 const VIDEO_GPU_FALLBACK_ON_FAIL =
-  String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "0") === "0";
+  String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
