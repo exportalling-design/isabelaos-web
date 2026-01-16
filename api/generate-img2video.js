@@ -7,6 +7,7 @@
 // ✅ Si hay job activo (MISMO MODO i2v) => devuelve ese job_id
 // ✅ Payload NORMALIZADO para el worker (mode=i2v + image_base64/image_url)
 // ✅ Evita doble cobro: soporta already_billed=true
+// ✅ FIX IMPORTANTE: image_base64 normalizado a DataURL
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -182,7 +183,11 @@ async function waitForWorkerReady(podId, maxMs = WORKER_READY_TIMEOUT_MS) {
 
   while (Date.now() - start < maxMs) {
     try {
-      const r = await fetchWithTimeout(healthUrl, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+      const r = await fetchWithTimeout(
+        healthUrl,
+        { method: "GET" },
+        HEALTH_FETCH_TIMEOUT_MS
+      );
       if (r.ok) return true;
       const txt = await r.text().catch(() => "");
       lastInfo = `${healthUrl} -> ${r.status} ${txt.slice(0, 120)}`;
@@ -191,7 +196,11 @@ async function waitForWorkerReady(podId, maxMs = WORKER_READY_TIMEOUT_MS) {
     }
 
     try {
-      const r = await fetchWithTimeout(asyncUrl, { method: "GET" }, HEALTH_FETCH_TIMEOUT_MS);
+      const r = await fetchWithTimeout(
+        asyncUrl,
+        { method: "GET" },
+        HEALTH_FETCH_TIMEOUT_MS
+      );
       if (r.ok || r.status === 405) return true;
       const txt = await r.text().catch(() => "");
       lastInfo = `${asyncUrl} -> ${r.status} ${txt.slice(0, 120)}`;
@@ -411,6 +420,7 @@ async function createVideoJob(sb, job) {
 }
 
 async function updateVideoJob(sb, job_id, patch) {
+  // OJO: tu tabla usa job_id
   const { error } = await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("job_id", job_id);
   if (error) throw error;
 }
@@ -594,6 +604,13 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Missing image_b64 (o image_base64) or image_url" });
     }
 
+    // ✅ NORMALIZAR BASE64 A DATAURL (evita que el worker lo lea mal)
+    const normalizedImageB64 = image_b64
+      ? (String(image_b64).startsWith("data:")
+          ? String(image_b64)
+          : `data:image/jpeg;base64,${String(image_b64)}`)
+      : null;
+
     const requestedSteps =
       typeof payloadRaw.steps === "number"
         ? payloadRaw.steps
@@ -621,7 +638,8 @@ export default async function handler(req, res) {
       fps: typeof payloadRaw.fps === "number" ? payloadRaw.fps : 24,
       guidance_scale: payloadRaw.guidance_scale ?? 6.0,
 
-      image_base64: image_b64 || null,
+      // ✅ fijo
+      image_base64: normalizedImageB64,
       image_url: image_url || null,
 
       ...maybeFast,
@@ -667,6 +685,7 @@ export default async function handler(req, res) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // ✅ IMPORTANTE: mandamos job_id + payload
         body: JSON.stringify({ job_id, ...payload }),
       },
       DISPATCH_TIMEOUT_MS
@@ -713,7 +732,9 @@ export default async function handler(req, res) {
         createAttempt: ensured.createAttempt || null,
       },
       worker: ensured.workerUrl,
-      billed: alreadyBilled ? { type: "FRONTEND", amount: 0 } : { type: "JADE", amount: COST_IMG2VIDEO_JADES },
+      billed: alreadyBilled
+        ? { type: "FRONTEND", amount: 0 }
+        : { type: "JADE", amount: COST_IMG2VIDEO_JADES },
       note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=... o /api/video-status?mode=i2v",
     });
   } catch (e) {
