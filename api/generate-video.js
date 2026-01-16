@@ -4,7 +4,13 @@
 // MODO: ASYNC REAL (worker encola y runner procesa)
 // CLAVE: si ya hay job activo => devuelve ese job_id (no crea otro)
 //
-// ✅ SOLO CAMBIO: soporta prompt automatizado (optimizado):
+// ✅ CAMBIO PRINCIPAL (H100 ONLY + mensaje amable):
+// - Fuerza a pedir SIEMPRE el GPU especificado en VIDEO_GPU_TYPE_IDS (ej: "NVIDIA H100 80GB HBM3")
+// - DESACTIVA fallback silencioso (no crea pods en otra GPU)
+// - Si NO hay GPU disponible / capacity, responde OK con mensaje:
+//   "En este momento no hay GPU libre, por favor inténtalo más tarde."
+//
+// ✅ Mantiene soporte de prompt automatizado (optimizado):
 // - acepta { optimized_prompt, optimized_negative_prompt, use_optimized }
 // - manda al worker el prompt FINAL (optimizado o normal)
 // - devuelve al frontend { used_prompt, used_negative_prompt, using_optimized }
@@ -20,12 +26,19 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
+  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
+// ✅ H100-only: aquí debes ponerlo en ENV
+// Ejemplo: VIDEO_GPU_TYPE_IDS="NVIDIA H100 80GB HBM3"
 const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
+
+// Se mantiene por compatibilidad (no rompe tu env), pero H100-only ignora fallback
 const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
 const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
+
+// ⛔ Ignorado (H100-only): NO fallback silencioso
 const VIDEO_GPU_FALLBACK_ON_FAIL =
   String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
 
@@ -88,6 +101,52 @@ function workerBaseUrl(podId) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ✅ Detecta errores típicos de “no hay GPU / no capacity”
+function isNoGpuCapacityError(e) {
+  const msg = String(e?.message || e || "").toLowerCase();
+  const raw = String(e?.raw || "").toLowerCase();
+  const status = Number(e?.status || 0);
+
+  const haystack = `${msg}\n${raw}`;
+
+  // Señales comunes en APIs de infraestructura
+  const hints = [
+    "no capacity",
+    "insufficient",
+    "out of capacity",
+    "out of stock",
+    "no hosts",
+    "no host",
+    "capacity",
+    "gpu not available",
+    "not available",
+    "resource unavailable",
+    "resource exhausted",
+    "quota",
+    "cannot allocate",
+    "allocation",
+    "temporarily unavailable",
+    "no instances",
+    "sold out",
+  ];
+
+  const hit = hints.some((h) => haystack.includes(h));
+
+  // Algunos providers devuelven 409/429/503 en saturación
+  const statusLooksLikeCapacity = [409, 429, 503].includes(status);
+
+  return hit || statusLooksLikeCapacity;
+}
+
+function friendlyNoGpuResponse(res, extra = {}) {
+  return res.status(200).json({
+    ok: true,
+    status: "NO_GPU_AVAILABLE",
+    message: "En este momento no hay GPU libre, por favor inténtalo más tarde.",
+    ...extra,
+  });
 }
 
 // ---------------------------
@@ -202,7 +261,7 @@ async function releaseLock(sb) {
 }
 
 // ---------------------------
-// Crear pod desde template (con preferencia de GPU + fallback)
+// Crear pod desde template (H100-only, sin fallback)
 // ---------------------------
 function parseGpuTypeList() {
   if (!VIDEO_GPU_TYPE_IDS) return null;
@@ -248,58 +307,37 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID)
     throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
 
+  // ✅ H100-only: exigir gpuTypeIds (si no, no creamos nada)
   const gpuTypeIds = parseGpuTypeList();
+  if (!gpuTypeIds || !gpuTypeIds.length) {
+    throw new Error(
+      'Falta VIDEO_GPU_TYPE_IDS. Ejemplo: VIDEO_GPU_TYPE_IDS="NVIDIA H100 80GB HBM3"'
+    );
+  }
 
-  const basePayload = {
+  const payload = {
     name,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
     networkVolumeId: VIDEO_RUNPOD_NETWORK_VOLUME_ID,
     volumeMountPath: VIDEO_VOLUME_MOUNT_PATH,
     ports: ["8000/http", "8888/http"],
     gpuCount: VIDEO_GPU_COUNT,
+
+    // ✅ lo importante:
+    cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
+    gpuTypeIds, // <- fuerza H100
   };
 
-  const attempts = [];
-
-  attempts.push({
-    label: "PREFERRED_GPU",
-    payload: {
-      ...basePayload,
-      cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
-      ...(gpuTypeIds ? { gpuTypeIds } : {}),
-    },
-  });
-
-  if (VIDEO_GPU_FALLBACK_ON_FAIL) {
-    attempts.push({
-      label: "FALLBACK_CLOUD_ONLY",
-      payload: { ...basePayload, cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL" },
+  if (log)
+    log("createPod attempt=H100_ONLY", {
+      gpuTypeIds,
+      cloudType: payload.cloudType || null,
+      gpuCount: payload.gpuCount,
+      fallbackEnabledEnv: VIDEO_GPU_FALLBACK_ON_FAIL, // solo para log, pero no se usa
     });
-    attempts.push({
-      label: "FALLBACK_PLAIN",
-      payload: { ...basePayload },
-    });
-  }
 
-  let lastErr = null;
-  for (const a of attempts) {
-    try {
-      if (log)
-        log(`createPod attempt=${a.label}`, {
-          hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
-          cloudType: a.payload.cloudType || null,
-          gpuCount: a.payload.gpuCount,
-        });
-      const created = await runpodCreatePodOnce(a.payload);
-      return { ...created, attempt: a.label, used: a.payload };
-    } catch (e) {
-      lastErr = e;
-      if (log) log(`createPod failed attempt=${a.label}`, String(e?.message || e));
-      if (!VIDEO_GPU_FALLBACK_ON_FAIL) throw e;
-    }
-  }
-
-  throw lastErr || new Error("RunPod create failed: sin detalle");
+  const created = await runpodCreatePodOnce(payload);
+  return { ...created, attempt: "H100_ONLY", used: payload };
 }
 
 // ---------------------------
@@ -481,7 +519,6 @@ export default async function handler(req, res) {
     }
 
     const user_id = auth.user.id;
-
     const body = req.body || {};
 
     const {
@@ -495,7 +532,7 @@ export default async function handler(req, res) {
       image_base64 = null,
     } = body;
 
-    // ✅ SOLO CAMBIO: usar prompt final
+    // ✅ prompt final
     const { finalPrompt, finalNegative, usingOptimized } = pickFinalPrompts(body);
 
     if (!finalPrompt) {
@@ -539,9 +576,29 @@ export default async function handler(req, res) {
     lockAcquired = true;
     log("step=LOCK_OK", { locked_until: lock.locked_until });
 
-    // 2) Ensure pod
+    // 2) Ensure pod (H100-only)
     log("step=ENSURE_POD_BEGIN");
-    const podInfo = await ensureWorkingPod(sb, log);
+    let podInfo = null;
+    try {
+      podInfo = await ensureWorkingPod(sb, log);
+    } catch (e) {
+      // ✅ Si es falta de capacidad GPU, responder amable (no 500)
+      if (isNoGpuCapacityError(e)) {
+        // liberar lock antes de responder
+        try {
+          await releaseLock(sb);
+        } catch {}
+        lockAcquired = false;
+
+        return friendlyNoGpuResponse(res, {
+          retry_after_ms: 30000,
+          using_optimized: usingOptimized,
+          used_prompt: finalPrompt,
+          used_negative_prompt: finalNegative,
+        });
+      }
+      throw e;
+    }
     log("step=ENSURE_POD_OK", podInfo);
 
     // C) Liberar lock YA
@@ -553,7 +610,6 @@ export default async function handler(req, res) {
     const podId = podInfo.podId;
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
-    // ✅ SOLO CAMBIO: prompt final
     const payload = {
       user_id,
       mode,
@@ -581,7 +637,20 @@ export default async function handler(req, res) {
     });
 
     const tt = await rr.text().catch(() => "");
-    if (!rr.ok) throw new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
+
+    // ✅ Si el pod existe pero worker no responde (por saturación), también responde amable
+    if (!rr.ok) {
+      const err = new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
+      if (isNoGpuCapacityError(err) || [502, 503, 504].includes(rr.status)) {
+        return friendlyNoGpuResponse(res, {
+          retry_after_ms: 20000,
+          using_optimized: usingOptimized,
+          used_prompt: finalPrompt,
+          used_negative_prompt: finalNegative,
+        });
+      }
+      throw err;
+    }
 
     let j = null;
     try {
@@ -607,6 +676,12 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     const msg = String(e?.message || e);
+
+    // ✅ Última línea de defensa: si parece saturación/capacidad, responde amable
+    if (isNoGpuCapacityError(e)) {
+      return friendlyNoGpuResponse(res, { retry_after_ms: 30000 });
+    }
+
     console.error("[GV] fatal:", msg);
     return res.status(500).json({ ok: false, error: msg });
   } finally {
