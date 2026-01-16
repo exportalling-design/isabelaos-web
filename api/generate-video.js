@@ -3,6 +3,11 @@
 // IsabelaOS Studio — API de Generación de Video (Vercel Function)
 // MODO: ASYNC REAL (worker encola y runner procesa)
 // CLAVE: si ya hay job activo => devuelve ese job_id (no crea otro)
+//
+// ✅ MINIMO: soporta prompt optimizado:
+// - acepta { optimized_prompt, optimized_negative_prompt, use_optimized }
+// - manda al worker el prompt FINAL (optimizado o normal)
+// - devuelve al frontend { used_prompt, used_negative_prompt, using_optimized }
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -18,19 +23,9 @@ const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
 const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
-// ✅ Preferencias de GPU (prioridad) — acepta lo que tú pongas (IDs o nombres).
-// Ejemplo recomendado (por tu UI):
-// "H100 NVL,A100 SXM,A100 PCIe,RTX 6000 ADA"
 const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
-
-// ✅ Truco datacenter: ALL suele encontrar más stock (si tu cuenta lo permite)
 const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
-
-// ✅ Fuerza 1 GPU
 const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
-
-// ✅ Si la creación con GPU preferida falla, NO confirmamos falla al usuario:
-// hacemos fallback automático a crear sin gpuTypeIds / sin cloudType.
 const VIDEO_GPU_FALLBACK_ON_FAIL = String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
 
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
@@ -43,14 +38,12 @@ const WAIT_WORKER_INTERVAL_MS = parseInt(process.env.WAIT_WORKER_INTERVAL_MS || 
 const WAIT_RUNNING_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || "240000", 10);
 const WAIT_RUNNING_INTERVAL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3500", 10);
 
-// Lock SOLO para arranque/ensure (no para render)
 const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "60", 10);
 
 const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
 const POD_LOCK_TABLE = process.env.POD_LOCK_TABLE || "pod_lock";
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
-// 👇 Estados activos (los mismos que video-current usa / y runner usa)
 const ACTIVE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS", "RUNNING"];
 
 function sbAdmin() {
@@ -95,7 +88,6 @@ async function runpodGetPod(podId) {
 }
 
 async function runpodStartPod(podId) {
-  // best-effort
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/start`, {
     method: "POST",
     headers: runpodHeaders(),
@@ -106,7 +98,6 @@ async function runpodStartPod(podId) {
 }
 
 async function runpodTerminatePod(podId) {
-  // best-effort terminate
   const r1 = await fetch(`https://rest.runpod.io/v1/pods/${podId}/terminate`, {
     method: "POST",
     headers: runpodHeaders(),
@@ -167,7 +158,6 @@ async function tryAcquireLockAtomic(sb, seconds = 60) {
   const until = new Date(now.getTime() + seconds * 1000);
   const nowIso = now.toISOString();
 
-  // ✅ UPDATE atómico: solo toma lock si ya expiró
   const { data, error } = await sb
     .from(POD_LOCK_TABLE)
     .update({ locked_until: until.toISOString() })
@@ -233,7 +223,6 @@ async function runpodCreatePodFromTemplate({ name, log }) {
 
   const gpuTypeIds = parseGpuTypeList();
 
-  // Intento #1: preferencia GPU + cloudType + gpuCount
   const basePayload = {
     name,
     templateId: VIDEO_RUNPOD_TEMPLATE_ID,
@@ -245,7 +234,6 @@ async function runpodCreatePodFromTemplate({ name, log }) {
 
   const attempts = [];
 
-  // A) preferida
   attempts.push({
     label: "PREFERRED_GPU",
     payload: {
@@ -256,21 +244,13 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   });
 
   if (VIDEO_GPU_FALLBACK_ON_FAIL) {
-    // B) sin gpuTypeIds pero con cloudType (más stock)
     attempts.push({
       label: "FALLBACK_CLOUD_ONLY",
-      payload: {
-        ...basePayload,
-        cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
-      },
+      payload: { ...basePayload, cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL" },
     });
-
-    // C) pelado (máxima compatibilidad)
     attempts.push({
       label: "FALLBACK_PLAIN",
-      payload: {
-        ...basePayload,
-      },
+      payload: { ...basePayload },
     });
   }
 
@@ -287,7 +267,6 @@ async function runpodCreatePodFromTemplate({ name, log }) {
     } catch (e) {
       lastErr = e;
       if (log) log(`createPod failed attempt=${a.label}`, String(e?.message || e));
-      // si no hay fallback, romper de una
       if (!VIDEO_GPU_FALLBACK_ON_FAIL) throw e;
     }
   }
@@ -317,7 +296,6 @@ async function ensureWorkingPod(sb, log) {
       .eq("id", 1);
   }
 
-  // Si no hay pod guardado => crear
   if (!statePodId) {
     const created = await runpodCreatePodFromTemplate({
       name: `isabela-video-${Date.now()}`,
@@ -347,7 +325,6 @@ async function ensureWorkingPod(sb, log) {
     return { podId: created.podId, action: "CREADO_Y_LISTO", createAttempt: created.attempt };
   }
 
-  // Si ya existe pod => reusar
   try {
     await runpodGetPod(statePodId);
 
@@ -363,7 +340,6 @@ async function ensureWorkingPod(sb, log) {
     await touch("RUNNING", false);
     return { podId: statePodId, action: "REUSADO" };
   } catch (e) {
-    // Si el pod guardado murió => recrear y reemplazar
     const msg = String(e?.message || e);
     log("ensureWorkingPod: pod existente falló, recreo", msg);
 
@@ -416,6 +392,26 @@ async function getActiveJobForUser(sb, user_id) {
 }
 
 // ---------------------------
+// ✅ MINIMO: resolver prompt final (optimizado o normal)
+// ---------------------------
+function pickFinalPrompts(body) {
+  const prompt = String(body?.prompt || "").trim();
+  const negative = String(body?.negative_prompt || "").trim();
+
+  const useOptimized = body?.use_optimized === true || body?.useOptimized === true;
+
+  const optPrompt = String(body?.optimized_prompt || body?.optimizedPrompt || "").trim();
+  const optNeg = String(body?.optimized_negative_prompt || body?.optimizedNegativePrompt || "").trim();
+
+  const usingOptimized = Boolean(useOptimized && optPrompt);
+
+  const finalPrompt = usingOptimized ? optPrompt : prompt;
+  const finalNegative = usingOptimized ? optNeg : negative;
+
+  return { finalPrompt, finalNegative, usingOptimized };
+}
+
+// ---------------------------
 // Handler principal
 // ---------------------------
 export default async function handler(req, res) {
@@ -424,17 +420,21 @@ export default async function handler(req, res) {
   let lockAcquired = false;
 
   try {
-    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Método no permitido" });
+    }
 
     const auth = await requireUser(req);
-    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    if (!auth.ok) {
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    }
 
     const user_id = auth.user.id;
 
+    const body = req.body || {};
+
     const {
       mode = "t2v",
-      prompt,
-      negative_prompt = "",
       steps = 34,
       height = 720,
       width = 1280,
@@ -442,13 +442,18 @@ export default async function handler(req, res) {
       fps = 24,
       guidance_scale = 6.5,
       image_base64 = null,
-    } = req.body || {};
+    } = body;
 
-    if (!prompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
+    // ✅ MINIMO: usar prompt final (optimizado o normal)
+    const { finalPrompt, finalNegative, usingOptimized } = pickFinalPrompts(body);
+
+    if (!finalPrompt) {
+      return res.status(400).json({ ok: false, error: "Falta prompt" });
+    }
 
     const sb = sbAdmin();
 
-    // ✅ A) Si ya hay job activo, devolvelo y NO crees otro
+    // A) Si ya hay job activo, devolvelo y NO crees otro
     const active = await getActiveJobForUser(sb, user_id);
     if (active) {
       return res.status(200).json({
@@ -456,10 +461,13 @@ export default async function handler(req, res) {
         status: "ALREADY_RUNNING",
         job_id: active.id,
         job: active,
+        using_optimized: usingOptimized,
+        used_prompt: finalPrompt,
+        used_negative_prompt: finalNegative,
       });
     }
 
-    // ✅ B) Lock SOLO para ensurePod (se libera inmediatamente)
+    // B) Lock SOLO para ensurePod
     log("step=LOCK_BEGIN");
     const lock = await tryAcquireLockAtomic(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
@@ -468,30 +476,34 @@ export default async function handler(req, res) {
         ok: true,
         status: "LOCK_BUSY",
         retry_after_ms: 2500,
+        using_optimized: usingOptimized,
+        used_prompt: finalPrompt,
+        used_negative_prompt: finalNegative,
       });
     }
     lockAcquired = true;
     log("step=LOCK_OK", { locked_until: lock.locked_until });
 
-    // 2) Ensure pod (reusar el mismo pod si ya existe)
+    // 2) Ensure pod
     log("step=ENSURE_POD_BEGIN");
     const podInfo = await ensureWorkingPod(sb, log);
     log("step=ENSURE_POD_OK", podInfo);
 
-    // ✅ C) Liberar lock YA (no esperar render)
+    // C) Liberar lock YA
     await releaseLock(sb);
     lockAcquired = false;
     log("step=LOCK_RELEASED");
 
-    // 3) Dispatch ASYNC REAL al worker (él inserta video_jobs y devuelve job_id)
+    // 3) Dispatch ASYNC REAL al worker
     const podId = podInfo.podId;
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
+    // ✅ IMPORTANTE: aquí es donde el worker recibe el prompt final
     const payload = {
-      user_id, // ✅ fuente de verdad
+      user_id,
       mode,
-      prompt,
-      negative_prompt,
+      prompt: finalPrompt,
+      negative_prompt: finalNegative,
       steps,
       height,
       width,
@@ -501,7 +513,11 @@ export default async function handler(req, res) {
       image_base64,
     };
 
-    log("step=DISPATCH_BEGIN", { dispatchUrl });
+    log("step=DISPATCH_BEGIN", {
+      dispatchUrl,
+      usingOptimized,
+      promptLen: String(finalPrompt || "").length,
+    });
 
     const rr = await fetch(dispatchUrl, {
       method: "POST",
@@ -524,13 +540,17 @@ export default async function handler(req, res) {
       job_id,
       pod: podInfo,
       dispatch: { ok: true, url: dispatchUrl },
+
+      // ✅ NUEVO: para que el frontend lo muestre en el mismo cuadro
+      using_optimized: usingOptimized,
+      used_prompt: finalPrompt,
+      used_negative_prompt: finalNegative,
     });
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] fatal:", msg);
     return res.status(500).json({ ok: false, error: msg });
   } finally {
-    // Si por error quedó lock, liberarlo best-effort
     if (lockAcquired) {
       try {
         const sb = sbAdmin();
