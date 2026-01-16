@@ -135,19 +135,40 @@ async function waitForRunning(podId) {
   };
 }
 
+// ✅ FIX DEFINITIVO: no recrear pod por /health 404
+// Si el proxy responde (aunque sea 404/405), el worker está vivo.
+// Solo consideramos "no listo" si es 502/503 o no hay respuesta.
 async function waitForWorker(podId) {
   const base = workerBaseUrl(podId);
-  const url = `${base}${WORKER_HEALTH_PATH}`;
+
+  const urls = [
+    `${base}${WORKER_HEALTH_PATH}`, // puede ser 404 si no existe
+    `${base}${WORKER_ASYNC_PATH}`,  // GET puede ser 405, igual indica vivo
+  ];
+
   const start = Date.now();
 
   while (Date.now() - start < WAIT_WORKER_TIMEOUT_MS) {
-    try {
-      const r = await fetch(url, { method: "GET" });
-      if (r.ok) return { ok: true, url };
-    } catch (_) {}
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { method: "GET" });
+
+        // 502/503 = proxy/worker no listo todavía
+        // Cualquier otro status (200/404/405/etc) = server reachable => OK
+        if (r.status && r.status !== 502 && r.status !== 503) {
+          return { ok: true, url, status: r.status };
+        }
+      } catch (_) {}
+    }
+
     await sleep(WAIT_WORKER_INTERVAL_MS);
   }
-  return { ok: false, error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms`, url };
+
+  return {
+    ok: false,
+    error: `Worker no respondió tras ${WAIT_WORKER_TIMEOUT_MS}ms`,
+    url: urls[0],
+  };
 }
 
 // ---------------------------
