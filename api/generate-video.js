@@ -486,12 +486,12 @@ export default async function handler(req, res) {
 
     const {
       mode = "t2v",
-      steps = 34,
-      height = 720,
-      width = 1280,
-      num_frames = 75,
-      fps = 24,
-      guidance_scale = 6.5,
+      steps,
+      height,
+      width,
+      num_frames,
+      fps,
+      guidance_scale,
       image_base64 = null,
     } = body;
 
