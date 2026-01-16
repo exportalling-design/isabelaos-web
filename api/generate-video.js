@@ -4,21 +4,15 @@
 // MODO: ASYNC REAL (worker encola y runner procesa)
 // CLAVE: si ya hay job activo => devuelve ese job_id (no crea otro)
 //
-// ✅ Soporta prompt automatizado (optimizado):
+// ✅ SOLO CAMBIO: soporta prompt automatizado (optimizado):
 // - acepta { optimized_prompt, optimized_negative_prompt, use_optimized }
 // - manda al worker el prompt FINAL (optimizado o normal)
 // - devuelve al frontend { used_prompt, used_negative_prompt, using_optimized }
-//
-// ✅ RunPod: cloudType SOLO puede ser 'SECURE' o 'COMMUNITY' (NO 'ALL')
-// ✅ UX: si no hay GPU / no se puede crear pod / worker no listo -> responder "probá más tarde"
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
-// ---------------------------
-// ENV
-// ---------------------------
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -26,17 +20,12 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
 const VIDEO_RUNPOD_TEMPLATE_ID = process.env.VIDEO_RUNPOD_TEMPLATE_ID || null;
-const VIDEO_RUNPOD_NETWORK_VOLUME_ID =
-  process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
+const VIDEO_RUNPOD_NETWORK_VOLUME_ID = process.env.VIDEO_RUNPOD_NETWORK_VOLUME_ID || null;
 const VIDEO_VOLUME_MOUNT_PATH = process.env.VIDEO_VOLUME_MOUNT_PATH || "/workspace";
 
 const VIDEO_GPU_TYPE_IDS = (process.env.VIDEO_GPU_TYPE_IDS || "").trim();
-
-// ✅ CAMBIO: default 'SECURE' (RunPod solo acepta SECURE/COMMUNITY)
-const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "SECURE").trim();
-
+const VIDEO_GPU_CLOUD_TYPE = (process.env.VIDEO_GPU_CLOUD_TYPE || "ALL").trim();
 const VIDEO_GPU_COUNT = parseInt(process.env.VIDEO_GPU_COUNT || "1", 10);
-
 const VIDEO_GPU_FALLBACK_ON_FAIL =
   String(process.env.VIDEO_GPU_FALLBACK_ON_FAIL || "1") === "1";
 
@@ -44,17 +33,23 @@ const WORKER_PORT = parseInt(process.env.WORKER_PORT || "8000", 10);
 const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
 
-// ✅ venv check opcional (solo si tu /health devuelve flag)
-const WORKER_HEALTH_VENV_KEYS = (process.env.WORKER_HEALTH_VENV_KEYS || "venv_ok,venv")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const WAIT_WORKER_TIMEOUT_MS = parseInt(
+  process.env.WAIT_WORKER_TIMEOUT_MS || "180000",
+  10
+);
+const WAIT_WORKER_INTERVAL_MS = parseInt(
+  process.env.WAIT_WORKER_INTERVAL_MS || "2500",
+  10
+);
 
-const WAIT_WORKER_TIMEOUT_MS = parseInt(process.env.WAIT_WORKER_TIMEOUT_MS || "180000", 10);
-const WAIT_WORKER_INTERVAL_MS = parseInt(process.env.WAIT_WORKER_INTERVAL_MS || "2500", 10);
-
-const WAIT_RUNNING_TIMEOUT_MS = parseInt(process.env.WAIT_RUNNING_TIMEOUT_MS || "240000", 10);
-const WAIT_RUNNING_INTERVAL_MS = parseInt(process.env.WAIT_RUNNING_INTERVAL_MS || "3500", 10);
+const WAIT_RUNNING_TIMEOUT_MS = parseInt(
+  process.env.WAIT_RUNNING_TIMEOUT_MS || "240000",
+  10
+);
+const WAIT_RUNNING_INTERVAL_MS = parseInt(
+  process.env.WAIT_RUNNING_INTERVAL_MS || "3500",
+  10
+);
 
 const WAKE_LOCK_SECONDS = parseInt(process.env.WAKE_LOCK_SECONDS || "60", 10);
 
@@ -62,11 +57,15 @@ const POD_STATE_TABLE = process.env.POD_STATE_TABLE || "pod_state";
 const POD_LOCK_TABLE = process.env.POD_LOCK_TABLE || "pod_lock";
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
-const ACTIVE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS", "RUNNING"];
+const ACTIVE_STATUSES = [
+  "PENDING",
+  "IN_QUEUE",
+  "QUEUED",
+  "DISPATCHED",
+  "IN_PROGRESS",
+  "RUNNING",
+];
 
-// ---------------------------
-// Helpers
-// ---------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
@@ -89,35 +88,6 @@ function workerBaseUrl(podId) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function noGpuMessage() {
-  return "En este momento no hay GPU libre, por favor inténtalo más tarde.";
-}
-
-function looksLikeNoGpuOrCapacity(msg) {
-  const m = String(msg || "").toLowerCase();
-
-  // RunPod / capacity / schema / not available / etc.
-  return (
-    m.includes("create failed") ||
-    m.includes("does not meet the schema") ||
-    m.includes("schema") ||
-    m.includes("insufficient") ||
-    m.includes("capacity") ||
-    m.includes("no available") ||
-    m.includes("unavailable") ||
-    m.includes("gpu") ||
-    m.includes("quota") ||
-    m.includes("rate") ||
-    m.includes("(400)") ||
-    m.includes("(409)") ||
-    m.includes("timeout") ||
-    m.includes("worker no") ||
-    m.includes("pod no llegó") ||
-    m.includes("failed") ||
-    m.includes("error")
-  );
 }
 
 // ---------------------------
@@ -168,8 +138,9 @@ async function waitForRunning(podId) {
   const start = Date.now();
   while (Date.now() - start < WAIT_RUNNING_TIMEOUT_MS) {
     const pod = await runpodGetPod(podId);
-    const status = String(pod?.desiredStatus || pod?.status || pod?.pod?.status || "")
-      .toUpperCase();
+    const status = String(
+      pod?.desiredStatus || pod?.status || pod?.pod?.status || ""
+    ).toUpperCase();
 
     if (status.includes("RUNNING")) return { ok: true, status };
     if (status.includes("FAILED") || status.includes("ERROR")) {
@@ -184,7 +155,6 @@ async function waitForRunning(podId) {
   };
 }
 
-// ✅ Ahora además “mira” venv si tu /health lo devuelve
 async function waitForWorker(podId) {
   const base = workerBaseUrl(podId);
   const url = `${base}${WORKER_HEALTH_PATH}`;
@@ -193,33 +163,7 @@ async function waitForWorker(podId) {
   while (Date.now() - start < WAIT_WORKER_TIMEOUT_MS) {
     try {
       const r = await fetch(url, { method: "GET" });
-      if (r.ok) {
-        // Intentar leer JSON (si falla, igual consideramos ok)
-        let j = null;
-        try {
-          const txt = await r.text();
-          j = JSON.parse(txt);
-        } catch {
-          j = null;
-        }
-
-        // Si /health trae un flag de venv, lo validamos.
-        if (j && typeof j === "object") {
-          for (const k of WORKER_HEALTH_VENV_KEYS) {
-            if (k in j) {
-              const v = j[k];
-              // aceptamos true/"true"/1
-              const ok = v === true || v === 1 || v === "true";
-              if (!ok) {
-                return { ok: false, error: "VENV_NOT_READY", url, health: j };
-              }
-              break;
-            }
-          }
-        }
-
-        return { ok: true, url };
-      }
+      if (r.ok) return { ok: true, url };
     } catch (_) {}
     await sleep(WAIT_WORKER_INTERVAL_MS);
   }
@@ -291,15 +235,18 @@ async function runpodCreatePodOnce(payload) {
     json = { raw: t };
   }
 
-  const podId = json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
-  if (!podId) throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
+  const podId =
+    json?.id || json?.podId || json?.pod?.id || json?.data?.id || null;
+  if (!podId)
+    throw new Error(`RunPod create no devolvió podId. Respuesta: ${t}`);
 
   return { podId, raw: json };
 }
 
 async function runpodCreatePodFromTemplate({ name, log }) {
   if (!VIDEO_RUNPOD_TEMPLATE_ID) throw new Error("Falta VIDEO_RUNPOD_TEMPLATE_ID");
-  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID) throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
+  if (!VIDEO_RUNPOD_NETWORK_VOLUME_ID)
+    throw new Error("Falta VIDEO_RUNPOD_NETWORK_VOLUME_ID");
 
   const gpuTypeIds = parseGpuTypeList();
 
@@ -318,7 +265,7 @@ async function runpodCreatePodFromTemplate({ name, log }) {
     label: "PREFERRED_GPU",
     payload: {
       ...basePayload,
-      cloudType: VIDEO_GPU_CLOUD_TYPE || "SECURE",
+      cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL",
       ...(gpuTypeIds ? { gpuTypeIds } : {}),
     },
   });
@@ -326,7 +273,7 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   if (VIDEO_GPU_FALLBACK_ON_FAIL) {
     attempts.push({
       label: "FALLBACK_CLOUD_ONLY",
-      payload: { ...basePayload, cloudType: VIDEO_GPU_CLOUD_TYPE || "SECURE" },
+      payload: { ...basePayload, cloudType: VIDEO_GPU_CLOUD_TYPE || "ALL" },
     });
     attempts.push({
       label: "FALLBACK_PLAIN",
@@ -337,13 +284,12 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   let lastErr = null;
   for (const a of attempts) {
     try {
-      if (log) {
+      if (log)
         log(`createPod attempt=${a.label}`, {
           hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
           cloudType: a.payload.cloudType || null,
           gpuCount: a.payload.gpuCount,
         });
-      }
       const created = await runpodCreatePodOnce(a.payload);
       return { ...created, attempt: a.label, used: a.payload };
     } catch (e) {
@@ -372,10 +318,12 @@ async function ensureWorkingPod(sb, log) {
   const statePodId = String(podState?.pod_id || "").trim();
 
   async function touch(status, busy = false) {
-    await sb.from(POD_STATE_TABLE).update({ status, last_used_at: nowIso, busy }).eq("id", 1);
+    await sb
+      .from(POD_STATE_TABLE)
+      .update({ status, last_used_at: nowIso, busy })
+      .eq("id", 1);
   }
 
-  // Crear pod nuevo si no hay pod_id
   if (!statePodId) {
     const created = await runpodCreatePodFromTemplate({
       name: `isabela-video-${Date.now()}`,
@@ -396,16 +344,23 @@ async function ensureWorkingPod(sb, log) {
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no llegó a RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(
+        `Pod nuevo no llegó a RUNNING: ${running.error || running.status}`
+      );
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
+    if (!ready.ok)
+      throw new Error(`Worker no listo tras crear pod: ${ready.error}`);
 
     await touch("RUNNING", false);
-    return { podId: created.podId, action: "CREADO_Y_LISTO", createAttempt: created.attempt };
+    return {
+      podId: created.podId,
+      action: "CREADO_Y_LISTO",
+      createAttempt: created.attempt,
+    };
   }
 
-  // Reusar pod existente
   try {
     await runpodGetPod(statePodId);
 
@@ -413,10 +368,12 @@ async function ensureWorkingPod(sb, log) {
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(statePodId);
-    if (!running.ok) throw new Error(`Pod no RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(`Pod no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(statePodId);
-    if (!ready.ok) throw new Error(`Worker no respondió en pod existente: ${ready.error}`);
+    if (!ready.ok)
+      throw new Error(`Worker no respondió en pod existente: ${ready.error}`);
 
     await touch("RUNNING", false);
     return { podId: statePodId, action: "REUSADO" };
@@ -425,7 +382,6 @@ async function ensureWorkingPod(sb, log) {
     log("ensureWorkingPod: pod existente falló, recreo", msg);
 
     const oldPodId = statePodId;
-
     const created = await runpodCreatePodFromTemplate({
       name: `isabela-video-${Date.now()}`,
       log,
@@ -445,15 +401,22 @@ async function ensureWorkingPod(sb, log) {
     if (st !== true) log("warn=startPod failed (ignored)", st);
 
     const running = await waitForRunning(created.podId);
-    if (!running.ok) throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
+    if (!running.ok)
+      throw new Error(`Pod nuevo no RUNNING: ${running.error || running.status}`);
 
     const ready = await waitForWorker(created.podId);
-    if (!ready.ok) throw new Error(`Worker no listo tras recrear pod: ${ready.error}`);
+    if (!ready.ok)
+      throw new Error(`Worker no listo tras recrear pod: ${ready.error}`);
 
     await touch("RUNNING", false);
 
     await runpodTerminatePod(oldPodId).catch(() => {});
-    return { podId: created.podId, action: "RECREADO", oldPodId, createAttempt: created.attempt };
+    return {
+      podId: created.podId,
+      action: "RECREADO",
+      oldPodId,
+      createAttempt: created.attempt,
+    };
   }
 }
 
@@ -463,7 +426,9 @@ async function ensureWorkingPod(sb, log) {
 async function getActiveJobForUser(sb, user_id) {
   const { data, error } = await sb
     .from(VIDEO_JOBS_TABLE)
-    .select("id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at")
+    .select(
+      "id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at"
+    )
     .eq("user_id", user_id)
     .in("status", ACTIVE_STATUSES)
     .order("created_at", { ascending: false })
@@ -474,16 +439,21 @@ async function getActiveJobForUser(sb, user_id) {
 }
 
 // ---------------------------
-// Resolver prompt final (optimizado o normal)
+// ✅ SOLO AÑADIDO: resolver prompt final (optimizado o normal)
 // ---------------------------
 function pickFinalPrompts(body) {
   const prompt = String(body?.prompt || "").trim();
   const negative = String(body?.negative_prompt || "").trim();
 
-  const useOptimized = body?.use_optimized === true || body?.useOptimized === true;
+  const useOptimized =
+    body?.use_optimized === true || body?.useOptimized === true;
 
-  const optPrompt = String(body?.optimized_prompt || body?.optimizedPrompt || "").trim();
-  const optNeg = String(body?.optimized_negative_prompt || body?.optimizedNegativePrompt || "").trim();
+  const optPrompt = String(
+    body?.optimized_prompt || body?.optimizedPrompt || ""
+  ).trim();
+  const optNeg = String(
+    body?.optimized_negative_prompt || body?.optimizedNegativePrompt || ""
+  ).trim();
 
   const usingOptimized = Boolean(useOptimized && optPrompt);
   const finalPrompt = usingOptimized ? optPrompt : prompt;
@@ -511,6 +481,7 @@ export default async function handler(req, res) {
     }
 
     const user_id = auth.user.id;
+
     const body = req.body || {};
 
     const {
@@ -524,6 +495,7 @@ export default async function handler(req, res) {
       image_base64 = null,
     } = body;
 
+    // ✅ SOLO CAMBIO: usar prompt final
     const { finalPrompt, finalNegative, usingOptimized } = pickFinalPrompts(body);
 
     if (!finalPrompt) {
@@ -532,7 +504,7 @@ export default async function handler(req, res) {
 
     const sb = sbAdmin();
 
-    // A) Si ya hay job activo, devolvelo
+    // A) Si ya hay job activo, devolvelo y NO crees otro
     const active = await getActiveJobForUser(sb, user_id);
     if (active) {
       return res.status(200).json({
@@ -540,6 +512,8 @@ export default async function handler(req, res) {
         status: "ALREADY_RUNNING",
         job_id: active.id,
         job: active,
+
+        // ✅ para UI
         using_optimized: usingOptimized,
         used_prompt: finalPrompt,
         used_negative_prompt: finalNegative,
@@ -555,6 +529,8 @@ export default async function handler(req, res) {
         ok: true,
         status: "LOCK_BUSY",
         retry_after_ms: 2500,
+
+        // ✅ para UI
         using_optimized: usingOptimized,
         used_prompt: finalPrompt,
         used_negative_prompt: finalNegative,
@@ -565,37 +541,8 @@ export default async function handler(req, res) {
 
     // 2) Ensure pod
     log("step=ENSURE_POD_BEGIN");
-    let podInfo = null;
-    try {
-      podInfo = await ensureWorkingPod(sb, log);
-      log("step=ENSURE_POD_OK", podInfo);
-    } catch (e) {
-      const msg = String(e?.message || e);
-      console.error("[GV] ensure pod error:", msg);
-
-      // liberar lock si lo teníamos
-      if (lockAcquired) {
-        try { await releaseLock(sb); } catch {}
-        lockAcquired = false;
-        log("step=LOCK_RELEASED_ON_FAIL");
-      }
-
-      // ✅ mensaje amable en vez de error feo
-      if (looksLikeNoGpuOrCapacity(msg) || msg.includes("VENV_NOT_READY")) {
-        return res.status(200).json({
-          ok: true,
-          status: "NO_GPU",
-          message: noGpuMessage(),
-          retry_after_ms: 60000,
-          using_optimized: usingOptimized,
-          used_prompt: finalPrompt,
-          used_negative_prompt: finalNegative,
-        });
-      }
-
-      // si no parece capacity, sí devolvemos error real
-      return res.status(500).json({ ok: false, error: msg });
-    }
+    const podInfo = await ensureWorkingPod(sb, log);
+    log("step=ENSURE_POD_OK", podInfo);
 
     // C) Liberar lock YA
     await releaseLock(sb);
@@ -606,6 +553,7 @@ export default async function handler(req, res) {
     const podId = podInfo.podId;
     const dispatchUrl = `${workerBaseUrl(podId)}${WORKER_ASYNC_PATH}`;
 
+    // ✅ SOLO CAMBIO: prompt final
     const payload = {
       user_id,
       mode,
@@ -633,22 +581,7 @@ export default async function handler(req, res) {
     });
 
     const tt = await rr.text().catch(() => "");
-    if (!rr.ok) {
-      const msg = `Worker dispatch failed (${rr.status}): ${tt}`;
-      // ✅ mensaje amable si worker no está listo / se cayó
-      if (looksLikeNoGpuOrCapacity(msg)) {
-        return res.status(200).json({
-          ok: true,
-          status: "NO_GPU",
-          message: noGpuMessage(),
-          retry_after_ms: 60000,
-          using_optimized: usingOptimized,
-          used_prompt: finalPrompt,
-          used_negative_prompt: finalNegative,
-        });
-      }
-      throw new Error(msg);
-    }
+    if (!rr.ok) throw new Error(`Worker dispatch failed (${rr.status}): ${tt}`);
 
     let j = null;
     try {
@@ -658,18 +591,7 @@ export default async function handler(req, res) {
     }
 
     const job_id = j?.job_id || j?.id || null;
-    if (!job_id) {
-      // ✅ no reventar con error feo
-      return res.status(200).json({
-        ok: true,
-        status: "NO_GPU",
-        message: noGpuMessage(),
-        retry_after_ms: 60000,
-        using_optimized: usingOptimized,
-        used_prompt: finalPrompt,
-        used_negative_prompt: finalNegative,
-      });
-    }
+    if (!job_id) throw new Error(`Worker no devolvió job_id. Respuesta: ${tt}`);
 
     return res.status(200).json({
       ok: true,
@@ -677,6 +599,8 @@ export default async function handler(req, res) {
       job_id,
       pod: podInfo,
       dispatch: { ok: true, url: dispatchUrl },
+
+      // ✅ para UI
       using_optimized: usingOptimized,
       used_prompt: finalPrompt,
       used_negative_prompt: finalNegative,
@@ -684,12 +608,6 @@ export default async function handler(req, res) {
   } catch (e) {
     const msg = String(e?.message || e);
     console.error("[GV] fatal:", msg);
-
-    // ✅ En vez de mostrar error feo, mensaje amable si parece capacity/GPU
-    if (looksLikeNoGpuOrCapacity(msg)) {
-      return res.status(200).json({ ok: true, status: "NO_GPU", message: noGpuMessage(), retry_after_ms: 60000 });
-    }
-
     return res.status(500).json({ ok: false, error: msg });
   } finally {
     if (lockAcquired) {
