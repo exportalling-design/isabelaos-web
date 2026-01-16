@@ -7,7 +7,8 @@
 // ✅ Si hay job activo (MISMO MODO i2v) => devuelve ese job_id
 // ✅ Payload NORMALIZADO para el worker (mode=i2v + image_base64/image_url)
 // ✅ Evita doble cobro: soporta already_billed=true
-// ✅ FIX IMPORTANTE: image_base64 normalizado a DataURL
+// ✅ FIX: image_base64 normalizado a DataURL
+// ✅ FIX: caps seguros (si MAX=0 => SIN CAP, no rompe Math.min)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -17,7 +18,7 @@ import { requireUser } from "./_auth.js";
 // =====================
 // COSTOS (JADE)
 // =====================
-const COST_IMG2VIDEO_JADES = 3; // <- AJUSTA AQUÍ
+const COST_IMG2VIDEO_JADES = parseInt(process.env.COST_IMG2VIDEO_JADES || "25", 10); // ajusta aquí
 
 // =====================
 // ENV (Supabase)
@@ -54,9 +55,32 @@ const WORKER_HEALTH_PATH = process.env.WORKER_HEALTH_PATH || "/health";
 const WORKER_ASYNC_PATH = process.env.WORKER_ASYNC_PATH || "/api/video_async";
 
 // =====================
-// VIDEO LIMITS / MODES
+// CAPS (si MAX=0 => sin cap)
 // =====================
-const MAX_STEPS = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10);
+const MAX_STEPS_RAW = parseInt(process.env.VIDEO_MAX_STEPS || "25", 10);
+const MAX_WIDTH_RAW = parseInt(process.env.VIDEO_MAX_WIDTH || "0", 10);
+const MAX_HEIGHT_RAW = parseInt(process.env.VIDEO_MAX_HEIGHT || "0", 10);
+const MAX_FRAMES_RAW = parseInt(process.env.VIDEO_MAX_FRAMES || "0", 10);
+const MAX_FPS_RAW = parseInt(process.env.VIDEO_MAX_FPS || "0", 10);
+
+const MAX_STEPS = MAX_STEPS_RAW > 0 ? MAX_STEPS_RAW : null;
+const MAX_WIDTH = MAX_WIDTH_RAW > 0 ? MAX_WIDTH_RAW : null;
+const MAX_HEIGHT = MAX_HEIGHT_RAW > 0 ? MAX_HEIGHT_RAW : null;
+const MAX_FRAMES = MAX_FRAMES_RAW > 0 ? MAX_FRAMES_RAW : null;
+const MAX_FPS = MAX_FPS_RAW > 0 ? MAX_FPS_RAW : null;
+
+// =====================
+// VIDEO DEFAULTS (si frontend no manda)
+// =====================
+const DEF_WIDTH = parseInt(process.env.VIDEO_DEF_WIDTH || "896", 10);
+const DEF_HEIGHT = parseInt(process.env.VIDEO_DEF_HEIGHT || "512", 10);
+const DEF_FRAMES = parseInt(process.env.VIDEO_DEF_FRAMES || "49", 10);
+const DEF_FPS = parseInt(process.env.VIDEO_DEF_FPS || "24", 10);
+const DEF_GUIDANCE = Number(process.env.VIDEO_DEF_GUIDANCE || "6.0");
+
+// =====================
+// FAST TEST MODE
+// =====================
 const FAST_TEST_MODE = (process.env.VIDEO_FAST_TEST_MODE || "0") === "1";
 
 // =====================
@@ -132,6 +156,12 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   } finally {
     clearTimeout(id);
   }
+}
+
+function clampIfCap(val, cap) {
+  if (typeof val !== "number" || !Number.isFinite(val)) return val;
+  if (!cap) return val; // sin cap
+  return Math.min(val, cap);
 }
 
 // =====================
@@ -341,11 +371,12 @@ async function runpodCreatePodFromTemplate({ name, log }) {
   let lastErr = null;
   for (const a of attempts) {
     try {
-      if (log) log(`[I2V] createPod attempt=${a.label}`, {
-        hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
-        cloudType: a.payload.cloudType || null,
-        gpuCount: a.payload.gpuCount,
-      });
+      if (log)
+        log(`[I2V] createPod attempt=${a.label}`, {
+          hasGpuTypeIds: Boolean(a.payload.gpuTypeIds),
+          cloudType: a.payload.cloudType || null,
+          gpuCount: a.payload.gpuCount,
+        });
       const created = await runpodCreatePodOnce(a.payload);
       return { ...created, attempt: a.label, used: a.payload };
     } catch (e) {
@@ -403,8 +434,10 @@ async function runpodWaitUntilRunning(podId) {
 
     console.log("[I2V] waitRunning status=", status || "EMPTY", "podId=", podId);
 
-    if (status.includes("RUNNING") || status.includes("READY") || status.includes("ACTIVE")) return true;
-    if (status.includes("FAILED") || status.includes("ERROR")) throw new Error("Pod entró en FAILED/ERROR");
+    if (status.includes("RUNNING") || status.includes("READY") || status.includes("ACTIVE"))
+      return true;
+    if (status.includes("FAILED") || status.includes("ERROR"))
+      throw new Error("Pod entró en FAILED/ERROR");
 
     await sleep(POLL_MS);
   }
@@ -420,7 +453,6 @@ async function createVideoJob(sb, job) {
 }
 
 async function updateVideoJob(sb, job_id, patch) {
-  // OJO: tu tabla usa job_id
   const { error } = await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("job_id", job_id);
   if (error) throw error;
 }
@@ -429,7 +461,9 @@ async function updateVideoJob(sb, job_id, patch) {
 async function getActiveJobForUserI2V(sb, user_id) {
   const { data, error } = await sb
     .from(VIDEO_JOBS_TABLE)
-    .select("job_id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at,payload")
+    .select(
+      "job_id,status,progress,eta_seconds,queue_position,video_url,error,created_at,updated_at,payload"
+    )
     .eq("user_id", user_id)
     .in("status", ACTIVE_STATUSES)
     .eq("payload->>mode", "i2v")
@@ -606,11 +640,12 @@ export default async function handler(req, res) {
 
     // ✅ NORMALIZAR BASE64 A DATAURL (evita que el worker lo lea mal)
     const normalizedImageB64 = image_b64
-      ? (String(image_b64).startsWith("data:")
-          ? String(image_b64)
-          : `data:image/jpeg;base64,${String(image_b64)}`)
+      ? String(image_b64).startsWith("data:")
+        ? String(image_b64)
+        : `data:image/jpeg;base64,${String(image_b64)}`
       : null;
 
+    // Steps (cap seguro: si MAX_STEPS=null => sin cap)
     const requestedSteps =
       typeof payloadRaw.steps === "number"
         ? payloadRaw.steps
@@ -619,7 +654,21 @@ export default async function handler(req, res) {
         : null;
 
     const safeSteps =
-      requestedSteps == null ? MAX_STEPS : Math.min(requestedSteps, MAX_STEPS);
+      requestedSteps == null
+        ? (MAX_STEPS ?? MAX_STEPS_RAW > 0 ? MAX_STEPS_RAW : 25)
+        : clampIfCap(requestedSteps, MAX_STEPS);
+
+    // Defaults + caps (sin cap si MAX_* = null)
+    const widthRaw = typeof payloadRaw.width === "number" ? payloadRaw.width : DEF_WIDTH;
+    const heightRaw = typeof payloadRaw.height === "number" ? payloadRaw.height : DEF_HEIGHT;
+    const framesRaw =
+      typeof payloadRaw.num_frames === "number" ? payloadRaw.num_frames : DEF_FRAMES;
+    const fpsRaw = typeof payloadRaw.fps === "number" ? payloadRaw.fps : DEF_FPS;
+
+    const safeWidth = clampIfCap(widthRaw, MAX_WIDTH);
+    const safeHeight = clampIfCap(heightRaw, MAX_HEIGHT);
+    const safeFrames = clampIfCap(framesRaw, MAX_FRAMES);
+    const safeFps = clampIfCap(fpsRaw, MAX_FPS);
 
     const maybeFast = FAST_TEST_MODE
       ? { steps: Math.min(safeSteps, 8), num_frames: 8, fps: 6, width: 384, height: 672 }
@@ -632,11 +681,12 @@ export default async function handler(req, res) {
       prompt: payloadRaw.prompt || "",
       negative_prompt: payloadRaw.negative_prompt || "",
 
-      width: typeof payloadRaw.width === "number" ? payloadRaw.width : 896,
-      height: typeof payloadRaw.height === "number" ? payloadRaw.height : 512,
-      num_frames: typeof payloadRaw.num_frames === "number" ? payloadRaw.num_frames : 49,
-      fps: typeof payloadRaw.fps === "number" ? payloadRaw.fps : 24,
-      guidance_scale: payloadRaw.guidance_scale ?? 6.0,
+      width: safeWidth,
+      height: safeHeight,
+      num_frames: safeFrames,
+      fps: safeFps,
+      guidance_scale:
+        payloadRaw.guidance_scale == null ? DEF_GUIDANCE : payloadRaw.guidance_scale,
 
       // ✅ fijo
       image_base64: normalizedImageB64,
@@ -736,6 +786,20 @@ export default async function handler(req, res) {
         ? { type: "FRONTEND", amount: 0 }
         : { type: "JADE", amount: COST_IMG2VIDEO_JADES },
       note: "I2V sigue generándose en el pod. Usa /api/video-status?job_id=... o /api/video-status?mode=i2v",
+      caps: {
+        max_steps: MAX_STEPS ?? 0,
+        max_width: MAX_WIDTH ?? 0,
+        max_height: MAX_HEIGHT ?? 0,
+        max_frames: MAX_FRAMES ?? 0,
+        max_fps: MAX_FPS ?? 0,
+      },
+      effective: {
+        steps: payload.steps,
+        width: payload.width,
+        height: payload.height,
+        num_frames: payload.num_frames,
+        fps: payload.fps,
+      },
     });
   } catch (e) {
     const msg = String(e?.message || e);
