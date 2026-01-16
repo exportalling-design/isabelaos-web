@@ -5,11 +5,11 @@ import { requireUser } from "./_auth.js";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const VIDEO_JOBS_TABLE = "video_jobs";
+const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
 // Para fallback si queue_position no está guardado (calcula vivo)
 const QUEUE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"];
-const ACTIVE_STATUSES = [...QUEUE_STATUSES, "RUNNING"]; // ✅ mínimo agregado
+const ACTIVE_STATUSES = [...QUEUE_STATUSES, "RUNNING"];
 
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
@@ -31,7 +31,7 @@ function shapeResponseFromJob(job) {
   const progress =
     typeof job.progress === "number"
       ? job.progress
-      : job.progress
+      : job.progress != null
       ? Number(job.progress)
       : 0;
 
@@ -49,12 +49,13 @@ function shapeResponseFromJob(job) {
       ? Number(job.eta_seconds)
       : null;
 
-  // RUNNING => cola 0
   if (status === "RUNNING") queue_position = 0;
 
   return {
     ok: true,
-    id: job.id,
+    // ✅ devolvemos ambos IDs para que el frontend sea consistente
+    id: job.id ?? null, // PK (si existe)
+    job_id: job.job_id ?? null, // ✅ el que tú usas en el flujo
     status,
     progress: Math.max(0, Math.min(100, Number(progress || 0))),
     queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
@@ -68,7 +69,7 @@ function shapeResponseFromJob(job) {
 
 export default async function handler(req, res) {
   try {
-    // ✅ Auth primero (porque ahora soportamos llamada sin jobId)
+    // ✅ Auth primero (soporta llamada sin jobId)
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
@@ -82,9 +83,8 @@ export default async function handler(req, res) {
         req.query?.id ||
         "").toString().trim();
 
-    // ✅ Nuevo: mode opcional para el fallback sin jobId
-    // (solo se usa cuando NO mandas jobId)
-    const mode = String(req.query?.mode || "").trim() || null; // "i2v" o "t2v"
+    // ✅ Nuevo: mode opcional para el fallback sin jobId ("i2v" o "t2v")
+    const mode = String(req.query?.mode || "").trim() || null;
 
     // -------------------------------------------------------
     // 0) Si NO viene jobId -> devolver job activo más reciente
@@ -98,11 +98,8 @@ export default async function handler(req, res) {
         .order("created_at", { ascending: false })
         .limit(1);
 
-      // Filtro opcional por payload.mode si lo estás guardando en JSONB
-      // No rompe nada si no existe payload o no tiene mode; solo no matchea cuando se usa.
-      if (mode) {
-        q = q.eq("payload->>mode", mode);
-      }
+      // Filtro opcional por payload.mode (JSONB)
+      if (mode) q = q.eq("payload->>mode", mode);
 
       const { data, error } = await q;
 
@@ -117,6 +114,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           id: null,
+          job_id: null,
           status: "IDLE",
           progress: 0,
           queue_position: null,
@@ -128,31 +126,47 @@ export default async function handler(req, res) {
         });
       }
 
-      // Respuesta uniforme (igual que cuando viene jobId)
-      // Nota: aquí NO calculo queue_position vivo para no meter queries extra innecesarias.
-      // Si lo quieres también aquí, te lo agrego sin tocar lo demás.
-      const shaped = shapeResponseFromJob(job);
-      return res.status(200).json(shaped);
+      return res.status(200).json(shapeResponseFromJob(job));
     }
 
     // -------------------------------------------------------
-    // 1) Buscar por PK uuid (id) (TU FLUJO ORIGINAL)
+    // 1) ✅ Buscar por job_id primero (TU FLUJO REAL)
+    // 2) Fallback: buscar por id (compatibilidad)
     // -------------------------------------------------------
-    const { data: job, error } = await sb
-      .from(VIDEO_JOBS_TABLE)
-      .select("*")
-      .eq("id", jobIdRaw)
-      .eq("user_id", user_id)
-      .single();
+    let job = null;
 
-    if (error || !job) return res.status(404).json({ ok: false, error: "Job not found" });
+    // 1) job_id
+    {
+      const r1 = await sb
+        .from(VIDEO_JOBS_TABLE)
+        .select("*")
+        .eq("job_id", jobIdRaw)
+        .eq("user_id", user_id)
+        .maybeSingle();
+
+      if (!r1.error && r1.data) job = r1.data;
+    }
+
+    // 2) id (fallback)
+    if (!job) {
+      const r2 = await sb
+        .from(VIDEO_JOBS_TABLE)
+        .select("*")
+        .eq("id", jobIdRaw)
+        .eq("user_id", user_id)
+        .maybeSingle();
+
+      if (!r2.error && r2.data) job = r2.data;
+    }
+
+    if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
 
     const status = normStatus(job.status);
 
     const progress =
       typeof job.progress === "number"
         ? job.progress
-        : job.progress
+        : job.progress != null
         ? Number(job.progress)
         : 0;
 
@@ -170,7 +184,8 @@ export default async function handler(req, res) {
         ? Number(job.eta_seconds)
         : null;
 
-    // Fallback: si no está guardado queue_position, lo calculamos en vivo (TU LÓGICA ORIGINAL)
+    // Fallback: si no está guardado queue_position, lo calculamos en vivo
+    // (ojo: esto cuenta global, si quieres por usuario/mode lo ajusto)
     if (
       (queue_position == null || Number.isNaN(queue_position)) &&
       QUEUE_STATUSES.includes(status) &&
@@ -185,12 +200,12 @@ export default async function handler(req, res) {
       if (typeof count === "number") queue_position = count + 1;
     }
 
-    // RUNNING => cola 0 (TU LÓGICA ORIGINAL)
     if (status === "RUNNING") queue_position = 0;
 
     return res.status(200).json({
       ok: true,
-      id: job.id,
+      id: job.id ?? null,
+      job_id: job.job_id ?? null, // ✅ clave para tu frontend
       status,
       progress: Math.max(0, Math.min(100, Number(progress || 0))),
       queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
