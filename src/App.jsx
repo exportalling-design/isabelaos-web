@@ -1100,6 +1100,8 @@ function LibraryView() {
 // Video desde prompt (logueado) - ASYNC REAL + PROGRESS + RESUME
 // (OPCIÓN B): NO export default (porque App.jsx ya tiene export default App)
 // + ✅ Prompt Optimizer (OpenAI) con toggle "usar optimizado"
+// + ✅ ENVÍA optimized_prompt al backend (para que llegue al worker)
+// + ✅ Muestra cuál prompt fue enviado (usado) en el cuadro de estado
 // ---------------------------------------------------------
 function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
@@ -1193,9 +1195,15 @@ function VideoFromPromptPanel({ userStatus }) {
     } catch {}
   };
 
-  const isBusyLocal = ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED", "DISPATCHED", "PENDING", "LOCK_BUSY"].includes(
-    status
-  );
+  const isBusyLocal = [
+    "IN_QUEUE",
+    "IN_PROGRESS",
+    "RUNNING",
+    "QUEUED",
+    "DISPATCHED",
+    "PENDING",
+    "LOCK_BUSY",
+  ].includes(status);
   const effectiveBusy = isBusyLocal || !!loadJobId();
 
   const formatEta = (s) => {
@@ -1216,11 +1224,20 @@ function VideoFromPromptPanel({ userStatus }) {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optError, setOptError] = useState("");
 
+  // ✅ Para mostrar el prompt realmente enviado al motor
+  const [usedPrompt, setUsedPrompt] = useState("");
+  const [usedNegative, setUsedNegative] = useState("");
+  const [usedWasOptimized, setUsedWasOptimized] = useState(false);
+
   // Invalida optimizado si cambian los originales
   useEffect(() => {
     setOptimizedPrompt("");
     setOptimizedNegative("");
     setOptError("");
+    // si cambian prompt/negative, también limpiamos "used"
+    setUsedPrompt("");
+    setUsedNegative("");
+    setUsedWasOptimized(false);
   }, [prompt, negative]);
 
   const handleOptimize = async () => {
@@ -1352,6 +1369,11 @@ function VideoFromPromptPanel({ userStatus }) {
     setQueuePos(null);
     setEtaSeconds(null);
 
+    // limpiar “used prompt” en cada intento nuevo
+    setUsedPrompt("");
+    setUsedNegative("");
+    setUsedWasOptimized(false);
+
     if (!canUse) {
       setStatus("ERROR");
       setStatusText("Debes iniciar sesión.");
@@ -1380,7 +1402,12 @@ function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeadersGlobal();
       if (!auth.Authorization) throw new Error("No hay sesión/token.");
 
-      const { finalPrompt, finalNegative } = getEffectivePrompts();
+      const { finalPrompt, finalNegative, usingOptimized } = getEffectivePrompts();
+
+      // ✅ Mostrar en UI cuál prompt va a enviarse (sin cambiar diseño)
+      setUsedPrompt(finalPrompt);
+      setUsedNegative(finalNegative);
+      setUsedWasOptimized(usingOptimized);
 
       // 1) Crear job (puede devolver LOCK_BUSY)
       let jid = null;
@@ -1397,9 +1424,18 @@ function VideoFromPromptPanel({ userStatus }) {
           headers: { "Content-Type": "application/json", ...auth },
           body: JSON.stringify({
             mode: "t2v",
+
+            // ✅ seguimos mandando prompt/negative como antes (compatibilidad),
+            // pero además mandamos la info del optimizado para que el backend
+            // lo use y lo pase al worker cuando el toggle está activo:
             prompt: finalPrompt,
             negative_prompt: finalNegative,
             steps: Number(steps),
+
+            // ✅ NUEVO (mínimo): el backend decide si usa optimized o no
+            use_optimized: usingOptimized,
+            optimized_prompt: optimizedPrompt,
+            optimized_negative_prompt: optimizedNegative,
           }),
         });
 
@@ -1415,6 +1451,17 @@ function VideoFromPromptPanel({ userStatus }) {
 
         if (!data.ok || !data.job_id) {
           throw new Error(data?.error || "No se recibió job_id.");
+        }
+
+        // ✅ Si el backend devuelve qué prompt usó, lo reflejamos
+        if (typeof data.used_prompt === "string" && data.used_prompt.trim()) {
+          setUsedPrompt(data.used_prompt.trim());
+        }
+        if (typeof data.used_negative_prompt === "string") {
+          setUsedNegative(String(data.used_negative_prompt || "").trim());
+        }
+        if (typeof data.using_optimized === "boolean") {
+          setUsedWasOptimized(data.using_optimized);
         }
 
         const action = data?.pod?.action || "";
@@ -1498,7 +1545,6 @@ function VideoFromPromptPanel({ userStatus }) {
           throw new Error(stData.error || "Error al generar el video.");
         }
 
-        // status desconocido => error
         throw new Error(stData.error || `Estado inesperado: ${st}`);
       }
     } catch (err) {
@@ -1549,6 +1595,14 @@ function VideoFromPromptPanel({ userStatus }) {
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
 
+          {/* ✅ NUEVO: mostrar el prompt realmente enviado */}
+          {usedPrompt?.trim()?.length > 0 && (
+            <div className="mt-1 text-[10px] text-neutral-400">
+              Prompt enviado {usedWasOptimized ? "(optimizado)" : ""}:{" "}
+              <span className="text-neutral-200">{usedPrompt.trim()}</span>
+            </div>
+          )}
+
           {queuePos != null && status !== "RUNNING" && status !== "COMPLETED" && (
             <div className="mt-1 text-[10px] text-neutral-400">
               Cola: <span className="font-semibold text-white">{queuePos}</span>
@@ -1570,7 +1624,10 @@ function VideoFromPromptPanel({ userStatus }) {
                 />
               </div>
               <div className="mt-1 text-[10px] text-neutral-400">
-                Progreso: <span className="font-semibold text-white">{Math.max(0, Math.min(100, progress))}%</span>
+                Progreso:{" "}
+                <span className="font-semibold text-white">
+                  {Math.max(0, Math.min(100, progress))}%
+                </span>
               </div>
             </div>
           )}
@@ -1585,7 +1642,7 @@ function VideoFromPromptPanel({ userStatus }) {
               onChange={(e) => setPrompt(e.target.value)}
             />
 
-            {/* ✅ NUEVO: Mostrar prompt optimizado debajo del cuadro */}
+            {/* ✅ Mostrar prompt optimizado debajo del cuadro */}
             {optimizedPrompt?.trim()?.length > 0 && (
               <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
                 <div className="text-[10px] text-neutral-400">
@@ -1606,7 +1663,7 @@ function VideoFromPromptPanel({ userStatus }) {
               onChange={(e) => setNegative(e.target.value)}
             />
 
-            {/* ✅ NUEVO: Mostrar negative optimizado debajo del cuadro */}
+            {/* ✅ Mostrar negative optimizado debajo del cuadro */}
             {optimizedNegative?.trim()?.length > 0 && (
               <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
                 <div className="text-[10px] text-neutral-400">
@@ -1619,7 +1676,7 @@ function VideoFromPromptPanel({ userStatus }) {
             )}
           </div>
 
-          {/* ✅ Optimizer UI (igual al actual) */}
+          {/* ✅ Optimizer UI (mismo cuadro) */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
@@ -1660,7 +1717,9 @@ function VideoFromPromptPanel({ userStatus }) {
 
             {optimizedPrompt ? (
               <div className="mt-2">
-                <div className="text-[10px] text-neutral-400">Prompt optimizado (se envía al motor si está activo):</div>
+                <div className="text-[10px] text-neutral-400">
+                  Prompt optimizado (se envía al motor si está activo):
+                </div>
                 <div className="mt-1 max-h-24 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
                   {optimizedPrompt}
                 </div>
@@ -1672,11 +1731,14 @@ function VideoFromPromptPanel({ userStatus }) {
               </div>
             ) : (
               <div className="mt-2 text-[10px] text-neutral-500">
-                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés) manteniendo tu idea.
+                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés)
+                manteniendo tu idea.
               </div>
             )}
 
-            {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
+            {optError && (
+              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
