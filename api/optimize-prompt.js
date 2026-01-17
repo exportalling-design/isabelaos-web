@@ -51,6 +51,9 @@ export default async function handler(req, res) {
       "camera: slow push-in (or subtle handheld), shallow depth of field, crisp focus on eyes",
       "50mm lens, f/1.8, soft key light + subtle rim light, professional commercial look",
       "vertical framing if requested, otherwise keep the user's framing",
+      // ✅ NUEVO: mantener sujeto siempre en encuadre
+      "subject stays fully in frame at all times, centered composition, head and torso remain visible, no cropping, no off-frame movement",
+      "camera keeps subject centered, auto-framing/subject tracking, no drifting out of frame",
     ].join(", ");
 
     const BASE_NEGATIVE = [
@@ -62,6 +65,8 @@ export default async function handler(req, res) {
       "bad anatomy, deformed face, distorted hands, extra fingers, duplicated face",
       // problemas temporales de video
       "flicker, jitter, temporal wobble, frame skipping, ghosting, motion artifacts, warping",
+      // ✅ NUEVO: evitar que se salga del cuadro / recortes
+      "out of frame, off-frame, subject leaving frame, cropped head, cropped face, cut off body, extreme close-up, accidental zoom, camera drift",
     ].join(", ");
 
     const completionRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -75,21 +80,21 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content:
-              [
-                "You are a PROMPT OPTIMIZER for VIDEO DIFFUSION (text-to-video / image-to-video).",
-                "Goal: maximize realism and cinematic quality, and improve TEMPORAL STABILITY (reduce flicker/jitter).",
-                "Return ONLY valid JSON with EXACT keys: {\"prompt\":\"...\",\"negative\":\"...\"}. No markdown, no extra text.",
-                "",
-                "Rules:",
-                "- Keep the user's idea and subject. Do NOT change the meaning.",
-                "- Output in ENGLISH.",
-                "- Add concrete camera/lighting/motion details when missing (lens, DOF, camera move, micro-movements).",
-                "- Add temporal stability constraints (no flicker/jitter/temporal wobble).",
-                "- Do NOT add graphic violence. Do NOT add minors.",
-                "- Keep prompt concise but strong (1–3 sentences).",
-                "- Negative prompt should include temporal artifact blockers.",
-              ].join("\n"),
+            content: [
+              "You are a PROMPT OPTIMIZER for VIDEO DIFFUSION (text-to-video / image-to-video).",
+              "Goal: maximize realism and cinematic quality, improve TEMPORAL STABILITY (reduce flicker/jitter), and KEEP THE SUBJECT FULLY IN FRAME at all times (no drifting/cropping).",
+              'Return ONLY valid JSON with EXACT keys: {"prompt":"...","negative":"..."}. No markdown, no extra text.',
+              "",
+              "Rules:",
+              "- Keep the user's idea and subject. Do NOT change the meaning.",
+              "- Output in ENGLISH.",
+              "- Add concrete camera/lighting/motion details when missing (lens, DOF, camera move, micro-movements).",
+              "- Add temporal stability constraints (no flicker/jitter/temporal wobble).",
+              "- Add framing constraints: subject stays centered and fully visible; camera tracks subject; no out-of-frame/cropping.",
+              "- Do NOT add graphic violence. Do NOT add minors.",
+              "- Keep prompt concise but strong (1–3 sentences).",
+              "- Negative prompt should include temporal artifact blockers and out-of-frame blockers.",
+            ].join("\n"),
           },
           {
             role: "user",
