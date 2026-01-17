@@ -4,6 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 import { requireUser } from "./_auth.js";
 
 // =========================================================
+// FORZAR SIEMPRE IMG2VIDEO (para que NO use el modelo T2V)
+// =========================================================
+const FORCED_MODE = "i2v"; // <- clave: nunca se toma del frontend
+
+// =========================================================
 // ENV (Supabase)
 // =========================================================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -133,7 +138,7 @@ async function getActiveJobForUserI2V(sb, user_id) {
     .select("*")
     .eq("user_id", user_id)
     .in("status", ["QUEUED", "DISPATCHED", "IN_PROGRESS", "RUNNING", "PENDING", "IN_QUEUE"])
-    .eq("payload->>mode", "i2v")
+    .eq("payload->>mode", FORCED_MODE) // <- forzado
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -336,9 +341,7 @@ async function runpodCreatePodFromTemplate({ name, log }) {
 }
 
 // =========================================================
-// Enforce SINGLE POD: si pod_state tiene pod_id, ese es el único válido.
-// Si por algún motivo hay otro en el sistema, lo mata autosleep.
-// Aquí solo garantizamos pod_state.
+// Ensure pod (fail-fast). NO crea 2 pods en un mismo request.
 // =========================================================
 async function ensureWorkingPodFast(sb, log) {
   const nowIso = new Date().toISOString();
@@ -346,7 +349,6 @@ async function ensureWorkingPodFast(sb, log) {
 
   const statePodId = String(ps?.pod_id || "").trim();
 
-  // helper: limpiar estado si algo falla
   async function clearStateWithError(msg) {
     await patchPodState(sb, {
       pod_id: null,
@@ -358,7 +360,6 @@ async function ensureWorkingPodFast(sb, log) {
     });
   }
 
-  // 1) si NO hay pod, crea
   if (!statePodId) {
     const created = await runpodCreatePodFromTemplate({ name: `isabela-video-${Date.now()}`, log });
     await patchPodState(sb, { pod_id: created.podId, status: "STARTING", busy: false, last_used_at: nowIso });
@@ -390,7 +391,6 @@ async function ensureWorkingPodFast(sb, log) {
     return { podId: created.podId, workerUrl, action: "CREATED" };
   }
 
-  // 2) hay pod -> intentar arrancar rápido
   try {
     await runpodGetPod(statePodId);
 
@@ -409,14 +409,18 @@ async function ensureWorkingPodFast(sb, log) {
     return { podId: statePodId, workerUrl, action: "REUSED" };
   } catch (e) {
     const msg = String(e?.message || e);
-    log?.("ensureWorkingPodFast failed -> terminate & recreate", msg);
+    log?.("ensureWorkingPodFast failed -> terminate & clear", msg);
 
-    // TERMINATE el pod viejo y limpiar
     await runpodTerminatePod(statePodId).catch(() => {});
-    await patchPodState(sb, { pod_id: null, worker_url: null, status: "IDLE", busy: false, last_error: `terminated bad pod: ${msg}`, last_used_at: nowIso });
+    await patchPodState(sb, {
+      pod_id: null,
+      worker_url: null,
+      status: "IDLE",
+      busy: false,
+      last_error: `terminated bad pod: ${msg}`,
+      last_used_at: nowIso,
+    });
 
-    // aquí NO volvemos a crear dentro del mismo request si falló,
-    // para no hacer que el usuario espere.
     const err = new Error("El pod falló al iniciar. Intenta de nuevo.");
     err.retryable = true;
     throw err;
@@ -456,12 +460,10 @@ export default async function handler(req, res) {
   let lockAcquired = false;
 
   try {
-    // AUTH
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
-    // evitar duplicado
     const activeI2V = await getActiveJobForUserI2V(sb, user_id);
     if (activeI2V) {
       return res.status(200).json({
@@ -474,7 +476,10 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
-    // image
+    // ✅ BLOQUEO: si el frontend intenta mandar "mode", se ignora. Siempre i2v.
+    // (esto evita que por error el worker abra t2v)
+    // const clientMode = body.mode; // <- NO SE USA
+
     const image_base64 =
       body.image_base64 ||
       body.imageBase64 ||
@@ -501,7 +506,6 @@ export default async function handler(req, res) {
           : `data:image/jpeg;base64,${String(image_base64)}`)
       : null;
 
-    // caps
     const requestedSteps =
       typeof body.steps === "number"
         ? body.steps
@@ -526,9 +530,19 @@ export default async function handler(req, res) {
       ? { steps: Math.min(safeSteps, 8), num_frames: 8, fps: 6, width: 384, height: 672 }
       : { steps: safeSteps };
 
+    // =====================================================
+    // ✅ PAYLOAD FORZADO A IMG2VIDEO:
+    // - mode: "i2v" siempre
+    // - model_hint / pipeline_hint: ayuda al worker a NO abrir T2V
+    //   (si tu worker no usa estos campos, no estorban)
+    // =====================================================
     const payload = {
       user_id,
-      mode: "i2v",
+      mode: FORCED_MODE,
+      model_hint: "img2video",
+      pipeline_hint: "i2v",
+      force_i2v: true,
+
       prompt: body.prompt || "",
       negative_prompt: body.negative_prompt || body.negative || "",
       width,
@@ -541,13 +555,11 @@ export default async function handler(req, res) {
       ...maybeFast,
     };
 
-    // cobro backend si no viene already_billed
     const alreadyBilled = body.already_billed === true;
     if (!alreadyBilled) {
       await spendJadesOrThrow(sb, user_id, COST_IMG2VIDEO_JADES, "generation:img2video", body.ref || null);
     }
 
-    // LOCK corto solo para ensure pod
     const lock = await tryAcquireLockAtomic(sb, WAKE_LOCK_SECONDS);
     if (!lock.ok) {
       return res.status(200).json({
@@ -573,7 +585,7 @@ export default async function handler(req, res) {
       job_id,
       user_id,
       status: "QUEUED",
-      payload,
+      payload, // <- queda guardado con mode=i2v
       pod_id: ensured.podId,
       worker_url: ensured.workerUrl,
       created_at: new Date().toISOString(),
@@ -585,9 +597,12 @@ export default async function handler(req, res) {
     await patchPodState(sb, { status: "BUSY", busy: true, last_used_at: new Date().toISOString() });
     await updateVideoJob(sb, job_id, { status: "DISPATCHED", updated_at: new Date().toISOString() });
 
+    // ✅ DISPATCH: también forzamos mode=i2v en el POST (por si el worker usa body.mode directo)
+    const dispatchBody = { job_id, ...payload, mode: FORCED_MODE };
+
     const r = await fetchWithTimeout(
       dispatchUrl,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id, ...payload }) },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dispatchBody) },
       DISPATCH_TIMEOUT_MS
     );
 
@@ -599,7 +614,6 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString(),
       });
 
-      // Si dispatch falló, TERMINATE para que el siguiente intento sea limpio
       await runpodTerminatePod(ensured.podId).catch(() => {});
       await patchPodState(sb, {
         pod_id: null,
@@ -618,7 +632,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ok
     await updateVideoJob(sb, job_id, { status: "IN_PROGRESS", updated_at: new Date().toISOString() }).catch(() => {});
     await patchPodState(sb, { status: "RUNNING", busy: false, last_used_at: new Date().toISOString() }).catch(() => {});
 
@@ -628,12 +641,12 @@ export default async function handler(req, res) {
       status: "IN_PROGRESS",
       worker: ensured.workerUrl,
       billed: alreadyBilled ? { type: "FRONTEND", amount: 0 } : { type: "JADE", amount: COST_IMG2VIDEO_JADES },
+      mode: FORCED_MODE,
     });
   } catch (e) {
     const msg = String(e?.message || e);
     const retryable = Boolean(e?.retryable);
 
-    // respuesta suave (no rojo)
     return res.status(200).json({
       ok: false,
       retryable,
