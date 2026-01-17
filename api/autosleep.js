@@ -1,25 +1,33 @@
 // /api/autosleep.js
 import { createClient } from "@supabase/supabase-js";
 
+// -------------------- ENV: Supabase --------------------
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
+// -------------------- ENV: RunPod --------------------
+const RUNPOD_API_KEY =
+  process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
 
-// ✅ default 5 min
+// ✅ default 5 min (tu regla)
 const AUTOSLEEP_IDLE_MINUTES = parseInt(process.env.AUTOSLEEP_IDLE_MINUTES || "5", 10);
 
-// ✅ si un job está "activo" pero no se ha actualizado en X min → se considera zombi
+// ✅ si hay job “activo” pero no se actualiza en X min → zombi
 const STALE_JOB_MINUTES = parseInt(process.env.STALE_JOB_MINUTES || "15", 10);
 
-// ✅ opcional: pausar pods huérfanos con prefijo (0=off, 1=on)
+// ✅ lock seconds (corto)
+const AUTOSLEEP_LOCK_SECONDS = parseInt(process.env.AUTOSLEEP_LOCK_SECONDS || "90", 10);
+
+// ✅ opcional: limpiar pods huérfanos
 const CLEANUP_ORPHAN_PODS = (process.env.CLEANUP_ORPHAN_PODS || "0") === "1";
 const ORPHAN_POD_NAME_PREFIX = process.env.ORPHAN_POD_NAME_PREFIX || "isabela-video-";
 
+// -------------------- Tablas --------------------
 const POD_STATE_TABLE = "pod_state";
 const POD_LOCK_TABLE = "pod_lock";
 const VIDEO_JOBS_TABLE = "video_jobs";
 
+// “Activos” = si hay alguno fresco, NO dormimos.
 const ACTIVE_STATUSES = ["QUEUED", "DISPATCHED", "IN_PROGRESS", "PENDING", "RUNNING"];
 
 function sbAdmin() {
@@ -38,6 +46,11 @@ function runpodHeaders() {
   };
 }
 
+function minutesBetween(a, b) {
+  return Math.abs(a.getTime() - b.getTime()) / 60000;
+}
+
+// -------------------- RunPod stop/list (REST) --------------------
 async function runpodStopPod(podId) {
   const r = await fetch(`https://rest.runpod.io/v1/pods/${podId}/stop`, {
     method: "POST",
@@ -62,33 +75,29 @@ async function runpodListPods(limit = 50) {
   }
 }
 
-// Mini-lock: usa fila id=1 en pod_lock. (Asume que ya existe.)
-// Si no existe, la crea una sola vez de forma segura.
+// -------------------- Lock (pod_lock.id=1) --------------------
 async function ensureLockRow(sb) {
   const { data, error } = await sb.from(POD_LOCK_TABLE).select("id").eq("id", 1).maybeSingle();
   if (error) throw error;
   if (data) return true;
 
-  // crear fila id=1
   const { error: insErr } = await sb.from(POD_LOCK_TABLE).insert([
     { id: 1, locked_until: new Date(0).toISOString() },
   ]);
+
   if (insErr) {
-    // si otro proceso la creó al mismo tiempo, ignoramos
     const msg = String(insErr?.message || insErr);
     if (!msg.toLowerCase().includes("duplicate")) throw insErr;
   }
   return true;
 }
 
-// Lock: tomar si expiró
-async function tryAcquireLock(sb, seconds = 120) {
+async function tryAcquireLock(sb, seconds = 90) {
   await ensureLockRow(sb);
 
   const nowIso = new Date().toISOString();
   const untilIso = new Date(Date.now() + seconds * 1000).toISOString();
 
-  // ✅ intento "semi-atómico": solo actualiza si locked_until <= now
   const { data, error } = await sb
     .from(POD_LOCK_TABLE)
     .update({ locked_until: untilIso })
@@ -103,15 +112,28 @@ async function tryAcquireLock(sb, seconds = 120) {
   return { ok: true, locked_until: data.locked_until };
 }
 
-function minutesBetween(a, b) {
-  return Math.abs(a.getTime() - b.getTime()) / 60000;
+async function releaseLock(sb) {
+  const pastIso = new Date(Date.now() - 1000).toISOString();
+  const { error } = await sb.from(POD_LOCK_TABLE).update({ locked_until: pastIso }).eq("id", 1);
+  if (error) throw error;
 }
 
+// -------------------- Main --------------------
 export default async function handler(req, res) {
-  try {
-    const sb = sbAdmin();
+  let sb = null;
+  let lockAcquired = false;
 
-    // 1) leer pod_state
+  try {
+    sb = sbAdmin();
+
+    // 0) lock para que no choque con ensureWorkingPod()
+    const lock = await tryAcquireLock(sb, AUTOSLEEP_LOCK_SECONDS);
+    if (!lock.ok) {
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "lock active" });
+    }
+    lockAcquired = true;
+
+    // 1) leer pod_state (fila id=1)
     const { data: podState, error: psErr } = await sb
       .from(POD_STATE_TABLE)
       .select("*")
@@ -125,24 +147,26 @@ export default async function handler(req, res) {
     const busy = Boolean(podState?.busy);
     const status = String(podState?.status || "").toUpperCase();
 
-    // 2) si está ocupado, no dormir
+    // 2) si el pod está marcado busy => no dormir
     if (busy || status === "BUSY") {
-      return res.status(200).json({ ok: true, action: "SKIP", reason: "pod ocupado (busy/status)" });
+      return res.status(200).json({ ok: true, action: "SKIP", reason: "pod busy" });
     }
 
-    // 3) check jobs activos, pero ignorar zombis (stale)
+    // 3) jobs activos recientes vs zombis
     const { data: activeJobs, error: ajErr } = await sb
       .from(VIDEO_JOBS_TABLE)
-      .select("id,status,updated_at,created_at,worker_id,error")
+      .select("id,job_id,status,updated_at,created_at,error")
       .in("status", ACTIVE_STATUSES)
       .order("updated_at", { ascending: false })
-      .limit(5);
+      .limit(10);
     if (ajErr) throw ajErr;
 
     const now = new Date();
+
     const freshActive = (activeJobs || []).filter((j) => {
       const u = j?.updated_at ? new Date(j.updated_at) : null;
-      if (!u) return true; // si no hay updated_at, lo tratamos como activo para no matar un job raro
+      // si no hay updated_at, lo tratamos como activo para no matar algo raro
+      if (!u) return true;
       return minutesBetween(now, u) <= STALE_JOB_MINUTES;
     });
 
@@ -154,17 +178,16 @@ export default async function handler(req, res) {
         ok: true,
         action: "SKIP",
         reason: "hay jobs activos (frescos)",
-        sample: freshActive[0],
         stale_detected: staleActive.length,
       });
     }
 
-    // ✅ opcional: si hay zombis, marcarlos ERROR para desbloquear el sistema
-    // (esto evita que el sistema quede “para siempre” con PENDING/RUNNING)
+    // ✅ si hay zombis, marcarlos ERROR para liberar el sistema
+    let staleCleaned = 0;
     if (staleActive.length > 0) {
       const ids = staleActive.map((j) => j.id).filter(Boolean);
       if (ids.length > 0) {
-        await sb
+        const { error: updErr } = await sb
           .from(VIDEO_JOBS_TABLE)
           .update({
             status: "ERROR",
@@ -172,6 +195,8 @@ export default async function handler(req, res) {
             updated_at: new Date().toISOString(),
           })
           .in("id", ids);
+
+        if (!updErr) staleCleaned = ids.length;
       }
     }
 
@@ -180,8 +205,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         action: "SKIP",
-        reason: "no hay pod_id (pod_state vacío)",
-        stale_cleaned: staleActive.length,
+        reason: "pod_state sin pod_id",
+        stale_cleaned: staleCleaned,
       });
     }
 
@@ -195,40 +220,28 @@ export default async function handler(req, res) {
         reason: "aún no está idle",
         idle_minutes: idleMin,
         threshold_minutes: AUTOSLEEP_IDLE_MINUTES,
-        stale_cleaned: staleActive.length,
+        stale_cleaned: staleCleaned,
       });
     }
 
-    // 6) toma mini-lock
-    const lock = await tryAcquireLock(sb, 120);
-    if (!lock.ok) {
-      return res.status(200).json({
-        ok: true,
-        action: "SKIP",
-        reason: "lock active",
-        stale_cleaned: staleActive.length,
-      });
-    }
-
-    // 7) STOP pod principal
+    // 6) STOP pod principal
     await runpodStopPod(podId);
 
-    // 8) actualizar pod_state
+    // 7) actualizar pod_state
     await sb
       .from(POD_STATE_TABLE)
       .update({
         status: "SLEEPING",
         busy: false,
         last_used_at: now.toISOString(),
+        updated_at: now.toISOString(),
       })
       .eq("id", 1);
 
-    // 9) opcional: cleanup pods huérfanos (si tu sistema a veces crea pods extra)
+    // 8) cleanup huérfanos (opcional)
     let orphanStopped = [];
     if (CLEANUP_ORPHAN_PODS) {
       const list = await runpodListPods(50);
-
-      // runpod devuelve diferentes formas; intentamos encontrar array
       const pods =
         list?.pods ||
         list?.data ||
@@ -239,11 +252,9 @@ export default async function handler(req, res) {
         const id = p?.id || p?.podId || p?.pod?.id;
         const name = p?.name || p?.pod?.name || "";
         if (!id || !name) continue;
-
-        if (id === podId) continue; // ya paramos el principal
+        if (id === podId) continue;
 
         if (String(name).startsWith(ORPHAN_POD_NAME_PREFIX)) {
-          // best-effort: los pausamos (si ya estaban parados, runpod puede responder error)
           try {
             await runpodStopPod(id);
             orphanStopped.push({ id, name });
@@ -257,11 +268,17 @@ export default async function handler(req, res) {
       action: "STOPPED",
       podId,
       idle_minutes: idleMin,
-      stale_cleaned: staleActive.length,
+      stale_cleaned: staleCleaned,
       orphanStopped,
     });
   } catch (e) {
     const msg = String(e?.message || e);
     return res.status(500).json({ ok: false, error: msg });
+  } finally {
+    if (lockAcquired && sb) {
+      try {
+        await releaseLock(sb);
+      } catch (_) {}
+    }
   }
 }
