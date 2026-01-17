@@ -53,9 +53,9 @@ function shapeResponseFromJob(job) {
 
   return {
     ok: true,
-    // ✅ devolvemos ambos IDs para que el frontend sea consistente
-    id: job.id ?? null,        // PK (si existe)
-    job_id: job.job_id ?? null, // ✅ el que tú usas en el flujo
+    // devolvemos ambos IDs
+    id: job.id ?? null, // PK (si existe)
+    job_id: job.job_id ?? null, // el de tu flujo
     status,
     progress: Math.max(0, Math.min(100, Number(progress || 0))),
     queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
@@ -64,26 +64,29 @@ function shapeResponseFromJob(job) {
     error: job.error || null,
     created_at: job.created_at || null,
     updated_at: job.updated_at || null,
+    mode: job.mode || (job.payload?.mode ?? null),
   };
 }
 
 export default async function handler(req, res) {
   try {
-    // ✅ Auth primero (soporta llamada sin jobId)
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
 
     const sb = sbAdmin();
 
-    const jobIdRaw =
-      (req.query?.jobId ||
-        req.query?.job_id ||
-        req.query?.jobID ||
-        req.query?.id ||
-        "").toString().trim();
+    const jobIdRaw = (
+      req.query?.jobId ||
+      req.query?.job_id ||
+      req.query?.jobID ||
+      req.query?.id ||
+      ""
+    )
+      .toString()
+      .trim();
 
-    // ✅ Nuevo: mode opcional para el fallback sin jobId ("i2v" o "t2v")
+    // mode opcional ("i2v" / "t2v") para fallback sin jobId
     const mode = String(req.query?.mode || "").trim() || null;
 
     // -------------------------------------------------------
@@ -98,18 +101,52 @@ export default async function handler(req, res) {
         .order("created_at", { ascending: false })
         .limit(1);
 
-      // Filtro opcional por payload.mode (JSONB)
-      if (mode) q = q.eq("payload->>mode", mode);
+      if (mode) {
+        // primero intenta por columna mode si existe
+        q = q.eq("mode", mode);
+      }
 
       const { data, error } = await q;
-
       if (error) {
+        // fallback por payload->>mode si tu tabla no tiene columna mode
+        if (mode) {
+          const q2 = await sb
+            .from(VIDEO_JOBS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .in("status", ACTIVE_STATUSES)
+            .eq("payload->>mode", mode)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+          if (q2.error) {
+            return res.status(500).json({ ok: false, error: q2.error.message || "DB error" });
+          }
+          const job2 = q2.data?.[0] || null;
+          if (!job2) {
+            return res.status(200).json({
+              ok: true,
+              id: null,
+              job_id: null,
+              status: "IDLE",
+              progress: 0,
+              queue_position: null,
+              eta_seconds: null,
+              video_url: null,
+              error: null,
+              created_at: null,
+              updated_at: null,
+              mode,
+            });
+          }
+          return res.status(200).json(shapeResponseFromJob(job2));
+        }
+
         return res.status(500).json({ ok: false, error: error.message || "DB error" });
       }
 
       const job = data?.[0] || null;
 
-      // Si no hay job activo, responde IDLE (sin romper UI)
       if (!job) {
         return res.status(200).json({
           ok: true,
@@ -123,6 +160,7 @@ export default async function handler(req, res) {
           error: null,
           created_at: null,
           updated_at: null,
+          mode,
         });
       }
 
@@ -130,7 +168,7 @@ export default async function handler(req, res) {
     }
 
     // -------------------------------------------------------
-    // 1) ✅ Buscar por job_id primero (TU FLUJO REAL)
+    // 1) Buscar por job_id primero (TU FLUJO REAL)
     // 2) Fallback: buscar por id (compatibilidad)
     // -------------------------------------------------------
     let job = null;
@@ -163,30 +201,10 @@ export default async function handler(req, res) {
 
     const status = normStatus(job.status);
 
-    const progress =
-      typeof job.progress === "number"
-        ? job.progress
-        : job.progress != null
-        ? Number(job.progress)
-        : 0;
-
-    let queue_position =
-      typeof job.queue_position === "number"
-        ? job.queue_position
-        : job.queue_position != null
-        ? Number(job.queue_position)
-        : null;
-
-    let eta_seconds =
-      typeof job.eta_seconds === "number"
-        ? job.eta_seconds
-        : job.eta_seconds != null
-        ? Number(job.eta_seconds)
-        : null;
-
     // Fallback: si no está guardado queue_position, lo calculamos en vivo
+    // (global; si querés por mode/usuario lo hacemos)
     if (
-      (queue_position == null || Number.isNaN(queue_position)) &&
+      (job.queue_position == null || Number.isNaN(Number(job.queue_position))) &&
       QUEUE_STATUSES.includes(status) &&
       job.created_at
     ) {
@@ -196,24 +214,12 @@ export default async function handler(req, res) {
         .in("status", QUEUE_STATUSES)
         .lt("created_at", job.created_at);
 
-      if (typeof count === "number") queue_position = count + 1;
+      if (typeof count === "number") {
+        job.queue_position = count + 1;
+      }
     }
 
-    if (status === "RUNNING") queue_position = 0;
-
-    return res.status(200).json({
-      ok: true,
-      id: job.id ?? null,
-      job_id: job.job_id ?? null, // ✅ clave para tu frontend
-      status,
-      progress: Math.max(0, Math.min(100, Number(progress || 0))),
-      queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
-      eta_seconds: eta_seconds != null ? Math.max(0, Number(eta_seconds)) : null,
-      video_url: job.video_url || null,
-      error: job.error || null,
-      created_at: job.created_at || null,
-      updated_at: job.updated_at || null,
-    });
+    return res.status(200).json(shapeResponseFromJob(job));
   } catch (e) {
     console.error("[video-status] fatal:", e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
