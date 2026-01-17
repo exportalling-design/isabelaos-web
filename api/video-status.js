@@ -53,9 +53,8 @@ function shapeResponseFromJob(job) {
 
   return {
     ok: true,
-    // ✅ devolvemos ambos IDs para que el frontend sea consistente
-    id: job.id ?? null, // PK (si existe)
-    job_id: job.job_id ?? null, // ✅ el que tú usas en el flujo
+    id: job.id ?? null, // PK si existe
+    job_id: job.job_id ?? null, // TU ID real
     status,
     progress: Math.max(0, Math.min(100, Number(progress || 0))),
     queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
@@ -69,7 +68,7 @@ function shapeResponseFromJob(job) {
 
 export default async function handler(req, res) {
   try {
-    // ✅ Auth primero (soporta llamada sin jobId)
+    // Auth primero
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const user_id = auth.user.id;
@@ -83,7 +82,7 @@ export default async function handler(req, res) {
         req.query?.id ||
         "").toString().trim();
 
-    // ✅ Nuevo: mode opcional para el fallback sin jobId ("i2v" o "t2v")
+    // mode opcional para fallback sin jobId ("i2v" o "t2v")
     const mode = String(req.query?.mode || "").trim() || null;
 
     // -------------------------------------------------------
@@ -130,8 +129,8 @@ export default async function handler(req, res) {
     }
 
     // -------------------------------------------------------
-    // 1) ✅ Buscar por job_id primero (TU FLUJO REAL)
-    // 2) Fallback: buscar por id (compatibilidad)
+    // 1) Buscar por job_id primero (TU FLUJO REAL)
+    // 2) Fallback: buscar por id (compat)
     // -------------------------------------------------------
     let job = null;
 
@@ -147,7 +146,7 @@ export default async function handler(req, res) {
       if (!r1.error && r1.data) job = r1.data;
     }
 
-    // 2) id (fallback)
+    // 2) id fallback
     if (!job) {
       const r2 = await sb
         .from(VIDEO_JOBS_TABLE)
@@ -184,8 +183,7 @@ export default async function handler(req, res) {
         ? Number(job.eta_seconds)
         : null;
 
-    // Fallback: si no está guardado queue_position, lo calculamos en vivo
-    // (ojo: esto cuenta global, si quieres por usuario/mode lo ajusto)
+    // Fallback: calcular queue_position si no está guardado
     if (
       (queue_position == null || Number.isNaN(queue_position)) &&
       QUEUE_STATUSES.includes(status) &&
@@ -205,7 +203,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       id: job.id ?? null,
-      job_id: job.job_id ?? null, // ✅ clave para tu frontend
+      job_id: job.job_id ?? null,
       status,
       progress: Math.max(0, Math.min(100, Number(progress || 0))),
       queue_position: queue_position != null ? Math.max(0, Number(queue_position)) : null,
