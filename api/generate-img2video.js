@@ -57,7 +57,7 @@ const MAX_FPS = MAX_FPS_RAW > 0 ? MAX_FPS_RAW : null;
 // =========================================================
 const DEF_WIDTH = parseInt(process.env.VIDEO_DEF_WIDTH || "896", 10);
 const DEF_HEIGHT = parseInt(process.env.VIDEO_DEF_HEIGHT || "512", 10);
-const DEF_FRAMES = parseInt(process.env.VIDEO_DEF_FRAMES || "49", 10);
+const DEF_FRAMES = parseInt(process.env.VIDEO_DEF_FRAMES || "74", 10);
 const DEF_FPS = parseInt(process.env.VIDEO_DEF_FPS || "24", 10);
 const DEF_GUIDANCE = Number(process.env.VIDEO_DEF_GUIDANCE || "6.0");
 
