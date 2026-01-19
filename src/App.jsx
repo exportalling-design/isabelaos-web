@@ -2322,20 +2322,16 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Headshot Pro IA (Premium)
+// Foto Profesional IA (Headshot Pro)
+// SOLO COMPONENTE – sin export default, sin costos
 // ---------------------------------------------------------
-import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
-import { getAuthHeadersGlobal } from "../lib/auth";
 
-const COST_HEADSHOT_PHOTO = 1;
-
-function HeadshotProPanel({ userStatus }) {
+function HeadshotPhotoPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
-  const [style, setStyle] = useState("corporate");
+  const [extraPrompt, setExtraPrompt] = useState("");
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [resultB64, setResultB64] = useState(null);
@@ -2353,7 +2349,7 @@ function HeadshotProPanel({ userStatus }) {
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
+      reader.onerror = (err) => reject(err);
       reader.readAsDataURL(file);
     });
 
@@ -2378,10 +2374,12 @@ function HeadshotProPanel({ userStatus }) {
       setError("Debes iniciar sesión para usar este módulo.");
       return;
     }
+
     if (!isPremium) {
       setError("Este módulo requiere un plan activo.");
       return;
     }
+
     if (!pureB64) {
       setError("Sube una foto primero.");
       return;
@@ -2389,7 +2387,7 @@ function HeadshotProPanel({ userStatus }) {
 
     setResultB64(null);
     setStatus("IN_QUEUE");
-    setStatusText("Enviando foto para Headshot Pro...");
+    setStatusText("Enviando foto a RunPod...");
 
     try {
       const auth = await getAuthHeadersGlobal();
@@ -2399,17 +2397,17 @@ function HeadshotProPanel({ userStatus }) {
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           image_b64: pureB64,
-          style,
+          description: extraPrompt || "",
         }),
       });
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.jobId) {
-        throw new Error(data?.error || "Error lanzando Headshot Pro.");
+        throw new Error(data?.error || "Error lanzando job.");
       }
 
       const jobId = data.jobId;
-      setStatusText(`Procesando Headshot (ID ${jobId})...`);
+      setStatusText(`Job ${jobId} enviado. Procesando...`);
 
       let finished = false;
       while (!finished) {
@@ -2437,7 +2435,7 @@ function HeadshotProPanel({ userStatus }) {
           setResultB64(statusData.output.image_b64);
           setStatusText("Headshot generado con éxito.");
         } else {
-          throw new Error("El job terminó sin imagen.");
+          throw new Error("Job finalizó sin imagen.");
         }
       }
     } catch (err) {
@@ -2452,7 +2450,7 @@ function HeadshotProPanel({ userStatus }) {
     if (!resultB64) return;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${resultB64}`;
-    link.download = "isabelaos-headshot-pro.png";
+    link.download = "isabelaos-headshot.png";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2461,91 +2459,67 @@ function HeadshotProPanel({ userStatus }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Headshot Pro IA</h2>
+        <h2 className="text-lg font-semibold text-white">Headshot Profesional IA</h2>
 
         <div className="mt-5 space-y-4 text-sm">
-          <div>
-            <p className="text-xs text-neutral-300">1. Sube tu foto</p>
-            <button
-              type="button"
-              onClick={handlePickFile}
-              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-xs text-neutral-400 hover:border-cyan-400 hover:text-cyan-300"
-            >
-              {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
-            </button>
-            <input
-              id={fileInputId}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            {dataUrl && (
-              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                <img src={dataUrl} alt="Foto base" className="w-full object-cover" />
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs text-neutral-300">2. Estilo</p>
-            <select
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white ring-1 ring-white/10"
-            >
-              <option value="corporate">Corporativo / LinkedIn</option>
-              <option value="influencer">Influencer / Redes</option>
-              <option value="creative">Creativo / Editorial</option>
-            </select>
-          </div>
-
-          <div className="rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
-            Estado: {statusText || "Listo."}
-          </div>
-
-          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
-
           <button
             type="button"
-            onClick={handleGenerateHeadshot}
-            disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64}
-            className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            onClick={handlePickFile}
+            className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/60 text-neutral-400"
           >
-            {status === "IN_QUEUE" || status === "IN_PROGRESS"
-              ? "Generando..."
-              : `Generar Headshot (${COST_HEADSHOT_PHOTO} jade)`}
+            {dataUrl ? "Cambiar foto" : "Sube tu foto"}
           </button>
+
+          <input
+            id={fileInputId}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          {dataUrl && <img src={dataUrl} className="rounded-xl" />}
+
+          <input
+            type="text"
+            value={extraPrompt}
+            onChange={(e) => setExtraPrompt(e.target.value)}
+            placeholder="Ej: fondo neutro, luz de estudio"
+            className="w-full rounded-xl bg-black/60 px-3 py-2 text-white"
+          />
+
+          <button
+            onClick={handleGenerateHeadshot}
+            className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 font-semibold text-white"
+          >
+            Generar Headshot
+          </button>
+
+          {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text-white">Resultado</h2>
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-          {resultB64 ? (
+      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        {resultB64 ? (
+          <>
             <img
               src={`data:image/png;base64,${resultB64}`}
-              alt="Headshot generado"
-              className="h-full w-full rounded-2xl object-contain"
+              className="rounded-xl"
             />
-          ) : (
-            <p>Aquí aparecerá el resultado.</p>
-          )}
-        </div>
-        {resultB64 && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
-          >
-            Descargar
-          </button>
+            <button
+              onClick={handleDownload}
+              className="mt-4 w-full rounded-xl border py-2 text-white"
+            >
+              Descargar
+            </button>
+          </>
+        ) : (
+          <p className="text-neutral-400">Aquí aparecerá el resultado</p>
         )}
       </div>
     </div>
   );
 }
-
-export default HeadshotProPanel;
 
 // ---------------------------------------------------------
 // Dashboard (logueado)
