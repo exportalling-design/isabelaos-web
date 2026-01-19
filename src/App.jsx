@@ -2322,21 +2322,27 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 }
 
 // ---------------------------------------------------------
-// Foto Navideña IA (Premium)
+// Headshot Pro IA (Premium)
 // ---------------------------------------------------------
-function XmasPhotoPanel({ userStatus }) {
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { getAuthHeadersGlobal } from "../lib/auth";
+
+const COST_HEADSHOT_PHOTO = 1;
+
+function HeadshotProPanel({ userStatus }) {
   const { user } = useAuth();
 
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
-  const [extraPrompt, setExtraPrompt] = useState("");
+  const [style, setStyle] = useState("corporate");
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
 
   const isPremium = !!user && userStatus?.subscription_status === "active";
-  const fileInputId = "xmas-file-input";
+  const fileInputId = "headshot-file-input";
 
   const handlePickFile = () => {
     const input = document.getElementById(fileInputId);
@@ -2347,7 +2353,7 @@ function XmasPhotoPanel({ userStatus }) {
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = (err) => reject(err);
+      reader.onerror = reject;
       reader.readAsDataURL(file);
     });
 
@@ -2365,7 +2371,7 @@ function XmasPhotoPanel({ userStatus }) {
     }
   };
 
-  const handleGenerateXmas = async () => {
+  const handleGenerateHeadshot = async () => {
     setError("");
 
     if (!user) {
@@ -2373,38 +2379,37 @@ function XmasPhotoPanel({ userStatus }) {
       return;
     }
     if (!isPremium) {
-      setError("Este módulo forma parte del Plan Basic (US$19/mes). Activa tu plan para usar Foto Navideña IA.");
+      setError("Este módulo requiere un plan activo.");
       return;
     }
     if (!pureB64) {
-      setError("Por favor sube una foto primero.");
+      setError("Sube una foto primero.");
       return;
     }
 
     setResultB64(null);
     setStatus("IN_QUEUE");
-    setStatusText("Enviando foto navideña a RunPod...");
+    setStatusText("Enviando foto para Headshot Pro...");
 
     try {
       const auth = await getAuthHeadersGlobal();
 
-      const res = await fetch("/api/generate-xmas", {
+      const res = await fetch("/api/generate-headshot", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           image_b64: pureB64,
-          description: extraPrompt || "",
-          cost: COST_XMAS_PHOTO,
+          style,
         }),
       });
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.jobId) {
-        throw new Error(data?.error || "Error lanzando job navideño.");
+        throw new Error(data?.error || "Error lanzando Headshot Pro.");
       }
 
       const jobId = data.jobId;
-      setStatusText(`Foto enviada. ID: ${jobId}. Consultando estado...`);
+      setStatusText(`Procesando Headshot (ID ${jobId})...`);
 
       let finished = false;
       while (!finished) {
@@ -2417,29 +2422,28 @@ function XmasPhotoPanel({ userStatus }) {
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
-          throw new Error(statusData?.error || "Error consultando /api/status.");
+          throw new Error("Error consultando estado.");
         }
 
         const st = statusData.status;
         setStatus(st);
-        setStatusText(`Estado actual: ${st}...`);
+        setStatusText(`Estado: ${st}`);
 
         if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
 
         finished = true;
 
         if (st === "COMPLETED" && statusData.output?.image_b64) {
-          const b64 = statusData.output.image_b64;
-          setResultB64(b64);
-          setStatusText("Foto navideña generada con éxito.");
+          setResultB64(statusData.output.image_b64);
+          setStatusText("Headshot generado con éxito.");
         } else {
-          throw new Error("Job terminado pero sin imagen.");
+          throw new Error("El job terminó sin imagen.");
         }
       }
     } catch (err) {
       console.error(err);
       setStatus("ERROR");
-      setStatusText("Error al generar la foto navideña.");
+      setStatusText("Error generando headshot.");
       setError(err?.message || String(err));
     }
   };
@@ -2448,7 +2452,7 @@ function XmasPhotoPanel({ userStatus }) {
     if (!resultB64) return;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${resultB64}`;
-    link.download = "isabelaos-xmas-photo.png";
+    link.download = "isabelaos-headshot-pro.png";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2457,11 +2461,11 @@ function XmasPhotoPanel({ userStatus }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Foto Navideña IA (Premium)</h2>
+        <h2 className="text-lg font-semibold text-white">Headshot Pro IA</h2>
 
         <div className="mt-5 space-y-4 text-sm">
           <div>
-            <p className="text-xs text-neutral-300">1. Sube tu foto (JPG/PNG)</p>
+            <p className="text-xs text-neutral-300">1. Sube tu foto</p>
             <button
               type="button"
               onClick={handlePickFile}
@@ -2469,7 +2473,13 @@ function XmasPhotoPanel({ userStatus }) {
             >
               {dataUrl ? "Cambiar foto" : "Haz clic para subir una foto"}
             </button>
-            <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            <input
+              id={fileInputId}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
                 <img src={dataUrl} alt="Foto base" className="w-full object-cover" />
@@ -2478,17 +2488,19 @@ function XmasPhotoPanel({ userStatus }) {
           </div>
 
           <div>
-            <p className="text-xs text-neutral-300">2. Opcional: describe escena</p>
-            <input
-              type="text"
-              value={extraPrompt}
-              onChange={(e) => setExtraPrompt(e.target.value)}
-              placeholder="Ejemplo: familia, sala acogedora, árbol de navidad..."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            />
+            <p className="text-xs text-neutral-300">2. Estilo</p>
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white ring-1 ring-white/10"
+            >
+              <option value="corporate">Corporativo / LinkedIn</option>
+              <option value="influencer">Influencer / Redes</option>
+              <option value="creative">Creativo / Editorial</option>
+            </select>
           </div>
 
-          <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
+          <div className="rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
             Estado: {statusText || "Listo."}
           </div>
 
@@ -2496,13 +2508,13 @@ function XmasPhotoPanel({ userStatus }) {
 
           <button
             type="button"
-            onClick={handleGenerateXmas}
-            disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64 || !user}
+            onClick={handleGenerateHeadshot}
+            disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !pureB64}
             className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {status === "IN_QUEUE" || status === "IN_PROGRESS"
               ? "Generando..."
-              : `Generar Foto Navideña IA (${COST_XMAS_PHOTO} jades)`}
+              : `Generar Headshot (${COST_HEADSHOT_PHOTO} jade)`}
           </button>
         </div>
       </div>
@@ -2513,11 +2525,11 @@ function XmasPhotoPanel({ userStatus }) {
           {resultB64 ? (
             <img
               src={`data:image/png;base64,${resultB64}`}
-              alt="Resultado navideño"
+              alt="Headshot generado"
               className="h-full w-full rounded-2xl object-contain"
             />
           ) : (
-            <p>Aquí verás el resultado cuando termine.</p>
+            <p>Aquí aparecerá el resultado.</p>
           )}
         </div>
         {resultB64 && (
@@ -2525,13 +2537,15 @@ function XmasPhotoPanel({ userStatus }) {
             onClick={handleDownload}
             className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
           >
-            Descargar resultado
+            Descargar
           </button>
         )}
       </div>
     </div>
   );
 }
+
+export default HeadshotProPanel;
 
 // ---------------------------------------------------------
 // Dashboard (logueado)
