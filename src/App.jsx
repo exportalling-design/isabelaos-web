@@ -2540,9 +2540,10 @@ function DashboardView() {
     try {
       const auth = await getAuthHeadersGlobal();
 
-      const r = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`, {
-        headers: { ...auth },
-      });
+      const r = await fetch(
+        `/api/user-status?user_id=${encodeURIComponent(user.id)}`,
+        { headers: { ...auth } }
+      );
 
       const data = await r.json().catch(() => null);
       if (!r.ok || !data?.ok) throw new Error(data?.error || "user-status error");
@@ -2581,7 +2582,8 @@ function DashboardView() {
     });
 
     const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
+    if (!r.ok || !data?.ok)
+      throw new Error(data?.error || "No se pudo descontar jades.");
 
     await fetchUserStatus();
     return data;
@@ -2621,7 +2623,9 @@ function DashboardView() {
               <div className="text-sm font-semibold leading-tight">
                 isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
-              <div className="text-[10px] text-neutral-500">Panel del creador · Beta</div>
+              <div className="text-[10px] text-neutral-500">
+                Panel del creador · Beta
+              </div>
             </div>
           </div>
 
@@ -2631,7 +2635,9 @@ function DashboardView() {
             </span>
 
             <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5">
-              <span className="text-[10px] text-neutral-400">{userPlanLabel}</span>
+              <span className="text-[10px] text-neutral-400">
+                {userPlanLabel}
+              </span>
               <span className="mx-1 h-3 w-px bg-white/10" />
               <span className="text-[11px] text-neutral-300">
                 Jades:{" "}
@@ -2668,7 +2674,9 @@ function DashboardView() {
             </div>
           </div>
 
-          <p className="text-[11px] font-semibold text-neutral-300 mb-2">Navegación</p>
+          <p className="text-[11px] font-semibold text-neutral-300 mb-2">
+            Navegación
+          </p>
           <div className="flex flex-wrap gap-2 text-xs">
             {[
               ["generator", "Motor de imagen"],
@@ -2695,7 +2703,9 @@ function DashboardView() {
 
         <section className="flex gap-6">
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
-            <p className="text-[11px] font-semibold text-neutral-300 mb-3">Navegación</p>
+            <p className="text-[11px] font-semibold text-neutral-300 mb-3">
+              Navegación
+            </p>
 
             {[
               ["generator", "Motor de imagen (render)"],
@@ -2721,24 +2731,32 @@ function DashboardView() {
 
           <div className="flex-1 space-y-6">
             <div>
-              <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
+              <h1 className="text-xl font-semibold text-white">
+                Panel del creador
+              </h1>
               <p className="mt-1 text-xs text-neutral-400">
-                Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
+                Genera, revisa, descarga y administra resultados desde un solo
+                sistema conectado a GPU.
               </p>
             </div>
 
-            {/* Planes / Suscripción */}
-            {/* ---- TODO EL BLOQUE DE PLANES ORIGINAL ---- */}
-
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
             {appViewMode === "video_prompt" && (
-              <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
+              <VideoFromPromptPanel
+                userStatus={userStatus}
+                spendJades={spendJades}
+              />
             )}
             {appViewMode === "img2video" && (
-              <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
+              <Img2VideoPanel
+                userStatus={userStatus}
+                spendJades={spendJades}
+              />
             )}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "xmas" && <XmasPhotoPanel userStatus={userStatus} />}
+            {appViewMode === "xmas" && (
+              <XmasPhotoPanel userStatus={userStatus} />
+            )}
           </div>
         </section>
       </main>
