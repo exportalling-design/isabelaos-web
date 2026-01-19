@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import ContactView from "./components/ContactView";
+import HeadshotProPanel from "./HeadshotProPanel.jsx";
 
 import { supabase } from "./lib/supabaseClient";
 
