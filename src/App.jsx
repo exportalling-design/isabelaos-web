@@ -2669,7 +2669,7 @@ function DashboardView() {
               ["video_prompt", "Motor de video"],
               ["img2video", "Imagen → Video"],
               ["library", "Biblioteca"],
-              ["xmas", "🎄 Foto Navideña IA"],
+              ["headshot", "📸 Headshot Pro"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -2696,7 +2696,7 @@ function DashboardView() {
               ["video_prompt", "Motor de video (clips)"],
               ["img2video", "Transformación Imagen → Video"],
               ["library", "Biblioteca de producción"],
-              ["xmas", "🎄 Foto Navideña IA (Premium)"],
+              ["headshot", "📸 Headshot Pro (Premium)"],
             ].map(([key, label]) => (
               <button
                 key={key}
