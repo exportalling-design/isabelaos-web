@@ -1,3 +1,4 @@
+
 // pages/api/generate-headshot.js
 // Lanza un job "headshot_pro" en RunPod (Serverless)
 // + AUTH UNIFICADO (requireUser)
