@@ -2597,17 +2597,77 @@ function DashboardView() {
 
   const handleContact = () => {
     const subject = encodeURIComponent("Soporte IsabelaOS Studio");
-    const body = encodeURIComponent("Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)");
+    const body = encodeURIComponent(
+      "Hola, necesito ayuda con IsabelaOS Studio.\n\n(Escribe aquí tu mensaje)"
+    );
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
   return (
-    <div className="min-h-screen w-full text-white" style={{ background: "#06070B" }}>
-      {/* HEADER OMITIDO (SIN CAMBIOS) */}
+    <div
+      className="min-h-screen w-full text-white"
+      style={{
+        background:
+          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
+      }}
+    >
+      <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
+              io
+            </div>
+            <div>
+              <div className="text-sm font-semibold leading-tight">
+                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+              </div>
+              <div className="text-[10px] text-neutral-500">Panel del creador · Beta</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <span className="hidden sm:inline text-neutral-300">
+              {user?.email} {isAdmin ? "· admin" : ""}
+            </span>
+
+            <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5">
+              <span className="text-[10px] text-neutral-400">{userPlanLabel}</span>
+              <span className="mx-1 h-3 w-px bg-white/10" />
+              <span className="text-[11px] text-neutral-300">
+                Jades:{" "}
+                <span className="font-semibold text-white">
+                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
+                </span>
+              </span>
+            </div>
+
+            <button
+              onClick={handleContact}
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Contacto
+            </button>
+            <button
+              onClick={signOut}
+              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* NAV MÓVIL */}
         <div className="mb-4 md:hidden">
+          <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-neutral-400">{userPlanLabel}</span>
+              <span className="font-semibold text-white">
+                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
+              </span>
+            </div>
+          </div>
+
           <p className="text-[11px] font-semibold text-neutral-300 mb-2">Navegación</p>
           <div className="flex flex-wrap gap-2 text-xs">
             {[
@@ -2615,10 +2675,11 @@ function DashboardView() {
               ["video_prompt", "Motor de video"],
               ["img2video", "Imagen → Video"],
               ["library", "Biblioteca"],
-              ["headshot", "📸 Headshot Pro"],
+              ["xmas", "🎄 Foto Navideña IA"],
             ].map(([key, label]) => (
               <button
                 key={key}
+                type="button"
                 onClick={() => setAppViewMode(key)}
                 className={`rounded-2xl px-3 py-1.5 ${
                   appViewMode === key
@@ -2633,7 +2694,6 @@ function DashboardView() {
         </div>
 
         <section className="flex gap-6">
-          {/* SIDEBAR */}
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
             <p className="text-[11px] font-semibold text-neutral-300 mb-3">Navegación</p>
 
@@ -2642,10 +2702,11 @@ function DashboardView() {
               ["video_prompt", "Motor de video (clips)"],
               ["img2video", "Transformación Imagen → Video"],
               ["library", "Biblioteca de producción"],
-              ["headshot", "📸 Headshot Pro"],
+              ["xmas", "🎄 Foto Navideña IA (Premium)"],
             ].map(([key, label]) => (
               <button
                 key={key}
+                type="button"
                 onClick={() => setAppViewMode(key)}
                 className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
                   appViewMode === key
@@ -2658,8 +2719,17 @@ function DashboardView() {
             ))}
           </aside>
 
-          {/* CONTENIDO */}
           <div className="flex-1 space-y-6">
+            <div>
+              <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
+              <p className="mt-1 text-xs text-neutral-400">
+                Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
+              </p>
+            </div>
+
+            {/* Planes / Suscripción */}
+            {/* ---- TODO EL BLOQUE DE PLANES ORIGINAL ---- */}
+
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
             {appViewMode === "video_prompt" && (
               <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />
@@ -2668,7 +2738,7 @@ function DashboardView() {
               <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
             )}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
+            {appViewMode === "xmas" && <XmasPhotoPanel userStatus={userStatus} />}
           </div>
         </section>
       </main>
