@@ -2825,7 +2825,7 @@ function DashboardView() {
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "xmas" && <XmasPhotoPanel userStatus={userStatus} />}
+            {appViewMode === "headshot" && <HeadshotProPanel userStatus={userStatus} />}
           </div>
         </section>
       </main>
