@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import ContactView from "./components/ContactView";
-import HeadshotProPanel from "./components/HeadshotProPanel";
+import { HeadshotPhotoPanel } from "./components/HeadshotPhotoPanel";
 
 import { supabase } from "./lib/supabaseClient";
 
@@ -2850,7 +2850,7 @@ function DashboardView() {
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "headshot" && <HeadshotProPanel userStatus={userStatus} />}
+            {{appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
           </div>
         </section>
       </main>
