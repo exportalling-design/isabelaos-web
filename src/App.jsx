@@ -2355,6 +2355,11 @@ function HeadshotPhotoPanel({ userStatus }) {
     });
 
   const handleFileChange = async (e) => {
+    setError("");
+    setResultB64(null);
+    setStatus("IDLE");
+    setStatusText("");
+
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -2393,12 +2398,15 @@ function HeadshotPhotoPanel({ userStatus }) {
     try {
       const auth = await getAuthHeadersGlobal();
 
+      // ✅ Compat: enviamos lo que tu backend espera (style) y también description por si tu worker lo usa
       const res = await fetch("/api/generate-headshot", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           image_b64: pureB64,
-          description: extraPrompt || "",
+          style: "corporate", // si querés luego lo cambiamos por selector
+          description: extraPrompt || "", // se mantiene por compatibilidad con tu worker si lo usa
+          // si tu backend NO acepta description, no pasa nada; si lo acepta, lo recibe.
         }),
       });
 
@@ -2410,31 +2418,43 @@ function HeadshotPhotoPanel({ userStatus }) {
       const jobId = data.jobId;
       setStatusText(`Job ${jobId} enviado. Procesando...`);
 
+      // ✅ Polling con timeout para no quedar infinito
+      const startedAt = Date.now();
+      const TIMEOUT_MS = 3 * 60 * 1000; // 3 min (ajusta si tu job tarda más)
+
       let finished = false;
       while (!finished) {
+        // timeout
+        if (Date.now() - startedAt > TIMEOUT_MS) {
+          throw new Error("Timeout esperando el resultado. Revisa el job en RunPod.");
+        }
+
         await new Promise((r) => setTimeout(r, 2000));
 
         const auth2 = await getAuthHeadersGlobal();
-        const statusRes = await fetch(`/api/status?id=${jobId}`, {
+        const statusRes = await fetch(`/api/status?id=${encodeURIComponent(jobId)}`, {
           headers: { ...auth2 },
         });
         const statusData = await statusRes.json().catch(() => null);
 
         if (!statusRes.ok || !statusData) {
-          throw new Error("Error consultando estado.");
+          throw new Error(statusData?.error || "Error consultando estado.");
         }
 
-        const st = statusData.status;
+        const st = statusData.status || statusData?.state || "UNKNOWN";
         setStatus(st);
         setStatusText(`Estado: ${st}`);
 
-        if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
+        if (st === "IN_QUEUE" || st === "IN_PROGRESS" || st === "RUNNING") continue;
 
         finished = true;
 
-        if (st === "COMPLETED" && statusData.output?.image_b64) {
+        // ✅ Resultado
+        if ((st === "COMPLETED" || st === "COMPLETED_SUCCESS") && statusData.output?.image_b64) {
           setResultB64(statusData.output.image_b64);
           setStatusText("Headshot generado con éxito.");
+        } else if (st === "FAILED" || st === "ERROR") {
+          throw new Error(statusData?.error || "El job falló en RunPod.");
         } else {
           throw new Error("Job finalizó sin imagen.");
         }
@@ -2457,10 +2477,16 @@ function HeadshotPhotoPanel({ userStatus }) {
     document.body.removeChild(link);
   };
 
+  const isBusy = status === "IN_QUEUE" || status === "IN_PROGRESS" || status === "RUNNING";
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Headshot Profesional IA</h2>
+
+        <div className="mt-2 text-xs text-neutral-400">
+          {statusText || "Sube una foto y genera un headshot profesional."}
+        </div>
 
         <div className="mt-5 space-y-4 text-sm">
           <button
@@ -2479,7 +2505,7 @@ function HeadshotPhotoPanel({ userStatus }) {
             onChange={handleFileChange}
           />
 
-          {dataUrl && <img src={dataUrl} className="rounded-xl" />}
+          {dataUrl && <img src={dataUrl} className="rounded-xl" alt="preview" />}
 
           <input
             type="text"
@@ -2491,9 +2517,10 @@ function HeadshotPhotoPanel({ userStatus }) {
 
           <button
             onClick={handleGenerateHeadshot}
-            className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 font-semibold text-white"
+            disabled={isBusy}
+            className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 font-semibold text-white disabled:opacity-50"
           >
-            Generar Headshot
+            {isBusy ? "Generando..." : "Generar Headshot"}
           </button>
 
           {error && <p className="text-red-400 text-xs">{error}</p>}
@@ -2503,19 +2530,16 @@ function HeadshotPhotoPanel({ userStatus }) {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         {resultB64 ? (
           <>
-            <img
-              src={`data:image/png;base64,${resultB64}`}
-              className="rounded-xl"
-            />
-            <button
-              onClick={handleDownload}
-              className="mt-4 w-full rounded-xl border py-2 text-white"
-            >
+            <img src={`data:image/png;base64,${resultB64}`} className="rounded-xl" alt="resultado" />
+            <button onClick={handleDownload} className="mt-4 w-full rounded-xl border py-2 text-white">
               Descargar
             </button>
           </>
         ) : (
-          <p className="text-neutral-400">Aquí aparecerá el resultado</p>
+          <p className="text-neutral-400">
+            Aquí aparecerá el resultado
+            {isBusy ? " (procesando...)" : ""}
+          </p>
         )}
       </div>
     </div>
