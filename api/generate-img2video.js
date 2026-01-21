@@ -69,7 +69,7 @@ const FAST_TEST_MODE = (process.env.VIDEO_FAST_TEST_MODE || "0") === "1";
 // =========================================================
 // JADES
 // =========================================================
-const COST_IMG2VIDEO_JADES = parseInt(process.env.COST_IMG2VIDEO_JADES || "25", 10);
+const COST_IMG2VIDEO_JADES = parseInt(process.env.COST_IMG2VIDEO_JADES || "12", 10);
 
 // =========================================================
 // Timeouts
