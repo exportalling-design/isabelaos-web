@@ -1,4 +1,4 @@
-// /api/status.js
+// /api/flux/status.js
 export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
@@ -34,7 +34,7 @@ export default async function handler(req) {
       });
     }
 
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
+    const endpointId = process.env.RUNPOD_FLUX_ENDPOINT_ID;
     const apiKey = process.env.RP_API_KEY;
 
     if (!apiKey || !endpointId) {
@@ -42,7 +42,7 @@ export default async function handler(req) {
         JSON.stringify({
           ok: false,
           error: "MISSING_RP_ENV",
-          detail: "Falta RP_API_KEY o RUNPOD_ENDPOINT_ID/RP_ENDPOINT",
+          detail: "Falta RP_API_KEY o RUNPOD_FLUX_ENDPOINT_ID",
         }),
         { status: 500, headers: cors }
       );
@@ -68,11 +68,25 @@ export default async function handler(req) {
 
     const data = await rp.json();
 
+    // ✅ Normalizamos: el frontend espera output.image_b64
+    const out = data?.output || null;
+    const image_b64 =
+      out?.image_b64 ||
+      out?.imageB64 ||
+      out?.imageBase64 ||
+      null;
+
+    const normalizedOutput = out
+      ? { ...out, image_b64 }
+      : null;
+
     return new Response(
       JSON.stringify({
         ok: true,
-        status: data.status,
-        output: data.output ?? null,
+        status: data?.status || null,
+        delayTime: data?.delayTime ?? null,
+        executionTime: data?.executionTime ?? null,
+        output: normalizedOutput,
         raw: data,
       }),
       { status: 200, headers: cors }
