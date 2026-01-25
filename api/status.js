@@ -1,5 +1,3 @@
-// /api/status.js  (EDGE)
-// Consulta /status/:id en RunPod y normaliza output.image_b64
 export default async function handler(req) {
   const cors = {
     "access-control-allow-origin": "*",
@@ -69,14 +67,9 @@ export default async function handler(req) {
 
     const data = await rp.json();
 
-    // Normalización para que tu UI siga leyendo output.image_b64
+    // ✅ Esto es CLAVE: tu frontend espera output.image_b64
     const out = data?.output || null;
-    const image_b64 =
-      out?.image_b64 ||
-      out?.imageBase64 ||
-      out?.imageB64 ||
-      null;
-
+    const image_b64 = out?.image_b64 || out?.imageBase64 || out?.imageB64 || null;
     const imageUrl = out?.imageUrl || out?.url || null;
 
     return new Response(
@@ -88,7 +81,7 @@ export default async function handler(req) {
         output: out
           ? {
               ...out,
-              image_b64, // ✅ clave esperada por tu frontend
+              image_b64, // ✅
               imageUrl,
             }
           : null,
