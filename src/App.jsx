@@ -612,7 +612,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         const needsOptimize =
           optStatus !== "READY" ||
           !optimizedPrompt ||
-          // ojo: optimizedNegative puede venir vacío, no lo forzamos como requerido
           optSource.prompt !== prompt ||
           optSource.negative !== negative;
 
@@ -620,7 +619,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           setStatusText("Optimizando prompt con IA...");
           const opt = await runOptimizeNow();
           if (!opt.ok || !opt.optimizedPrompt) {
-            // Si falla optimización, seguimos con el prompt original (no bloqueamos)
             finalPrompt = prompt;
             finalNegative = negative;
           } else {
@@ -638,7 +636,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
 
-      const res = await fetch("/api/generate", {
+      // ✅ RUTA NUEVA (FLUX)
+      const res = await fetch("/api/flux/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -660,7 +659,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Error en /api/generate, revisa logs.");
+        throw new Error(data?.error || "Error en /api/flux/generate, revisa logs.");
       }
 
       const jobId = data.jobId;
@@ -672,11 +671,15 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         await new Promise((r) => setTimeout(r, 2000));
 
         const authHeaders2 = isDemo ? {} : await getAuthHeadersGlobal();
-        const statusRes = await fetch(`/api/status?id=${jobId}`, { headers: { ...authHeaders2 } });
+
+        // ✅ RUTA NUEVA (FLUX)
+        const statusRes = await fetch(`/api/flux/status?id=${jobId}`, {
+          headers: { ...authHeaders2 },
+        });
 
         const statusData = await statusRes.json().catch(() => null);
         if (!statusRes.ok || statusData?.error) {
-          throw new Error(statusData?.error || "Error consultando /api/status.");
+          throw new Error(statusData?.error || "Error consultando /api/flux/status.");
         }
 
         const st = statusData.status;
@@ -704,13 +707,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt, // guardamos el prompt del usuario (original)
-              negativePrompt: negative, // guardamos el negativo original
+              prompt,
+              negativePrompt: negative,
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
 
-              // opcional para trazabilidad
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
