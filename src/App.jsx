@@ -416,7 +416,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [optimizedNegative, setOptimizedNegative] = useState("");
   const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar stale
 
-  // Si el usuario cambia prompt/negative, marcamos stale (no borramos, pero queda desactualizado)
+  // Si el usuario cambia prompt/negative, marcamos stale
   useEffect(() => {
     setOptError("");
     // NO borramos optimizedPrompt/Negative para que el usuario lo vea,
@@ -424,8 +424,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   }, [prompt, negative]);
 
   const isOptStale =
-    optStatus === "READY" &&
-    (optSource.prompt !== prompt || optSource.negative !== negative);
+    optStatus === "READY" && (optSource.prompt !== prompt || optSource.negative !== negative);
 
   async function runOptimizeNow() {
     setOptError("");
@@ -494,7 +493,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           return;
         }
 
-        const authHeaders = await getAuthHeadersGlobal(); // debe incluir Authorization Bearer user JWT
+        const authHeaders = await getAuthHeadersGlobal(); // Authorization Bearer user JWT
         const url =
           `${SUPABASE_URL.replace(/\/$/, "")}` +
           `/rest/v1/profiles?id=eq.${user.id}&select=plan,jade_balance`;
@@ -538,6 +537,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setDailyCount(0);
       return;
     }
+
     (async () => {
       try {
         const countToday = await getTodayGenerationCount(user.id);
@@ -618,7 +618,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         if (needsOptimize) {
           setStatusText("Optimizando prompt con IA...");
           const opt = await runOptimizeNow();
+
           if (!opt.ok || !opt.optimizedPrompt) {
+            // Si falla optimización, seguimos con el prompt original
             finalPrompt = prompt;
             finalNegative = negative;
           } else {
@@ -636,8 +638,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
 
-      // ✅ RUTA NUEVA (FLUX)
-      const res = await fetch("/api/flux/generate", {
+      const res = await fetch("/api/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -659,7 +660,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Error en /api/flux/generate, revisa logs.");
+        throw new Error(data?.error || "Error en /api/generate, revisa logs.");
       }
 
       const jobId = data.jobId;
@@ -667,19 +668,19 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setStatusText(`Job enviado. ID: ${jobId}. Consultando estado...`);
 
       let finished = false;
+
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
 
         const authHeaders2 = isDemo ? {} : await getAuthHeadersGlobal();
-
-        // ✅ RUTA NUEVA (FLUX)
-        const statusRes = await fetch(`/api/flux/status?id=${jobId}`, {
+        const statusRes = await fetch(`/api/status?id=${jobId}`, {
           headers: { ...authHeaders2 },
         });
 
         const statusData = await statusRes.json().catch(() => null);
+
         if (!statusRes.ok || statusData?.error) {
-          throw new Error(statusData?.error || "Error consultando /api/flux/status.");
+          throw new Error(statusData?.error || "Error consultando /api/status.");
         }
 
         const st = statusData.status;
@@ -707,12 +708,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt,
-              negativePrompt: negative,
+              prompt, // guardamos el prompt del usuario (original)
+              negativePrompt: negative, // guardamos el negativo original
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
 
+              // opcional para trazabilidad
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
@@ -737,6 +739,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
     if (!imageB64) return;
+
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${imageB64}`;
     link.download = "isabelaos-image.png";
@@ -757,8 +760,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   }
 
   // UI: remaining
-  const remaining =
-    isDemo ? Math.max(0, DEMO_LIMIT - demoCount) : hasPaidAccess ? Infinity : Math.max(0, DAILY_LIMIT - dailyCount);
+  const remaining = isDemo
+    ? Math.max(0, DEMO_LIMIT - demoCount)
+    : hasPaidAccess
+    ? Infinity
+    : Math.max(0, DAILY_LIMIT - dailyCount);
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -809,7 +815,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <div className="text-xs text-neutral-300">
                 Optimización de prompt (OpenAI)
                 {optStatus === "READY" && optimizedPrompt ? (
-                  <span className="ml-2 text-[10px] text-emerald-300/90">{isOptStale ? "Desactualizado" : "Listo ✓"}</span>
+                  <span className="ml-2 text-[10px] text-emerald-300/90">
+                    {isOptStale ? "Desactualizado" : "Listo ✓"}
+                  </span>
                 ) : (
                   <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
                 )}
@@ -870,7 +878,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               </div>
             )}
 
-            {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
+            {optError && (
+              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
