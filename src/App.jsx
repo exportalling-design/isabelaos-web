@@ -1108,705 +1108,105 @@ function LibraryView() {
   );
 }
 
-// ---------------------------------------------------------
-// Video desde prompt (logueado) - ASYNC REAL + PROGRESS + RESUME
-// (OPCIÓN B): NO export default (porque App.jsx ya tiene export default App)
-// + ✅ Prompt Optimizer (OpenAI) con toggle "usar optimizado"
-// + ✅ ENVÍA optimized_prompt al backend (para que llegue al worker)
-// + ✅ Muestra cuál prompt fue enviado (usado) en el cuadro de estado
-// ---------------------------------------------------------
-function VideoFromPromptPanel({ userStatus }) {
-  const { user } = useAuth();
+// VideoFromPromptPanel.jsx
+// ------------------------------------------------------------
+// Genera un video SOLO desde texto
+// Costo: 10 jades
+// ------------------------------------------------------------
 
-  const [prompt, setPrompt] = useState("Cinematic short scene, ultra detailed, soft light, 8k");
-  const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
-  const [steps, setSteps] = useState(22); // 👈 default calidad mejor
+import { useState } from "react";
 
+export default function VideoFromPromptPanel({ userStatus }) {
+  // Prompt escrito por el usuario
+  const [prompt, setPrompt] = useState("");
+
+  // Estado del job
   const [status, setStatus] = useState("IDLE");
-  const [statusText, setStatusText] = useState("");
+
+  // job_id devuelto por backend
   const [jobId, setJobId] = useState(null);
+
+  // URL final del video
   const [videoUrl, setVideoUrl] = useState(null);
-  const [error, setError] = useState("");
 
-  const [progress, setProgress] = useState(0);
-  const [queuePos, setQueuePos] = useState(null);
-  const [etaSeconds, setEtaSeconds] = useState(null);
+  // Error si ocurre
+  const [error, setError] = useState(null);
 
-  const canUse = !!user;
+  // Costo fijo
+  const COST_T2V = 10;
 
-  const COST_VIDEO_FROM_PROMPT = 10;
-  const cost = COST_VIDEO_FROM_PROMPT;
+  // Validar jades
+  const canUse = (userStatus?.jades ?? 0) >= COST_T2V;
 
-  const currentJades = userStatus?.jades ?? 0;
-  const hasEnough = currentJades >= cost;
+  // ----------------------------------------------------------
+  // Lanza generación de video
+  // ----------------------------------------------------------
+  async function generate() {
+    if (!prompt.trim()) return;
 
-  const POLL_EVERY_MS = 2500;
-  const POLL_MAX_MS = 25 * 60 * 1000;
+    setStatus("STARTING");
+    setError(null);
 
-  const COMPLETED_URL_GRACE_MS = 45 * 1000;
-  const COMPLETED_URL_RETRY_EVERY_MS = 2500;
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  const normalizeStatus = (raw) => {
-    const s = String(raw ?? "").trim();
-    return s ? s.toUpperCase() : "PENDING";
-  };
-
-  const extractVideoUrl = (stData) => {
-    if (!stData) return null;
-    const direct =
-      stData.video_url ||
-      stData.videoUrl ||
-      stData.url ||
-      stData.signed_url ||
-      stData.signedUrl ||
-      stData.public_url ||
-      stData.publicUrl;
-    if (direct) return direct;
-
-    const nested =
-      stData.data?.video_url ||
-      stData.data?.videoUrl ||
-      stData.result?.video_url ||
-      stData.result?.videoUrl ||
-      stData.payload?.video_url ||
-      stData.payload?.videoUrl;
-
-    return nested || null;
-  };
-
-  const pollVideoStatus = async (jid) => {
-    const auth = await getAuthHeadersGlobal();
-    const r = await fetch(`/api/video-status?jobId=${encodeURIComponent(jid)}`, {
-      headers: { ...auth },
+    const r = await fetch("/api/generate-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "t2v",     // 👈 video desde prompt
+        prompt,
+      }),
     });
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
-    return data;
-  };
 
-  // -------- Persist jobId (para refresh/cambiar módulo) --------
-  const STORAGE_KEY = "isabelaos_video_job_id_v1";
+    const j = await r.json();
 
-  const saveJobId = (id) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, String(id));
-    } catch {}
-  };
-  const loadJobId = () => {
-    try {
-      return localStorage.getItem(STORAGE_KEY);
-    } catch {
-      return null;
-    }
-  };
-  const clearJobId = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {}
-  };
-
-  const isBusyLocal = [
-    "IN_QUEUE",
-    "IN_PROGRESS",
-    "RUNNING",
-    "QUEUED",
-    "DISPATCHED",
-    "PENDING",
-    "LOCK_BUSY",
-  ].includes(status);
-  const effectiveBusy = isBusyLocal || !!loadJobId();
-
-  const formatEta = (s) => {
-    if (s == null) return null;
-    const sec = Math.max(0, Number(s));
-    const m = Math.floor(sec / 60);
-    const r = sec % 60;
-    if (m <= 0) return `${r}s`;
-    return `${m}m ${r}s`;
-  };
-
-  // ---------------------------------------------------------
-  // ✅ Prompt Optimizer states
-  // ---------------------------------------------------------
-  const [useOptimized, setUseOptimized] = useState(false);
-  const [optimizedPrompt, setOptimizedPrompt] = useState("");
-  const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optError, setOptError] = useState("");
-
-  // ✅ Para mostrar el prompt realmente enviado al motor
-  const [usedPrompt, setUsedPrompt] = useState("");
-  const [usedNegative, setUsedNegative] = useState("");
-  const [usedWasOptimized, setUsedWasOptimized] = useState(false);
-
-  // Invalida optimizado si cambian los originales
-  useEffect(() => {
-    setOptimizedPrompt("");
-    setOptimizedNegative("");
-    setOptError("");
-    // si cambian prompt/negative, también limpiamos "used"
-    setUsedPrompt("");
-    setUsedNegative("");
-    setUsedWasOptimized(false);
-  }, [prompt, negative]);
-
-  const handleOptimize = async () => {
-    setOptError("");
-    setIsOptimizing(true);
-
-    try {
-      const res = await fetch("/api/optimize-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: negative,
-        }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Error optimizando prompt.");
-      }
-
-      setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
-      setOptimizedNegative(String(data.optimizedNegative || "").trim());
-      // Auto-activar toggle si todavía no lo tenía
-      setUseOptimized(true);
-    } catch (e) {
-      setOptError(e?.message || String(e));
-    } finally {
-      setIsOptimizing(false);
-    }
-  };
-
-  const getEffectivePrompts = () => {
-    const canUseOpt =
-      useOptimized &&
-      typeof optimizedPrompt === "string" &&
-      optimizedPrompt.trim().length > 0;
-
-    return {
-      finalPrompt: canUseOpt ? optimizedPrompt.trim() : prompt,
-      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : negative,
-      usingOptimized: canUseOpt,
-    };
-  };
-
-  // -------- Resume: si hay job activo, continuar UI --------
-  const resumeExistingJob = async () => {
-    setError("");
-    setVideoUrl(null);
-
-    const auth = await getAuthHeadersGlobal();
-    if (!auth?.Authorization) return;
-
-    const fetchCurrentJob = async () => {
-      const r = await fetch("/api/video-current", { headers: { ...auth } });
-      const d = await r.json().catch(() => null);
-      if (!r.ok || !d) return null;
-      return d.job || null;
-    };
-
-    let jid = loadJobId();
-
-    // si no hay storage, intenta encontrar job activo en supabase
-    if (!jid) {
-      const cur = await fetchCurrentJob();
-      if (cur?.id) jid = cur.id;
-    }
-
-    if (!jid) return;
-
-    try {
-      const stData = await pollVideoStatus(jid);
-      const st = normalizeStatus(stData.status);
-      setJobId(jid);
-      saveJobId(jid);
-
-      const qp = typeof stData.queue_position === "number" ? stData.queue_position : null;
-      const pr = typeof stData.progress === "number" ? stData.progress : 0;
-      const eta = typeof stData.eta_seconds === "number" ? stData.eta_seconds : null;
-
-      setQueuePos(qp);
-      setProgress(Math.max(0, Math.min(100, pr)));
-      setEtaSeconds(eta);
-      setStatus(st);
-
-      if (["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"].includes(st)) {
-        if (qp && qp > 1) setStatusText(`Tu video está en cola. Posición: ${qp}.`);
-        else if (qp === 1) setStatusText("Tu video está primero en cola. Preparando render...");
-        else setStatusText("Tu video está en cola...");
-        return;
-      }
-
-      if (st === "RUNNING") {
-        setStatusText(`Generando... ${Math.max(0, Math.min(100, pr))}%`);
-        return;
-      }
-
-      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-        const url = extractVideoUrl(stData);
-        if (url) setVideoUrl(url);
-        setProgress(100);
-        setStatusText("Video generado con éxito.");
-        clearJobId();
-        return;
-      }
-
-      if (st === "ERROR") {
-        setStatus("ERROR");
-        setStatusText("Error al generar el video.");
-        setError(stData.error || "Error en job");
-        clearJobId();
-      }
-    } catch {
-      clearJobId();
-    }
-  };
-
-  useEffect(() => {
-    if (!user?.id) return;
-    resumeExistingJob();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  const handleGenerateVideo = async () => {
-    setError("");
-    setVideoUrl(null);
-    setJobId(null);
-    setProgress(0);
-    setQueuePos(null);
-    setEtaSeconds(null);
-
-    // limpiar “used prompt” en cada intento nuevo
-    setUsedPrompt("");
-    setUsedNegative("");
-    setUsedWasOptimized(false);
-
-    if (!canUse) {
+    if (!j.ok) {
+      setError(j.error || "Error al generar");
       setStatus("ERROR");
-      setStatusText("Debes iniciar sesión.");
-      setError("Debes iniciar sesión para usar el motor de video.");
       return;
     }
 
-    if (!hasEnough) {
-      setStatus("ERROR");
-      setStatusText("No tienes jades suficientes.");
-      setError(`Necesitas ${cost} jades para generar este video.`);
-      return;
-    }
-
-    // Si hay job guardado, reanuda en vez de crear otro
-    if (loadJobId()) {
-      setStatusText("Ya hay un video en proceso. Reanudando estado...");
-      await resumeExistingJob();
-      return;
-    }
-
-    setStatus("IN_QUEUE");
-    setStatusText("Enviando job al motor de video...");
-
-    try {
-      const auth = await getAuthHeadersGlobal();
-      if (!auth.Authorization) throw new Error("No hay sesión/token.");
-
-      const { finalPrompt, finalNegative, usingOptimized } = getEffectivePrompts();
-
-      // ✅ Mostrar en UI cuál prompt va a enviarse (sin cambiar diseño)
-      setUsedPrompt(finalPrompt);
-      setUsedNegative(finalNegative);
-      setUsedWasOptimized(usingOptimized);
-
-      // 1) Crear job (puede devolver LOCK_BUSY)
-      let jid = null;
-      let coldStartMsgShown = false;
-
-      const startCreate = Date.now();
-      while (!jid) {
-        if (Date.now() - startCreate > 2 * 60 * 1000) {
-          throw new Error("Timeout creando job (lock ocupado demasiado tiempo).");
-        }
-
-        const res = await fetch("/api/generate-video", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...auth },
-          body: JSON.stringify({
-            mode: "t2v",
-
-            // ✅ seguimos mandando prompt/negative como antes (compatibilidad),
-            // pero además mandamos la info del optimizado para que el backend
-            // lo use y lo pase al worker cuando el toggle está activo:
-            prompt: finalPrompt,
-            negative_prompt: finalNegative,
-            steps: Number(steps),
-
-            // ✅ NUEVO (mínimo): el backend decide si usa optimized o no
-            use_optimized: usingOptimized,
-            optimized_prompt: optimizedPrompt,
-            optimized_negative_prompt: optimizedNegative,
-          }),
-        });
-
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data) throw new Error(data?.error || "Error /api/generate-video");
-
-        if (data.status === "LOCK_BUSY") {
-          setStatus("LOCK_BUSY");
-          setStatusText("Arranque en cola... preparando motor (lock ocupado).");
-          await sleep(Number(data.retry_after_ms || 3000));
-          continue;
-        }
-
-        if (!data.ok || !data.job_id) {
-          throw new Error(data?.error || "No se recibió job_id.");
-        }
-
-        // ✅ Si el backend devuelve qué prompt usó, lo reflejamos
-        if (typeof data.used_prompt === "string" && data.used_prompt.trim()) {
-          setUsedPrompt(data.used_prompt.trim());
-        }
-        if (typeof data.used_negative_prompt === "string") {
-          setUsedNegative(String(data.used_negative_prompt || "").trim());
-        }
-        if (typeof data.using_optimized === "boolean") {
-          setUsedWasOptimized(data.using_optimized);
-        }
-
-        const action = data?.pod?.action || "";
-        if (!coldStartMsgShown && (action === "CREADO_Y_LISTO" || action === "RECREADO")) {
-          coldStartMsgShown = true;
-          setStatusText("Arranque en frío: iniciando motor de video...");
-        } else if (!coldStartMsgShown && action === "REUSADO") {
-          setStatusText("Motor listo. Encolando tu video...");
-        }
-
-        jid = data.job_id;
-      }
-
-      setJobId(jid);
-      saveJobId(jid);
-      setStatus("DISPATCHED");
-      setStatusText(`Job creado. En cola...`);
-
-      // 2) Poll status
-      const startedAt = Date.now();
-
-      while (true) {
-        if (Date.now() - startedAt > POLL_MAX_MS) {
-          throw new Error("Timeout esperando el video. Intenta de nuevo.");
-        }
-
-        await sleep(POLL_EVERY_MS);
-
-        const stData = await pollVideoStatus(jid);
-        const st = normalizeStatus(stData.status);
-
-        setStatus(st);
-
-        const qp = typeof stData.queue_position === "number" ? stData.queue_position : null;
-        const pr = typeof stData.progress === "number" ? stData.progress : 0;
-        const eta = typeof stData.eta_seconds === "number" ? stData.eta_seconds : null;
-
-        setQueuePos(qp);
-        setProgress(Math.max(0, Math.min(100, pr)));
-        setEtaSeconds(eta);
-
-        if (["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"].includes(st)) {
-          if (qp && qp > 1) setStatusText(`Tu video está en cola. Posición: ${qp}.`);
-          else if (qp === 1) setStatusText("Tu video está primero en cola. Preparando render...");
-          else setStatusText("Tu video está en cola...");
-          continue;
-        }
-
-        if (st === "RUNNING") {
-          const pct = Math.max(0, Math.min(100, pr));
-          const etaStr = formatEta(eta);
-          setStatusText(etaStr ? `Generando... ${pct}% · ETA ${etaStr}` : `Generando... ${pct}%`);
-          continue;
-        }
-
-        if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          let url = extractVideoUrl(stData);
-
-          if (!url) {
-            const graceStart = Date.now();
-            setStatusText("Finalizado. Sincronizando URL del video...");
-            while (Date.now() - graceStart < COMPLETED_URL_GRACE_MS) {
-              await sleep(COMPLETED_URL_RETRY_EVERY_MS);
-              const stData2 = await pollVideoStatus(jid);
-              url = extractVideoUrl(stData2);
-              if (url) break;
-            }
-          }
-
-          if (url) {
-            setVideoUrl(url);
-            setProgress(100);
-            setStatusText("Video generado con éxito.");
-            clearJobId();
-            return;
-          }
-          throw new Error("Terminado pero sin video_url (tras reintentos).");
-        }
-
-        if (st === "ERROR") {
-          throw new Error(stData.error || "Error al generar el video.");
-        }
-
-        throw new Error(stData.error || `Estado inesperado: ${st}`);
-      }
-    } catch (err) {
-      console.error(err);
-      setStatus("ERROR");
-      setStatusText("Error al generar el video.");
-      setError(err?.message || String(err));
-      clearJobId();
-    }
-  };
-
-  const handleDownload = async () => {
-    if (!videoUrl) return;
-    const link = document.createElement("a");
-    link.href = videoUrl;
-    link.download = "isabelaos-video.mp4";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  if (!canUse) {
-    return (
-      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
-        Debes iniciar sesión para usar el motor de video.
-      </div>
-    );
+    setJobId(j.job_id);
+    setStatus("IN_PROGRESS");
   }
 
-  const showProgressBar = ["RUNNING", "COMPLETED"].includes(status) || (progress > 0 && effectiveBusy);
+  // ----------------------------------------------------------
+  // Consulta estado del video
+  // ----------------------------------------------------------
+  async function poll() {
+    if (!jobId) return;
+
+    const r = await fetch(`/api/video-status?job_id=${jobId}`);
+    const j = await r.json();
+
+    if (j.status === "DONE" && j.video_url) {
+      setVideoUrl(j.video_url);
+      setStatus("DONE");
+    } else if (j.status === "ERROR") {
+      setError(j.error);
+      setStatus("ERROR");
+    }
+  }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Motor de video · Producción de clips</h2>
+    <div>
+      <h3>Video desde Prompt (10 jades)</h3>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Estado: {statusText || "Listo."}</span>
-            <span className="text-[11px] text-neutral-400">
-              Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
-            </span>
-          </div>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Describe el video..."
+      />
 
-          <div className="mt-1 text-[11px] text-neutral-400">
-            Costo: <span className="font-semibold text-white">{cost}</span> jades por video
-          </div>
+      <button disabled={!canUse} onClick={generate}>
+        Generar Video
+      </button>
 
-          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+      {status === "IN_PROGRESS" && (
+        <button onClick={poll}>Actualizar estado</button>
+      )}
 
-          {/* ✅ NUEVO: mostrar el prompt realmente enviado */}
-          {usedPrompt?.trim()?.length > 0 && (
-            <div className="mt-1 text-[10px] text-neutral-400">
-              Prompt enviado {usedWasOptimized ? "(optimizado)" : ""}:{" "}
-              <span className="text-neutral-200">{usedPrompt.trim()}</span>
-            </div>
-          )}
+      {videoUrl && <video src={videoUrl} controls />}
 
-          {queuePos != null && status !== "RUNNING" && status !== "COMPLETED" && (
-            <div className="mt-1 text-[10px] text-neutral-400">
-              Cola: <span className="font-semibold text-white">{queuePos}</span>
-            </div>
-          )}
-
-          {etaSeconds != null && status === "RUNNING" && (
-            <div className="mt-1 text-[10px] text-neutral-400">
-              ETA: <span className="font-semibold text-white">{formatEta(etaSeconds)}</span>
-            </div>
-          )}
-
-          {showProgressBar && (
-            <div className="mt-2">
-              <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all"
-                  style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-                />
-              </div>
-              <div className="mt-1 text-[10px] text-neutral-400">
-                Progreso:{" "}
-                <span className="font-semibold text-white">
-                  {Math.max(0, Math.min(100, progress))}%
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 space-y-4 text-sm">
-          <div>
-            <label className="text-neutral-300">Prompt</label>
-            <textarea
-              className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-
-            {/* ✅ Mostrar prompt optimizado debajo del cuadro */}
-            {optimizedPrompt?.trim()?.length > 0 && (
-              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
-                <div className="text-[10px] text-neutral-400">
-                  Prompt optimizado {useOptimized ? "(activo)" : "(no activo)"}:
-                </div>
-                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
-                  {optimizedPrompt.trim()}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="text-neutral-300">Negative prompt</label>
-            <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-            />
-
-            {/* ✅ Mostrar negative optimizado debajo del cuadro */}
-            {optimizedNegative?.trim()?.length > 0 && (
-              <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
-                <div className="text-[10px] text-neutral-400">
-                  Negative optimizado {useOptimized ? "(activo)" : "(no activo)"}:
-                </div>
-                <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
-                  {optimizedNegative.trim()}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ✅ Optimizer UI (mismo cuadro) */}
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-neutral-300">
-                Optimización de prompt (OpenAI)
-                {optimizedPrompt ? (
-                  <span className="ml-2 text-[10px] text-emerald-300/90">Listo ✓</span>
-                ) : (
-                  <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleOptimize}
-                disabled={isOptimizing || !prompt?.trim()}
-                className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-60"
-              >
-                {isOptimizing ? "Optimizando..." : "Optimizar con IA"}
-              </button>
-            </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="useOptVideo"
-                type="checkbox"
-                checked={useOptimized}
-                onChange={(e) => setUseOptimized(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="useOptVideo" className="text-[11px] text-neutral-300">
-                Usar prompt optimizado para generar
-              </label>
-
-              <span className="ml-auto text-[10px] text-neutral-500">
-                {useOptimized && optimizedPrompt ? "Activo (mandará optimizado)" : "Mandará tu prompt"}
-              </span>
-            </div>
-
-            {optimizedPrompt ? (
-              <div className="mt-2">
-                <div className="text-[10px] text-neutral-400">
-                  Prompt optimizado (se envía al motor si está activo):
-                </div>
-                <div className="mt-1 max-h-24 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
-                  {optimizedPrompt}
-                </div>
-
-                <div className="mt-2 text-[10px] text-neutral-400">Negative optimizado:</div>
-                <div className="mt-1 max-h-20 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">
-                  {optimizedNegative || "(vacío)"}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2 text-[10px] text-neutral-500">
-                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés)
-                manteniendo tu idea.
-              </div>
-            )}
-
-            {optError && (
-              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-neutral-300">Steps (calidad)</label>
-              <input
-                type="number"
-                min={10}
-                max={25}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                value={steps}
-                onChange={(e) => setSteps(Number(e.target.value))}
-              />
-              <div className="mt-1 text-[10px] text-neutral-500">Recomendado: 20–24. Máx permitido: 25.</div>
-            </div>
-
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={handleGenerateVideo}
-                disabled={effectiveBusy || !hasEnough}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {effectiveBusy ? "Generando..." : !hasEnough ? "Sin jades" : "Generar video"}
-              </button>
-            </div>
-          </div>
-
-          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
-        <h2 className="text-lg font-semibold text-white">Resultado</h2>
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-          {videoUrl ? (
-            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
-          ) : (
-            <p>
-              {queuePos && queuePos > 1
-                ? `Tu video está en cola (posición ${queuePos}).`
-                : effectiveBusy
-                ? "Procesando… vuelve en unos segundos (puedes cambiar de módulo, el progreso se guarda)."
-                : "Aquí verás el video cuando termine."}
-            </p>
-          )}
-        </div>
-        {videoUrl && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
-          >
-            Descargar video
-          </button>
-        )}
-      </div>
+      {error && <p style={{ color: "red" }}>{error}</p>}
     </div>
   );
 }
