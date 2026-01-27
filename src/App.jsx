@@ -1736,6 +1736,9 @@ function Img2VideoPanel({ userStatus, spendJades }) {
 // ---------------------------------------------------------
 // Foto Profesional IA (Headshot Pro)
 // SOLO COMPONENTE – sin export default, sin costos
+// ✅ CAMBIO: ya NO exige "plan activo".
+// ✅ Ahora: exige login + (opcional) jades suficientes.
+// ✅ Todo lo demás queda IGUAL (copy/paste estricto).
 // ---------------------------------------------------------
 
 function HeadshotPhotoPanel({ userStatus }) {
@@ -1749,7 +1752,29 @@ function HeadshotPhotoPanel({ userStatus }) {
   const [resultB64, setResultB64] = useState(null);
   const [error, setError] = useState("");
 
-  const isPremium = !!user && userStatus?.subscription_status === "active";
+  // -------------------------------------------------------------------
+  // ✅ CAMBIO IMPORTANTE (mínimo)
+  // Antes:
+  // const isPremium = !!user && userStatus?.subscription_status === "active";
+  //
+  // Ahora:
+  // - El backend ya cobra con spend_jades, así que NO bloqueamos por plan.
+  // - Bloqueamos por login y (si querés) por jades suficientes.
+  // -------------------------------------------------------------------
+  const canUse = !!user;
+
+  // ✅ Debe coincidir con COST_HEADSHOT_JADES del backend (ahora está en 1)
+  const COST_HEADSHOT_JADES = 1;
+
+  // ✅ Si tu userStatus trae jades, validamos. Si no trae, asumimos 0.
+  const currentJades = userStatus?.jades ?? 0;
+  const hasEnough = currentJades >= COST_HEADSHOT_JADES;
+
+  // ✅ Si todavía NO querés validar jades en UI, poné: const enforceJades = false;
+  // (El backend igual lo valida y devolverá INSUFFICIENT_JADES si no alcanza.)
+  const enforceJades = true;
+
+  // file input
   const fileInputId = "headshot-file-input";
 
   const handlePickFile = () => {
@@ -1787,15 +1812,23 @@ function HeadshotPhotoPanel({ userStatus }) {
   const handleGenerateHeadshot = async () => {
     setError("");
 
-    if (!user) {
+    // ✅ Login requerido
+    if (!canUse) {
       setError("Debes iniciar sesión para usar este módulo.");
       return;
     }
 
-    if (!isPremium) {
-      setError("Este módulo requiere un plan activo.");
+    // ✅ (Opcional) Bloqueo por jades en UI
+    if (enforceJades && !hasEnough) {
+      setError("No tienes jades suficientes para generar un headshot.");
       return;
     }
+
+    // ✅ Ya NO pedimos "plan activo"
+    // if (!isPremium) {
+    //   setError("Este módulo requiere un plan activo.");
+    //   return;
+    // }
 
     if (!pureB64) {
       setError("Sube una foto primero.");
@@ -1823,6 +1856,10 @@ function HeadshotPhotoPanel({ userStatus }) {
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data?.jobId) {
+        // ✅ Si el backend devuelve 402 (INSUFFICIENT_JADES), mostramos mensaje claro
+        if (data?.error === "INSUFFICIENT_JADES" || res.status === 402) {
+          throw new Error("No tienes jades suficientes para generar un headshot.");
+        }
         throw new Error(data?.error || "Error lanzando job.");
       }
 
