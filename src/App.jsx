@@ -1116,7 +1116,9 @@ function LibraryView() {
 
 import { useState } from "react";
 
-export default function VideoFromPromptPanel({ userStatus }) {
+// ✅ PARCHE: ya no export default (porque App.jsx solo puede tener 1 default)
+function VideoFromPromptPanel({ userStatus }) {
+
   // Prompt escrito por el usuario
   const [prompt, setPrompt] = useState("");
 
