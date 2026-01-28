@@ -1114,8 +1114,6 @@ function LibraryView() {
 // Costo: 10 jades
 // ------------------------------------------------------------
 
-import { useState } from "react";
-
 // ✅ PARCHE: ya no export default (porque App.jsx solo puede tener 1 default)
 function VideoFromPromptPanel({ userStatus }) {
 
