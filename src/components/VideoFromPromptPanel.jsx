@@ -5,9 +5,10 @@
 // - ✅ Prompt Optimizer (OpenAI)
 // - ✅ Negative prompt
 // - ✅ Selección de formato (ratio + plataforma referencia)
-// - ✅ Duración 3s / 5s (por ahora)
-// - ✅ AUTH TOKEN: manda Authorization Bearer (arregla MISSING_AUTH_TOKEN)
-// - ✅ Evita doble cobro: already_billed: true
+// - ✅ Duración 3s / 5s
+// - ✅ AUTH TOKEN: Authorization Bearer
+// - ✅ Billing ahora es SERVER-SIDE (para poder refund automático)
+// - ✅ JSON safe parsing (arregla error rojo)
 // ------------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
@@ -15,91 +16,40 @@ import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import { COSTS } from "../lib/pricing";
 
-// ❗️Export nombrado (NO default) para que App.jsx lo use como <VideoFromPromptPanel ... />
-export function VideoFromPromptPanel({ userStatus, spendJades }) {
+export function VideoFromPromptPanel({ userStatus }) {
   const { user } = useAuth();
 
-  // ---------------------------
-  // Prompt base + negative
-  // ---------------------------
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
 
-  // ---------------------------
-  // Formato / plataforma / duración
-  // ---------------------------
-  // Nota: mandamos aspect_ratio + width/height + platform_ref
-  // El backend puede usar lo que le sirva (si no lo usa aún, no rompe nada).
   const PRESETS = [
-    {
-      id: "tiktok_9_16",
-      label: "TikTok / Reels / Shorts (9:16) · 1080x1920",
-      platform_ref: "tiktok",
-      aspect_ratio: "9:16",
-      width: 1080,
-      height: 1920,
-    },
-    {
-      id: "ig_square_1_1",
-      label: "Instagram Feed (1:1) · 1080x1080",
-      platform_ref: "instagram",
-      aspect_ratio: "1:1",
-      width: 1080,
-      height: 1080,
-    },
-    {
-      id: "yt_16_9",
-      label: "YouTube Horizontal (16:9) · 1920x1080",
-      platform_ref: "youtube",
-      aspect_ratio: "16:9",
-      width: 1920,
-      height: 1080,
-    },
-    {
-      id: "ig_4_5",
-      label: "Instagram Feed Vertical (4:5) · 1080x1350",
-      platform_ref: "instagram",
-      aspect_ratio: "4:5",
-      width: 1080,
-      height: 1350,
-    },
-    {
-      id: "fb_4_3",
-      label: "Facebook (4:3) · 1440x1080",
-      platform_ref: "facebook",
-      aspect_ratio: "4:3",
-      width: 1440,
-      height: 1080,
-    },
+    { id: "tiktok_9_16", label: "TikTok / Reels / Shorts (9:16) · 1080x1920", platform_ref: "tiktok", aspect_ratio: "9:16", width: 1080, height: 1920 },
+    { id: "ig_square_1_1", label: "Instagram Feed (1:1) · 1080x1080", platform_ref: "instagram", aspect_ratio: "1:1", width: 1080, height: 1080 },
+    { id: "yt_16_9", label: "YouTube Horizontal (16:9) · 1920x1080", platform_ref: "youtube", aspect_ratio: "16:9", width: 1920, height: 1080 },
+    { id: "ig_4_5", label: "Instagram Feed Vertical (4:5) · 1080x1350", platform_ref: "instagram", aspect_ratio: "4:5", width: 1080, height: 1350 },
+    { id: "fb_4_3", label: "Facebook (4:3) · 1440x1080", platform_ref: "facebook", aspect_ratio: "4:3", width: 1440, height: 1080 },
   ];
 
   const [presetId, setPresetId] = useState(PRESETS[0].id);
-  const [durationSec, setDurationSec] = useState(3); // 3 o 5
-  const fps = 24; // fijo por ahora (si tu worker usa otro, no pasa nada)
+  const [durationSec, setDurationSec] = useState(3);
+  const fps = 24;
 
   const selectedPreset = PRESETS.find((p) => p.id === presetId) || PRESETS[0];
 
-  // ---------------------------
-  // Job state
-  // ---------------------------
-  const [status, setStatus] = useState("IDLE"); // IDLE | STARTING | IN_PROGRESS | DONE | ERROR
+  const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [jobId, setJobId] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
-  // ---------------------------
-  // Costos
-  // ---------------------------
   const COST_T2V = COSTS?.T2V ?? 10;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= COST_T2V;
 
-  // Evita doble click/doble request
   const lockRef = useRef(false);
 
   // ==========================================================
-  // ✅ Prompt Optimizer (OpenAI)
+  // Prompt Optimizer
   // ==========================================================
   const [useOptimized, setUseOptimized] = useState(false);
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
@@ -107,7 +57,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optError, setOptError] = useState("");
 
-  // Si cambia prompt o negative, limpiamos optimizados (para no usar uno viejo)
   useEffect(() => {
     setOptimizedPrompt("");
     setOptimizedNegative("");
@@ -115,41 +64,41 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     setUseOptimized(false);
   }, [prompt, negative]);
 
-  // ---------------------------
-  // ✅ AUTH HEADERS (arregla MISSING_AUTH_TOKEN)
-  // ---------------------------
   async function getAuthHeaders() {
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token || null;
-    if (!token) {
-      // Este texto es EXACTO para que lo veas claro en UI
-      throw new Error("MISSING_AUTH_TOKEN");
-    }
+    if (!token) throw new Error("MISSING_AUTH_TOKEN");
     return { Authorization: `Bearer ${token}` };
   }
 
-  // ---------------------------
-  // Optimizar prompt con /api/optimize-prompt
-  // ---------------------------
+  // ✅ JSON safe parse (evita error rojo)
+  async function safeFetchJson(url, options = {}) {
+    const r = await fetch(url, options);
+    const txt = await r.text();
+    let j = null;
+    try {
+      j = JSON.parse(txt);
+    } catch {
+      j = { ok: false, error: txt?.slice(0, 300) || "Respuesta no-JSON del servidor." };
+    }
+    return { r, j, txt };
+  }
+
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
 
     try {
-      const res = await fetch("/api/optimize-prompt", {
+      const { r, j } = await safeFetchJson("/api/optimize-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: negative || "",
-        }),
+        body: JSON.stringify({ prompt, negative_prompt: negative || "" }),
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "Error optimizando prompt.");
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Error optimizando prompt.");
 
-      setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
-      setOptimizedNegative(String(data.optimizedNegative || "").trim());
+      setOptimizedPrompt(String(j.optimizedPrompt || "").trim());
+      setOptimizedNegative(String(j.optimizedNegative || "").trim());
       setUseOptimized(true);
     } catch (e) {
       setOptError(e?.message || String(e));
@@ -158,7 +107,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     }
   };
 
-  // Decide qué prompt/negative mandar al backend
   const getEffectivePrompts = () => {
     const canUseOpt = useOptimized && optimizedPrompt?.trim()?.length > 0;
     return {
@@ -168,18 +116,12 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     };
   };
 
-  // ---------------------------
-  // Helper: poner error
-  // ---------------------------
   const setErrorState = (msg) => {
     setStatus("ERROR");
     setStatusText("Error.");
     setError(msg || "Ocurrió un error.");
   };
 
-  // ----------------------------------------------------------
-  // Generar video (COBRA + crea job)
-  // ----------------------------------------------------------
   async function generate() {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -188,38 +130,20 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
       setError("");
       setVideoUrl(null);
 
-      if (!user) {
-        setErrorState("Debes iniciar sesión para generar video.");
-        return;
-      }
+      if (!user) return setErrorState("Debes iniciar sesión para generar video.");
 
-      const { finalPrompt, finalNegative } = getEffectivePrompts();
-      if (!finalPrompt) {
-        setErrorState("Escribe un prompt (o activa el optimizado).");
-        return;
-      }
+      const { finalPrompt, finalNegative, usingOptimized } = getEffectivePrompts();
+      if (!finalPrompt) return setErrorState("Escribe un prompt (o activa el optimizado).");
 
-      if (!hasEnough) {
-        setErrorState(`Necesitas ${COST_T2V} jades para Video desde Prompt.`);
-        return;
-      }
+      if (!hasEnough) return setErrorState(`Necesitas ${COST_T2V} jades para Video desde Prompt.`);
 
       setStatus("STARTING");
-      setStatusText("Cobrando jades y enviando job...");
+      setStatusText("Enviando job...");
 
-      // ✅ Cobro (FRONTEND)
-      if (typeof spendJades === "function") {
-        await spendJades({ amount: COST_T2V, reason: "t2v" });
-      }
-
-      // ✅ AUTH
       const auth = await getAuthHeaders();
-
-      // ✅ Duración -> frames (por si tu worker lo usa)
       const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
 
-      // ✅ Crear job en backend
-      const r = await fetch("/api/generate-video", {
+      const { r, j } = await safeFetchJson("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
@@ -227,26 +151,22 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           prompt: finalPrompt,
           negative_prompt: finalNegative || "",
 
-          // ✅ formato
           platform_ref: selectedPreset.platform_ref,
           aspect_ratio: selectedPreset.aspect_ratio,
           width: selectedPreset.width,
           height: selectedPreset.height,
 
-          // ✅ duración
           duration_s: Number(durationSec),
           fps,
           num_frames: numFrames,
 
-          // ✅ evita doble cobro backend
-          already_billed: true,
+          // ✅ AHORA backend cobra (NO mandes already_billed true)
+          already_billed: false,
 
-          // ✅ auditoría (opcional)
-          used_optimized: !!(useOptimized && optimizedPrompt?.trim()),
+          used_optimized: usingOptimized,
         }),
       });
 
-      const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok || !j?.job_id) {
         throw new Error(j?.error || "No se pudo crear el job de video.");
       }
@@ -261,23 +181,17 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     }
   }
 
-  // ----------------------------------------------------------
-  // Poll / status
-  // ----------------------------------------------------------
   async function poll() {
     try {
       if (!jobId) return;
-
       setStatusText("Consultando estado...");
 
-      // ✅ AUTH (por si tu endpoint lo requiere)
       const auth = await getAuthHeaders();
 
-      const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(jobId)}`, {
+      const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(jobId)}`, {
         headers: { ...auth },
       });
 
-      const j = await r.json().catch(() => null);
       if (!r.ok || !j) throw new Error(j?.error || "Error consultando status.");
 
       const st = j.status || "IN_PROGRESS";
@@ -287,14 +201,16 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           setVideoUrl(j.video_url);
           setStatus("DONE");
           setStatusText("Video listo.");
-        } else {
-          throw new Error("El job terminó pero no devolvió video_url.");
+          return;
         }
-        return;
+        throw new Error("El job terminó pero no devolvió video_url.");
       }
 
       if (st === "ERROR" || st === "FAILED") {
-        throw new Error(j.error || "El job falló.");
+        let extra = "";
+        if (j.refunded) extra = `\n✅ Refund: ${j.refund_amount || 0} jades.`;
+        if (j.refund_error) extra += `\n⚠️ Refund error: ${j.refund_error}`;
+        throw new Error((j.error || "El job falló.") + extra);
       }
 
       setStatus("IN_PROGRESS");
@@ -304,7 +220,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     }
   }
 
-  // ✅ Auto-poll cada 5s mientras está generando
   useEffect(() => {
     if (!jobId) return;
     if (status !== "IN_PROGRESS") return;
@@ -317,12 +232,8 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, status]);
 
-  // ----------------------------------------------------------
-  // UI
-  // ----------------------------------------------------------
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      {/* Panel izquierdo */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Video desde Prompt</h2>
         <p className="mt-1 text-xs text-neutral-400">
@@ -330,7 +241,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           <span className="text-white font-semibold">{COST_T2V}</span> jades.
         </p>
 
-        {/* Barra de estado */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Estado: {statusText || "Listo."}</span>
@@ -341,7 +251,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
-        {/* ✅ Formato + duración */}
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
             <label className="text-xs text-neutral-300">Formato / plataforma</label>
@@ -377,7 +286,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           </div>
         </div>
 
-        {/* Prompt */}
         <div className="mt-4">
           <label className="text-xs text-neutral-300">Prompt</label>
           <textarea
@@ -399,7 +307,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           )}
         </div>
 
-        {/* ✅ Negative */}
         <div className="mt-4">
           <label className="text-xs text-neutral-300">Negative (opcional)</label>
           <textarea
@@ -421,7 +328,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           )}
         </div>
 
-        {/* ✅ Optimizer */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-neutral-300">
@@ -469,7 +375,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
         </div>
 
-        {/* Botones */}
         <div className="mt-4 grid grid-cols-2 gap-3">
           <button
             type="button"
@@ -497,7 +402,6 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
         {error && <p className="mt-3 text-xs text-red-400 whitespace-pre-line">{error}</p>}
       </div>
 
-      {/* Panel derecho */}
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
 
