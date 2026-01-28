@@ -1373,6 +1373,114 @@ function HeadshotPhotoPanel({ userStatus }) {
 }
 
 // ---------------------------------------------------------
+// Dashboard: pestaña "Suscribirse" (antes estaba en el home)
+// ---------------------------------------------------------
+function SubscribePanel({ userStatus }) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-black/60 p-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold text-white">Suscribirse</h2>
+        <p className="text-xs text-neutral-400">
+          Suscripción mensual. Al activarse, el sistema acreditará tus jades automáticamente por webhook.
+        </p>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>
+            Estado:{" "}
+            <span className="font-semibold text-white">
+              {userStatus.loading ? "..." : userStatus.subscription_status}
+            </span>
+          </span>
+
+          <span className="text-neutral-400">
+            Plan:{" "}
+            <span className="font-semibold text-white">
+              {userStatus.loading ? "..." : userStatus.plan || "none"}
+            </span>
+          </span>
+
+          <span className="text-neutral-400">
+            Jades:{" "}
+            <span className="font-semibold text-white">
+              {userStatus.loading ? "..." : userStatus.jades ?? 0}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-white">Basic</h3>
+            <span className="text-sm text-neutral-300">$19/mes</span>
+          </div>
+          <p className="mt-2 text-xs text-neutral-400">Ideal para creators en beta. Incluye jades mensuales.</p>
+
+          <div className="mt-4">
+            {!PAYPAL_PLAN_ID_BASIC ? (
+              <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                Falta VITE_PAYPAL_PLAN_ID_BASIC en tu .env
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await startPaypalSubscription("basic");
+                  } catch (e) {
+                    alert(e?.message || "No se pudo iniciar la suscripción.");
+                  }
+                }}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+              >
+                Suscribirme con PayPal
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-white">Pro</h3>
+            <span className="text-sm text-neutral-300">$39/mes</span>
+          </div>
+          <p className="mt-2 text-xs text-neutral-400">Más jades y potencia para producción constante.</p>
+
+          <div className="mt-4">
+            {!PAYPAL_PLAN_ID_PRO ? (
+              <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                Falta VITE_PAYPAL_PLAN_ID_PRO en tu .env
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await startPaypalSubscription("pro");
+                  } catch (e) {
+                    alert(e?.message || "No se pudo iniciar la suscripción.");
+                  }
+                }}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+              >
+                Suscribirme con PayPal
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-4 text-[10px] text-neutral-500">
+        Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal confirma
+        el evento.
+      </p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------
 // Dashboard (logueado)
 // ---------------------------------------------------------
 function DashboardView() {
@@ -1521,6 +1629,7 @@ function DashboardView() {
               ["img2video", "Imagen → Video"],
               ["library", "Biblioteca"],
               ["headshot", "📸 Headshot Pro"],
+              ["subscribe", "Suscribirse"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -1548,6 +1657,7 @@ function DashboardView() {
               ["img2video", "Transformación Imagen → Video"],
               ["library", "Biblioteca de producción"],
               ["headshot", "📸 Headshot Pro (Premium)"],
+              ["subscribe", "Suscribirse"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -1572,111 +1682,12 @@ function DashboardView() {
               </p>
             </div>
 
-            {/* Planes / Suscripción */}
-            <section className="rounded-3xl border border-white/10 bg-black/60 p-6">
-              <div className="flex flex-col gap-2">
-                <h2 className="text-lg font-semibold text-white">Planes</h2>
-                <p className="text-xs text-neutral-400">
-                  Suscripción mensual. Al activarse, el sistema acreditará tus jades automáticamente por webhook.
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span>
-                    Estado:{" "}
-                    <span className="font-semibold text-white">
-                      {userStatus.loading ? "..." : userStatus.subscription_status}
-                    </span>
-                  </span>
-
-                  <span className="text-neutral-400">
-                    Plan:{" "}
-                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.plan || "none"}</span>
-                  </span>
-
-                  <span className="text-neutral-400">
-                    Jades:{" "}
-                    <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-base font-semibold text-white">Basic</h3>
-                    <span className="text-sm text-neutral-300">$19/mes</span>
-                  </div>
-                  <p className="mt-2 text-xs text-neutral-400">Ideal para creators en beta. Incluye jades mensuales.</p>
-
-                  <div className="mt-4">
-                    {!PAYPAL_PLAN_ID_BASIC ? (
-                      <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                        Falta VITE_PAYPAL_PLAN_ID_BASIC en tu .env
-                      </div>
-                    ) : (
-                      // ✅ App.jsx — Cambio #2: Reemplazo SOLO el PayPalButton de BASIC (sin tocar nada más)
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await startPaypalSubscription("basic");
-                          } catch (e) {
-                            alert(e?.message || "No se pudo iniciar la suscripción.");
-                          }
-                        }}
-                        className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-                      >
-                        Suscribirme con PayPal
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-base font-semibold text-white">Pro</h3>
-                    <span className="text-sm text-neutral-300">$39/mes</span>
-                  </div>
-                  <p className="mt-2 text-xs text-neutral-400">Más jades y potencia para producción constante.</p>
-
-                  <div className="mt-4">
-                    {!PAYPAL_PLAN_ID_PRO ? (
-                      <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                        Falta VITE_PAYPAL_PLAN_ID_PRO en tu .env
-                      </div>
-                    ) : (
-                      // ✅ App.jsx — Cambio #2: Reemplazo SOLO el PayPalButton de PRO (sin tocar nada más)
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await startPaypalSubscription("pro");
-                          } catch (e) {
-                            alert(e?.message || "No se pudo iniciar la suscripción.");
-                          }
-                        }}
-                        className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-                      >
-                        Suscribirme con PayPal
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <p className="mt-4 text-[10px] text-neutral-500">
-                Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal
-                confirma el evento.
-              </p>
-            </section>
-
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
+            {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
           </div>
         </section>
       </main>
