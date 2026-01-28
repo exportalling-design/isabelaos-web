@@ -2,34 +2,37 @@
 // /api/video-status.js
 // IsabelaOS Studio
 // Endpoint para consultar el estado REAL de un video async
-// Funciona para:
-// - video desde prompt (t2v)
-// - video desde imagen (i2v)
+// - Ahora consulta RunPod Serverless (status)
+// - Si RunPod ya terminó, sube MP4 a Supabase Storage y actualiza video_jobs
 // ============================================================
 
-// Cliente Supabase
 import { createClient } from "@supabase/supabase-js";
-
-// Middleware de auth (usuario logueado)
 import { requireUser } from "./_auth.js";
 
-// Variables de entorno
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Tabla donde viven los jobs
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
-// Estados que indican que el job sigue en cola
-const QUEUE_STATUSES = [
-  "PENDING",
-  "IN_QUEUE",
-  "QUEUED",
-  "DISPATCHED",
-  "IN_PROGRESS",
-];
+// ✅ Bucket donde guardas videos (ajusta si el tuyo se llama distinto)
+const VIDEO_BUCKET = process.env.VIDEO_BUCKET || "videos";
 
-// Estados activos (cola + ejecutando)
+// ✅ RunPod Serverless
+const RUNPOD_API_KEY =
+  process.env.RUNPOD_SLS_API_KEY ||
+  process.env.VIDEO_RUNPOD_API_KEY ||
+  process.env.RUNPOD_API_KEY ||
+  null;
+
+// Si tienes endpoint distinto para T2V/I2V, puedes mapear por mode.
+// Si usas uno solo, con este basta.
+const RUNPOD_WAN22_ENDPOINT_ID =
+  process.env.RUNPOD_WAN22_T2V_ENDPOINT_ID ||
+  process.env.RUNPOD_WAN22_I2V_ENDPOINT_ID ||
+  null;
+
+// Estados que indican que el job sigue en cola
+const QUEUE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS"];
 const ACTIVE_STATUSES = [...QUEUE_STATUSES, "RUNNING"];
 
 // ------------------------------------------------------------
@@ -44,25 +47,22 @@ function sbAdmin() {
   });
 }
 
-// Normaliza el status (mayúsculas y fallback)
 function normStatus(s) {
   return String(s || "PENDING").toUpperCase();
 }
 
-// Da forma estándar a la respuesta del job
 function shape(job) {
   const status = normStatus(job.status);
 
   let queue_position = job.queue_position ?? null;
   let eta_seconds = job.eta_seconds ?? null;
 
-  // Si ya está corriendo → posición 0
   if (status === "RUNNING") queue_position = 0;
 
   return {
     ok: true,
-    id: job.id ?? null,             // PK de la tabla
-    job_id: job.job_id ?? null,     // UUID real del flujo
+    id: job.id ?? null,
+    job_id: job.job_id ?? null,
     status,
     progress: Math.max(0, Math.min(100, Number(job.progress || 0))),
     queue_position,
@@ -72,7 +72,183 @@ function shape(job) {
     created_at: job.created_at,
     updated_at: job.updated_at,
     mode: job.mode || job.payload?.mode || null,
+    provider: job.provider || null,
+    provider_request_id: job.provider_request_id || null,
   };
+}
+
+// ------------------------------------------------------------
+// RunPod: GET status/{requestId}
+// ------------------------------------------------------------
+async function runpodGetStatus({ endpointId, apiKey, requestId }) {
+  if (!endpointId) throw new Error("Missing RunPod endpointId");
+  if (!apiKey) throw new Error("Missing RunPod apiKey");
+  if (!requestId) throw new Error("Missing RunPod requestId");
+
+  const url = `https://api.runpod.ai/v2/${endpointId}/status/${requestId}`;
+  const r = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const txt = await r.text();
+  let data = null;
+  try {
+    data = JSON.parse(txt);
+  } catch {
+    data = { raw: txt };
+  }
+
+  if (!r.ok) {
+    throw new Error(`RunPod status HTTP ${r.status}: ${txt?.slice(0, 300)}`);
+  }
+  return data;
+}
+
+// ------------------------------------------------------------
+// Guarda MP4 (base64) en Supabase Storage y retorna public URL
+// ------------------------------------------------------------
+async function saveVideoToStorage({ sb, userId, jobId, videoB64 }) {
+  if (!videoB64) throw new Error("Missing video_b64");
+
+  // Buffer MP4
+  const buf = Buffer.from(String(videoB64), "base64");
+
+  // path estable (puedes cambiar)
+  const filename = `${jobId || "job"}-${Date.now()}.mp4`;
+  const path = `${userId}/${filename}`;
+
+  const { error: upErr } = await sb.storage
+    .from(VIDEO_BUCKET)
+    .upload(path, buf, {
+      contentType: "video/mp4",
+      upsert: true,
+    });
+
+  if (upErr) throw upErr;
+
+  // Public URL (si tu bucket es privado, aquí cambia a signed URL)
+  const { data } = sb.storage.from(VIDEO_BUCKET).getPublicUrl(path);
+
+  return data?.publicUrl || null;
+}
+
+// ------------------------------------------------------------
+// Si el job está activo y tiene provider_request_id,
+// consulta RunPod y si está listo, actualiza DB.
+// ------------------------------------------------------------
+async function maybeSyncFromRunPod({ sb, userId, job }) {
+  const status = normStatus(job.status);
+
+  // Si ya está listo o ya tiene URL, no hacemos nada
+  if (status === "COMPLETED" || status === "FAILED" || job.video_url) return job;
+
+  // Debe tener request id del proveedor
+  const requestId = job.provider_request_id;
+  if (!requestId) return job;
+
+  // Necesitamos credenciales RunPod
+  if (!RUNPOD_API_KEY || !RUNPOD_WAN22_ENDPOINT_ID) return job;
+
+  // Preguntar a RunPod
+  const rp = await runpodGetStatus({
+    endpointId: RUNPOD_WAN22_ENDPOINT_ID,
+    apiKey: RUNPOD_API_KEY,
+    requestId,
+  });
+
+  // Formatos típicos:
+  // rp.status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED"
+  const rpStatus = normStatus(rp?.status);
+
+  // Guardar raw (opcional, pero útil)
+  const providerRaw = rp;
+
+  // Si sigue corriendo: actualizar status/progress si quieres (simple)
+  if (ACTIVE_STATUSES.includes(rpStatus)) {
+    const patch = {
+      status: rpStatus, // opcional: refleja el real
+      provider_status: rpStatus,
+      provider_raw: providerRaw,
+      updated_at: new Date().toISOString(),
+    };
+
+    await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("id", job.id);
+    return { ...job, ...patch };
+  }
+
+  // Si falló:
+  if (rpStatus === "FAILED") {
+    const errMsg =
+      rp?.error ||
+      rp?.output?.error ||
+      rp?.output?.message ||
+      rp?.message ||
+      "RunPod FAILED";
+
+    const patch = {
+      status: "FAILED",
+      provider_status: rpStatus,
+      provider_raw: providerRaw,
+      error: String(errMsg).slice(0, 900),
+      updated_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    };
+
+    await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("id", job.id);
+    return { ...job, ...patch };
+  }
+
+  // Si completó: buscar video_b64
+  if (rpStatus === "COMPLETED") {
+    const videoB64 =
+      rp?.output?.video_b64 ||
+      rp?.output?.video ||
+      rp?.output?.mp4_b64 ||
+      null;
+
+    if (!videoB64) {
+      // Completó pero no trajo output esperado → marca error claro
+      const patch = {
+        status: "FAILED",
+        provider_status: rpStatus,
+        provider_raw: providerRaw,
+        error: "COMPLETED_BUT_NO_VIDEO_B64",
+        updated_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      };
+      await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("id", job.id);
+      return { ...job, ...patch };
+    }
+
+    // Subir a Storage
+    const url = await saveVideoToStorage({
+      sb,
+      userId,
+      jobId: job.job_id || job.id,
+      videoB64,
+    });
+
+    const patch = {
+      status: "COMPLETED",
+      provider_status: rpStatus,
+      provider_raw: providerRaw,
+      video_url: url,
+      progress: 100,
+      updated_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      error: null,
+    };
+
+    await sb.from(VIDEO_JOBS_TABLE).update(patch).eq("id", job.id);
+    return { ...job, ...patch };
+  }
+
+  // Cualquier otro caso raro: no tocar
+  return job;
 }
 
 // ============================================================
@@ -80,27 +256,16 @@ function shape(job) {
 // ============================================================
 export default async function handler(req, res) {
   try {
-    // 1️⃣ Verificar usuario autenticado
+    // 1) Verificar usuario autenticado
     const auth = await requireUser(req);
     if (!auth.ok) {
-      return res.status(auth.code || 401).json({
-        ok: false,
-        error: auth.error,
-      });
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     }
 
     const user_id = auth.user.id;
     const sb = sbAdmin();
 
-    // job_id opcional por query
-    const jobId = String(
-      req.query?.job_id ||
-      req.query?.jobId ||
-      req.query?.id ||
-      ""
-    ).trim();
-
-    // modo opcional (t2v / i2v)
+    const jobId = String(req.query?.job_id || req.query?.jobId || req.query?.id || "").trim();
     const mode = String(req.query?.mode || "").trim() || null;
 
     // --------------------------------------------------------
@@ -115,15 +280,13 @@ export default async function handler(req, res) {
         .order("created_at", { ascending: false })
         .limit(1);
 
-      // Si viene modo, filtra
       if (mode) q = q.eq("mode", mode);
 
       const { data, error } = await q;
       if (error) throw error;
 
-      const job = data?.[0];
+      let job = data?.[0];
 
-      // Si no hay job → sistema idle
       if (!job) {
         return res.status(200).json({
           ok: true,
@@ -136,13 +299,16 @@ export default async function handler(req, res) {
         });
       }
 
+      // ✅ NEW: sincronizar con RunPod si aplica
+      job = await maybeSyncFromRunPod({ sb, userId: user_id, job });
+
       return res.status(200).json(shape(job));
     }
 
     // --------------------------------------------------------
     // CASO B: viene job_id → buscar ese job
     // --------------------------------------------------------
-    const { data: job, error } = await sb
+    const { data: job0, error } = await sb
       .from(VIDEO_JOBS_TABLE)
       .select("*")
       .eq("job_id", jobId)
@@ -150,20 +316,14 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (error) throw error;
-    if (!job) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+    if (!job0) {
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
-    // --------------------------------------------------------
+    let job = job0;
+
     // Fallback: calcular posición en cola si no existe
-    // --------------------------------------------------------
-    if (
-      job.queue_position == null &&
-      QUEUE_STATUSES.includes(normStatus(job.status))
-    ) {
+    if (job.queue_position == null && QUEUE_STATUSES.includes(normStatus(job.status))) {
       const { count } = await sb
         .from(VIDEO_JOBS_TABLE)
         .select("id", { count: "exact", head: true })
@@ -175,12 +335,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // ✅ NEW: sincronizar con RunPod si aplica
+    job = await maybeSyncFromRunPod({ sb, userId: user_id, job });
+
     return res.status(200).json(shape(job));
   } catch (e) {
     console.error("[video-status]", e);
-    return res.status(500).json({
-      ok: false,
-      error: String(e?.message || e),
-    });
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 }
