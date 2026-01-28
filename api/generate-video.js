@@ -1,10 +1,12 @@
 // /api/generate-video.js  (SERVERLESS)
 // ============================================================
 // - Crea job en Supabase (video_jobs)
-// - Cobra 10 jades SOLO si already_billed !== true
+// - ✅ Cobra 10 jades SERVER-SIDE (spend_jades) por defecto
+// - ✅ Soporta ya_billed=true (si alguna UI vieja lo manda)
 // - Ajusta width/height para que sean divisibles por 16
 // - Lanza RunPod Serverless /run
 // - Guarda provider_request_id para consultar status
+// - Guarda billed_amount/billed_at en payload (para refund automático)
 // ============================================================
 
 import crypto from "crypto";
@@ -71,7 +73,7 @@ function pickFinalPrompts(body) {
   return { finalPrompt, finalNegative, usingOptimized };
 }
 
-// ✅ COBRO server-side (RPC spend_jades) SOLO si no viene already_billed=true
+// ✅ COBRO server-side (RPC spend_jades)
 async function spendJadesAtomic(sb, { user_id, amount, reason }) {
   const { data, error } = await sb.rpc("spend_jades", {
     p_user_id: user_id,
@@ -90,7 +92,6 @@ async function spendJadesAtomic(sb, { user_id, amount, reason }) {
 function snap16(n, fallback) {
   const x = Number(n);
   if (!Number.isFinite(x) || x <= 0) return fallback;
-  // round al múltiplo de 16 más cercano
   const r = Math.round(x / 16) * 16;
   return Math.max(16, r);
 }
@@ -101,17 +102,19 @@ function sanitizeDims(width, height, fallbackW, fallbackH) {
   return { width: w, height: h };
 }
 
-// (Opcional) Normaliza duración 3/5 como tu UI
+// Normaliza duración 3/5 como tu UI
 function normalizeTiming(body) {
   const fps = Number(body?.fps ?? 24);
   const duration_s = Number(body?.duration_s ?? body?.seconds ?? 3);
 
-  const seconds = duration_s < 4 ? 3 : 5; // fuerza solo 3 o 5
+  const seconds = duration_s < 4 ? 3 : 5;
   const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 24;
 
   const num_frames_raw = body?.num_frames ?? body?.frames;
   const numFramesFallback = Math.round(seconds * safeFps);
-  const num_frames = Number.isFinite(Number(num_frames_raw)) ? Math.max(1, Math.round(Number(num_frames_raw))) : numFramesFallback;
+  const num_frames = Number.isFinite(Number(num_frames_raw))
+    ? Math.max(1, Math.round(Number(num_frames_raw)))
+    : numFramesFallback;
 
   return { seconds, fps: safeFps, num_frames };
 }
@@ -126,8 +129,15 @@ async function runpodServerlessRun({ endpointId, input }) {
     body: JSON.stringify({ input }),
   });
 
-  const j = await r.json().catch(() => null);
-  if (!r.ok || !j) throw new Error(j?.error || `RunPod /run falló (${r.status})`);
+  const txt = await r.text();
+  let j = null;
+  try {
+    j = JSON.parse(txt);
+  } catch {
+    j = null;
+  }
+
+  if (!r.ok || !j) throw new Error((j && j.error) || `RunPod /run falló (${r.status}): ${txt.slice(0, 180)}`);
 
   const requestId = j?.id || j?.requestId || null;
   if (!requestId) throw new Error("RunPod /run no devolvió id");
@@ -150,7 +160,7 @@ export default async function handler(req, res) {
       guidance_scale,
       platform_ref,
       aspect_ratio,
-      already_billed,
+      already_billed, // compatibilidad
     } = body;
 
     const { finalPrompt, finalNegative, usingOptimized } = pickFinalPrompts(body);
@@ -175,15 +185,17 @@ export default async function handler(req, res) {
     // ✅ timing 3/5
     const timing = normalizeTiming(body);
 
-    // ✅ dims: ajusta a /16
-    // Fallbacks por tu preset actual (tiktok/reels)
+    // ✅ dims /16 (fallbacks)
     const fallbackW = 1088;
     const fallbackH = 1920;
-
     const dims = sanitizeDims(body?.width, body?.height, fallbackW, fallbackH);
 
-    // ✅ COBRO server-side SOLO si frontend NO cobró
-    if (already_billed !== true) {
+    // ✅ COBRO server-side (por defecto cobra)
+    const willBill = already_billed === true ? false : true;
+    const billedAmount = willBill ? COST_T2V : 0;
+    const billedAt = willBill ? new Date().toISOString() : null;
+
+    if (willBill) {
       await spendJadesAtomic(sb, { user_id, amount: COST_T2V, reason: "video_from_prompt" });
     }
 
@@ -205,11 +217,16 @@ export default async function handler(req, res) {
       duration_s: timing.seconds,
       fps: timing.fps,
       num_frames: timing.num_frames,
-      already_billed: already_billed === true,
       using_optimized: usingOptimized,
+
+      // ✅ billing guardado para refund
+      billing: {
+        already_billed: already_billed === true,
+        billed_amount: billedAmount,
+        billed_at: billedAt,
+      },
     };
 
-    // ⚠️ IMPORTANTE: NO uses columnas que no existen (ej: provider_reply)
     const { error: insErr } = await sb.from(VIDEO_JOBS_TABLE).insert([
       {
         job_id,
@@ -232,10 +249,7 @@ export default async function handler(req, res) {
     if (insErr) throw new Error(`No pude insertar video_jobs: ${insErr.message}`);
 
     // 2) dispatch a RunPod
-    await sb
-      .from(VIDEO_JOBS_TABLE)
-      .update({ status: "DISPATCHED", updated_at: new Date().toISOString() })
-      .eq("job_id", job_id);
+    await sb.from(VIDEO_JOBS_TABLE).update({ status: "DISPATCHED", updated_at: new Date().toISOString() }).eq("job_id", job_id);
 
     const input = {
       job_id,
@@ -261,7 +275,6 @@ export default async function handler(req, res) {
       .update({
         status: "IN_PROGRESS",
         provider_request_id: run.requestId,
-        // ✅ guardamos el raw dentro del payload, NO en provider_reply
         payload: { ...payloadToStore, runpod_raw: run.raw },
         updated_at: new Date().toISOString(),
       })
@@ -277,6 +290,7 @@ export default async function handler(req, res) {
       used_negative_prompt: finalNegative,
       used_dims: dims,
       used_timing: timing,
+      billed_amount: billedAmount,
     });
   } catch (e) {
     console.error("[generate-video] fatal:", e);
