@@ -1,10 +1,9 @@
 // /api/video-status.js
 // ============================================================
 // - Consulta estado del job en Supabase
-// - Consulta RunPod Serverless status: /v2/{endpointId}/status/{requestId}
-// - Si COMPLETED → guarda video_url y marca DONE
-// - Si FAILED → marca ERROR y reembolsa jades (si aplica, idempotente)
-// - SIEMPRE responde JSON válido (evita errores rojos de parseo)
+// - Consulta RunPod SERVERLESS con endpoint correcto
+// - Si COMPLETED: guarda video y devuelve video_url
+// - Si FAILED: marca ERROR y refund (pero el refund NUNCA rompe la respuesta)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -18,9 +17,6 @@ const VIDEO_RUNPOD_ENDPOINT_ID = process.env.VIDEO_RUNPOD_ENDPOINT_ID || null;
 
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
-// ------------------------
-// Supabase Admin
-// ------------------------
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
@@ -29,9 +25,6 @@ function sbAdmin() {
   });
 }
 
-// ------------------------
-// RunPod headers
-// ------------------------
 function runpodHeaders() {
   if (!RUNPOD_API_KEY) throw new Error("Falta RUNPOD_API_KEY");
   return {
@@ -40,9 +33,6 @@ function runpodHeaders() {
   };
 }
 
-// ------------------------
-// Safe JSON (si RunPod/Vercel devuelve texto/html no rompe)
-// ------------------------
 async function safeJson(res) {
   const txt = await res.text();
   try {
@@ -52,45 +42,35 @@ async function safeJson(res) {
   }
 }
 
-// ------------------------
-// RunPod Serverless Status correcto
-// GET https://api.runpod.ai/v2/{endpointId}/status/{requestId}
-// ------------------------
+// ✅ Serverless status correcto: /v2/{endpointId}/status/{requestId}
 async function runpodServerlessStatus({ endpointId, requestId }) {
   if (!endpointId) throw new Error("Falta VIDEO_RUNPOD_ENDPOINT_ID");
   if (!requestId) throw new Error("Falta provider_request_id");
 
   const url = `https://api.runpod.ai/v2/${endpointId}/status/${requestId}`;
   const r = await fetch(url, { headers: runpodHeaders() });
-
   const { json, txt } = await safeJson(r);
 
-  // Si RunPod responde error en texto/HTML, lo mostramos resumido
-  if (!r.ok) {
-    const msg = json?.error || json?.message || `RunPod status falló (${r.status}): ${txt.slice(0, 200)}`;
-    throw new Error(msg);
+  if (!r.ok || !json) {
+    throw new Error((json && json.error) || `RunPod status falló (${r.status}): ${txt.slice(0, 180)}`);
   }
-
-  // A veces puede venir vacío si hay incidentes → lo tratamos como error claro
-  if (!json) {
-    throw new Error(`RunPod status no devolvió JSON (${r.status}): ${txt.slice(0, 200)}`);
-  }
-
   return json;
 }
 
-// ------------------------
-// Extraer video de varios formatos posibles del worker
-// ------------------------
-function extractVideoFromOutput(rpJson) {
+// ✅ Extrae video de muchas variantes
+function extractVideo(rpJson) {
+  // serverless normalmente trae: { status, output, delayTime, executionTime, ... }
   const out =
     rpJson?.output ||
     rpJson?.result?.output ||
     rpJson?.data?.output ||
-    rpJson?.data ||
     {};
 
-  // posibles nombres
+  // Caso: output puede ser string base64 directo (algunos workers)
+  if (typeof out === "string" && out.length > 50) {
+    return { videoB64: out, videoUrl: null };
+  }
+
   const videoB64 =
     out?.video_base64 ||
     out?.video ||
@@ -103,45 +83,29 @@ function extractVideoFromOutput(rpJson) {
     out?.video_url ||
     out?.url ||
     out?.result_url ||
-    out?.mp4_url ||
+    rpJson?.output?.video_url ||
     null;
 
-  return { videoB64, videoUrl, out };
+  return { videoB64, videoUrl };
 }
 
-// ------------------------
-// Refund idempotente (solo una vez)
-// Requiere RPC public.add_jades (si no existe, NO puede reembolsar)
-// ------------------------
-async function refundJadesOnce(sb, { job, user_id }) {
-  // Lo que tú realmente cobraste (si lo guardas en payload)
-  const billedAmount =
-    Number(job?.payload?.billing?.billed_amount) ||
-    Number(job?.payload?.billed_amount) ||
-    0;
-
-  if (!billedAmount || billedAmount <= 0) {
-    return { refunded: false, refund_amount: 0 };
-  }
+// ✅ Refund idempotente: SOLO si hay billing guardado
+async function refundJadesOnce(sb, job, user_id) {
+  const billedAmount = Number(job?.payload?.billing?.billed_amount || 0);
+  if (!billedAmount || billedAmount <= 0) return { refunded: false, refund_amount: 0 };
 
   const alreadyRefunded = Boolean(job?.payload?.refund?.refunded_at);
-  if (alreadyRefunded) {
-    return { refunded: true, refund_amount: billedAmount };
-  }
+  if (alreadyRefunded) return { refunded: true, refund_amount: billedAmount };
 
-  // Intento RPC
+  // RPC add_jades (tu función debe existir)
   const { data, error } = await sb.rpc("add_jades", {
     p_user_id: user_id,
     p_amount: billedAmount,
     p_reason: `refund_video_job:${job.job_id}`,
   });
 
-  if (error) {
-    // Este es EXACTAMENTE tu error rojo si no existe la función
-    throw new Error(error.message || "No se pudo reembolsar jades.");
-  }
+  if (error) throw new Error(error.message || "No se pudo reembolsar jades.");
 
-  // Marca refund en payload (idempotencia)
   const newPayload = {
     ...(job.payload || {}),
     refund: {
@@ -156,30 +120,22 @@ async function refundJadesOnce(sb, { job, user_id }) {
     .update({ payload: newPayload, updated_at: new Date().toISOString() })
     .eq("job_id", job.job_id);
 
-  return { refunded: true, refund_amount: billedAmount, refund_rpc: data ?? true };
+  return { refunded: true, refund_amount: billedAmount, rpc_ok: data === true };
 }
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "GET") {
-      return res.status(405).json({ ok: false, error: "Método no permitido" });
-    }
+    if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Método no permitido" });
 
-    // ✅ Auth
     const auth = await requireUser(req);
-    if (!auth.ok) {
-      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
-    }
+    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
 
     const user_id = auth.user.id;
     const job_id = req.query.job_id;
-    if (!job_id) {
-      return res.status(400).json({ ok: false, error: "Falta job_id" });
-    }
+    if (!job_id) return res.status(400).json({ ok: false, error: "Falta job_id" });
 
     const sb = sbAdmin();
 
-    // 1) Leer job
     const { data: job, error } = await sb
       .from(VIDEO_JOBS_TABLE)
       .select("*")
@@ -187,101 +143,49 @@ export default async function handler(req, res) {
       .eq("user_id", user_id)
       .single();
 
-    if (error || !job) {
-      return res.status(404).json({ ok: false, error: "Job no encontrado" });
-    }
+    if (error || !job) return res.status(404).json({ ok: false, error: "Job no encontrado" });
 
-    // 2) DONE directo
+    // Si ya está DONE
     if (job.status === "DONE" && job.video_url) {
-      return res.status(200).json({
-        ok: true,
-        status: "DONE",
-        video_url: job.video_url,
-      });
+      return res.status(200).json({ ok: true, status: "DONE", video_url: job.video_url });
     }
 
-    // 3) sin requestId todavía
     if (!job.provider_request_id) {
-      return res.status(200).json({
-        ok: true,
-        status: job.status || "PENDING",
-      });
+      return res.status(200).json({ ok: true, status: job.status || "PENDING" });
     }
 
-    // 4) Consultar RunPod
     const rpJson = await runpodServerlessStatus({
       endpointId: VIDEO_RUNPOD_ENDPOINT_ID,
       requestId: job.provider_request_id,
     });
 
-    // RunPod serverless típicamente responde status con estos valores
-    const rpStatus = String(rpJson?.status || "UNKNOWN").toUpperCase();
+    const rpStatus = rpJson?.status || "UNKNOWN";
 
-    // 5) Sigue ejecutando
+    // Running
     if (["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED"].includes(rpStatus)) {
       return res.status(200).json({ ok: true, status: rpStatus });
     }
 
-    // 6) Falló / cancelado / timeout → ERROR + refund
-    if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(rpStatus)) {
-      let refundInfo = { refunded: false, refund_amount: 0 };
-
-      try {
-        refundInfo = await refundJadesOnce(sb, { job, user_id });
-      } catch (refundErr) {
-        // IMPORTANTÍSIMO: NO tumbamos el status por culpa del refund
-        refundInfo = {
-          refunded: false,
-          refund_amount: 0,
-          refund_error: String(refundErr?.message || refundErr),
-        };
-      }
-
-      await sb
-        .from(VIDEO_JOBS_TABLE)
-        .update({
-          status: "ERROR",
-          error: rpJson?.error || rpJson?.message || `RunPod ${rpStatus}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("job_id", job_id);
-
-      return res.status(200).json({
-        ok: false,
-        status: "ERROR",
-        error: rpJson?.error || rpJson?.message || `RunPod ${rpStatus}`,
-        rp_status: rpStatus,
-        ...refundInfo,
-      });
-    }
-
-    // 7) Completó → guardar video
+    // ✅ COMPLETED => guardar video sí o sí
     if (rpStatus === "COMPLETED") {
-      const { videoB64, videoUrl } = extractVideoFromOutput(rpJson);
+      const { videoB64, videoUrl } = extractVideo(rpJson);
 
       let finalUrl = null;
-      if (videoUrl) {
-        finalUrl = videoUrl;
-      } else if (videoB64) {
-        finalUrl = videoB64.startsWith("data:")
-          ? videoB64
-          : `data:video/mp4;base64,${videoB64}`;
-      } else {
-        // Guardamos error claro en DB
+      if (videoUrl) finalUrl = videoUrl;
+      else if (videoB64) finalUrl = videoB64.startsWith("data:") ? videoB64 : `data:video/mp4;base64,${videoB64}`;
+
+      if (!finalUrl) {
+        // No rompas: guarda estado para debug
         await sb
           .from(VIDEO_JOBS_TABLE)
           .update({
             status: "ERROR",
-            error: "RunPod COMPLETED pero no devolvió video_url ni base64",
+            error: "COMPLETED pero sin video_url/base64",
             updated_at: new Date().toISOString(),
           })
           .eq("job_id", job_id);
 
-        return res.status(200).json({
-          ok: false,
-          status: "ERROR",
-          error: "RunPod terminó pero no devolvió video (ni video_url ni base64).",
-        });
+        return res.status(200).json({ ok: false, status: "ERROR", error: "COMPLETED pero sin video en output" });
       }
 
       await sb
@@ -293,23 +197,40 @@ export default async function handler(req, res) {
         })
         .eq("job_id", job_id);
 
+      return res.status(200).json({ ok: true, status: "DONE", video_url: finalUrl });
+    }
+
+    // FAILED => refund, pero NO rompas aunque refund falle
+    if (rpStatus === "FAILED") {
+      let refundInfo = { refunded: false, refund_amount: 0 };
+
+      try {
+        refundInfo = await refundJadesOnce(sb, job, user_id);
+      } catch (e) {
+        refundInfo = { refunded: false, refund_amount: 0, refund_error: e?.message || String(e) };
+      }
+
+      await sb
+        .from(VIDEO_JOBS_TABLE)
+        .update({
+          status: "ERROR",
+          error: rpJson?.error || rpJson?.message || "RunPod failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("job_id", job_id);
+
+      // ✅ status siempre responde (nunca 500 por refund)
       return res.status(200).json({
-        ok: true,
-        status: "DONE",
-        video_url: finalUrl,
+        ok: false,
+        status: "ERROR",
+        error: rpJson?.error || rpJson?.message || "RunPod failed",
+        ...refundInfo,
       });
     }
 
-    // fallback (status raro)
-    return res.status(200).json({
-      ok: true,
-      status: rpStatus,
-    });
+    return res.status(200).json({ ok: true, status: rpStatus });
   } catch (e) {
     console.error("[video-status] ERROR:", e);
-    return res.status(500).json({
-      ok: false,
-      error: e?.message || String(e),
-    });
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 }
