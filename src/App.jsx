@@ -1115,7 +1115,7 @@ function LibraryView() {
 // ------------------------------------------------------------
 
 // ✅ PARCHE: ya no export default (porque App.jsx solo puede tener 1 default)
-function VideoFromPromptPanel({ userStatus }) {
+
 function VideoFromPromptPanel({ userStatus, spendJades }) {
   // Prompt escrito por el usuario
   const [prompt, setPrompt] = useState("");
@@ -1137,6 +1137,13 @@ function VideoFromPromptPanel({ userStatus, spendJades }) {
 
   // Validar jades
   const canUse = (userStatus?.jades ?? 0) >= COST_T2V;
+
+  // ✅ Cobro (FRONTEND) antes de enviar el job
+if (!canUse) return;
+
+if (typeof spendJades === "function") {
+  await spendJades({ amount: COST_T2V, reason: "t2v" });
+}
 
   // ----------------------------------------------------------
   // Lanza generación de video
@@ -1233,7 +1240,7 @@ function Img2VideoPanel({ userStatus, spendJades }) {
   const [error, setError] = useState("");
 
   const canUse = !!user;
-  const cost = COST_IMG2VIDEO;
+  const cost = COSTS?.IMG2VIDEO ?? 12;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
 
