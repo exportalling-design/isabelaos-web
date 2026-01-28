@@ -1,24 +1,83 @@
 // src/components/VideoFromPromptPanel.jsx
 // ------------------------------------------------------------
-// VideoFromPromptPanel
-// - Genera un video SOLO desde texto (T2V)
-// - Costo: 10 jades
-// - ✅ Incluye Prompt Optimizer (OpenAI) igual que Img2Video
-// - Cobra jades ANTES de mandar el job (para no doble cobro)
+// VideoFromPromptPanel (T2V)
+// - Genera video desde texto (prompt)
+// - ✅ Prompt Optimizer (OpenAI)
+// - ✅ Negative prompt
+// - ✅ Selección de formato (ratio + plataforma referencia)
+// - ✅ Duración 3s / 5s (por ahora)
+// - ✅ AUTH TOKEN: manda Authorization Bearer (arregla MISSING_AUTH_TOKEN)
+// - ✅ Evita doble cobro: already_billed: true
 // ------------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { supabase } from "../lib/supabaseClient";
 import { COSTS } from "../lib/pricing";
 
-// ❗️NO export default: App.jsx solo puede tener 1 default (App)
+// ❗️Export nombrado (NO default) para que App.jsx lo use como <VideoFromPromptPanel ... />
 export function VideoFromPromptPanel({ userStatus, spendJades }) {
   const { user } = useAuth();
 
   // ---------------------------
-  // Prompt base escrito por el usuario
+  // Prompt base + negative
   // ---------------------------
   const [prompt, setPrompt] = useState("");
+  const [negative, setNegative] = useState("");
+
+  // ---------------------------
+  // Formato / plataforma / duración
+  // ---------------------------
+  // Nota: mandamos aspect_ratio + width/height + platform_ref
+  // El backend puede usar lo que le sirva (si no lo usa aún, no rompe nada).
+  const PRESETS = [
+    {
+      id: "tiktok_9_16",
+      label: "TikTok / Reels / Shorts (9:16) · 1080x1920",
+      platform_ref: "tiktok",
+      aspect_ratio: "9:16",
+      width: 1080,
+      height: 1920,
+    },
+    {
+      id: "ig_square_1_1",
+      label: "Instagram Feed (1:1) · 1080x1080",
+      platform_ref: "instagram",
+      aspect_ratio: "1:1",
+      width: 1080,
+      height: 1080,
+    },
+    {
+      id: "yt_16_9",
+      label: "YouTube Horizontal (16:9) · 1920x1080",
+      platform_ref: "youtube",
+      aspect_ratio: "16:9",
+      width: 1920,
+      height: 1080,
+    },
+    {
+      id: "ig_4_5",
+      label: "Instagram Feed Vertical (4:5) · 1080x1350",
+      platform_ref: "instagram",
+      aspect_ratio: "4:5",
+      width: 1080,
+      height: 1350,
+    },
+    {
+      id: "fb_4_3",
+      label: "Facebook (4:3) · 1440x1080",
+      platform_ref: "facebook",
+      aspect_ratio: "4:3",
+      width: 1440,
+      height: 1080,
+    },
+  ];
+
+  const [presetId, setPresetId] = useState(PRESETS[0].id);
+  const [durationSec, setDurationSec] = useState(3); // 3 o 5
+  const fps = 24; // fijo por ahora (si tu worker usa otro, no pasa nada)
+
+  const selectedPreset = PRESETS.find((p) => p.id === presetId) || PRESETS[0];
 
   // ---------------------------
   // Job state
@@ -30,32 +89,48 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
   const [error, setError] = useState("");
 
   // ---------------------------
-  // Costo centralizado (fallback 10)
+  // Costos
   // ---------------------------
   const COST_T2V = COSTS?.T2V ?? 10;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= COST_T2V;
 
-  // Evita doble click / doble request
+  // Evita doble click/doble request
   const lockRef = useRef(false);
 
   // ==========================================================
-  // ✅ Prompt Optimizer (OpenAI) — mismo patrón que Img2Video
+  // ✅ Prompt Optimizer (OpenAI)
   // ==========================================================
   const [useOptimized, setUseOptimized] = useState(false);
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [optimizedNegative, setOptimizedNegative] = useState("");
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optError, setOptError] = useState("");
 
-  // Si el usuario cambia el prompt, limpiamos el optimizado (para no usar uno viejo)
+  // Si cambia prompt o negative, limpiamos optimizados (para no usar uno viejo)
   useEffect(() => {
     setOptimizedPrompt("");
+    setOptimizedNegative("");
     setOptError("");
     setUseOptimized(false);
-  }, [prompt]);
+  }, [prompt, negative]);
 
-  // Llama a tu endpoint existente /api/optimize-prompt
-  // (lo usamos igual que en Img2Video; negative_prompt vacío)
+  // ---------------------------
+  // ✅ AUTH HEADERS (arregla MISSING_AUTH_TOKEN)
+  // ---------------------------
+  async function getAuthHeaders() {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token || null;
+    if (!token) {
+      // Este texto es EXACTO para que lo veas claro en UI
+      throw new Error("MISSING_AUTH_TOKEN");
+    }
+    return { Authorization: `Bearer ${token}` };
+  }
+
+  // ---------------------------
+  // Optimizar prompt con /api/optimize-prompt
+  // ---------------------------
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
@@ -66,15 +141,15 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          negative_prompt: "", // T2V no usa negative (por ahora)
+          negative_prompt: negative || "",
         }),
       });
 
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Error optimizando prompt.");
 
-      // Guardamos el optimizado (normalmente viene en inglés y más descriptivo)
       setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
+      setOptimizedNegative(String(data.optimizedNegative || "").trim());
       setUseOptimized(true);
     } catch (e) {
       setOptError(e?.message || String(e));
@@ -83,14 +158,18 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
     }
   };
 
-  // Decide qué prompt mandar al backend
-  const getEffectivePrompt = () => {
+  // Decide qué prompt/negative mandar al backend
+  const getEffectivePrompts = () => {
     const canUseOpt = useOptimized && optimizedPrompt?.trim()?.length > 0;
-    return canUseOpt ? optimizedPrompt.trim() : (prompt || "").trim();
+    return {
+      finalPrompt: canUseOpt ? optimizedPrompt.trim() : (prompt || "").trim(),
+      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : (negative || "").trim(),
+      usingOptimized: canUseOpt,
+    };
   };
 
   // ---------------------------
-  // Helper de error
+  // Helper: poner error
   // ---------------------------
   const setErrorState = (msg) => {
     setStatus("ERROR");
@@ -114,7 +193,7 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
         return;
       }
 
-      const finalPrompt = getEffectivePrompt();
+      const { finalPrompt, finalNegative } = getEffectivePrompts();
       if (!finalPrompt) {
         setErrorState("Escribe un prompt (o activa el optimizado).");
         return;
@@ -133,18 +212,36 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
         await spendJades({ amount: COST_T2V, reason: "t2v" });
       }
 
+      // ✅ AUTH
+      const auth = await getAuthHeaders();
+
+      // ✅ Duración -> frames (por si tu worker lo usa)
+      const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
+
       // ✅ Crear job en backend
       const r = await fetch("/api/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           mode: "t2v",
           prompt: finalPrompt,
+          negative_prompt: finalNegative || "",
 
-          // ✅ indica que YA cobramos en frontend (evita doble cobro backend)
+          // ✅ formato
+          platform_ref: selectedPreset.platform_ref,
+          aspect_ratio: selectedPreset.aspect_ratio,
+          width: selectedPreset.width,
+          height: selectedPreset.height,
+
+          // ✅ duración
+          duration_s: Number(durationSec),
+          fps,
+          num_frames: numFrames,
+
+          // ✅ evita doble cobro backend
           already_billed: true,
 
-          // ✅ (opcional) para debug / auditoría
+          // ✅ auditoría (opcional)
           used_optimized: !!(useOptimized && optimizedPrompt?.trim()),
         }),
       });
@@ -173,9 +270,14 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
 
       setStatusText("Consultando estado...");
 
-      const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(jobId)}`);
-      const j = await r.json().catch(() => null);
+      // ✅ AUTH (por si tu endpoint lo requiere)
+      const auth = await getAuthHeaders();
 
+      const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(jobId)}`, {
+        headers: { ...auth },
+      });
+
+      const j = await r.json().catch(() => null);
       if (!r.ok || !j) throw new Error(j?.error || "Error consultando status.");
 
       const st = j.status || "IN_PROGRESS";
@@ -239,6 +341,42 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
+        {/* ✅ Formato + duración */}
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-xs text-neutral-300">Formato / plataforma</label>
+            <select
+              value={presetId}
+              onChange={(e) => setPresetId(e.target.value)}
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            >
+              {PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <div className="mt-1 text-[10px] text-neutral-500">
+              Se enviará como {selectedPreset.aspect_ratio} ({selectedPreset.width}x{selectedPreset.height})
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Duración</label>
+            <select
+              value={durationSec}
+              onChange={(e) => setDurationSec(Number(e.target.value))}
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            >
+              <option value={3}>3 segundos (rápido)</option>
+              <option value={5}>5 segundos (máximo)</option>
+            </select>
+            <div className="mt-1 text-[10px] text-neutral-500">
+              fps: {fps} · frames aprox: {Math.round(Number(durationSec) * fps)}
+            </div>
+          </div>
+        </div>
+
         {/* Prompt */}
         <div className="mt-4">
           <label className="text-xs text-neutral-300">Prompt</label>
@@ -246,10 +384,9 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Describe el video..."
-            className="mt-2 h-28 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            className="mt-2 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
           />
 
-          {/* Vista del prompt optimizado (si existe) */}
           {optimizedPrompt?.trim()?.length > 0 && (
             <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
               <div className="text-[10px] text-neutral-400">
@@ -262,7 +399,29 @@ export function VideoFromPromptPanel({ userStatus, spendJades }) {
           )}
         </div>
 
-        {/* ✅ Optimizer box (igual estilo al otro panel) */}
+        {/* ✅ Negative */}
+        <div className="mt-4">
+          <label className="text-xs text-neutral-300">Negative (opcional)</label>
+          <textarea
+            value={negative}
+            onChange={(e) => setNegative(e.target.value)}
+            placeholder="Ej: blurry, low quality, deformed..."
+            className="mt-2 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+          />
+
+          {optimizedNegative?.trim()?.length > 0 && (
+            <div className="mt-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+              <div className="text-[10px] text-neutral-400">
+                Negative optimizado {useOptimized ? "(activo)" : "(no activo)"}:
+              </div>
+              <div className="mt-1 whitespace-pre-wrap text-[10px] text-neutral-200">
+                {optimizedNegative.trim()}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ✅ Optimizer */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-neutral-300">
