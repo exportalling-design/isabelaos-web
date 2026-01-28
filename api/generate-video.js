@@ -5,6 +5,11 @@
 // - Lanza RunPod Serverless /run
 // - Guarda provider_request_id para consultar status
 // - Devuelve used_prompt / used_negative_prompt
+//
+// FIXES:
+// ✅ NO marca DISPATCHED antes de tener requestId
+// ✅ Si /run falla => status=ERROR con mensaje real
+// ✅ /run VERBOSO: captura response text+status
 // ============================================================
 
 import crypto from "crypto";
@@ -14,24 +19,37 @@ import { requireUser } from "./_auth.js";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
+const RUNPOD_API_KEY =
+  process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
+
 const VIDEO_RUNPOD_ENDPOINT_ID = process.env.VIDEO_RUNPOD_ENDPOINT_ID || null;
 
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
-
 const COST_T2V = 10;
 
-const ACTIVE_STATUSES = ["PENDING", "IN_QUEUE", "QUEUED", "DISPATCHED", "IN_PROGRESS", "RUNNING"];
+const ACTIVE_STATUSES = [
+  "PENDING",
+  "IN_QUEUE",
+  "QUEUED",
+  "DISPATCHED",
+  "IN_PROGRESS",
+  "RUNNING",
+];
 
 function sbAdmin() {
   if (!SUPABASE_URL) throw new Error("Falta SUPABASE_URL");
   if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
 }
 
 function runpodHeaders() {
   if (!RUNPOD_API_KEY) throw new Error("Falta RUNPOD_API_KEY");
-  return { Authorization: `Bearer ${RUNPOD_API_KEY}`, "Content-Type": "application/json" };
+  return {
+    Authorization: `Bearer ${RUNPOD_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
 async function getActiveJobForUser(sb, user_id, mode) {
@@ -50,10 +68,10 @@ async function getActiveJobForUser(sb, user_id, mode) {
   return data?.[0] || null;
 }
 
-// ✅ resolver prompt final (optimizado o normal) — IGUAL que el tuyo
+// ✅ resolver prompt final (optimizado o normal)
 function pickFinalPrompts(body) {
   const prompt = String(body?.prompt || "").trim();
-  const negative = String(body?.negative_prompt || "").trim();
+  const negative = String(body?.negative_prompt || body?.negative || "").trim();
 
   const useOptimized = body?.use_optimized === true || body?.useOptimized === true;
 
@@ -67,8 +85,7 @@ function pickFinalPrompts(body) {
   return { finalPrompt, finalNegative, usingOptimized };
 }
 
-// ✅ COBRO server-side (asume RPC en Supabase: spend_jades(user_id, amount, reason))
-// Si tú ya tienes otra RPC/nombre, lo ajusto, pero este es el patrón correcto.
+// ✅ COBRO server-side (RPC spend_jades)
 async function spendJadesAtomic(sb, { user_id, amount, reason }) {
   const { data, error } = await sb.rpc("spend_jades", {
     p_user_id: user_id,
@@ -77,13 +94,14 @@ async function spendJadesAtomic(sb, { user_id, amount, reason }) {
   });
 
   if (error) throw new Error(error.message || "No se pudo descontar jades.");
-  // data puede ser boolean/obj según tu RPC; solo validamos que no sea false/null
   if (data === false || data == null) throw new Error("No se pudo descontar jades (sin detalle).");
   return data;
 }
 
+// ✅ RunPod /run VERBOSO
 async function runpodServerlessRun({ endpointId, input }) {
   if (!endpointId) throw new Error("Falta VIDEO_RUNPOD_ENDPOINT_ID");
+
   const url = `https://api.runpod.ai/v2/${endpointId}/run`;
 
   const r = await fetch(url, {
@@ -92,24 +110,32 @@ async function runpodServerlessRun({ endpointId, input }) {
     body: JSON.stringify({ input }),
   });
 
-  const j = await r.json().catch(() => null);
-  if (!r.ok || !j) throw new Error(j?.error || `RunPod /run falló (${r.status})`);
+  const text = await r.text();
+  let j = null;
+  try { j = JSON.parse(text); } catch {}
 
-  // RunPod devuelve normalmente: { id, status, ... }
+  if (!r.ok) {
+    throw new Error(`RunPod /run ${r.status}: ${j?.error || text || "sin detalle"}`);
+  }
+
   const requestId = j?.id || j?.requestId || null;
-  if (!requestId) throw new Error("RunPod /run no devolvió id");
+  if (!requestId) throw new Error(`RunPod /run sin id: ${text}`);
   return { requestId, raw: j };
 }
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Método no permitido" });
+    }
 
     const auth = await requireUser(req);
-    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
-    const user_id = auth.user.id;
+    if (!auth.ok) {
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const user_id = auth.user.id;
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
     const {
       mode = "t2v",
@@ -119,14 +145,22 @@ export default async function handler(req, res) {
       num_frames,
       fps,
       guidance_scale,
+      // extras opcionales (por si luego quieres)
+      duration_s,
+      seconds,
+      aspect_ratio,
+      platform_ref,
+      seed,
     } = body;
 
     const { finalPrompt, finalNegative, usingOptimized } = pickFinalPrompts(body);
-    if (!finalPrompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
+    if (!finalPrompt) {
+      return res.status(400).json({ ok: false, error: "Falta prompt" });
+    }
 
     const sb = sbAdmin();
 
-    // A) si ya hay job activo (t2v), no crear otro
+    // A) si ya hay job activo, no crear otro
     const active = await getActiveJobForUser(sb, user_id, mode);
     if (active) {
       return res.status(200).json({
@@ -140,10 +174,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ COBRO: 10 jades por video (server-side)
-    await spendJadesAtomic(sb, { user_id, amount: COST_T2V, reason: "video_from_prompt" });
+    // ✅ COBRO
+    await spendJadesAtomic(sb, {
+      user_id,
+      amount: COST_T2V,
+      reason: "video_from_prompt",
+    });
 
-    // 1) crear job en supabase
+    // 1) crear job en Supabase
     const job_id = crypto.randomUUID();
     const nowIso = new Date().toISOString();
 
@@ -158,6 +196,11 @@ export default async function handler(req, res) {
       num_frames,
       fps,
       guidance_scale,
+      duration_s,
+      seconds,
+      aspect_ratio,
+      platform_ref,
+      seed,
     };
 
     const { error: insErr } = await sb.from(VIDEO_JOBS_TABLE).insert([
@@ -174,15 +217,14 @@ export default async function handler(req, res) {
         video_url: null,
         provider: "runpod_serverless",
         provider_request_id: null,
+        provider_reply: null,
         created_at: nowIso,
         updated_at: nowIso,
       },
     ]);
     if (insErr) throw new Error(`No pude insertar video_jobs: ${insErr.message}`);
 
-    // 2) dispatch a RunPod Serverless
-    await sb.from(VIDEO_JOBS_TABLE).update({ status: "DISPATCHED", updated_at: new Date().toISOString() }).eq("job_id", job_id);
-
+    // 2) Llamar RunPod /run (NO marcamos DISPATCHED todavía)
     const input = {
       job_id,
       user_id,
@@ -195,10 +237,31 @@ export default async function handler(req, res) {
       num_frames,
       fps,
       guidance_scale,
+      duration_s,
+      seconds,
+      aspect_ratio,
+      platform_ref,
+      seed,
     };
 
-    const run = await runpodServerlessRun({ endpointId: VIDEO_RUNPOD_ENDPOINT_ID, input });
+    let run;
+    try {
+      run = await runpodServerlessRun({ endpointId: VIDEO_RUNPOD_ENDPOINT_ID, input });
+    } catch (e) {
+      // ✅ si falla /run, marcar ERROR con detalle real
+      await sb
+        .from(VIDEO_JOBS_TABLE)
+        .update({
+          status: "ERROR",
+          error: `RUNPOD_RUN_FAILED: ${String(e?.message || e)}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("job_id", job_id);
 
+      throw e;
+    }
+
+    // 3) Ya con requestId, marcamos DISPATCHED/IN_PROGRESS correctamente
     await sb
       .from(VIDEO_JOBS_TABLE)
       .update({
@@ -220,6 +283,9 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error("[generate-video] fatal:", e);
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error: String(e?.message || e),
+    });
   }
 }
