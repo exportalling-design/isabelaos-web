@@ -1116,7 +1116,7 @@ function LibraryView() {
 
 // ✅ PARCHE: ya no export default (porque App.jsx solo puede tener 1 default)
 function VideoFromPromptPanel({ userStatus }) {
-
+function VideoFromPromptPanel({ userStatus, spendJades }) {
   // Prompt escrito por el usuario
   const [prompt, setPrompt] = useState("");
 
