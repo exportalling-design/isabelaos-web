@@ -1,11 +1,10 @@
 // src/components/Img2VideoPanel.jsx
 // ---------------------------------------------------------
 // Img2VideoPanel (Imagen -> Video)
-// - Cobra jades (frontend) y manda already_billed=true
-// - Si "Usar prompt optimizado" está activo, optimiza AUTOMÁTICO al generar
-// - UI completa (prompt/negative/optimizer/steps)
-// - Rehidrata job activo (mode=i2v) para no perder estado
-// - Presets: 9:16 (default ON) y duración 5s (default)
+// - Default 3s y 9:16 NO marcado
+// - Selector 3s / 5s
+// - Usa Authorization (getAuthHeadersGlobal) para evitar Unauthorized
+// - Si "Usar prompt optimizado" está activo => manda optimizedPrompt/optimizedNegative
 // ---------------------------------------------------------
 
 import { useEffect, useState } from "react";
@@ -14,7 +13,7 @@ import { COSTS } from "../lib/pricing";
 
 // ❗️NO export default
 export function Img2VideoPanel({ userStatus, spendJades }) {
-  const { user } = useAuth();
+  const { user, getAuthHeadersGlobal } = useAuth();
 
   // ---------------------------
   // Inputs
@@ -26,10 +25,9 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const [negative, setNegative] = useState("");
   const [steps, setSteps] = useState(25);
 
-  // ✅ Presets (NEW)
-  const [usePortrait916, setUsePortrait916] = useState(true); // 9:16 default ON
-  const [seconds, setSeconds] = useState(5); // 5s default
-  const [fps, setFps] = useState(24); // fijo (puedes ocultarlo si quieres)
+  // ✅ Default real:
+  const [durationS, setDurationS] = useState(3); // default 3
+  const [isVertical916, setIsVertical916] = useState(false); // no marcado
 
   // ---------------------------
   // Job state
@@ -40,9 +38,8 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
-  // ✅ costo desde pricing central (fallback 12)
+  // costo
   const cost = COSTS?.IMG2VIDEO ?? 12;
-
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= cost;
   const canUse = !!user;
@@ -67,15 +64,11 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
-
     try {
       const res = await fetch("/api/optimize-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: negative,
-        }),
+        body: JSON.stringify({ prompt, negative_prompt: negative }),
       });
 
       const data = await res.json().catch(() => null);
@@ -84,13 +77,8 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
       setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
       setOptimizedNegative(String(data.optimizedNegative || "").trim());
       setUseOptimized(true);
-      return {
-        optimizedPrompt: String(data.optimizedPrompt || "").trim(),
-        optimizedNegative: String(data.optimizedNegative || "").trim(),
-      };
     } catch (e) {
       setOptError(e?.message || String(e));
-      throw e;
     } finally {
       setIsOptimizing(false);
     }
@@ -101,6 +89,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
     return {
       finalPrompt: canUseOpt ? optimizedPrompt.trim() : (prompt || ""),
       finalNegative: canUseOpt ? (optimizedNegative || "").trim() : (negative || ""),
+      usingOptimized: !!canUseOpt,
     };
   };
 
@@ -139,74 +128,20 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   };
 
   // ---------------------------
-  // Poll video-status
+  // Poll status (con auth)
   // ---------------------------
   const pollVideoStatus = async (job_id) => {
-    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`);
+    const auth = await getAuthHeadersGlobal();
+    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
+      headers: { ...auth },
+    });
     const data = await r.json().catch(() => null);
     if (!r.ok || !data) throw new Error(data?.error || "Error /api/video-status");
     return data;
   };
 
-  // ✅ Rehidratación job activo i2v
-  const rehydrateActiveI2V = async () => {
-    if (!user) return null;
-
-    const r = await fetch(`/api/video-status?mode=i2v`);
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) return null;
-
-    if (data.status === "IDLE" || !data.job_id) return null;
-
-    setJobId(data.job_id);
-    setStatus(data.status || "IN_PROGRESS");
-    setStatusText(`Estado actual: ${data.status || "IN_PROGRESS"}... (rehidratado)`);
-
-    if (data.video_url) setVideoUrl(data.video_url);
-    return data;
-  };
-
-  // Auto-rehidratar al entrar
-  useEffect(() => {
-    setError("");
-    setVideoUrl(null);
-
-    if (!user) {
-      setJobId(null);
-      setStatus("IDLE");
-      setStatusText("");
-      return;
-    }
-
-    rehydrateActiveI2V().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
   // ---------------------------
-  // Helpers presets
-  // ---------------------------
-  const clampInt = (v, min, max, fallback) => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(max, Math.max(min, Math.floor(n)));
-  };
-
-  // 9:16 recomendado para preview vertical:
-  // 576x1024 (ligero) o 720x1280 (más pesado)
-  const getResolution = () => {
-    if (usePortrait916) return { width: 576, height: 1024 };
-    // horizontal default (si lo quieres): 1024x576
-    return { width: 1024, height: 576 };
-  };
-
-  const getFrames = () => {
-    const sec = clampInt(seconds, 1, 10, 5);
-    const _fps = clampInt(fps, 12, 30, 24);
-    return { seconds: sec, fps: _fps, num_frames: sec * _fps };
-  };
-
-  // ---------------------------
-  // Generar (COBRA + crea job)
+  // Generar
   // ---------------------------
   const handleGenerate = async () => {
     setError("");
@@ -216,13 +151,6 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
       setStatus("ERROR");
       setStatusText("Debes iniciar sesión.");
       setError("Debes iniciar sesión para usar Imagen → Video.");
-      return;
-    }
-
-    // Si ya hay un job en progreso, solo rehidrata
-    if (jobId && ["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(status)) {
-      setStatusText("Ya hay una generación en curso. Rehidratando estado...");
-      await rehydrateActiveI2V();
       return;
     }
 
@@ -244,57 +172,37 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
         return;
       }
 
-      // ✅ Cobro (FRONTEND)
+      // ✅ Cobro frontend (si lo estás usando así)
       if (typeof spendJades === "function") {
         await spendJades({ amount: cost, reason: "img2video" });
       }
 
-      // ✅ Si el checkbox está marcado, optimiza AUTOMÁTICO aquí
-      // - Solo optimiza si hay prompt base
-      // - Si ya existe optimizedPrompt, lo usa sin reoptimizar
-      let optP = optimizedPrompt;
-      let optN = optimizedNegative;
+      const { finalPrompt, finalNegative, usingOptimized } = getEffectivePrompts();
 
-      if (useOptimized && (prompt || "").trim().length > 0 && !(optimizedPrompt || "").trim()) {
-        setStatusText("Optimizando prompt con IA...");
-        const out = await handleOptimize(); // lanza /api/optimize-prompt
-        optP = out?.optimizedPrompt || "";
-        optN = out?.optimizedNegative || "";
-      }
+      // ✅ auth headers (CLAVE para no ver Unauthorized)
+      const auth = await getAuthHeadersGlobal();
 
-      const { finalPrompt, finalNegative } = getEffectivePrompts();
-
-      // Presets
-      const { width, height } = getResolution();
-      const { fps: finalFps, num_frames } = getFrames();
-
-      // ✅ Crear job
+      // ✅ crea job
       const res = await fetch("/api/generate-img2video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
-          // prompts normales
-          prompt: (prompt || "").trim(),
-          negative_prompt: (negative || "").trim(),
-
-          // prompts optimizados (si aplica)
-          use_optimized: !!useOptimized,
-          optimized_prompt: (optP || "").trim(),
-          optimized_negative_prompt: (optN || "").trim(),
-
+          prompt: finalPrompt || "",
+          negative: finalNegative || "", // igual que generate-video (mapeo en backend)
           steps: Number(steps),
+
+          // duración y aspect ratio igual que video
+          duration_s: Number(durationS),
+          aspect_ratio: isVertical916 ? "9:16" : "",
 
           // imagen
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
 
-          // ✅ presets: 9:16 y 5s
-          width,
-          height,
-          fps: finalFps,
-          num_frames,
+          // si querés mostrar en logs
+          use_optimized: usingOptimized,
 
-          // ✅ evita doble cobro si backend cobra
+          // ✅ evita doble cobro si backend todavía cobra (ideal: backend respeta esto)
           already_billed: true,
         }),
       });
@@ -307,9 +215,8 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
       setStatus("IN_PROGRESS");
       setStatusText(`Job enviado. ID: ${jid}. Generando...`);
 
-      // Loop polling
+      // polling
       let finished = false;
-
       while (!finished) {
         await new Promise((r) => setTimeout(r, 3000));
 
@@ -319,7 +226,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
         setStatus(st);
         setStatusText(`Estado actual: ${st}...`);
 
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
+        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "submitted"].includes(st)) continue;
 
         finished = true;
 
@@ -358,6 +265,13 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
     );
   }
 
+  // preset preview
+  const fpsPreview = 24;
+  const framesPreview = Math.round(fpsPreview * Number(durationS || 3));
+  const presetText = isVertical916
+    ? `Preset actual: 576×1024 · ${durationS}s · 24fps (${framesPreview} frames)`
+    : `Preset actual: default · ${durationS}s · 24fps (${framesPreview} frames)`;
+
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
@@ -374,6 +288,48 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
             Costo: <span className="font-semibold text-white">{cost}</span> jades por video
           </div>
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+        </div>
+
+        {/* ✅ Barra igual a la de video: 9:16 + duración */}
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-xs text-neutral-200">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={isVertical916}
+                onChange={(e) => setIsVertical916(e.target.checked)}
+              />
+              9:16 (vertical)
+            </label>
+
+            <div className="flex items-center gap-3 text-xs text-neutral-200">
+              <span className="text-neutral-300">Duración</span>
+
+              {/* ✅ selector 3/5 (no “solo 5”) */}
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="i2vDuration"
+                  checked={Number(durationS) === 3}
+                  onChange={() => setDurationS(3)}
+                />
+                3s
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="i2vDuration"
+                  checked={Number(durationS) === 5}
+                  onChange={() => setDurationS(5)}
+                />
+                5s
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-2 text-[11px] text-neutral-400">{presetText}</div>
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
@@ -405,42 +361,6 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
               placeholder="https://..."
               className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
             />
-          </div>
-
-          {/* ✅ Presets: 9:16 y 5s */}
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <input
-                  id="i2v916"
-                  type="checkbox"
-                  checked={usePortrait916}
-                  onChange={(e) => setUsePortrait916(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="i2v916" className="text-[11px] text-neutral-300">
-                  9:16 (vertical)
-                </label>
-              </div>
-
-              <div className="ml-auto flex items-center gap-2">
-                <span className="text-[11px] text-neutral-400">Duración</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={seconds}
-                  onChange={(e) => setSeconds(Number(e.target.value))}
-                  className="w-20 rounded-xl bg-black/60 px-2 py-1 text-[12px] text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                />
-                <span className="text-[11px] text-neutral-400">s</span>
-              </div>
-            </div>
-
-            <div className="mt-2 text-[10px] text-neutral-500">
-              Preset actual: {usePortrait916 ? "576x1024" : "1024x576"} · {seconds}s · {fps}fps (
-              {Math.max(1, Math.floor(seconds)) * Math.max(12, Math.min(30, Math.floor(fps)))} frames)
-            </div>
           </div>
 
           <div>
@@ -495,7 +415,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
                 Usar prompt optimizado para generar (auto)
               </label>
               <span className="ml-auto text-[10px] text-neutral-500">
-                {useOptimized ? "Activo (auto-optimiza al generar)" : "Mandará tu prompt"}
+                {useOptimized && optimizedPrompt ? "Activo (mandará optimizado)" : "Mandará tu prompt"}
               </span>
             </div>
 
