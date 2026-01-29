@@ -1,26 +1,19 @@
-// lib/supabaseAdmin.js
+// src/lib/supabaseAdmin.js
 import { createClient } from "@supabase/supabase-js";
 
-/**
- * sbAdmin()
- * Cliente admin usando SERVICE_ROLE.
- * - Bypassea RLS (necesario para inserts/updates de jobs y billing).
- * - NO lo uses en frontend.
- */
-export function sbAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url) throw new Error("Missing SUPABASE_URL (o VITE_SUPABASE_URL)");
-  if (!key) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-
-  return createClient(url, key);
-}
-
-/**
- * ✅ Alias para compatibilidad (tu video-status importaba este nombre).
- * Así no revientan rutas por un import que no existe.
- */
 export function getSupabaseAdmin() {
-  return sbAdmin();
+  if (!process.env.SUPABASE_URL) {
+    throw new Error("SUPABASE_URL missing");
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
+  }
+
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: { persistSession: false },
+    }
+  );
 }
