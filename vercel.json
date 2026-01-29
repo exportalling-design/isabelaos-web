@@ -1,13 +1,6 @@
 {
-  "crons": [
-    {
-      "path": "/api/autosleep",
-      "schedule": "*/1 * * * *"
-    }
-  ],
+  "crons": [],
   "functions": {
-    "api/generate-video.js": {
-      "maxDuration": 800
-    }
+    "api/generate-video.js": { "maxDuration": 800 }
   }
 }
