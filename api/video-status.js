@@ -6,7 +6,7 @@
 
 export const config = { runtime: "nodejs" };
 
-import { sbAdmin } from "../lib/supabaseAdmin.js";
+import { sbAdmin } from "../src/lib/supabaseAdmin.js";
 
 function getRunpodConfig() {
   const apiKey = process.env.RUNPOD_API_KEY || process.env.VIDEO_RUNPOD_API_KEY || null;
