@@ -1,7 +1,7 @@
 // api/generate-video.js  (CLON POD)
 // - Defaults exactos del POD: steps 34, 1280x720, 75 frames, 24 fps, guidance 6.5
-// - Usa prompt final (optimizado si viene), SIN inventar prompts
-// - Si falta prompt => "Falta prompt" (idéntico a tu versión POD)
+// - Usa prompt final (optimizado si viene), SIN inventar prompts (excepto fallback default si falta)
+// - Si falta prompt => ahora usa default hiperrealista (según tu pedido)
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -47,11 +47,24 @@ async function runpodRun({ endpointId, input }) {
 }
 
 // ------------------------------------------------------------
+// ✅ PROMPTS DEFAULT (ultradetalle + hiperrealismo)
+// ------------------------------------------------------------
+const DEFAULT_PROMPT =
+  "ultra detailed, hyperrealistic, photorealistic, cinematic lighting, " +
+  "sharp focus, high dynamic range, realistic skin texture, natural colors, " +
+  "high quality, professional video, film look";
+
+const DEFAULT_NEGATIVE =
+  "low quality, blurry, noisy, jpeg artifacts, deformed, distorted, " +
+  "extra limbs, bad anatomy, out of frame, cropped, text, watermark, logo";
+
+// ------------------------------------------------------------
 // ✅ pickFinalPrompts (compatible)
 // Prioridad:
 // 1) body.finalPrompt / body.finalNegative (si tu frontend los manda)
 // 2) body.optimizedPrompt / body.optimizedNegative (si los manda)
 // 3) body.prompt / body.negative_prompt|negative
+// 4) DEFAULT_PROMPT / DEFAULT_NEGATIVE (si falta todo)
 // ------------------------------------------------------------
 function pickFinalPrompts(body) {
   const b = body || {};
@@ -59,19 +72,27 @@ function pickFinalPrompts(body) {
   const finalPrompt =
     String(b?.finalPrompt || "").trim() ||
     String(b?.optimizedPrompt || "").trim() ||
-    String(b?.prompt || "").trim();
+    String(b?.prompt || "").trim() ||
+    DEFAULT_PROMPT;
 
   const finalNegative =
     String(b?.finalNegative || "").trim() ||
     String(b?.optimizedNegative || "").trim() ||
-    String(b?.negative_prompt || b?.negative || "").trim();
+    String(b?.negative_prompt || b?.negative || "").trim() ||
+    DEFAULT_NEGATIVE;
 
   const usingOptimized = !!(
     (String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim()) &&
     finalPrompt
   );
 
-  return { finalPrompt, finalNegative, usingOptimized };
+  const usedDefault = !(
+    String(b?.finalPrompt || "").trim() ||
+    String(b?.optimizedPrompt || "").trim() ||
+    String(b?.prompt || "").trim()
+  );
+
+  return { finalPrompt, finalNegative, usingOptimized, usedDefault };
 }
 
 export default async function handler(req, res) {
@@ -85,12 +106,11 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    // ✅ CLON POD: usar prompt final
-    const { finalPrompt, finalNegative } = pickFinalPrompts(body);
+    // ✅ CLON POD: usar prompt final (con fallback default)
+    const { finalPrompt, finalNegative, usedDefault } = pickFinalPrompts(body);
 
-    if (!finalPrompt) {
-      return res.status(400).json({ ok: false, error: "Falta prompt" });
-    }
+    // (ya no falla por falta de prompt; si querés que aún falle, decime y lo dejo igual)
+    // if (!finalPrompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
 
     // Aspect ratio opcional ("9:16" solo si UI lo manda)
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
@@ -203,6 +223,7 @@ export default async function handler(req, res) {
       job_id: jobId,
       provider_request_id: runpodId,
       spend: spendData ?? null,
+      used_default_prompt: !!usedDefault,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Server error" });
