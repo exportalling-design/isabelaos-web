@@ -9,6 +9,7 @@
 // - ✅ AUTH TOKEN: Authorization Bearer
 // - ✅ Billing ahora es SERVER-SIDE (para poder refund automático)
 // - ✅ JSON safe parsing (arregla error rojo)
+// - ✅ Progress bar + Update status handling (front-only)
 // ------------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
@@ -37,11 +38,21 @@ export function VideoFromPromptPanel({ userStatus }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
+  // ✅ Progress UI
+  const [progress, setProgress] = useState(0); // 0..100
+  const [needsManualRefresh, setNeedsManualRefresh] = useState(false);
+  const [lastKnownJob, setLastKnownJob] = useState(null);
+
   const COST_T2V = COSTS?.T2V ?? 10;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= COST_T2V;
 
   const lockRef = useRef(false);
+
+  // Poll control refs
+  const pollTimerRef = useRef(null);
+  const progTimerRef = useRef(null);
+  const currentParamsRef = useRef({ steps: 25, numFrames: 72, durationSec: 3, fps: 24 });
 
   // ==========================================================
   // Prompt Optimizer
@@ -121,6 +132,153 @@ export function VideoFromPromptPanel({ userStatus }) {
   const setDuration3 = () => setDurationSec(3);
   const setDuration5 = () => setDurationSec(5);
 
+  // ---------------------------
+  // Progress helpers (front-only estimation)
+  // ---------------------------
+  function isFetchDisconnectError(e) {
+    const m = String(e?.message || e || "").toLowerCase();
+    return (
+      m.includes("failed to fetch") ||
+      m.includes("networkerror") ||
+      m.includes("network request failed") ||
+      m.includes("load failed") ||
+      m.includes("fetch")
+    );
+  }
+
+  function getExpectedSeconds() {
+    const p = currentParamsRef.current || {};
+    const f = Number(p.numFrames || 72);
+    // Estimación UI simple por frames (sin tocar backend)
+    const est = 40 + f * 1.4; // ~140s para 72 frames
+    return Math.max(50, Math.min(420, est));
+  }
+
+  function computeProgressFromStartedAt(startedAtIso) {
+    if (!startedAtIso) return 5;
+    const startedAtMs = new Date(startedAtIso).getTime();
+    if (!isFinite(startedAtMs)) return 5;
+
+    const elapsedS = Math.max(0, (Date.now() - startedAtMs) / 1000);
+    const expected = getExpectedSeconds();
+    const raw = (elapsedS / expected) * 95;
+    const clamped = Math.max(3, Math.min(95, Math.round(raw)));
+    return clamped;
+  }
+
+  function stopPolling() {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (progTimerRef.current) {
+      clearInterval(progTimerRef.current);
+      progTimerRef.current = null;
+    }
+  }
+
+  async function refreshStatusOnce(forceJobId) {
+    const jid = forceJobId || jobId;
+    if (!jid) return;
+
+    try {
+      setNeedsManualRefresh(false);
+      setError("");
+
+      const auth = await getAuthHeaders();
+      const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(jid)}`, {
+        headers: { ...auth },
+      });
+
+      if (!r.ok || !j) throw new Error(j?.error || "Error consultando status.");
+
+      const st = j.status || "IN_PROGRESS";
+
+      if (j?.job) setLastKnownJob(j.job);
+
+      if (st === "DONE" || st === "COMPLETED" || st === "SUCCESS") {
+        setStatus("DONE");
+        setStatusText("Video listo.");
+        setProgress(100);
+        stopPolling();
+
+        if (j.video_url) {
+          setVideoUrl(j.video_url);
+          return;
+        }
+        // si el backend ya marcó DONE pero aún no mandó url
+        setStatusText("Video terminado.");
+        return;
+      }
+
+      if (st === "ERROR" || st === "FAILED") {
+        let extra = "";
+        if (j.refunded) extra = `\n✅ Refund: ${j.refund_amount || 0} jades.`;
+        if (j.refund_error) extra += `\n⚠️ Refund error: ${j.refund_error}`;
+        setStatus("FAILED");
+        setStatusText("Falló.");
+        setProgress(0);
+        stopPolling();
+        setError((j.error || "El job falló.") + extra);
+        return;
+      }
+
+      setStatus("IN_PROGRESS");
+      setStatusText(`Estado: ${st}`);
+
+      const startedAt = j?.job?.started_at || lastKnownJob?.started_at || null;
+      if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+    } catch (e) {
+      if (isFetchDisconnectError(e)) {
+        setNeedsManualRefresh(true);
+        setStatus("IN_PROGRESS");
+        setStatusText("Connection lost.");
+        setError("Connection lost. Click “Update status”.");
+        return;
+      }
+      setErrorState(e?.message || String(e));
+    }
+  }
+
+  function startPolling(jid) {
+    stopPolling();
+
+    progTimerRef.current = setInterval(() => {
+      const startedAt = lastKnownJob?.started_at || null;
+      if (!startedAt) return;
+      setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+    }, 1000);
+
+    let tick = 0;
+    pollTimerRef.current = setInterval(async () => {
+      tick += 1;
+      if (needsManualRefresh) return;
+
+      if (tick <= 8) {
+        await refreshStatusOnce(jid);
+      } else {
+        if (tick % 3 === 0) await refreshStatusOnce(jid);
+      }
+    }, 2000);
+  }
+
+  // ✅ refrescar al volver al tab (móvil)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible" && jobId) {
+        refreshStatusOnce(jobId);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
   async function generate() {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -128,6 +286,9 @@ export function VideoFromPromptPanel({ userStatus }) {
     try {
       setError("");
       setVideoUrl(null);
+      setProgress(0);
+      setNeedsManualRefresh(false);
+      setLastKnownJob(null);
 
       if (!user) return setErrorState("Debes iniciar sesión para generar video.");
 
@@ -152,6 +313,9 @@ export function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeaders();
       const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
 
+      // keep params for progress estimate (T2V no steps aquí)
+      currentParamsRef.current = { numFrames, durationSec: Number(durationSec), fps: Number(fps) };
+
       // ✅ Solo manda ratio si el usuario marcó 9:16
       const aspect_ratio = useNineSixteen ? "9:16" : "";
 
@@ -162,17 +326,11 @@ export function VideoFromPromptPanel({ userStatus }) {
           mode: "t2v",
           prompt: finalPrompt,
           negative_prompt: finalNegative || "",
-
-          // ✅ NUEVO: sin presets ni tamaños. Solo ratio opcional.
           ...(aspect_ratio ? { aspect_ratio } : {}),
-
           duration_s: Number(durationSec),
           fps,
           num_frames: numFrames,
-
-          // ✅ AHORA backend cobra (NO mandes already_billed true)
           already_billed: false,
-
           used_optimized: usingOptimized,
         }),
       });
@@ -181,53 +339,33 @@ export function VideoFromPromptPanel({ userStatus }) {
         throw new Error(j?.error || "No se pudo crear el job de video.");
       }
 
-      setJobId(j.job_id);
+      const jid = j.job_id;
+      setJobId(jid);
       setStatus("IN_PROGRESS");
-      setStatusText(`Generando... Job: ${j.job_id}`);
+      setStatusText(`Generando... Job: ${jid}`);
+      setProgress(3);
+
+      // refresh inmediato y polling
+      await new Promise((t) => setTimeout(t, 700));
+      await refreshStatusOnce(jid);
+      startPolling(jid);
     } catch (e) {
-      setErrorState(e?.message || String(e));
+      if (isFetchDisconnectError(e)) {
+        setNeedsManualRefresh(true);
+        setStatus("IN_PROGRESS");
+        setStatusText("Connection lost.");
+        setError("Connection lost. Click “Update status”.");
+      } else {
+        setErrorState(e?.message || String(e));
+      }
     } finally {
       lockRef.current = false;
     }
   }
 
   async function poll() {
-    try {
-      if (!jobId) return;
-      setStatusText("Consultando estado...");
-
-      const auth = await getAuthHeaders();
-
-      const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(jobId)}`, {
-        headers: { ...auth },
-      });
-
-      if (!r.ok || !j) throw new Error(j?.error || "Error consultando status.");
-
-      const st = j.status || "IN_PROGRESS";
-
-      if (st === "DONE" || st === "COMPLETED" || st === "SUCCESS") {
-        if (j.video_url) {
-          setVideoUrl(j.video_url);
-          setStatus("DONE");
-          setStatusText("Video listo.");
-          return;
-        }
-        throw new Error("El job terminó pero no devolvió video_url.");
-      }
-
-      if (st === "ERROR" || st === "FAILED") {
-        let extra = "";
-        if (j.refunded) extra = `\n✅ Refund: ${j.refund_amount || 0} jades.`;
-        if (j.refund_error) extra += `\n⚠️ Refund error: ${j.refund_error}`;
-        throw new Error((j.error || "El job falló.") + extra);
-      }
-
-      setStatus("IN_PROGRESS");
-      setStatusText(`Estado: ${st}`);
-    } catch (e) {
-      setErrorState(e?.message || String(e));
-    }
+    // ✅ ahora el botón solo hace refresh 1 vez (y sirve para “Update status”)
+    await refreshStatusOnce(jobId);
   }
 
   useEffect(() => {
@@ -235,7 +373,7 @@ export function VideoFromPromptPanel({ userStatus }) {
     if (status !== "IN_PROGRESS") return;
 
     const t = setInterval(() => {
-      poll().catch(() => {});
+      refreshStatusOnce(jobId).catch(() => {});
     }, 5000);
 
     return () => clearInterval(t);
@@ -259,6 +397,28 @@ export function VideoFromPromptPanel({ userStatus }) {
             </span>
           </div>
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+
+          {/* ✅ Progress bar */}
+          {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] text-neutral-400">
+                <span>Progress</span>
+                <span className="text-neutral-300">{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }}
+                />
+              </div>
+
+              {needsManualRefresh && (
+                <div className="mt-2 text-[11px] text-yellow-200">
+                  Connection lost. Click <span className="font-semibold">“Update status”</span>.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ✅ NUEVO: Formato y Duración con cuadritos */}
@@ -428,7 +588,7 @@ export function VideoFromPromptPanel({ userStatus }) {
             disabled={!jobId || status === "STARTING"}
             className="w-full rounded-2xl border border-white/20 bg-white/5 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-60"
           >
-            Actualizar estado
+            Update status
           </button>
         </div>
 
