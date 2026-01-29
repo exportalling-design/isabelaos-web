@@ -42,6 +42,40 @@ async function runpodRun({ endpointId, input }) {
   return data; // { id: "..." } normalmente
 }
 
+// ------------------------------------------------------------
+// ✅ Prompt Enhancer (calidad / lente / luz / enfoque)
+// - Si el prompt ya viene largo/detallado, NO lo toca.
+// - Si viene corto, lo completa con "cinematic capture" genérico.
+// ------------------------------------------------------------
+function enhancePromptIfNeeded(userPrompt) {
+  const p = String(userPrompt || "").trim();
+  if (!p) return "";
+
+  // Si ya viene detallado, no lo tocamos
+  if (p.length >= 80) return p;
+
+  // Pack universal (sirve para personas/objetos/agua/productos/escenas)
+  const cinematicPack =
+    "cinematic professional shot, ultra sharp focus, high detail, clean edges, stable shapes, smooth motion, " +
+    "natural textures, HDR, filmic color grading, soft key light, subtle rim light, global illumination, " +
+    "35mm lens, shallow depth of field, soft bokeh, realistic exposure, crisp highlights, no flicker";
+
+  // Mantiene la idea del usuario y solo agrega calidad
+  return `${p}. ${cinematicPack}`;
+}
+
+// ------------------------------------------------------------
+// ✅ Negative default (si el usuario no manda negative)
+// ------------------------------------------------------------
+function defaultNegativePrompt() {
+  return (
+    "blurry, low quality, worst quality, lowres, pixelated, deformed, bad anatomy, distorted face, " +
+    "extra limbs, missing fingers, fused fingers, broken hands, warped objects, " +
+    "flicker, jitter, frame tearing, unstable motion, ghosting, duplicate subject, " +
+    "watermark, text, logo, subtitles"
+  );
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -54,10 +88,13 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const prompt = String(body?.prompt || "").trim();
+    // ✅ prompt con enhancer
+    const promptRaw = String(body?.prompt || "").trim();
+    const prompt = enhancePromptIfNeeded(promptRaw);
 
-    // ✅ mapea "negative" -> negative_prompt (tu worker usa negative_prompt)
-    const negative_prompt = String(body?.negative || body?.negative_prompt || "").trim();
+    // ✅ negative default si viene vacío
+    const negativeRaw = String(body?.negative || body?.negative_prompt || "").trim();
+    const negative_prompt = negativeRaw.length > 0 ? negativeRaw : defaultNegativePrompt();
 
     // ✅ NUEVO: frontend manda aspect_ratio solo si el usuario marcó 9:16
     // (si viene "", el worker usa default)
@@ -84,8 +121,8 @@ export default async function handler(req, res) {
     // ✅ tu tabla usa num_frames
     const num_frames = Number(body?.num_frames || body?.frames || Math.round(fps * seconds));
 
-    // opcionales en tu tabla
-    const steps = Number(body?.steps || 25);
+    // ✅ defaults de calidad (podés cambiarlo)
+    const steps = Number(body?.steps || 30); // antes 25
     const guidance_scale = Number(body?.guidance_scale || 7.5);
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
