@@ -24,7 +24,8 @@ export function VideoFromPromptPanel({ userStatus }) {
 
   // ✅ Nuevo UI simple
   // Default = (sin aspect_ratio)
-  const [useNineSixteen, setUseNineSixteen] = useState(true); // puedes poner false si quieres default por defecto
+  // ✅ CAMBIO: NO marcado por default
+  const [useNineSixteen, setUseNineSixteen] = useState(false);
   const [durationSec, setDurationSec] = useState(3);
 
   // ✅ Mantengo fps fijo como estaba
@@ -129,6 +130,16 @@ export function VideoFromPromptPanel({ userStatus }) {
       setVideoUrl(null);
 
       if (!user) return setErrorState("Debes iniciar sesión para generar video.");
+
+      // ✅ Si el usuario marcó "Usar prompt optimizado", optimizamos automáticamente si aún no existe.
+      if (useOptimized && !optimizedPrompt?.trim()) {
+        if (!prompt?.trim()) {
+          return setErrorState("Escribe un prompt antes de activar el optimizado.");
+        }
+        setStatus("STARTING");
+        setStatusText("Optimizando prompt con IA...");
+        await handleOptimize();
+      }
 
       const { finalPrompt, finalNegative, usingOptimized } = getEffectivePrompts();
       if (!finalPrompt) return setErrorState("Escribe un prompt (o activa el optimizado).");
