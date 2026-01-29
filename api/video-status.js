@@ -1,5 +1,8 @@
 // pages/api/video-status.js
-import { getSupabaseAdmin } from "../../src/lib/supabaseAdmin";
+
+export const runtime = "nodejs"; // ⛔️ SIN ESTO VERCEL MUERE
+
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 function getRunpodConfig() {
   return {
@@ -9,18 +12,22 @@ function getRunpodConfig() {
   };
 }
 
-// Sube un buffer a Supabase Storage y devuelve public URL
 async function uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId, buffer }) {
-  const path = `${jobId}.mp4`; // simple (podés hacer carpetas por user)
-  const { error: upErr } = await supabaseAdmin.storage.from(bucket).upload(path, buffer, {
-    contentType: "video/mp4",
-    upsert: true,
-  });
-  if (upErr) throw new Error(`storage upload failed: ${upErr.message}`);
+  const path = `${jobId}.mp4`;
 
-  // ✅ Public URL (bucket tiene que ser PUBLIC)
+  const { error } = await supabaseAdmin.storage
+    .from(bucket)
+    .upload(path, buffer, {
+      contentType: "video/mp4",
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
-  return data?.publicUrl || null;
+  return data.publicUrl;
 }
 
 export default async function handler(req, res) {
@@ -33,61 +40,36 @@ export default async function handler(req, res) {
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
 
     const job_id = req.query.job_id;
-    if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
+    if (!job_id) {
+      return res.status(400).json({ ok: false, error: "Missing job_id" });
+    }
 
-    // 1) Cargar job de DB
     const { data: job, error: jobErr } = await supabaseAdmin
       .from("video_jobs")
-      .select("id,status,provider_request_id,video_url,provider_status,provider_raw,provider_reply")
+      .select("*")
       .eq("id", job_id)
       .single();
 
     if (jobErr || !job) {
-      return res.status(404).json({ ok: false, error: "video_jobs row not found" });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
-    // Si ya está listo y tiene URL, devolvé rápido
     if (job.status === "DONE" && job.video_url) {
       return res.status(200).json({ ok: true, status: "DONE", video_url: job.video_url });
     }
 
     if (!job.provider_request_id) {
-      return res.status(200).json({ ok: true, status: job.status || "QUEUED" });
+      return res.status(200).json({ ok: true, status: job.status });
     }
 
-    // 2) Consultar RunPod status
     const statusUrl = `${baseUrl}/${endpointId}/status/${job.provider_request_id}`;
     const rp = await fetch(statusUrl, {
-      method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
     });
 
-    const rpJson = await rp.json().catch(() => null);
+    const rpJson = await rp.json();
+    const rpStatus = rpJson.status;
 
-    if (!rp.ok) {
-      console.log("❌ runpod status failed:", rp.status, rpJson);
-      // No tumbamos el job, solo devolvemos estado actual
-      return res.status(200).json({ ok: true, status: job.status || "RUNNING", provider: rpJson });
-    }
-
-    const rpStatus = rpJson?.status || "RUNNING";
-
-    // 3) Si RunPod dice FAILED
-    if (rpStatus === "FAILED") {
-      await supabaseAdmin
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          provider_status: "FAILED",
-          provider_reply: rpJson,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-
-      return res.status(200).json({ ok: true, status: "FAILED" });
-    }
-
-    // 4) Si todavía corre
     if (rpStatus !== "COMPLETED") {
       await supabaseAdmin
         .from("video_jobs")
@@ -98,59 +80,23 @@ export default async function handler(req, res) {
         })
         .eq("id", job.id);
 
-      return res.status(200).json({ ok: true, status: "RUNNING", provider_status: rpStatus });
+      return res.status(200).json({ ok: true, status: rpStatus });
     }
 
-    // 5) COMPLETED -> sacar URL del output (ajusta según tu worker)
-    const out = rpJson?.output;
     const remoteUrl =
-      (typeof out === "string" && out) ||
-      out?.video_url ||
-      out?.url ||
-      out?.result?.video_url ||
-      null;
+      rpJson.output?.video_url ||
+      rpJson.output?.url ||
+      (typeof rpJson.output === "string" ? rpJson.output : null);
 
     if (!remoteUrl) {
-      await supabaseAdmin
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          provider_status: "FAILED",
-          provider_reply: rpJson,
-          error: "no_video_url_in_provider_output",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-
-      return res.status(200).json({
-        ok: true,
-        status: "FAILED",
-        error: "no_video_url_in_provider_output",
-      });
+      throw new Error("No video URL in provider output");
     }
-
-    // 6) Descargar el mp4 y subir a Supabase Storage
-    const bucket = process.env.VIDEO_BUCKET || "videos";
 
     const vidResp = await fetch(remoteUrl);
-    if (!vidResp.ok) {
-      await supabaseAdmin
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          provider_status: "FAILED",
-          provider_reply: rpJson,
-          error: "failed_to_download_video",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-
-      return res.status(200).json({ ok: true, status: "FAILED", error: "failed_to_download_video" });
-    }
-
     const arrayBuffer = await vidResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
+    const bucket = process.env.VIDEO_BUCKET || "videos";
     const publicUrl = await uploadToSupabaseVideoBucket({
       supabaseAdmin,
       bucket,
@@ -158,21 +104,23 @@ export default async function handler(req, res) {
       buffer,
     });
 
-    // 7) Update DB con video_url final
     await supabaseAdmin
       .from("video_jobs")
       .update({
         status: "DONE",
         provider_status: "COMPLETED",
-        provider_reply: rpJson,
         video_url: publicUrl,
+        provider_reply: rpJson,
         completed_at: new Date().toISOString(),
       })
       .eq("id", job.id);
 
     return res.status(200).json({ ok: true, status: "DONE", video_url: publicUrl });
-  } catch (e) {
-    console.log("❌ video-status fatal:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "server_error" });
+  } catch (err) {
+    console.error("❌ video-status fatal:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || "server_error",
+    });
   }
 }
