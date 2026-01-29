@@ -41,12 +41,22 @@ export function Img2VideoPanel({ userStatus }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
+  // ✅ Progress UI
+  const [progress, setProgress] = useState(0); // 0..100
+  const [needsManualRefresh, setNeedsManualRefresh] = useState(false);
+  const [lastKnownJob, setLastKnownJob] = useState(null); // for started_at, etc.
+
   const COST_I2V = COSTS?.IMG2VIDEO ?? 12;
   const currentJades = userStatus?.jades ?? 0;
   const hasEnough = currentJades >= COST_I2V;
 
   const fileInputId = "img2video-file-input";
   const lockRef = useRef(false);
+
+  // Poll control refs
+  const pollTimerRef = useRef(null);
+  const progTimerRef = useRef(null);
+  const currentParamsRef = useRef({ steps: 25, numFrames: 72, durationSec: 3, fps: 24 });
 
   // ---------------------------
   // Prompt Optimizer (OpenAI)
@@ -119,7 +129,7 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-// ---------------------------
+  // ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -176,6 +186,163 @@ export function Img2VideoPanel({ userStatus }) {
   const setDuration5 = () => setDurationSec(5);
 
   // ---------------------------
+  // Progress helpers (front-only estimation)
+  // ---------------------------
+  function isFetchDisconnectError(e) {
+    const m = String(e?.message || e || "").toLowerCase();
+    return (
+      m.includes("failed to fetch") ||
+      m.includes("networkerror") ||
+      m.includes("network request failed") ||
+      m.includes("load failed") ||
+      m.includes("fetch") // keep broad for mobile webviews
+    );
+  }
+
+  function getExpectedSeconds() {
+    // Estimación estable (solo UI): depende de steps + frames.
+    // Mantiene progreso suave y NO toca backend.
+    const p = currentParamsRef.current || {};
+    const s = Number(p.steps || 25);
+    const f = Number(p.numFrames || 72);
+    // base + coeficientes (suave)
+    const est = 35 + s * 2.0 + f * 1.2; // ~130s default
+    return Math.max(45, Math.min(420, est));
+  }
+
+  function computeProgressFromStartedAt(startedAtIso) {
+    if (!startedAtIso) return Math.max(progress, 5);
+    const startedAtMs = new Date(startedAtIso).getTime();
+    if (!isFinite(startedAtMs)) return Math.max(progress, 5);
+
+    const elapsedS = Math.max(0, (Date.now() - startedAtMs) / 1000);
+    const expected = getExpectedSeconds();
+
+    // Sube hasta 95% mientras corre
+    const raw = (elapsedS / expected) * 95;
+    const clamped = Math.max(3, Math.min(95, Math.round(raw)));
+    return clamped;
+  }
+
+  function stopPolling() {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (progTimerRef.current) {
+      clearInterval(progTimerRef.current);
+      progTimerRef.current = null;
+    }
+  }
+
+  async function refreshStatusOnce() {
+    if (!jobId) return;
+    try {
+      setNeedsManualRefresh(false);
+      setError("");
+
+      const stData = await pollVideoStatus(jobId);
+      const st = stData?.status || "IN_PROGRESS";
+
+      // Guardar job si viene
+      if (stData?.job) setLastKnownJob(stData.job);
+
+      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
+        const url = stData.video_url || stData.output?.video_url || stData.output?.videoUrl || null;
+        if (url) {
+          setVideoUrl(url);
+          setStatus("DONE");
+          setStatusText("Video ready.");
+          setProgress(100);
+          stopPolling();
+          return;
+        }
+        // DONE pero sin url
+        setStatus("DONE");
+        setStatusText("Finished.");
+        setProgress(100);
+        stopPolling();
+        return;
+      }
+
+      if (st === "FAILED") {
+        setStatus("FAILED");
+        setStatusText("Failed.");
+        setError(stData?.error || "Generation failed.");
+        setProgress(0);
+        stopPolling();
+        return;
+      }
+
+      // sigue
+      setStatus("IN_PROGRESS");
+      setStatusText(`Status: ${stData?.rp_status || st}`);
+      const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
+      if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+    } catch (e) {
+      // ✅ NO matamos el job por errores de red
+      if (isFetchDisconnectError(e)) {
+        setNeedsManualRefresh(true);
+        setStatus("IN_PROGRESS");
+        setStatusText("Connection lost.");
+        setError("Connection lost. Click “Update status”.");
+        return;
+      }
+      // otros errores sí los mostramos
+      setErrorState(e?.message || String(e));
+    }
+  }
+
+  function startPolling(job_id, startedAtIsoMaybe) {
+    stopPolling();
+
+    // progreso suave cada 1s (solo si no está DONE)
+    progTimerRef.current = setInterval(() => {
+      const startedAt = startedAtIsoMaybe || lastKnownJob?.started_at || null;
+      if (!startedAt) return;
+      setProgress((p) => {
+        const next = computeProgressFromStartedAt(startedAt);
+        return Math.max(p, next);
+      });
+    }, 1000);
+
+    // polling status (rápido al inicio, luego más suave)
+    let tick = 0;
+    pollTimerRef.current = setInterval(async () => {
+      tick += 1;
+
+      // si el user está en manual refresh mode, no spamear
+      if (needsManualRefresh) return;
+
+      // primeros ~15s cada 2s, luego cada 5s (hacemos “skip”)
+      if (tick <= 8) {
+        // correr siempre (2s interval)
+        await refreshStatusOnce();
+      } else {
+        // cada 5s aprox si interval es 2s => uno de cada 3
+        if (tick % 3 === 0) await refreshStatusOnce();
+      }
+    }, 2000);
+  }
+
+  // ✅ refrescar al volver al tab (móvil)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible" && jobId) {
+        refreshStatusOnce();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
+  // ---------------------------
   // Generate
   // ---------------------------
   async function handleGenerate() {
@@ -185,6 +352,9 @@ export function Img2VideoPanel({ userStatus }) {
     try {
       setError("");
       setVideoUrl(null);
+      setProgress(0);
+      setNeedsManualRefresh(false);
+      setLastKnownJob(null);
 
       if (!user) return setErrorState("You must be logged in to use Image → Video.");
       if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades to generate Image → Video.`);
@@ -205,6 +375,9 @@ export function Img2VideoPanel({ userStatus }) {
       const auth = await getAuthHeaders();
       const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
       const aspect_ratio = useNineSixteen ? "9:16" : "";
+
+      // keep params for progress estimate
+      currentParamsRef.current = { steps: Number(steps), numFrames, durationSec: Number(durationSec), fps: Number(fps) };
 
       // IMPORTANT:
       // Make sure your API route name matches this path:
@@ -241,34 +414,24 @@ export function Img2VideoPanel({ userStatus }) {
       setJobId(jid);
       setStatus("IN_PROGRESS");
       setStatusText(`Generating... Job: ${jid}`);
+      setProgress(3);
 
-      // Poll loop
-      let finished = false;
-      while (!finished) {
-        await new Promise((t) => setTimeout(t, 5000));
-        const stData = await pollVideoStatus(jid);
-        const st = stData.status || "IN_PROGRESS";
-
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "STARTING"].includes(st)) {
-          setStatus("IN_PROGRESS");
-          setStatusText(`Status: ${st}`);
-          continue;
-        }
-
-        finished = true;
-
-        if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          const url = stData.video_url || stData.output?.video_url || stData.output?.videoUrl || null;
-          if (!url) throw new Error("Job finished but video_url is missing.");
-          setVideoUrl(url);
-          setStatus("DONE");
-          setStatusText("Video ready.");
-        } else {
-          throw new Error(stData.error || "Generation failed.");
-        }
-      }
+// primer refresh inmediato + polling
+      // NOTA: video-status devuelve job.started_at cuando ya está IN_PROGRESS; al inicio puede ser null.
+      await new Promise((t) => setTimeout(t, 700));
+      await refreshStatusOnce();
+      const startedAt = lastKnownJob?.started_at || null;
+      startPolling(jid, startedAt);
     } catch (e) {
-      setErrorState(e?.message || String(e));
+      // si es red, no matar; mostrar botón actualizar
+      if (isFetchDisconnectError(e) && jobId) {
+        setNeedsManualRefresh(true);
+        setStatus("IN_PROGRESS");
+        setStatusText("Connection lost.");
+        setError("Connection lost. Click “Update status”.");
+      } else {
+        setErrorState(e?.message || String(e));
+      }
     } finally {
       lockRef.current = false;
     }
@@ -282,6 +445,10 @@ export function Img2VideoPanel({ userStatus }) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleUpdateStatus = async () => {
+    await refreshStatusOnce();
   };
 
   if (!user) {
@@ -310,6 +477,40 @@ export function Img2VideoPanel({ userStatus }) {
           </div>
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+
+          {/* ✅ Progress bar */}
+          {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] text-neutral-400">
+                <span>Progress</span>
+                <span className="text-neutral-300">{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }}
+                />
+              </div>
+              {needsManualRefresh && (
+                <div className="mt-2 text-[11px] text-yellow-200">
+                  Connection lost. Click <span className="font-semibold">“Update status”</span>.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ✅ Update status button */}
+          {jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh) && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={handleUpdateStatus}
+                className="w-full rounded-xl border border-white/20 px-3 py-2 text-[11px] text-white hover:bg-white/10"
+              >
+                Update status
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Format + Duration like T2V */}
