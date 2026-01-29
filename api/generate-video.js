@@ -10,7 +10,7 @@
 // Forzamos runtime Node (necesario porque usamos Buffer/stream en status, y fetch normal)
 export const config = { runtime: "nodejs" };
 
-import { sbAdmin } from "../lib/supabaseAdmin.js";
+import { sbAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../lib/getUserIdFromAuth.js";
 
 // Ajusta tu costo aquí o importalo desde tu pricing si ya lo tenés centralizado
