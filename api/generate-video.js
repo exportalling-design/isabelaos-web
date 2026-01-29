@@ -1,53 +1,31 @@
-// /api/generate-video.js
-// ------------------------------------------------------------
-// Genera un job T2V (texto->video) y lo deja registrado en Supabase.
-// - ✅ Inserta row en video_jobs (NO crea columnas nuevas)
-// - ✅ Cobra jades server-side via RPC spend_jades
-// - ✅ Llama RunPod endpoint /run y guarda provider_request_id
-// - ✅ Devuelve job_id al front para que haga polling con /api/video-status
-// ------------------------------------------------------------
-
-// Forzamos runtime Node (necesario porque usamos Buffer/stream en status, y fetch normal)
 export const config = { runtime: "nodejs" };
 
 import { sbAdmin } from "../src/lib/supabaseAdmin.js";
-import { getUserIdFromAuthHeader } from "../lib/getUserIdFromAuth.js";
+import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
-// Ajusta tu costo aquí o importalo desde tu pricing si ya lo tenés centralizado
 const COST_T2V = 10;
 
 function getRunpodConfig() {
   const apiKey = process.env.RUNPOD_API_KEY || process.env.VIDEO_RUNPOD_API_KEY || null;
   const endpointId = process.env.RUNPOD_ENDPOINT_ID || null;
   const baseUrl = process.env.RUNPOD_BASE_URL || "https://api.runpod.ai/v2";
-
   if (!apiKey) throw new Error("Missing RUNPOD_API_KEY");
   if (!endpointId) throw new Error("Missing RUNPOD_ENDPOINT_ID");
-
   return { apiKey, endpointId, baseUrl };
 }
 
-// Llama a RunPod Serverless Endpoint (v2) -> POST /{endpointId}/run
 async function runpodRun({ apiKey, endpointId, baseUrl, input }) {
   const url = `${baseUrl}/${endpointId}/run`;
-
   const r = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ input }),
   });
-
   const j = await r.json().catch(() => null);
-
   if (!r.ok || !j?.id) {
     const detail = j ? JSON.stringify(j).slice(0, 600) : "no_json";
     throw new Error(`RunPod run failed: ${r.status} ${detail}`);
   }
-
-  // RunPod devuelve { id: "xxxx", status: "IN_QUEUE", ... }
   return j;
 }
 
@@ -57,11 +35,9 @@ export default async function handler(req, res) {
   try {
     const admin = sbAdmin();
 
-    // 1) Autenticación: user_id real desde Bearer token (tu front ya manda Authorization)
     const user_id = await getUserIdFromAuthHeader(req);
     if (!user_id) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
-    // 2) Payload recibido del front (VideoFromPromptPanel)
     const {
       mode = "t2v",
       prompt,
@@ -81,15 +57,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing prompt" });
     }
 
-    // 3) Insert del job en video_jobs
-    //    NOTA: guardamos payload extra en provider_raw (jsonb) SIN crear columnas nuevas.
     const insertPayload = {
       user_id,
       status: "QUEUED",
       prompt: String(prompt).trim(),
       provider: "runpod",
       provider_status: "QUEUED",
-      // provider_request_id se llena después de llamar a RunPod
       provider_raw: {
         mode,
         negative_prompt: String(negative_prompt || ""),
@@ -119,7 +92,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Cobro de jades (server-side) - NO se quita
     if (!already_billed) {
       const { error: spendErr } = await admin.rpc("spend_jades", {
         p_user_id: user_id,
@@ -129,7 +101,6 @@ export default async function handler(req, res) {
       });
 
       if (spendErr) {
-        // si no se pudo cobrar, marcamos FAILED y devolvemos error
         await admin
           .from("video_jobs")
           .update({
@@ -144,11 +115,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5) Llamada a RunPod (Serverless Endpoint)
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
 
-    // Este input es el que recibirá tu worker RunPod.
-    // Ajustá solo si tu worker espera nombres distintos.
     const runInput = {
       mode,
       prompt: String(prompt).trim(),
@@ -160,13 +128,12 @@ export default async function handler(req, res) {
       duration_s,
       fps,
       num_frames,
-      job_id: job.id, // útil para trazabilidad
-      user_id,        // útil si querés logs/validación
+      job_id: job.id,
+      user_id,
     };
 
     const rpJson = await runpodRun({ apiKey, endpointId, baseUrl, input: runInput });
 
-    // 6) Guardamos provider_request_id para que /api/video-status pueda consultar /status/{id}
     await admin
       .from("video_jobs")
       .update({
@@ -177,7 +144,6 @@ export default async function handler(req, res) {
       })
       .eq("id", job.id);
 
-    // 7) Respuesta al front (tu panel ya hace polling con job_id)
     return res.status(200).json({ ok: true, job_id: job.id, status: "RUNNING" });
   } catch (e) {
     console.log("❌ generate-video fatal:", e);
