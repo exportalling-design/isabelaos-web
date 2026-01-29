@@ -186,3 +186,42 @@ export default async function handler(req, res) {
       duration_s: Number(duration_s),
       fps: Number(fps),
       num_frames: Number(num_frames),
+
+      // Referencia interna
+      job_id: job.id,
+      user_id,
+    };
+
+    const { requestId, rpJson } = await runpodRun({
+      apiKey,
+      endpointId,
+      baseUrl,
+      input: runpodInput,
+    });
+
+    // Actualizamos el job con request id
+    await admin
+      .from("video_jobs")
+      .update({
+        status: "RUNNING",
+        provider_status: rpJson?.status || "RUNNING",
+        provider_request_id: requestId,
+        provider_reply: rpJson,
+      })
+      .eq("id", job.id);
+
+    // ✅ Respuesta para que el frontend tenga job_id y empiece polling
+    return res.status(200).json({
+      ok: true,
+      job_id: job.id,
+      status: "RUNNING",
+      provider_request_id: requestId,
+    });
+  } catch (e) {
+    // Importante: devolvemos JSON siempre, no crash silencioso
+    return res.status(500).json({
+      ok: false,
+      error: e?.message || "server_error",
+    });
+  }
+}
