@@ -1,15 +1,7 @@
-// api/generate-img2video.js
-// ------------------------------------------------------------
-// generate-img2video (I2V)
-// - AUTH: getUserIdFromAuthHeader (same as generate-video.js)
-// - Billing: server-side via spend_jades (like generate-video.js)
-// - Creates job in video_jobs
-// - Dispatches RunPod serverless endpoint
-// - FIX1: Worker REQUIRES prompt -> provide default prompt if empty
-// - FIX2: Defaults aligned with POD template to avoid OOM
-//         (576x1024, 73 frames, steps 18, guidance 6.0, fps 24)
-// - FIX3: Provide default negative if empty
-// ------------------------------------------------------------
+// api/generate-img2video.js  (CLON POD)
+// - Defaults exactos del POD: steps 34, 1280x720, 75 frames, 24 fps, guidance 6.5
+// - NO inventa prompt. Si falta prompt => "Falta prompt" (idéntico)
+// - Requiere imagen_b64 o image_url
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -19,18 +11,6 @@ const RUNPOD_API_KEY =
   process.env.RUNPOD_API_KEY ||
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
-
-// ✅ Defaults como tu template del pod
-const DEFAULT_W = Number(process.env.DEFAULT_W || 576);
-const DEFAULT_H = Number(process.env.DEFAULT_H || 1024);
-const DEFAULT_FRAMES = Number(process.env.DEFAULT_FRAMES || 73); // tu pod: 73
-const DEFAULT_STEPS = Number(process.env.DEFAULT_STEPS || 18); // tu pod: 18
-const DEFAULT_GUIDANCE = Number(process.env.DEFAULT_GUIDANCE || 6.0); // tu pod: 6.0
-const DEFAULT_FPS = Number(process.env.DEFAULT_FPS || 24);
-
-// (opcional si querés clamps como en template)
-const MAX_FRAMES = Number(process.env.MAX_FRAMES || 75);
-const MAX_STEPS = Number(process.env.MAX_STEPS || 25);
 
 function pickI2VEndpointId() {
   return (
@@ -62,36 +42,29 @@ async function runpodRun({ endpointId, input }) {
     throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
   }
 
-  return data; // { id: "..." }
+  return data;
 }
 
-// ------------------------------------------------------------
-// ✅ Prompt default (porque el worker lo exige)
-// ------------------------------------------------------------
-function defaultI2VPrompt() {
-  return (
-    "Smooth natural motion, subtle camera movement, cinematic lighting, stable anatomy, " +
-    "high detail, sharp focus, clean edges, realistic textures, no flicker, no jitter"
+// Mismo selector que T2V (para mantenerlo idéntico)
+function pickFinalPrompts(body) {
+  const b = body || {};
+
+  const finalPrompt =
+    String(b?.finalPrompt || "").trim() ||
+    String(b?.optimizedPrompt || "").trim() ||
+    String(b?.prompt || "").trim();
+
+  const finalNegative =
+    String(b?.finalNegative || "").trim() ||
+    String(b?.optimizedNegative || "").trim() ||
+    String(b?.negative_prompt || b?.negative || "").trim();
+
+  const usingOptimized = !!(
+    (String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim()) &&
+    finalPrompt
   );
-}
 
-// ------------------------------------------------------------
-// ✅ Negative default (si el usuario no manda negative)
-// ------------------------------------------------------------
-function defaultNegativePrompt() {
-  return (
-    "blurry, low quality, worst quality, lowres, pixelated, deformed, bad anatomy, distorted face, " +
-    "extra limbs, missing fingers, fused fingers, broken hands, warped objects, " +
-    "flicker, jitter, frame tearing, unstable motion, ghosting, duplicate subject, " +
-    "watermark, text, logo, subtitles"
-  );
-}
-
-// clamps suaves para evitar que se pasen y reviente VRAM
-function clampInt(v, min, max, fallback) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(n)));
+  return { finalPrompt, finalNegative, usingOptimized };
 }
 
 export default async function handler(req, res) {
@@ -105,62 +78,14 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    // ✅ prompt: si viene vacío, worker revienta -> fallback
-    const rawPrompt = String(body?.prompt || "").trim();
-    const prompt = rawPrompt.length > 0 ? rawPrompt : defaultI2VPrompt();
+    const { finalPrompt, finalNegative } = pickFinalPrompts(body);
 
-    // ✅ negative: si viene vacío, mete default
-    const negativeRaw = String(body?.negative_prompt || body?.negative || "").trim();
-    const negative_prompt = negativeRaw.length > 0 ? negativeRaw : defaultNegativePrompt();
-
-    // Aspect ratio opcional (solo "9:16" si viene)
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
-
-    // Timing
-    const fps = Number(body?.fps || DEFAULT_FPS);
-
-    // Si el frontend manda seconds/duration_s usamos eso,
-    // pero el POD se controlaba realmente por frames (73)
-    const seconds =
-      body?.duration_s !== undefined && body?.duration_s !== null && body?.duration_s !== ""
-        ? Number(body.duration_s)
-        : body?.seconds !== undefined && body?.seconds !== null && body?.seconds !== ""
-        ? Number(body.seconds)
-        : null;
-
-    // Frames: si viene num_frames/frames úsalo, si no -> DEFAULT_FRAMES (73)
-    let num_frames =
-      body?.num_frames !== undefined && body?.num_frames !== null && body?.num_frames !== ""
-        ? Number(body.num_frames)
-        : body?.frames !== undefined && body?.frames !== null && body?.frames !== ""
-        ? Number(body.frames)
-        : null;
-
-    if (!Number.isFinite(num_frames) && Number.isFinite(seconds)) {
-      num_frames = Math.round(fps * seconds);
+    // ✅ CLON POD: si falta prompt => error (idéntico al worker)
+    if (!finalPrompt) {
+      return res.status(400).json({ ok: false, error: "Falta prompt" });
     }
-    if (!Number.isFinite(num_frames)) num_frames = DEFAULT_FRAMES;
 
-    // ✅ clamps: como tu template MAX_FRAMES 75
-    num_frames = clampInt(num_frames, 8, MAX_FRAMES, DEFAULT_FRAMES);
-
-    // Calidad defaults como tu template
-    const steps = clampInt(body?.steps ?? DEFAULT_STEPS, 5, MAX_STEPS, DEFAULT_STEPS);
-    const guidance_scale = Number(
-      body?.guidance_scale !== undefined && body?.guidance_scale !== null && body?.guidance_scale !== ""
-        ? body.guidance_scale
-        : DEFAULT_GUIDANCE
-    );
-
-    // ✅ width/height (si no vienen, usamos defaults del POD)
-    const width =
-      body?.width !== undefined && body?.width !== null && body?.width !== "" ? Number(body.width) : DEFAULT_W;
-    const height =
-      body?.height !== undefined && body?.height !== null && body?.height !== ""
-        ? Number(body.height)
-        : DEFAULT_H;
-
-    // Image input
+    // Imagen input
     const image_b64 = body?.image_b64 ? String(body.image_b64) : null;
     const image_url = body?.image_url ? String(body.image_url).trim() : null;
 
@@ -168,14 +93,33 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
     }
 
-    // ✅ 1) cobrar jades
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+
+    // ✅ CLON POD: defaults exactos
+    const fps = Number(body?.fps ?? 24);
+    const num_frames = Number(body?.num_frames ?? body?.frames ?? 75);
+    const steps = Number(body?.steps ?? 34);
+    const guidance_scale = Number(body?.guidance_scale ?? 6.5);
+
+    // ✅ CLON POD: resolución exacta si no viene
+    const width =
+      body?.width !== undefined && body?.width !== null && body?.width !== ""
+        ? Number(body.width)
+        : 1280;
+
+    const height =
+      body?.height !== undefined && body?.height !== null && body?.height !== ""
+        ? Number(body.height)
+        : 720;
+
+    // ✅ 1) spend jades
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
 
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
-      p_amount: 12, // tu precio actual I2V
+      p_amount: 12,
       p_reason: "i2v_generate",
       p_ref: ref,
     });
@@ -184,7 +128,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ 2) crear job en video_jobs
+    // ✅ 2) create job
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -194,11 +138,9 @@ export default async function handler(req, res) {
       user_id: userId,
       status: "QUEUED",
       mode: "i2v",
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
 
-      prompt,
-      negative_prompt,
-
-      // (si tu schema tiene width/height para i2v y querés guardarlo, lo agregás)
       width,
       height,
 
@@ -213,7 +155,9 @@ export default async function handler(req, res) {
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
     if (insErr) {
-      return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
+      return res
+        .status(400)
+        .json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
     // ✅ 3) RunPod dispatch
@@ -223,20 +167,19 @@ export default async function handler(req, res) {
       mode: "i2v",
       job_id: jobId,
       user_id: userId,
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
 
-      prompt,
-      negative_prompt,
-
-      // ✅ IMPORTANTES para consistencia con POD
-      width,
-      height,
       fps,
       num_frames,
       steps,
       guidance_scale,
 
-      ...(Number.isFinite(seconds) ? { duration_s: seconds } : {}), // solo si existe
+      duration_s: body?.duration_s ?? body?.seconds ?? null,
+
       ...(aspect_ratio ? { aspect_ratio } : {}),
+      width,
+      height,
 
       image_b64,
       image_url,
