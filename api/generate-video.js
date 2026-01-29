@@ -13,7 +13,9 @@ function pickT2VEndpointId() {
   return (
     process.env.RP_WAN22_T2V_ENDPOINT ||
     process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT ||
     process.env.RP_WAN22_ENDPOINT ||
+    process.env.RP_WAN22_T2V_ENDPOINT_ID ||
     null
   );
 }
@@ -64,6 +66,8 @@ export default async function handler(req, res) {
 
     const fps = Number(body?.fps || 24);
     const seconds = Number(body?.seconds || 3);
+
+    // ✅ frames SOLO para RunPod (NO se guarda en DB)
     const frames = Number(body?.frames || Math.round(fps * seconds));
 
     if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
@@ -84,7 +88,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ 2) crear job mínimo
+    // ✅ 2) crear job mínimo (SIN frames)
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -100,7 +104,6 @@ export default async function handler(req, res) {
       height,
       fps,
       seconds,
-      frames,
       provider: "runpod",
     };
 
@@ -126,7 +129,7 @@ export default async function handler(req, res) {
         height,
         fps,
         seconds,
-        frames,
+        frames, // ✅ aquí sí va
       },
     });
 
