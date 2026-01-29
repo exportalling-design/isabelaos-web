@@ -1,18 +1,35 @@
 // api/generate-video.js
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+// Supabase
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL;
+
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY;
+
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// RunPod (usa uno de estos)
-const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
-const RUNPOD_ENDPOINT = process.env.VIDEO_RUNPOD_ENDPOINT || process.env.RUNPOD_VIDEO_ENDPOINT || process.env.RUNPOD_ENDPOINT;
+// RunPod
+const RUNPOD_API_KEY =
+  process.env.RUNPOD_API_KEY ||
+  process.env.RP_API_KEY ||
+  process.env.VIDEO_RUNPOD_API_KEY ||
+  process.env.RUNPOD_KEY;
+
+const RUNPOD_ENDPOINT_ID =
+  process.env.RP_WAN22_T2V_ENDPOINT ||          // ✅ TU variable (ideal)
+  process.env.VIDEO_RUNPOD_ENDPOINT_ID ||       // ✅ TU variable
+  process.env.VIDEO_RUNPOD_ENDPOINT ||          // fallback
+  process.env.RUNPOD_ENDPOINT;                  // fallback
 
 const COST_VIDEO_PROMPT = parseInt(process.env.COST_VIDEO_PROMPT || "10", 10);
 
 function json(res, code, obj) {
-  res.status(code).setHeader("Content-Type", "application/json");
+  res.statusCode = code;
+  res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(obj));
 }
 
@@ -23,7 +40,6 @@ function getBearerToken(req) {
 }
 
 async function getUserIdFromRequest(req) {
-  // usamos el JWT del usuario para obtener su id (NO service role)
   const jwt = getBearerToken(req);
   if (!jwt) return null;
 
@@ -39,32 +55,29 @@ async function getUserIdFromRequest(req) {
   return data?.user?.id || null;
 }
 
-function buildRunpodRunUrl(endpointOrUrl) {
-  if (!endpointOrUrl) return null;
-  const v = String(endpointOrUrl).trim();
-  if (v.startsWith("http://") || v.startsWith("https://")) return v; // ya viene URL completa
-  // si solo viene el ID del endpoint:
+function runpodRunUrl(endpointIdOrUrl) {
+  const v = String(endpointIdOrUrl || "").trim();
+  if (!v) return null;
+  if (v.startsWith("http://") || v.startsWith("https://")) return v;
   return `https://api.runpod.ai/v2/${v}/run`;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return json(res, 405, { ok: false, error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
 
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json(res, 500, { ok: false, error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
-    }
-    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT) {
-      return json(res, 500, { ok: false, error: "Missing RUNPOD_API_KEY or VIDEO_RUNPOD_ENDPOINT" });
-    }
+    // DEBUG: si algo falta, aquí mismo lo verás en respuesta
+    if (!SUPABASE_URL) return json(res, 500, { ok: false, error: "Missing SUPABASE_URL" });
+    if (!SUPABASE_SERVICE_ROLE_KEY) return json(res, 500, { ok: false, error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
+    if (!SUPABASE_ANON_KEY) return json(res, 500, { ok: false, error: "Missing SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY)" });
+
+    if (!RUNPOD_API_KEY) return json(res, 500, { ok: false, error: "Missing RUNPOD_API_KEY / RP_API_KEY" });
+    if (!RUNPOD_ENDPOINT_ID) return json(res, 500, { ok: false, error: "Missing RP_WAN22_T2V_ENDPOINT / VIDEO_RUNPOD_ENDPOINT_ID" });
 
     const userId = await getUserIdFromRequest(req);
     if (!userId) return json(res, 401, { ok: false, error: "Unauthorized (no user)" });
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
     const prompt = String(body?.prompt || "").trim();
     const negative = String(body?.negative || "").trim();
 
@@ -72,8 +85,6 @@ export default async function handler(req, res) {
     const height = parseInt(body?.height || "1920", 10);
     const fps = parseInt(body?.fps || "24", 10);
     const seconds = parseInt(body?.seconds || "3", 10);
-
-    // frames = fps * seconds
     const frames = Math.max(1, fps * seconds);
 
     if (!prompt) return json(res, 400, { ok: false, error: "Missing prompt" });
@@ -82,7 +93,7 @@ export default async function handler(req, res) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // 1) Crear job en DB primero (QUEUED)
+    // 1) Insert job (QUEUED)
     const insertPayload = {
       user_id: userId,
       status: "QUEUED",
@@ -110,7 +121,7 @@ export default async function handler(req, res) {
 
     const jobId = jobRow.id;
 
-    // 2) Cobrar jades (tu RPC)
+    // 2) Spend jades (RPC)
     const { error: spendErr } = await admin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount: COST_VIDEO_PROMPT,
@@ -119,13 +130,13 @@ export default async function handler(req, res) {
     });
 
     if (spendErr) {
-      // rollback del job (opcional)
       await admin.from("video_jobs").update({ status: "FAILED", provider_status: "SPEND_FAILED" }).eq("id", jobId);
       return json(res, 402, { ok: false, error: "Jades spend failed", details: spendErr.message });
     }
 
-    // 3) Mandar a RunPod
-    const runUrl = buildRunpodRunUrl(RUNPOD_ENDPOINT);
+    // 3) RunPod submit
+    const runUrl = runpodRunUrl(RUNPOD_ENDPOINT_ID);
+
     const rpResp = await fetch(runUrl, {
       method: "POST",
       headers: {
@@ -161,19 +172,12 @@ export default async function handler(req, res) {
 
     await admin
       .from("video_jobs")
-      .update({
-        status: "QUEUED",
-        provider_status: "SUBMITTED",
-        provider_request_id: providerRequestId,
-      })
+      .update({ provider_status: "SUBMITTED", provider_request_id: providerRequestId })
       .eq("id", jobId);
 
-    return json(res, 200, {
-      ok: true,
-      job_id: jobId,
-      provider_request_id: providerRequestId,
-    });
+    return json(res, 200, { ok: true, job_id: jobId, provider_request_id: providerRequestId });
   } catch (e) {
+    // Si aquí explota, YA NO te quedas sin info.
     return json(res, 500, { ok: false, error: "Server error", details: String(e?.message || e) });
   }
 }
