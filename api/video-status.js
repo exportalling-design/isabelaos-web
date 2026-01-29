@@ -1,12 +1,16 @@
 // api/video-status.js
-import { getSupabaseAdmin } from "../lib/supabaseAdmin.js";
+export const runtime = "nodejs";
+
+import { getSupabaseAdmin } from "../src/lib/supabaseAdmin.js";
 
 function getRunpodConfig() {
   const apiKey = process.env.RUNPOD_API_KEY;
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   const baseUrl = process.env.RUNPOD_BASE_URL || "https://api.runpod.ai/v2";
+
   if (!apiKey) throw new Error("RUNPOD_API_KEY missing");
   if (!endpointId) throw new Error("RUNPOD_ENDPOINT_ID missing");
+
   return { apiKey, endpointId, baseUrl };
 }
 
@@ -17,6 +21,7 @@ async function uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId, buffe
     contentType: "video/mp4",
     upsert: true,
   });
+
   if (error) throw new Error(error.message);
 
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
@@ -25,20 +30,23 @@ async function uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId, buffe
 
 function b64ToBuffer(b64) {
   let s = String(b64 || "").trim();
-  // por si viniera DataURL
   if (s.startsWith("data:") && s.includes(",")) s = s.split(",", 2)[1];
   return Buffer.from(s, "base64");
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "GET") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
 
     const job_id = req.query.job_id;
-    if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
+    if (!job_id) {
+      return res.status(400).json({ ok: false, error: "Missing job_id" });
+    }
 
     const { data: job, error: jobErr } = await supabaseAdmin
       .from("video_jobs")
@@ -46,9 +54,10 @@ export default async function handler(req, res) {
       .eq("id", job_id)
       .single();
 
-    if (jobErr || !job) return res.status(404).json({ ok: false, error: "Job not found" });
+    if (jobErr || !job) {
+      return res.status(404).json({ ok: false, error: "Job not found" });
+    }
 
-    // si ya está listo
     if (job.status === "DONE" && job.video_url) {
       return res.status(200).json({ ok: true, status: "DONE", video_url: job.video_url });
     }
@@ -57,7 +66,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: job.status || "QUEUED" });
     }
 
-    // consultar runpod
     const statusUrl = `${baseUrl}/${endpointId}/status/${job.provider_request_id}`;
     const rp = await fetch(statusUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -66,7 +74,6 @@ export default async function handler(req, res) {
     const rpJson = await rp.json().catch(() => null);
     const rpStatus = rpJson?.status || "UNKNOWN";
 
-    // si aún no termina
     if (rpStatus !== "COMPLETED") {
       await supabaseAdmin
         .from("video_jobs")
@@ -80,17 +87,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: rpStatus });
     }
 
-    // COMPLETED: tu worker devuelve output.video_b64 (mp4)
+    // COMPLETED: tu worker devuelve output.video_b64
     const out = rpJson?.output || {};
     const videoB64 = out?.video_b64 || null;
-    const videoUrlRemote = out?.video_url || out?.url || (typeof out === "string" ? out : null);
+
+    // fallback si algun día devolvés URL remota
+    const remoteUrl = out?.video_url || out?.url || (typeof out === "string" ? out : null);
 
     let buffer = null;
 
     if (videoB64) {
       buffer = b64ToBuffer(videoB64);
-    } else if (videoUrlRemote) {
-      const vidResp = await fetch(videoUrlRemote);
+    } else if (remoteUrl) {
+      const vidResp = await fetch(remoteUrl);
       const arrayBuffer = await vidResp.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
     } else {
