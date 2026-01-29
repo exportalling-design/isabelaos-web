@@ -1,4 +1,12 @@
-// /api/generate-img2video.js
+// api/generate-img2video.js
+// ------------------------------------------------------------
+// generate-img2video (I2V)
+// - AUTH: getUserIdFromAuthHeader (same as generate-video.js)
+// - Billing: server-side via spend_jades (like generate-video.js)
+// - Creates job in video_jobs
+// - Dispatches RunPod serverless endpoint
+// ------------------------------------------------------------
+
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
@@ -8,19 +16,20 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
 
-// ✅ I2V endpoint id (env)
+// ✅ I2V endpoint id (Vercel env)
+// Prefer IMG2VIDEO_RUNPOD_ENDPOINT_ID if you set it, else fall back to VIDEO_RUNPOD_ENDPOINT_ID
 function pickI2VEndpointId() {
   return (
-    process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID || // ideal
-    process.env.VIDEO_RUNPOD_ENDPOINT_ID || // fallback
-    process.env.VIDEO_RUNPOD_ENDPOINT || // fallback
+    process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT ||
     null
   );
 }
 
 async function runpodRun({ endpointId, input }) {
   if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / RP_API_KEY");
-  if (!endpointId) throw new Error("Missing IMG2VIDEO endpoint id env var");
+  if (!endpointId) throw new Error("Missing I2V endpoint id env var");
 
   const url = `https://api.runpod.ai/v2/${endpointId}/run`;
 
@@ -39,7 +48,7 @@ async function runpodRun({ endpointId, input }) {
     throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
   }
 
-  return data; // { id: "..." }
+  return data; // usually { id: "..." }
 }
 
 export default async function handler(req, res) {
@@ -48,24 +57,19 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    // ✅ igual que generate-video
+    // ✅ user id from same helper used in generate-video.js
     const userId = await getUserIdFromAuthHeader(req);
     if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     const prompt = String(body?.prompt || "").trim();
-    const negative_prompt = String(body?.negative || body?.negative_prompt || "").trim();
+    const negative_prompt = String(body?.negative_prompt || body?.negative || "").trim();
 
-    // imagen requerida
-    const image_b64 = body?.image_b64 || null;
-    const image_url = String(body?.image_url || "").trim() || null;
+    // Aspect ratio optional ("9:16" only if checked)
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" or "9:16"
 
-    if (!image_b64 && !image_url) {
-      return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
-    }
-
-    // timing como t2v
+    // Timing
     const fps = Number(body?.fps || 24);
     const seconds = Number(body?.duration_s || body?.seconds || 3);
     const num_frames = Number(body?.num_frames || body?.frames || Math.round(fps * seconds));
@@ -73,44 +77,35 @@ export default async function handler(req, res) {
     const steps = Number(body?.steps || 25);
     const guidance_scale = Number(body?.guidance_scale || 7.5);
 
-    // aspect ratio como t2v
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+    // Image input
+    const image_b64 = body?.image_b64 ? String(body.image_b64) : null;
+    const image_url = body?.image_url ? String(body.image_url).trim() : null;
 
-    // width/height opcionales (si no vienen => null, worker decide)
-    const width =
-      body?.width !== undefined && body?.width !== null && body?.width !== ""
-        ? Number(body.width)
-        : null;
-
-    const height =
-      body?.height !== undefined && body?.height !== null && body?.height !== ""
-        ? Number(body.height)
-        : null;
-
-    // si querés permitir prompt vacío ok, pero si querés exigirlo:
-    // if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
-
-    // ✅ cobro (igual que generate-video) pero solo si ya no lo cobraste en frontend
-    const alreadyBilled = body?.already_billed === true;
-
-    if (!alreadyBilled) {
-      const ref = globalThis.crypto?.randomUUID
-        ? globalThis.crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
-
-      const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
-        p_user_id: userId,
-        p_amount: 12,
-        p_reason: "img2video_generate",
-        p_ref: ref,
-      });
-
-      if (spendErr) {
-        return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
-      }
+    if (!image_b64 && !image_url) {
+      return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
     }
 
-    // ✅ crear job (igual estructura que generate-video)
+    // prompt is optional for i2v (allow empty), but keep it as string
+    // if you want to require it, uncomment:
+    // if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
+
+    // ✅ 1) spend jades (server-side)
+    const ref = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
+
+    const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+      p_user_id: userId,
+      p_amount: 12, // change if you want a different I2V price
+      p_reason: "i2v_generate",
+      p_ref: ref,
+    });
+
+    if (spendErr) {
+      return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
+    }
+
+    // ✅ 2) create job in video_jobs (same style as generate-video.js)
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -120,18 +115,19 @@ export default async function handler(req, res) {
       user_id: userId,
       status: "QUEUED",
       mode: "i2v",
-      prompt,
-      negative_prompt,
-      width: width ?? null,
-      height: height ?? null,
+
+      prompt: prompt || "",
+      negative_prompt: negative_prompt || "",
+
       fps,
       num_frames,
       steps,
       guidance_scale,
-      provider: "runpod",
+
+      // optional storage (keep payload like T2V)
       payload: body ? JSON.stringify(body) : null,
-      video_url: null,
-      error: null,
+
+      provider: "runpod",
     };
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
@@ -139,28 +135,28 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
-    // ✅ RunPod input (igual patrón que t2v)
+    // ✅ 3) RunPod dispatch
     const endpointId = pickI2VEndpointId();
 
     const rpInput = {
       mode: "i2v",
       job_id: jobId,
       user_id: userId,
-      prompt,
-      negative_prompt,
+
+      prompt: prompt || "",
+      negative_prompt: negative_prompt || "",
+
       fps,
       num_frames,
       steps,
       guidance_scale,
+
       duration_s: seconds,
 
-      // imagen
+      ...(aspect_ratio ? { aspect_ratio } : {}),
+
       image_b64,
       image_url,
-
-      ...(aspect_ratio ? { aspect_ratio } : {}),
-      ...(typeof width === "number" && Number.isFinite(width) ? { width } : {}),
-      ...(typeof height === "number" && Number.isFinite(height) ? { height } : {}),
     };
 
     const rp = await runpodRun({ endpointId, input: rpInput });
