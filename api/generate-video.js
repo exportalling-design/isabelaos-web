@@ -1,4 +1,8 @@
-// /api/generate-video.js
+// api/generate-video.js  (CLON POD)
+// - Defaults exactos del POD: steps 34, 1280x720, 75 frames, 24 fps, guidance 6.5
+// - Usa prompt final (optimizado si viene), SIN inventar prompts
+// - Si falta prompt => "Falta prompt" (idéntico a tu versión POD)
+
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
@@ -16,25 +20,6 @@ function pickT2VEndpointId() {
     process.env.VIDEO_RUNPOD_ENDPOINT ||
     null
   );
-}
-
-// ✅ Auto quality prompt (lens/light/clarity) - universal
-function enrichPrompt(userPrompt) {
-  const base =
-    "cinematic shot, sharp focus, ultra detailed, clean edges, professional color grading, HDR, " +
-    "35mm lens, f/2.8, soft key light, rim light, realistic textures, natural skin detail, " +
-    "stable motion, high shutter clarity, high fidelity";
-  const p = String(userPrompt || "").trim();
-  return `${base}. ${p}`.trim();
-}
-
-function enrichNegative(userNegative) {
-  const baseNeg =
-    "blurry, low quality, lowres, noise, jpeg artifacts, watermark, text, logo, " +
-    "deformed, bad anatomy, extra limbs, face distortion, flicker, jitter, warping, " +
-    "ghosting, duplicate subject, oversmooth, plastic skin";
-  const n = String(userNegative || "").trim();
-  return n ? `${baseNeg}, ${n}` : baseNeg;
 }
 
 async function runpodRun({ endpointId, input }) {
@@ -61,6 +46,34 @@ async function runpodRun({ endpointId, input }) {
   return data;
 }
 
+// ------------------------------------------------------------
+// ✅ pickFinalPrompts (compatible)
+// Prioridad:
+// 1) body.finalPrompt / body.finalNegative (si tu frontend los manda)
+// 2) body.optimizedPrompt / body.optimizedNegative (si los manda)
+// 3) body.prompt / body.negative_prompt|negative
+// ------------------------------------------------------------
+function pickFinalPrompts(body) {
+  const b = body || {};
+
+  const finalPrompt =
+    String(b?.finalPrompt || "").trim() ||
+    String(b?.optimizedPrompt || "").trim() ||
+    String(b?.prompt || "").trim();
+
+  const finalNegative =
+    String(b?.finalNegative || "").trim() ||
+    String(b?.optimizedNegative || "").trim() ||
+    String(b?.negative_prompt || b?.negative || "").trim();
+
+  const usingOptimized = !!(
+    (String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim()) &&
+    finalPrompt
+  );
+
+  return { finalPrompt, finalNegative, usingOptimized };
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -72,46 +85,34 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const userPrompt = String(body?.prompt || "").trim();
-    const userNeg = String(body?.negative || body?.negative_prompt || "").trim();
+    // ✅ CLON POD: usar prompt final
+    const { finalPrompt, finalNegative } = pickFinalPrompts(body);
 
-    if (!userPrompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
+    if (!finalPrompt) {
+      return res.status(400).json({ ok: false, error: "Falta prompt" });
+    }
 
-    // ✅ Always enhance
-    const prompt = enrichPrompt(userPrompt);
-    const negative_prompt = enrichNegative(userNeg);
+    // Aspect ratio opcional ("9:16" solo si UI lo manda)
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
-    // Optional ratio
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" or "9:16"
+    // ✅ CLON POD: defaults exactos
+    const fps = Number(body?.fps ?? 24);
+    const num_frames = Number(body?.num_frames ?? body?.frames ?? 75);
+    const steps = Number(body?.steps ?? 34);
+    const guidance_scale = Number(body?.guidance_scale ?? 6.5);
 
-    // ✅ POD-LIKE DEFAULTS (what you showed worked)
-    const fps = Number(body?.fps || 24);
-
-    // If frontend sends duration_s, fine, but we primarily follow frames.
-    const seconds = Number(body?.duration_s || body?.seconds || 3);
-
-    // ✅ Prefer explicit num_frames, else default to 73 (pod)
-    const num_frames =
-      body?.num_frames !== undefined && body?.num_frames !== null && body?.num_frames !== ""
-        ? Number(body.num_frames)
-        : 73;
-
-    // ✅ Match pod defaults
-    const steps = Number(body?.steps || 18);
-    const guidance_scale = Number(body?.guidance_scale || 6.0);
-
-    // ✅ Force res (pod): 576x1024 (unless user explicitly sets it)
+    // ✅ CLON POD: resolución exacta si no viene
     const width =
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
-        : 576;
+        : 1280;
 
     const height =
       body?.height !== undefined && body?.height !== null && body?.height !== ""
         ? Number(body.height)
-        : 1024;
+        : 720;
 
-    // ✅ Spend jades
+    // ✅ 1) cobrar jades
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -127,7 +128,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ Create job
+    // ✅ 2) crear job
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -137,10 +138,12 @@ export default async function handler(req, res) {
       user_id: userId,
       status: "QUEUED",
       mode: "t2v",
-      prompt, // enhanced prompt saved
-      negative_prompt, // enhanced negative saved
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
+
       width,
       height,
+
       fps,
       num_frames,
       steps,
@@ -151,26 +154,32 @@ export default async function handler(req, res) {
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
     if (insErr) {
-      return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
+      return res
+        .status(400)
+        .json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
-    // ✅ RunPod
+    // ✅ 3) RunPod
     const endpointId = pickT2VEndpointId();
 
     const rpInput = {
       mode: "t2v",
       job_id: jobId,
       user_id: userId,
-      prompt,
-      negative_prompt,
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
+
       fps,
       num_frames,
       steps,
       guidance_scale,
+
+      // igual que tu estructura actual (no estorba)
+      duration_s: body?.duration_s ?? body?.seconds ?? null,
+
+      ...(aspect_ratio ? { aspect_ratio } : {}),
       width,
       height,
-      duration_s: seconds,
-      ...(aspect_ratio ? { aspect_ratio } : {}),
     };
 
     const rp = await runpodRun({ endpointId, input: rpInput });
