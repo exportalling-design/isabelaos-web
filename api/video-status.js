@@ -1,174 +1,133 @@
+// ---------------------------------------------------------
+// API: Estado del Video
+// Consulta Supabase + RunPod
+// ---------------------------------------------------------
+
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL =
+  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY =
-  process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
+  process.env.RUNPOD_API_KEY || process.env.VIDEO_RUNPOD_API_KEY;
 
-const VIDEO_BUCKET = process.env.VIDEO_BUCKET || "videos"; // tu bucket
-const VIDEO_BUCKET_PUBLIC =
-  process.env.VIDEO_BUCKET_PUBLIC === "true" || true;
+const RUNPOD_ENDPOINT_ID =
+  process.env.RUNPOD_ENDPOINT_ID;
 
-function json(res, status, data) {
-  res.status(status).setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(data));
-}
-
-function getPublicUrl(supabase, bucket, path) {
-  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-  return data?.publicUrl || null;
-}
-
+// ---------------------------------------------------------
 export default async function handler(req, res) {
   try {
-    if (req.method !== "GET") {
-      return json(res, 405, { ok: false, error: "Method not allowed" });
+    // job_id puede venir por query o body
+    const jobId =
+      req.query.job_id ||
+      req.body?.job_id;
+
+    if (!jobId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing job_id",
+      });
     }
 
-    const jobId = req.query.job_id || req.query.jobId;
-    if (!jobId) return json(res, 400, { ok: false, error: "Missing job_id" });
+    // Cliente Supabase (service role)
+    const supabase = createClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } }
+    );
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json(res, 500, { ok: false, error: "Missing Supabase env vars" });
-    }
-    if (!RUNPOD_API_KEY) {
-      return json(res, 500, { ok: false, error: "Missing RunPod API key" });
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    // 1) buscar job
-    const { data: job, error: jobErr } = await supabase
+    // -----------------------------------------------------
+    // 1) LEER JOB DESDE SUPABASE
+    // -----------------------------------------------------
+    const { data: job, error } = await supabase
       .from("video_jobs")
       .select("*")
       .eq("id", jobId)
       .single();
 
-    if (jobErr || !job) {
-      return json(res, 404, { ok: false, error: "video_jobs row not found", detail: jobErr?.message });
+    if (error || !job) {
+      return res.status(404).json({
+        ok: false,
+        error: "video_jobs row not found",
+      });
     }
 
-    const runpodId = job.runpod_job_id || job.runpod_id || job.request_id;
-    if (!runpodId) {
-      return json(res, 400, { ok: false, error: "Job missing runpod_job_id" });
+    // Si ya terminó, devolvemos directo
+    if (
+      job.status === "COMPLETED" ||
+      job.status === "FAILED"
+    ) {
+      return res.status(200).json({
+        ok: true,
+        job,
+      });
     }
 
-    // si ya está DONE y tiene URL, devolver rápido
-    if ((job.status === "DONE" || job.status === "COMPLETED") && job.video_url) {
-      return json(res, 200, { ok: true, status: "DONE", job_id: jobId, video_url: job.video_url });
+    // Si aún no hay request_id → RunPod no arrancó
+    if (!job.runpod_request_id) {
+      return res.status(200).json({
+        ok: true,
+        job,
+      });
     }
 
-    // 2) pedir status a runpod
-    const statusResp = await fetch(`https://api.runpod.ai/v2/${process.env.RUNPOD_ENDPOINT_ID || ""}/status/${runpodId}`, {
-      method: "GET",
+    // -----------------------------------------------------
+    // 2) CONSULTAR ESTADO EN RUNPOD
+    // -----------------------------------------------------
+    const statusUrl = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${job.runpod_request_id}`;
+
+    const runpodRes = await fetch(statusUrl, {
       headers: {
         Authorization: `Bearer ${RUNPOD_API_KEY}`,
-        "Content-Type": "application/json",
       },
     });
 
-    const statusJson = await statusResp.json().catch(() => null);
-    if (!statusResp.ok) {
-      return json(res, 200, {
-        ok: false,
-        status: "POLL_ERROR",
-        runpod_status: null,
-        error: "RunPod status request failed",
-        detail: statusJson,
-      });
-    }
+    const runpodJson = await runpodRes.json().catch(() => null);
 
-    const runStatus = statusJson?.status || "UNKNOWN";
-
-    // 3) si aún no completó
-    if (runStatus !== "COMPLETED") {
-      // guardar estado parcial
+    // -----------------------------------------------------
+    // 3) ACTUALIZAR ESTADO SEGÚN RUNPOD
+    // -----------------------------------------------------
+    if (runpodJson?.status === "COMPLETED") {
       await supabase
         .from("video_jobs")
-        .update({ status: runStatus })
+        .update({
+          status: "COMPLETED",
+          output: runpodJson.output || null,
+        })
         .eq("id", jobId);
-
-      return json(res, 200, {
-        ok: true,
-        status: runStatus,
-        job_id: jobId,
-      });
     }
 
-    // 4) COMPLETED: obtener base64 del video
-    const out = statusJson?.output || {};
-    const b64 = out.video_b64 || out.video || out.result || null; // soporta llaves comunes
-    const mime = out.video_mime || "video/mp4";
-
-    if (!b64) {
-      // está completed pero no trae video: guardo fail
+    if (runpodJson?.status === "FAILED") {
       await supabase
         .from("video_jobs")
-        .update({ status: "FAILED", error: "COMPLETED but missing video_b64" })
+        .update({
+          status: "FAILED",
+          error: runpodJson.error || "RunPod failed",
+          output: runpodJson.output || null,
+        })
         .eq("id", jobId);
-
-      return json(res, 200, {
-        ok: false,
-        status: "FAILED",
-        job_id: jobId,
-        error: "RunPod completed but no video payload",
-      });
     }
 
-    // limpiar data url si viniera así
-    const pureB64 = String(b64).includes(",") ? String(b64).split(",").pop() : String(b64);
-    const buffer = Buffer.from(pureB64, "base64");
-
-    const userId = job.user_id || "anon";
-    const filename = `video_${jobId}.mp4`;
-    const path = `${userId}/${filename}`;
-
-    // 5) subir a Supabase Storage
-    const { error: upErr } = await supabase.storage
-      .from(VIDEO_BUCKET)
-      .upload(path, buffer, {
-        contentType: mime,
-        upsert: true,
-      });
-
-    if (upErr) {
-      await supabase
-        .from("video_jobs")
-        .update({ status: "FAILED", error: `upload_failed: ${upErr.message}` })
-        .eq("id", jobId);
-
-      return json(res, 200, {
-        ok: false,
-        status: "FAILED",
-        job_id: jobId,
-        error: "Supabase upload failed",
-        detail: upErr.message,
-      });
-    }
-
-    // 6) url pública
-    const publicUrl = getPublicUrl(supabase, VIDEO_BUCKET, path);
-
-    // 7) actualizar tabla
-    await supabase
+    // Leer job actualizado
+    const { data: updatedJob } = await supabase
       .from("video_jobs")
-      .update({
-        status: "DONE",
-        video_url: publicUrl,
-        storage_bucket: VIDEO_BUCKET,
-        storage_path: path,
-      })
-      .eq("id", jobId);
+      .select("*")
+      .eq("id", jobId)
+      .single();
 
-    return json(res, 200, {
+    return res.status(200).json({
       ok: true,
-      status: "DONE",
-      job_id: jobId,
-      video_url: publicUrl,
-      storage: { bucket: VIDEO_BUCKET, path },
+      job: updatedJob || job,
+      runpod: runpodJson,
     });
-  } catch (e) {
-    return json(res, 500, { ok: false, error: "server_error", detail: String(e?.message || e) });
+
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Unknown error",
+    });
   }
 }
