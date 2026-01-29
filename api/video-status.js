@@ -1,112 +1,137 @@
 // api/video-status.js
-export const runtime = "nodejs";
+import { createClient } from "@supabase/supabase-js";
 
-import { getSupabaseAdmin } from "../src/lib/supabaseAdmin.js";
-import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function mustEnv(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} missing`);
-  return v;
+const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
+const RUNPOD_ENDPOINT = process.env.VIDEO_RUNPOD_ENDPOINT || process.env.RUNPOD_VIDEO_ENDPOINT || process.env.RUNPOD_ENDPOINT;
+
+function json(res, code, obj) {
+  res.status(code).setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(obj));
 }
 
-async function runpodStatus({ endpointId, apiKey, requestId }) {
-  const url = `https://api.runpod.ai/v2/${endpointId}/status/${requestId}`;
-  const r = await fetch(url, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
+function getBearerToken(req) {
+  const h = req.headers.authorization || req.headers.Authorization || "";
+  const m = String(h).match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function getUserIdFromRequest(req) {
+  const jwt = getBearerToken(req);
+  if (!jwt) return null;
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`RunPod /status failed: ${r.status} ${JSON.stringify(data)}`);
-  return data;
+
+  const { data, error } = await userClient.auth.getUser();
+  if (error) return null;
+  return data?.user?.id || null;
+}
+
+function buildRunpodStatusUrl(endpointOrUrl, requestId) {
+  if (!endpointOrUrl || !requestId) return null;
+  const v = String(endpointOrUrl).trim();
+  if (v.startsWith("http://") || v.startsWith("https://")) {
+    // si te guardaste una URL completa de /run, la convertimos a /status
+    // ejemplo: https://api.runpod.ai/v2/<id>/run  ->  https://api.runpod.ai/v2/<id>/status/<req>
+    const base = v.replace(/\/run\/?$/i, "");
+    return `${base}/status/${requestId}`;
+  }
+  return `https://api.runpod.ai/v2/${v}/status/${requestId}`;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "GET") return json(res, 405, { ok: false, error: "Method not allowed" });
 
   try {
-    const admin = getSupabaseAdmin();
-    const user_id = await getUserIdFromAuthHeader(req);
-    if (!user_id) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const userId = await getUserIdFromRequest(req);
+    if (!userId) return json(res, 401, { ok: false, error: "Unauthorized" });
 
-    const job_id = String(req.query?.job_id || "").trim();
-    if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
+    const jobId = String(req.query?.job_id || "").trim();
+    if (!jobId) return json(res, 400, { ok: false, error: "Missing job_id" });
+
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return json(res, 500, { ok: false, error: "Missing SUPABASE env" });
+    }
+
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: job, error: jobErr } = await admin
       .from("video_jobs")
       .select("*")
-      .eq("id", job_id)
+      .eq("id", jobId)
+      .eq("user_id", userId)
       .single();
 
-    if (jobErr || !job) return res.status(404).json({ ok: false, error: "Job not found" });
-    if (job.user_id !== user_id) return res.status(403).json({ ok: false, error: "Forbidden" });
+    if (jobErr || !job) return json(res, 404, { ok: false, error: "Job not found" });
 
-    // Si ya tenemos video_url, listo
+    // Si ya está listo con URL, devolvemos directo
     if (job.video_url) {
-      return res.status(200).json({ ok: true, status: job.status, video_url: job.video_url, job });
+      return json(res, 200, { ok: true, status: job.status, video_url: job.video_url, job });
     }
 
-    const provider_request_id = job.provider_request_id;
-    if (!provider_request_id) {
-      return res.status(200).json({
-        ok: true,
-        status: job.status || "QUEUED",
-        message: "No provider_request_id yet (RunPod not started)",
-        job,
-      });
+    // Si no hay request id, aún no se mandó bien
+    if (!job.provider_request_id) {
+      return json(res, 200, { ok: true, status: job.status, job });
     }
 
-    const endpointId = mustEnv("RUNPOD_VIDEO_ENDPOINT_ID");
-    const apiKey = mustEnv("RUNPOD_API_KEY");
-
-    const st = await runpodStatus({ endpointId, apiKey, requestId: provider_request_id });
-
-    // st.status suele ser: IN_QUEUE / IN_PROGRESS / COMPLETED / FAILED
-    const rpStatus = st?.status || "UNKNOWN";
-
-    // guarda provider_status siempre
-    await admin.from("video_jobs").update({ provider_status: rpStatus }).eq("id", job_id);
-
-    if (rpStatus === "FAILED") {
-      await admin.from("video_jobs").update({ status: "FAILED" }).eq("id", job_id);
-      return res.status(200).json({ ok: true, status: "FAILED", runpod: st });
+    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT) {
+      return json(res, 500, { ok: false, error: "Missing RUNPOD env" });
     }
 
-    if (rpStatus !== "COMPLETED") {
-      // sigue en proceso
-      return res.status(200).json({ ok: true, status: "IN_PROGRESS", runpod_status: rpStatus, runpod: st });
+    const statusUrl = buildRunpodStatusUrl(RUNPOD_ENDPOINT, job.provider_request_id);
+    const rpResp = await fetch(statusUrl, {
+      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+    });
+
+    const rpJson = await rpResp.json().catch(() => ({}));
+
+    if (!rpResp.ok) {
+      return json(res, 200, { ok: true, status: job.status, provider_status: "STATUS_CHECK_FAILED", rp: rpJson, job });
     }
 
-    // COMPLETED
-    const out = st?.output || {};
-    const video_url = out.video_url || out.url || null;
+    // RunPod típico: { status: "COMPLETED", output: {...} }
+    const rpStatus = rpJson?.status || null;
+    const output = rpJson?.output || null;
 
-    if (video_url) {
+    // Ajusta estas keys según tu worker:
+    const videoUrl = output?.video_url || output?.videoUrl || null;
+
+    if (rpStatus === "COMPLETED" && videoUrl) {
       await admin
         .from("video_jobs")
-        .update({ status: "COMPLETED", video_url })
-        .eq("id", job_id);
+        .update({ status: "COMPLETED", provider_status: "COMPLETED", video_url: videoUrl })
+        .eq("id", jobId);
 
-      return res.status(200).json({ ok: true, status: "COMPLETED", video_url, runpod: st });
+      return json(res, 200, { ok: true, status: "COMPLETED", video_url: videoUrl });
     }
 
-    // si tu worker devuelve base64, aquí lo capturas (si quieres luego lo subimos a Storage)
-    const video_b64 = out.video_b64 || out.base64 || null;
+    if (rpStatus === "FAILED") {
+      await admin
+        .from("video_jobs")
+        .update({ status: "FAILED", provider_status: "FAILED", provider_error: JSON.stringify(rpJson) })
+        .eq("id", jobId);
 
-    // si no hay nada, es que tu worker no está devolviendo output como esperas
+      return json(res, 200, { ok: true, status: "FAILED", rp: rpJson });
+    }
+
+    // En progreso
     await admin
       .from("video_jobs")
-      .update({ status: "COMPLETED" })
-      .eq("id", job_id);
+      .update({ status: "IN_PROGRESS", provider_status: rpStatus || "IN_PROGRESS" })
+      .eq("id", jobId);
 
-    return res.status(200).json({
-      ok: true,
-      status: "COMPLETED",
-      warning: "No video_url/video_b64 in RunPod output",
-      runpod: st,
-    });
-  } catch (err) {
-    console.error("video-status fatal:", err);
-    return res.status(500).json({ ok: false, error: err?.message || "server_error" });
+    return json(res, 200, { ok: true, status: "IN_PROGRESS", rp_status: rpStatus, job });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: "Server error", details: String(e?.message || e) });
   }
 }
