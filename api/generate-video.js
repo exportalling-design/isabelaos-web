@@ -11,9 +11,9 @@ const RUNPOD_API_KEY =
 // ✅ T2V endpoint id (Vercel env)
 function pickT2VEndpointId() {
   return (
-    process.env.RP_WAN22_T2V_ENDPOINT ||          // tu env visible en screenshot
-    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||       // si lo usas como fallback
-    process.env.VIDEO_RUNPOD_ENDPOINT ||          // por si existe en tu proyecto
+    process.env.RP_WAN22_T2V_ENDPOINT || // tu env visible en screenshot
+    process.env.VIDEO_RUNPOD_ENDPOINT_ID || // fallback
+    process.env.VIDEO_RUNPOD_ENDPOINT || // fallback
     null
   );
 }
@@ -55,13 +55,31 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     const prompt = String(body?.prompt || "").trim();
-    const negative_prompt = String(body?.negative || body?.negative_prompt || "").trim(); // ✅ mapea "negative" -> negative_prompt
 
-    const width = Number(body?.width || 1080);
-    const height = Number(body?.height || 1920);
+    // ✅ mapea "negative" -> negative_prompt (tu worker usa negative_prompt)
+    const negative_prompt = String(body?.negative || body?.negative_prompt || "").trim();
 
+    // ✅ NUEVO: frontend manda aspect_ratio solo si el usuario marcó 9:16
+    // (si viene "", el worker usa default)
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+
+    // ✅ IMPORTANTE:
+    // Ya NO forzamos 1080x1920. Si el frontend no manda width/height => null.
+    // El worker decide el default (y si aspect_ratio=9:16, usa 1080x1920).
+    const width =
+      body?.width !== undefined && body?.width !== null && body?.width !== ""
+        ? Number(body.width)
+        : null;
+
+    const height =
+      body?.height !== undefined && body?.height !== null && body?.height !== ""
+        ? Number(body.height)
+        : null;
+
+    // ✅ Timing:
+    // tu frontend nuevo manda duration_s (no seconds)
     const fps = Number(body?.fps || 24);
-    const seconds = Number(body?.seconds || 3);
+    const seconds = Number(body?.duration_s || body?.seconds || 3);
 
     // ✅ tu tabla usa num_frames
     const num_frames = Number(body?.num_frames || body?.frames || Math.round(fps * seconds));
@@ -99,15 +117,18 @@ export default async function handler(req, res) {
       status: "QUEUED",
       mode: "t2v",
       prompt,
-      negative_prompt,       // ✅ columna real
-      width,
-      height,
+      negative_prompt,
+
+      // ✅ si no vienen, quedan null y el worker decide
+      width: width ?? null,
+      height: height ?? null,
+
       fps,
-      num_frames,            // ✅ columna real
+      num_frames,
       steps,
       guidance_scale,
       provider: "runpod",
-      payload: body ? JSON.stringify(body) : null, // ✅ existe "payload"
+      payload: body ? JSON.stringify(body) : null,
     };
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
@@ -118,21 +139,28 @@ export default async function handler(req, res) {
     // ✅ 3) RunPod
     const endpointId = pickT2VEndpointId();
 
+    // ✅ input para worker:
+    // - mandamos aspect_ratio SOLO si existe ("9:16")
+    // - width/height SOLO si vinieron
+    const rpInput = {
+      mode: "t2v",
+      job_id: jobId,
+      user_id: userId,
+      prompt,
+      negative_prompt,
+      fps,
+      num_frames,
+      steps,
+      guidance_scale,
+      duration_s: seconds, // útil para logging; el worker usa num_frames igualmente
+      ...(aspect_ratio ? { aspect_ratio } : {}),
+      ...(typeof width === "number" && Number.isFinite(width) ? { width } : {}),
+      ...(typeof height === "number" && Number.isFinite(height) ? { height } : {}),
+    };
+
     const rp = await runpodRun({
       endpointId,
-      input: {
-        mode: "t2v",
-        job_id: jobId,
-        user_id: userId,
-        prompt,
-        negative_prompt,
-        width,
-        height,
-        fps,
-        num_frames,
-        steps,
-        guidance_scale,
-      },
+      input: rpInput,
     });
 
     const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
@@ -141,7 +169,7 @@ export default async function handler(req, res) {
       await supabaseAdmin
         .from("video_jobs")
         .update({
-          provider_request_id: String(runpodId), // ✅ columna real
+          provider_request_id: String(runpodId),
           provider_status: "submitted",
           status: "IN_PROGRESS",
           started_at: new Date().toISOString(),
