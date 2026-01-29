@@ -17,38 +17,6 @@ function getRunpodConfig() {
   return { apiKey, endpointId, baseUrl };
 }
 
-// ✅ Intenta RPC named y si falla, cae a posicional
-async function spendJadesSafe(admin, { user_id, amount, kind, ref }) {
-  // 1) NAMED (por si tu función es spend_jades(p_user_id uuid, p_amount int, ...)
-  const namedPayloads = [
-    { p_user_id: user_id, p_amount: amount, p_kind: kind, p_ref: String(ref) },
-    { user_id, amount, kind, ref: String(ref) },
-    { uid: user_id, amt: amount, k: kind, reference: String(ref) },
-  ];
-
-  let lastErr = null;
-
-  for (const payload of namedPayloads) {
-    const { error } = await admin.rpc("spend_jades", payload);
-    if (!error) return { ok: true, mode: "named", payload };
-    lastErr = error;
-  }
-
-  // 2) POSICIONAL (por si tu firma es spend_jades(uuid, integer, text, text))
-  const { error: posErr } = await admin.rpc("spend_jades", [
-    user_id,
-    amount,
-    kind,
-    String(ref),
-  ]);
-
-  if (!posErr) return { ok: true, mode: "positional" };
-
-  // si fallaron ambos:
-  const msg = `${lastErr?.message || "named_failed"} | ${posErr?.message || "positional_failed"}`;
-  return { ok: false, error: new Error(msg) };
-}
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -57,41 +25,35 @@ export default async function handler(req, res) {
   try {
     const admin = getSupabaseAdmin();
 
-    // ---------------------------------------------------
-    // 1) Auth
-    // ---------------------------------------------------
+    // --------------------------------------------------
+    // 1) AUTH
+    // --------------------------------------------------
     const user_id = await getUserIdFromAuthHeader(req);
-    if (!user_id) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user_id) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
-    // ---------------------------------------------------
-    // 2) Body (compat con tu frontend)
-    // ---------------------------------------------------
+    // --------------------------------------------------
+    // 2) BODY
+    // --------------------------------------------------
     const body = req.body || {};
 
-    const mode = String(body.mode || "t2v").trim().toLowerCase(); // worker: "t2v"
     const prompt = String(body.prompt || "").trim();
-    const negative_prompt = String(body.negative_prompt || body.negative || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: "Missing prompt" });
+    }
 
-    const platform_ref = String(body.platform_ref || "").trim();
-    const aspect_ratio = String(body.aspect_ratio || "").trim();
+    const negative_prompt = String(body.negative_prompt || body.negative || "").trim();
+    const duration_s = Number(body.duration_s ?? body.seconds ?? 3);
+    const fps = Number(body.fps ?? 24);
+    const num_frames = Math.max(1, Math.round(duration_s * fps));
 
     const width = Number(body.width ?? 640);
     const height = Number(body.height ?? 360);
 
-    const duration_s = Number(body.duration_s ?? body.seconds ?? 3);
-    const fps = Number(body.fps ?? 24);
-    const num_frames = Number(body.num_frames ?? Math.max(1, Math.round(duration_s * fps)));
-
-    const steps = Number(body.steps ?? 20);
-    const guidance_scale = Number(body.guidance_scale ?? 5.0);
-
-    const already_billed = !!body.already_billed;
-
-    if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
-
-    // ---------------------------------------------------
-    // 3) Crear job
-    // ---------------------------------------------------
+    // --------------------------------------------------
+    // 3) CREATE JOB
+    // --------------------------------------------------
     const { data: job, error: insertErr } = await admin
       .from("video_jobs")
       .insert({
@@ -100,19 +62,13 @@ export default async function handler(req, res) {
         provider: "runpod",
         provider_status: "QUEUED",
         provider_raw: {
-          mode,
           prompt,
           negative_prompt,
-          platform_ref,
-          aspect_ratio,
-          width,
-          height,
           duration_s,
           fps,
           num_frames,
-          steps,
-          guidance_scale,
-          used_optimized: !!body.used_optimized,
+          width,
+          height,
         },
       })
       .select("id")
@@ -122,47 +78,44 @@ export default async function handler(req, res) {
       return res.status(500).json({
         ok: false,
         error: "video_jobs insert failed",
-        detail: insertErr?.message || "insert_error",
+        detail: insertErr?.message,
       });
     }
 
-    // ---------------------------------------------------
-    // 4) Cobro jades (blindado)
-    // ---------------------------------------------------
-    if (!already_billed) {
-      const spend = await spendJadesSafe(admin, {
-        user_id,
-        amount: COST_T2V,
-        kind: "t2v",
-        ref: job.id,
+    // --------------------------------------------------
+    // 4) SPEND JADES (🔥 AQUÍ ESTABA EL ERROR 🔥)
+    // --------------------------------------------------
+    const { error: spendErr } = await admin.rpc("spend_jades", {
+      p_user_id: user_id,
+      p_amount: COST_T2V,
+      p_reason: "video_generation",
+      p_ref: String(job.id),
+    });
+
+    if (spendErr) {
+      await admin
+        .from("video_jobs")
+        .update({
+          status: "FAILED",
+          provider_status: "FAILED",
+          provider_reply: { error: spendErr.message },
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+
+      return res.status(400).json({
+        ok: false,
+        error: "Jades spend failed",
+        detail: spendErr.message,
       });
-
-      if (!spend.ok) {
-        await admin
-          .from("video_jobs")
-          .update({
-            status: "FAILED",
-            provider_status: "FAILED",
-            provider_reply: { error: spend.error.message },
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
-
-        return res.status(400).json({
-          ok: false,
-          error: "Jades spend failed",
-          detail: spend.error.message, // ✅ aquí verás la razón exacta
-        });
-      }
     }
 
-    // ---------------------------------------------------
-    // 5) RunPod serverless /run
-    // ---------------------------------------------------
+    // --------------------------------------------------
+    // 5) SEND TO RUNPOD
+    // --------------------------------------------------
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
-    const runUrl = `${baseUrl}/${endpointId}/run`;
 
-    const rp = await fetch(runUrl, {
+    const rp = await fetch(`${baseUrl}/${endpointId}/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -170,18 +123,14 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         input: {
-          mode, // "t2v"
+          mode: "t2v",
           prompt,
           negative_prompt,
-          platform_ref,
-          aspect_ratio,
-          width,
-          height,
           duration_s,
           fps,
           num_frames,
-          steps,
-          guidance_scale,
+          width,
+          height,
         },
       }),
     });
@@ -194,7 +143,7 @@ export default async function handler(req, res) {
         .update({
           status: "FAILED",
           provider_status: "FAILED",
-          provider_reply: rpJson || { error: "RunPod bad response" },
+          provider_reply: rpJson,
           completed_at: new Date().toISOString(),
         })
         .eq("id", job.id);
@@ -202,11 +151,13 @@ export default async function handler(req, res) {
       return res.status(500).json({
         ok: false,
         error: "RunPod run failed",
-        detail: rpJson || "no-json",
+        detail: rpJson,
       });
     }
 
-    // Guardar request id
+    // --------------------------------------------------
+    // 6) SAVE REQUEST ID
+    // --------------------------------------------------
     await admin
       .from("video_jobs")
       .update({
@@ -226,7 +177,7 @@ export default async function handler(req, res) {
     console.error("❌ generate-video fatal:", err);
     return res.status(500).json({
       ok: false,
-      error: err?.message || "server_error",
+      error: err.message || "server_error",
     });
   }
 }
