@@ -1,7 +1,7 @@
 // /api/generate-img2video.js (SERVERLESS)
 // ============================================================
 // - Crea job en Supabase
-// - Cobra 12 jades (server-side)
+// - Cobra 12 jades (server-side) SOLO si already_billed !== true
 // - Lanza RunPod Serverless /run con mode=i2v
 // ============================================================
 
@@ -13,7 +13,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY || null;
-const IMG2VIDEO_RUNPOD_ENDPOINT_ID = process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID || process.env.VIDEO_RUNPOD_ENDPOINT_ID || null;
+const IMG2VIDEO_RUNPOD_ENDPOINT_ID =
+  process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID || process.env.VIDEO_RUNPOD_ENDPOINT_ID || null;
 
 const VIDEO_JOBS_TABLE = process.env.VIDEO_JOBS_TABLE || "video_jobs";
 
@@ -112,6 +113,7 @@ export default async function handler(req, res) {
       guidance_scale,
       image_b64 = null,
       image_url = null,
+      already_billed = false, // ✅ NEW
     } = body;
 
     const mode = "i2v";
@@ -138,8 +140,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ COBRO: 12 jades por i2v (server-side)
-    await spendJadesAtomic(sb, { user_id, amount: COST_I2V, reason: "img2video" });
+    // ✅ COBRO: solo si NO viene already_billed=true
+    if (already_billed !== true) {
+      await spendJadesAtomic(sb, { user_id, amount: COST_I2V, reason: "img2video" });
+    }
 
     // 1) crear job
     const job_id = crypto.randomUUID();
@@ -158,6 +162,7 @@ export default async function handler(req, res) {
       guidance_scale,
       image_b64: image_b64 ? "[base64]" : null,
       image_url: image_url || null,
+      using_optimized,
     };
 
     const { error: insErr } = await sb.from(VIDEO_JOBS_TABLE).insert([
@@ -181,7 +186,10 @@ export default async function handler(req, res) {
     if (insErr) throw new Error(`No pude insertar video_jobs: ${insErr.message}`);
 
     // 2) dispatch
-    await sb.from(VIDEO_JOBS_TABLE).update({ status: "DISPATCHED", updated_at: new Date().toISOString() }).eq("job_id", job_id);
+    await sb
+      .from(VIDEO_JOBS_TABLE)
+      .update({ status: "DISPATCHED", updated_at: new Date().toISOString() })
+      .eq("job_id", job_id);
 
     const input = {
       job_id,
