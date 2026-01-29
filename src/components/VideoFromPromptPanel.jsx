@@ -4,8 +4,8 @@
 // - Genera video desde texto (prompt)
 // - ✅ Prompt Optimizer (OpenAI)
 // - ✅ Negative prompt
-// - ✅ Selección de formato (ratio + plataforma referencia)
-// - ✅ Duración 3s / 5s
+// - ✅ Formato simple: Default + checkbox 9:16
+// - ✅ Duración simple: checkbox 3s / 5s
 // - ✅ AUTH TOKEN: Authorization Bearer
 // - ✅ Billing ahora es SERVER-SIDE (para poder refund automático)
 // - ✅ JSON safe parsing (arregla error rojo)
@@ -22,19 +22,13 @@ export function VideoFromPromptPanel({ userStatus }) {
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
 
-  const PRESETS = [
-    { id: "tiktok_9_16", label: "TikTok / Reels / Shorts (9:16) · 1080x1920", platform_ref: "tiktok", aspect_ratio: "9:16", width: 1080, height: 1920 },
-    { id: "ig_square_1_1", label: "Instagram Feed (1:1) · 1080x1080", platform_ref: "instagram", aspect_ratio: "1:1", width: 1080, height: 1080 },
-    { id: "yt_16_9", label: "YouTube Horizontal (16:9) · 1920x1080", platform_ref: "youtube", aspect_ratio: "16:9", width: 1920, height: 1080 },
-    { id: "ig_4_5", label: "Instagram Feed Vertical (4:5) · 1080x1350", platform_ref: "instagram", aspect_ratio: "4:5", width: 1080, height: 1350 },
-    { id: "fb_4_3", label: "Facebook (4:3) · 1440x1080", platform_ref: "facebook", aspect_ratio: "4:3", width: 1440, height: 1080 },
-  ];
-
-  const [presetId, setPresetId] = useState(PRESETS[0].id);
+  // ✅ Nuevo UI simple
+  // Default = (sin aspect_ratio)
+  const [useNineSixteen, setUseNineSixteen] = useState(true); // puedes poner false si quieres default por defecto
   const [durationSec, setDurationSec] = useState(3);
-  const fps = 24;
 
-  const selectedPreset = PRESETS.find((p) => p.id === presetId) || PRESETS[0];
+  // ✅ Mantengo fps fijo como estaba
+  const fps = 24;
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -122,6 +116,10 @@ export function VideoFromPromptPanel({ userStatus }) {
     setError(msg || "Ocurrió un error.");
   };
 
+  // ✅ helpers para checkboxes (solo uno activo)
+  const setDuration3 = () => setDurationSec(3);
+  const setDuration5 = () => setDurationSec(5);
+
   async function generate() {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -143,6 +141,9 @@ export function VideoFromPromptPanel({ userStatus }) {
       const auth = await getAuthHeaders();
       const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
 
+      // ✅ Solo manda ratio si el usuario marcó 9:16
+      const aspect_ratio = useNineSixteen ? "9:16" : "";
+
       const { r, j } = await safeFetchJson("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
@@ -151,10 +152,8 @@ export function VideoFromPromptPanel({ userStatus }) {
           prompt: finalPrompt,
           negative_prompt: finalNegative || "",
 
-          platform_ref: selectedPreset.platform_ref,
-          aspect_ratio: selectedPreset.aspect_ratio,
-          width: selectedPreset.width,
-          height: selectedPreset.height,
+          // ✅ NUEVO: sin presets ni tamaños. Solo ratio opcional.
+          ...(aspect_ratio ? { aspect_ratio } : {}),
 
           duration_s: Number(durationSec),
           fps,
@@ -251,36 +250,59 @@ export function VideoFromPromptPanel({ userStatus }) {
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
+        {/* ✅ NUEVO: Formato y Duración con cuadritos */}
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div>
-            <label className="text-xs text-neutral-300">Formato / plataforma</label>
-            <select
-              value={presetId}
-              onChange={(e) => setPresetId(e.target.value)}
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            >
-              {PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <div className="mt-1 text-[10px] text-neutral-500">
-              Se enviará como {selectedPreset.aspect_ratio} ({selectedPreset.width}x{selectedPreset.height})
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Formato / tamaño</div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                id="t2v_916"
+                type="checkbox"
+                checked={useNineSixteen}
+                onChange={(e) => setUseNineSixteen(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="t2v_916" className="text-[12px] text-neutral-200">
+                9:16 (Reels / TikTok)
+              </label>
+            </div>
+
+            <div className="mt-2 text-[10px] text-neutral-500">
+              {useNineSixteen ? "Mandará 9:16" : "Mandará Default (más rápido)"}
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-neutral-300">Duración</label>
-            <select
-              value={durationSec}
-              onChange={(e) => setDurationSec(Number(e.target.value))}
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-            >
-              <option value={3}>3 segundos (rápido)</option>
-              <option value={5}>5 segundos (máximo)</option>
-            </select>
-            <div className="mt-1 text-[10px] text-neutral-500">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Duración</div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                id="t2v_3s"
+                type="checkbox"
+                checked={durationSec === 3}
+                onChange={(e) => (e.target.checked ? setDuration3() : null)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="t2v_3s" className="text-[12px] text-neutral-200">
+                3 segundos (rápido)
+              </label>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="t2v_5s"
+                type="checkbox"
+                checked={durationSec === 5}
+                onChange={(e) => (e.target.checked ? setDuration5() : null)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="t2v_5s" className="text-[12px] text-neutral-200">
+                5 segundos (máximo)
+              </label>
+            </div>
+
+            <div className="mt-2 text-[10px] text-neutral-500">
               fps: {fps} · frames aprox: {Math.round(Number(durationSec) * fps)}
             </div>
           </div>
