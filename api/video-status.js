@@ -1,5 +1,5 @@
-// /api/video-status.js
-import { getSupabaseAdmin } from "../src/lib/supabaseAdmin";
+// pages/api/video-status.js
+import { getSupabaseAdmin } from "../../src/lib/supabaseAdmin";
 
 function getRunpodConfig() {
   return {
@@ -9,21 +9,24 @@ function getRunpodConfig() {
   };
 }
 
+// Sube un buffer a Supabase Storage y devuelve public URL
 async function uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId, buffer }) {
-  const path = `${jobId}.mp4`;
-
+  const path = `${jobId}.mp4`; // simple (podés hacer carpetas por user)
   const { error: upErr } = await supabaseAdmin.storage.from(bucket).upload(path, buffer, {
     contentType: "video/mp4",
     upsert: true,
   });
   if (upErr) throw new Error(`storage upload failed: ${upErr.message}`);
 
+  // ✅ Public URL (bucket tiene que ser PUBLIC)
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
   return data?.publicUrl || null;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "GET") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
     const supabaseAdmin = getSupabaseAdmin();
@@ -32,14 +35,18 @@ export default async function handler(req, res) {
     const job_id = req.query.job_id;
     if (!job_id) return res.status(400).json({ ok: false, error: "Missing job_id" });
 
+    // 1) Cargar job de DB
     const { data: job, error: jobErr } = await supabaseAdmin
       .from("video_jobs")
-      .select("id,status,provider_request_id,video_url,provider_status,provider_raw")
+      .select("id,status,provider_request_id,video_url,provider_status,provider_raw,provider_reply")
       .eq("id", job_id)
       .single();
 
-    if (jobErr || !job) return res.status(404).json({ ok: false, error: "video_jobs row not found" });
+    if (jobErr || !job) {
+      return res.status(404).json({ ok: false, error: "video_jobs row not found" });
+    }
 
+    // Si ya está listo y tiene URL, devolvé rápido
     if (job.status === "DONE" && job.video_url) {
       return res.status(200).json({ ok: true, status: "DONE", video_url: job.video_url });
     }
@@ -48,6 +55,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: job.status || "QUEUED" });
     }
 
+    // 2) Consultar RunPod status
     const statusUrl = `${baseUrl}/${endpointId}/status/${job.provider_request_id}`;
     const rp = await fetch(statusUrl, {
       method: "GET",
@@ -58,11 +66,13 @@ export default async function handler(req, res) {
 
     if (!rp.ok) {
       console.log("❌ runpod status failed:", rp.status, rpJson);
+      // No tumbamos el job, solo devolvemos estado actual
       return res.status(200).json({ ok: true, status: job.status || "RUNNING", provider: rpJson });
     }
 
     const rpStatus = rpJson?.status || "RUNNING";
 
+    // 3) Si RunPod dice FAILED
     if (rpStatus === "FAILED") {
       await supabaseAdmin
         .from("video_jobs")
@@ -77,6 +87,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: "FAILED" });
     }
 
+    // 4) Si todavía corre
     if (rpStatus !== "COMPLETED") {
       await supabaseAdmin
         .from("video_jobs")
@@ -90,6 +101,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: "RUNNING", provider_status: rpStatus });
     }
 
+    // 5) COMPLETED -> sacar URL del output (ajusta según tu worker)
     const out = rpJson?.output;
     const remoteUrl =
       (typeof out === "string" && out) ||
@@ -110,9 +122,14 @@ export default async function handler(req, res) {
         })
         .eq("id", job.id);
 
-      return res.status(200).json({ ok: true, status: "FAILED", error: "no_video_url_in_provider_output" });
+      return res.status(200).json({
+        ok: true,
+        status: "FAILED",
+        error: "no_video_url_in_provider_output",
+      });
     }
 
+    // 6) Descargar el mp4 y subir a Supabase Storage
     const bucket = process.env.VIDEO_BUCKET || "videos";
 
     const vidResp = await fetch(remoteUrl);
@@ -134,8 +151,14 @@ export default async function handler(req, res) {
     const arrayBuffer = await vidResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const publicUrl = await uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId: job.id, buffer });
+    const publicUrl = await uploadToSupabaseVideoBucket({
+      supabaseAdmin,
+      bucket,
+      jobId: job.id,
+      buffer,
+    });
 
+    // 7) Update DB con video_url final
     await supabaseAdmin
       .from("video_jobs")
       .update({
