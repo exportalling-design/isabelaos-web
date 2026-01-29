@@ -1,4 +1,4 @@
-// api/generate-video.js
+// /api/generate-video.js
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
@@ -11,11 +11,30 @@ const RUNPOD_API_KEY =
 // ✅ T2V endpoint id (Vercel env)
 function pickT2VEndpointId() {
   return (
-    process.env.RP_WAN22_T2V_ENDPOINT || // tu env visible en screenshot
-    process.env.VIDEO_RUNPOD_ENDPOINT_ID || // fallback
-    process.env.VIDEO_RUNPOD_ENDPOINT || // fallback
+    process.env.RP_WAN22_T2V_ENDPOINT ||
+    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT ||
     null
   );
+}
+
+// ✅ Auto quality prompt (lens/light/clarity) - universal
+function enrichPrompt(userPrompt) {
+  const base =
+    "cinematic shot, sharp focus, ultra detailed, clean edges, professional color grading, HDR, " +
+    "35mm lens, f/2.8, soft key light, rim light, realistic textures, natural skin detail, " +
+    "stable motion, high shutter clarity, high fidelity";
+  const p = String(userPrompt || "").trim();
+  return `${base}. ${p}`.trim();
+}
+
+function enrichNegative(userNegative) {
+  const baseNeg =
+    "blurry, low quality, lowres, noise, jpeg artifacts, watermark, text, logo, " +
+    "deformed, bad anatomy, extra limbs, face distortion, flicker, jitter, warping, " +
+    "ghosting, duplicate subject, oversmooth, plastic skin";
+  const n = String(userNegative || "").trim();
+  return n ? `${baseNeg}, ${n}` : baseNeg;
 }
 
 async function runpodRun({ endpointId, input }) {
@@ -39,41 +58,7 @@ async function runpodRun({ endpointId, input }) {
     throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
   }
 
-  return data; // { id: "..." } normalmente
-}
-
-// ------------------------------------------------------------
-// ✅ Prompt Enhancer (calidad / lente / luz / enfoque)
-// - Si el prompt ya viene largo/detallado, NO lo toca.
-// - Si viene corto, lo completa con "cinematic capture" genérico.
-// ------------------------------------------------------------
-function enhancePromptIfNeeded(userPrompt) {
-  const p = String(userPrompt || "").trim();
-  if (!p) return "";
-
-  // Si ya viene detallado, no lo tocamos
-  if (p.length >= 80) return p;
-
-  // Pack universal (sirve para personas/objetos/agua/productos/escenas)
-  const cinematicPack =
-    "cinematic professional shot, ultra sharp focus, high detail, clean edges, stable shapes, smooth motion, " +
-    "natural textures, HDR, filmic color grading, soft key light, subtle rim light, global illumination, " +
-    "35mm lens, shallow depth of field, soft bokeh, realistic exposure, crisp highlights, no flicker";
-
-  // Mantiene la idea del usuario y solo agrega calidad
-  return `${p}. ${cinematicPack}`;
-}
-
-// ------------------------------------------------------------
-// ✅ Negative default (si el usuario no manda negative)
-// ------------------------------------------------------------
-function defaultNegativePrompt() {
-  return (
-    "blurry, low quality, worst quality, lowres, pixelated, deformed, bad anatomy, distorted face, " +
-    "extra limbs, missing fingers, fused fingers, broken hands, warped objects, " +
-    "flicker, jitter, frame tearing, unstable motion, ghosting, duplicate subject, " +
-    "watermark, text, logo, subtitles"
-  );
+  return data;
 }
 
 export default async function handler(req, res) {
@@ -82,52 +67,51 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    // ✅ user id desde tu helper
     const userId = await getUserIdFromAuthHeader(req);
     if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    // ✅ prompt con enhancer
-    const promptRaw = String(body?.prompt || "").trim();
-    const prompt = enhancePromptIfNeeded(promptRaw);
+    const userPrompt = String(body?.prompt || "").trim();
+    const userNeg = String(body?.negative || body?.negative_prompt || "").trim();
 
-    // ✅ negative default si viene vacío
-    const negativeRaw = String(body?.negative || body?.negative_prompt || "").trim();
-    const negative_prompt = negativeRaw.length > 0 ? negativeRaw : defaultNegativePrompt();
+    if (!userPrompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
 
-    // ✅ NUEVO: frontend manda aspect_ratio solo si el usuario marcó 9:16
-    // (si viene "", el worker usa default)
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+    // ✅ Always enhance
+    const prompt = enrichPrompt(userPrompt);
+    const negative_prompt = enrichNegative(userNeg);
 
-    // ✅ IMPORTANTE:
-    // Ya NO forzamos 1080x1920. Si el frontend no manda width/height => null.
-    // El worker decide el default (y si aspect_ratio=9:16, usa 1080x1920).
+    // Optional ratio
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" or "9:16"
+
+    // ✅ POD-LIKE DEFAULTS (what you showed worked)
+    const fps = Number(body?.fps || 24);
+
+    // If frontend sends duration_s, fine, but we primarily follow frames.
+    const seconds = Number(body?.duration_s || body?.seconds || 3);
+
+    // ✅ Prefer explicit num_frames, else default to 73 (pod)
+    const num_frames =
+      body?.num_frames !== undefined && body?.num_frames !== null && body?.num_frames !== ""
+        ? Number(body.num_frames)
+        : 73;
+
+    // ✅ Match pod defaults
+    const steps = Number(body?.steps || 18);
+    const guidance_scale = Number(body?.guidance_scale || 6.0);
+
+    // ✅ Force res (pod): 576x1024 (unless user explicitly sets it)
     const width =
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
-        : null;
+        : 576;
 
     const height =
       body?.height !== undefined && body?.height !== null && body?.height !== ""
         ? Number(body.height)
-        : null;
+        : 1024;
 
-    // ✅ Timing:
-    // tu frontend nuevo manda duration_s (no seconds)
-    const fps = Number(body?.fps || 24);
-    const seconds = Number(body?.duration_s || body?.seconds || 3);
-
-    // ✅ tu tabla usa num_frames
-    const num_frames = Number(body?.num_frames || body?.frames || Math.round(fps * seconds));
-
-    // ✅ defaults de calidad (podés cambiarlo)
-    const steps = Number(body?.steps || 30); // antes 25
-    const guidance_scale = Number(body?.guidance_scale || 7.5);
-
-    if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
-
-    // ✅ 1) cobrar jades
+    // ✅ Spend jades
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -143,7 +127,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ 2) crear job (SOLO columnas que EXISTEN en tu schema)
+    // ✅ Create job
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -153,13 +137,10 @@ export default async function handler(req, res) {
       user_id: userId,
       status: "QUEUED",
       mode: "t2v",
-      prompt,
-      negative_prompt,
-
-      // ✅ si no vienen, quedan null y el worker decide
-      width: width ?? null,
-      height: height ?? null,
-
+      prompt, // enhanced prompt saved
+      negative_prompt, // enhanced negative saved
+      width,
+      height,
       fps,
       num_frames,
       steps,
@@ -173,12 +154,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
-    // ✅ 3) RunPod
+    // ✅ RunPod
     const endpointId = pickT2VEndpointId();
 
-    // ✅ input para worker:
-    // - mandamos aspect_ratio SOLO si existe ("9:16")
-    // - width/height SOLO si vinieron
     const rpInput = {
       mode: "t2v",
       job_id: jobId,
@@ -189,16 +167,13 @@ export default async function handler(req, res) {
       num_frames,
       steps,
       guidance_scale,
-      duration_s: seconds, // útil para logging; el worker usa num_frames igualmente
+      width,
+      height,
+      duration_s: seconds,
       ...(aspect_ratio ? { aspect_ratio } : {}),
-      ...(typeof width === "number" && Number.isFinite(width) ? { width } : {}),
-      ...(typeof height === "number" && Number.isFinite(height) ? { height } : {}),
     };
 
-    const rp = await runpodRun({
-      endpointId,
-      input: rpInput,
-    });
+    const rp = await runpodRun({ endpointId, input: rpInput });
 
     const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
