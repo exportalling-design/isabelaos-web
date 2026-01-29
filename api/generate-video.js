@@ -1,181 +1,180 @@
-// ---------------------------------------------------------
-// API: Generar Video (T2V / I2V)
-// Inserta job en Supabase y luego lanza RunPod
-// ---------------------------------------------------------
+// pages/api/generate-video.js
+import { getSupabaseAdmin } from "../../lib/supabaseAdmin";
 
-import { createClient } from "@supabase/supabase-js";
+// ✅ costo (ajustalo a tu lógica real)
+const COST_VIDEO = 10;
 
-// URLs y keys desde variables de entorno
-const SUPABASE_URL =
-  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+// RunPod helpers
+function getRunpodConfig() {
+  return {
+    apiKey: process.env.RUNPOD_API_KEY,
+    endpointId: process.env.RUNPOD_ENDPOINT_ID,
+    baseUrl: process.env.RUNPOD_BASE_URL || "https://api.runpod.ai/v2",
+  };
+}
 
-// ⚠️ IMPORTANTE: Service Role (no anon)
-const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Calcula frames desde UI (fps * seconds)
+function secondsToFrames(seconds, fps) {
+  const s = Math.max(1, Number(seconds || 3));
+  const f = Math.max(1, Number(fps || 24));
+  return s * f;
+}
 
-// RunPod
-const RUNPOD_API_KEY =
-  process.env.RUNPOD_API_KEY || process.env.VIDEO_RUNPOD_API_KEY;
-
-const RUNPOD_ENDPOINT_ID =
-  process.env.RUNPOD_ENDPOINT_ID;
-
-// ---------------------------------------------------------
-// Handler principal
-// ---------------------------------------------------------
 export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+
   try {
-    // Solo permitimos POST
-    if (req.method !== "POST") {
-      return res.status(405).json({
-        ok: false,
-        error: "Method not allowed",
-      });
-    }
+    const supabaseAdmin = getSupabaseAdmin();
 
-    // Validaciones básicas
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing Supabase configuration",
-      });
-    }
+    // -----------------------------
+    // 1) Parse input
+    // -----------------------------
+    const {
+      user_id,           // uuid del usuario (desde tu auth)
+      prompt,
+      negative = "",
+      seconds = 3,
+      fps = 24,
+      width = 576,
+      height = 1024,
+      usePromptOptimizer = false,
+      optimizedPrompt = null, // si tu front ya trae el optimizado
+      engine = "wan22",        // etiqueta
+    } = req.body || {};
 
-    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing RunPod configuration",
-      });
-    }
+    if (!user_id) return res.status(400).json({ ok: false, error: "Missing user_id" });
+    if (!prompt || String(prompt).trim().length < 2) return res.status(400).json({ ok: false, error: "Missing prompt" });
 
-    // Cliente Supabase con SERVICE ROLE (bypassa RLS)
-    const supabase = createClient(
-      SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: { persistSession: false },
-      }
-    );
+    const frames = secondsToFrames(seconds, fps);
+    const finalPrompt = (usePromptOptimizer && optimizedPrompt) ? optimizedPrompt : prompt;
 
-    // Acepta body plano o body.input
-    const body = req.body?.input ? req.body : { input: req.body };
-    const input = body.input || {};
-
-    // Campos del video
-    const prompt = (input.prompt || "").trim();
-    const negative = input.negative || "";
-    const mode = input.mode || "t2v";
-
-    const seconds = Number(input.seconds ?? 3);
-    const fps = Number(input.fps ?? 24);
-    const width = Number(input.width ?? 640);
-    const height = Number(input.height ?? 360);
-
-    // Prompt es obligatorio
-    if (!prompt) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing prompt",
-      });
-    }
-
-    // -----------------------------------------------------
-    // 1) INSERTAR JOB EN SUPABASE (PASO CRÍTICO)
-    // -----------------------------------------------------
-    const { data: job, error: insertError } = await supabase
+    // -----------------------------
+    // 2) Insert job en video_jobs (STATUS QUEUED)
+    //    IMPORTANTE: id es UUID default (ya lo dejaste)
+    // -----------------------------
+    const { data: job, error: jobErr } = await supabaseAdmin
       .from("video_jobs")
       .insert({
+        user_id,
         status: "QUEUED",
-        prompt,
+        prompt: finalPrompt,
         negative,
-        mode,
         seconds,
         fps,
+        frames,
         width,
         height,
+        provider: "runpod",
+        provider_status: "QUEUED",
+        engine,
       })
-      .select("*")
+      .select("id,status,created_at")
       .single();
 
-    // Si falla aquí → el front nunca encontrará el row
-    if (insertError || !job?.id) {
-      return res.status(500).json({
-        ok: false,
-        error: "Failed to insert video_jobs row",
-        detail: insertError?.message,
-      });
+    if (jobErr) {
+      console.log("❌ insert video_jobs failed:", jobErr);
+      return res.status(500).json({ ok: false, error: "Failed to insert video_jobs row", detail: jobErr.message, code: jobErr.code });
     }
 
-    // -----------------------------------------------------
-    // 2) ENVIAR JOB A RUNPOD
-    // -----------------------------------------------------
-    const runpodUrl = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/run`;
+    // -----------------------------
+    // 3) Cobro de jades (NO lo quito)
+    //    Si tu RPC se llama distinto, ajustás aquí.
+    // -----------------------------
+    // Opción A: RPC (recomendado)
+    // Debe existir: spend_jades(user_id uuid, amount int, reason text, job_id uuid)
+    const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+      p_user_id: user_id,
+      p_amount: COST_VIDEO,
+      p_reason: "video_generation",
+      p_job_id: job.id,
+    });
 
-    const runpodResponse = await fetch(runpodUrl, {
+    if (spendErr) {
+      // Si no existe tu RPC, no te trono el sistema, pero te lo reporto.
+      console.log("⚠️ spend_jades RPC failed:", spendErr);
+      // Marcamos job como FAILED por cobro, para no dejarlo colgado.
+      await supabaseAdmin.from("video_jobs").update({
+        status: "FAILED",
+        error: "jades_spend_failed",
+        provider_status: "FAILED",
+        completed_at: new Date().toISOString(),
+      }).eq("id", job.id);
+
+      return res.status(400).json({ ok: false, error: "Jades spend failed (RPC)", detail: spendErr.message });
+    }
+
+    // -----------------------------
+    // 4) Mandar a RunPod (serverless)
+    // -----------------------------
+    const { apiKey, endpointId, baseUrl } = getRunpodConfig();
+    if (!apiKey || !endpointId) {
+      await supabaseAdmin.from("video_jobs").update({
+        status: "FAILED",
+        error: "missing_runpod_config",
+        provider_status: "FAILED",
+        completed_at: new Date().toISOString(),
+      }).eq("id", job.id);
+
+      return res.status(500).json({ ok: false, error: "Missing RUNPOD_API_KEY or RUNPOD_ENDPOINT_ID" });
+    }
+
+    // Payload para tu worker (ajustá nombres si tu worker usa otros)
+    const input = {
+      prompt: finalPrompt,
+      negative,
+      fps,
+      frames,
+      width,
+      height,
+      job_id: job.id, // importante para trazabilidad
+    };
+
+    const runpodUrl = `${baseUrl}/${endpointId}/run`;
+
+    const rp = await fetch(runpodUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${RUNPOD_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        input: {
-          // ⚠️ ESTE ID ES CLAVE PARA EL STATUS
-          job_id: job.id,
-
-          mode,
-          prompt,
-          negative,
-          seconds,
-          fps,
-          width,
-          height,
-        },
-      }),
+      body: JSON.stringify({ input }),
     });
 
-    const runpodJson = await runpodResponse.json().catch(() => null);
+    const rpJson = await rp.json().catch(() => null);
 
-    // Si RunPod falla → marcamos FAILED
-    if (!runpodResponse.ok || !runpodJson?.id) {
-      await supabase
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          error: runpodJson?.error || "RunPod run failed",
-        })
-        .eq("id", job.id);
+    if (!rp.ok) {
+      console.log("❌ runpod /run failed:", rp.status, rpJson);
 
-      return res.status(500).json({
-        ok: false,
-        error: "RunPod execution failed",
-        runpod: runpodJson,
-      });
+      await supabaseAdmin.from("video_jobs").update({
+        status: "FAILED",
+        provider_status: "FAILED",
+        provider_raw: rpJson,
+        error: "runpod_run_failed",
+        completed_at: new Date().toISOString(),
+      }).eq("id", job.id);
+
+      return res.status(500).json({ ok: false, error: "RunPod run failed", detail: rpJson || rp.statusText });
     }
 
-    // -----------------------------------------------------
-    // 3) ACTUALIZAR JOB COMO RUNNING
-    // -----------------------------------------------------
-    await supabase
-      .from("video_jobs")
-      .update({
-        status: "RUNNING",
-        runpod_request_id: runpodJson.id,
-      })
-      .eq("id", job.id);
+    // RunPod devuelve algo como { id: "xyz", status: "IN_QUEUE" }
+    const provider_request_id = rpJson?.id || null;
 
-    // Respuesta al frontend
+    await supabaseAdmin.from("video_jobs").update({
+      status: "RUNNING",
+      provider_status: rpJson?.status || "RUNNING",
+      provider_request_id,
+      provider_raw: rpJson,
+    }).eq("id", job.id);
+
+    // ✅ respuesta al front
     return res.status(200).json({
       ok: true,
       job_id: job.id,
-      runpod_request_id: runpodJson.id,
+      provider_request_id,
       status: "RUNNING",
     });
-
-  } catch (err) {
-    // Error inesperado
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "Unknown server error",
-    });
+  } catch (e) {
+    console.log("❌ generate-video fatal:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "server_error" });
   }
 }
