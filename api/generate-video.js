@@ -1,5 +1,5 @@
 // api/generate-video.js
-export const runtime = "nodejs"; // importante en Vercel
+export const runtime = "nodejs";
 
 import { getSupabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -17,6 +17,38 @@ function getRunpodConfig() {
   return { apiKey, endpointId, baseUrl };
 }
 
+// ✅ Intenta RPC named y si falla, cae a posicional
+async function spendJadesSafe(admin, { user_id, amount, kind, ref }) {
+  // 1) NAMED (por si tu función es spend_jades(p_user_id uuid, p_amount int, ...)
+  const namedPayloads = [
+    { p_user_id: user_id, p_amount: amount, p_kind: kind, p_ref: String(ref) },
+    { user_id, amount, kind, ref: String(ref) },
+    { uid: user_id, amt: amount, k: kind, reference: String(ref) },
+  ];
+
+  let lastErr = null;
+
+  for (const payload of namedPayloads) {
+    const { error } = await admin.rpc("spend_jades", payload);
+    if (!error) return { ok: true, mode: "named", payload };
+    lastErr = error;
+  }
+
+  // 2) POSICIONAL (por si tu firma es spend_jades(uuid, integer, text, text))
+  const { error: posErr } = await admin.rpc("spend_jades", [
+    user_id,
+    amount,
+    kind,
+    String(ref),
+  ]);
+
+  if (!posErr) return { ok: true, mode: "positional" };
+
+  // si fallaron ambos:
+  const msg = `${lastErr?.message || "named_failed"} | ${posErr?.message || "positional_failed"}`;
+  return { ok: false, error: new Error(msg) };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -26,19 +58,17 @@ export default async function handler(req, res) {
     const admin = getSupabaseAdmin();
 
     // ---------------------------------------------------
-    // 1) Usuario autenticado
+    // 1) Auth
     // ---------------------------------------------------
     const user_id = await getUserIdFromAuthHeader(req);
-    if (!user_id) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
+    if (!user_id) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     // ---------------------------------------------------
-    // 2) Leer body (compat con tu frontend actual)
+    // 2) Body (compat con tu frontend)
     // ---------------------------------------------------
     const body = req.body || {};
 
-    const mode = String(body.mode || "t2v").trim().toLowerCase(); // tu worker usa "t2v"
+    const mode = String(body.mode || "t2v").trim().toLowerCase(); // worker: "t2v"
     const prompt = String(body.prompt || "").trim();
     const negative_prompt = String(body.negative_prompt || body.negative || "").trim();
 
@@ -57,12 +87,10 @@ export default async function handler(req, res) {
 
     const already_billed = !!body.already_billed;
 
-    if (!prompt) {
-      return res.status(400).json({ ok: false, error: "Missing prompt" });
-    }
+    if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
 
     // ---------------------------------------------------
-    // 3) Crear job en video_jobs
+    // 3) Crear job
     // ---------------------------------------------------
     const { data: job, error: insertErr } = await admin
       .from("video_jobs")
@@ -90,33 +118,32 @@ export default async function handler(req, res) {
       .select("id")
       .single();
 
-    if (insertErr) {
+    if (insertErr || !job?.id) {
       return res.status(500).json({
         ok: false,
         error: "video_jobs insert failed",
-        detail: insertErr.message,
+        detail: insertErr?.message || "insert_error",
       });
     }
 
     // ---------------------------------------------------
-    // 4) Cobro de jades (SERVER-SIDE)
-    // OJO: ajusta nombres de params si tu RPC usa otros
+    // 4) Cobro jades (blindado)
     // ---------------------------------------------------
     if (!already_billed) {
-      const { error: spendErr } = await admin.rpc("spend_jades", {
-        p_user_id: user_id,
-        p_amount: COST_T2V,
-        p_kind: "t2v",
-        p_ref: String(job.id),
+      const spend = await spendJadesSafe(admin, {
+        user_id,
+        amount: COST_T2V,
+        kind: "t2v",
+        ref: job.id,
       });
 
-      if (spendErr) {
+      if (!spend.ok) {
         await admin
           .from("video_jobs")
           .update({
             status: "FAILED",
             provider_status: "FAILED",
-            provider_reply: { error: spendErr.message },
+            provider_reply: { error: spend.error.message },
             completed_at: new Date().toISOString(),
           })
           .eq("id", job.id);
@@ -124,13 +151,13 @@ export default async function handler(req, res) {
         return res.status(400).json({
           ok: false,
           error: "Jades spend failed",
-          detail: spendErr.message,
+          detail: spend.error.message, // ✅ aquí verás la razón exacta
         });
       }
     }
 
     // ---------------------------------------------------
-    // 5) Enviar a RunPod Serverless
+    // 5) RunPod serverless /run
     // ---------------------------------------------------
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
     const runUrl = `${baseUrl}/${endpointId}/run`;
@@ -146,16 +173,13 @@ export default async function handler(req, res) {
           mode, // "t2v"
           prompt,
           negative_prompt,
-
           platform_ref,
           aspect_ratio,
           width,
           height,
-
           duration_s,
           fps,
           num_frames,
-
           steps,
           guidance_scale,
         },
