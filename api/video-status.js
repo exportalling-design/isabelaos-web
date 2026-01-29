@@ -1,23 +1,23 @@
-export const config = { runtime: "nodejs" };
-
-import { sbAdmin } from "../src/lib/supabaseAdmin.js";
+// /api/video-status.js
+import { getSupabaseAdmin } from "../src/lib/supabaseAdmin";
 
 function getRunpodConfig() {
-  const apiKey = process.env.RUNPOD_API_KEY || process.env.VIDEO_RUNPOD_API_KEY || null;
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID || null;
-  const baseUrl = process.env.RUNPOD_BASE_URL || "https://api.runpod.ai/v2";
-  if (!apiKey) throw new Error("Missing RUNPOD_API_KEY");
-  if (!endpointId) throw new Error("Missing RUNPOD_ENDPOINT_ID");
-  return { apiKey, endpointId, baseUrl };
+  return {
+    apiKey: process.env.RUNPOD_API_KEY,
+    endpointId: process.env.RUNPOD_ENDPOINT_ID,
+    baseUrl: process.env.RUNPOD_BASE_URL || "https://api.runpod.ai/v2",
+  };
 }
 
 async function uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId, buffer }) {
   const path = `${jobId}.mp4`;
+
   const { error: upErr } = await supabaseAdmin.storage.from(bucket).upload(path, buffer, {
     contentType: "video/mp4",
     upsert: true,
   });
   if (upErr) throw new Error(`storage upload failed: ${upErr.message}`);
+
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
   return data?.publicUrl || null;
 }
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const supabaseAdmin = sbAdmin();
+    const supabaseAdmin = getSupabaseAdmin();
     const { apiKey, endpointId, baseUrl } = getRunpodConfig();
 
     const job_id = req.query.job_id;
@@ -34,13 +34,13 @@ export default async function handler(req, res) {
 
     const { data: job, error: jobErr } = await supabaseAdmin
       .from("video_jobs")
-      .select("id,status,provider_request_id,video_url,provider_status,provider_raw,provider_reply")
+      .select("id,status,provider_request_id,video_url,provider_status,provider_raw")
       .eq("id", job_id)
       .single();
 
     if (jobErr || !job) return res.status(404).json({ ok: false, error: "video_jobs row not found" });
 
-    if ((job.status === "DONE" || job.status === "COMPLETED" || job.status === "SUCCESS") && job.video_url) {
+    if (job.status === "DONE" && job.video_url) {
       return res.status(200).json({ ok: true, status: "DONE", video_url: job.video_url });
     }
 
@@ -49,12 +49,16 @@ export default async function handler(req, res) {
     }
 
     const statusUrl = `${baseUrl}/${endpointId}/status/${job.provider_request_id}`;
-    const rp = await fetch(statusUrl, { method: "GET", headers: { Authorization: `Bearer ${apiKey}` } });
+    const rp = await fetch(statusUrl, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
     const rpJson = await rp.json().catch(() => null);
 
     if (!rp.ok) {
       console.log("❌ runpod status failed:", rp.status, rpJson);
-      return res.status(200).json({ ok: true, status: job.status || "RUNNING", provider_status: job.provider_status || "UNKNOWN" });
+      return res.status(200).json({ ok: true, status: job.status || "RUNNING", provider: rpJson });
     }
 
     const rpStatus = rpJson?.status || "RUNNING";
@@ -70,7 +74,7 @@ export default async function handler(req, res) {
         })
         .eq("id", job.id);
 
-      return res.status(200).json({ ok: true, status: "FAILED", error: "provider_failed" });
+      return res.status(200).json({ ok: true, status: "FAILED" });
     }
 
     if (rpStatus !== "COMPLETED") {
@@ -109,6 +113,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, status: "FAILED", error: "no_video_url_in_provider_output" });
     }
 
+    const bucket = process.env.VIDEO_BUCKET || "videos";
+
     const vidResp = await fetch(remoteUrl);
     if (!vidResp.ok) {
       await supabaseAdmin
@@ -128,7 +134,6 @@ export default async function handler(req, res) {
     const arrayBuffer = await vidResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const bucket = process.env.VIDEO_BUCKET || "videos";
     const publicUrl = await uploadToSupabaseVideoBucket({ supabaseAdmin, bucket, jobId: job.id, buffer });
 
     await supabaseAdmin
