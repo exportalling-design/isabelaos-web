@@ -1,19 +1,19 @@
 // src/components/Img2VideoPanel.jsx
 // ---------------------------------------------------------
 // Img2VideoPanel (Image -> Video)
-// - Charges jades (frontend) and sends already_billed=true
-// - Keeps full UI (prompt/negative/optimizer/steps)
-// - Rehydrates active job (mode=i2v) to avoid losing state
-// - FIX: Safe auth header builder (no "a is not a function")
-// - UI parity: 9:16 checkbox (NOT default), duration presets 3s/5s (default 3)
+// - AUTH: uses supabase session token (same as VideoFromPromptPanel)
+// - Duration: default 3s, checkbox 5s optional
+// - Aspect ratio: 9:16 checkbox (NOT checked by default)
+// - Prompt Optimizer: if "Use optimized" is checked, it auto-optimizes on Generate
+// - Billing assumed SERVER-SIDE (like generate-video)
 // ---------------------------------------------------------
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { supabase } from "../lib/supabaseClient";
 import { COSTS } from "../lib/pricing";
 
-// ❗️NO export default
-export function Img2VideoPanel({ userStatus, spendJades }) {
+export function Img2VideoPanel({ userStatus }) {
   const { user } = useAuth();
 
   // ---------------------------
@@ -27,21 +27,10 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const [negative, setNegative] = useState("");
   const [steps, setSteps] = useState(25);
 
-  // ---------------------------
-  // Presets (match Video panel behavior)
-  // - Default duration = 3s
-  // - 5s only if user selects it
-  // - 9:16 checkbox exists but NOT checked by default
-  // - Default base resolution stays 1024x576 (landscape)
-  // - If 9:16 checked -> 576x1024 (vertical)
-  // ---------------------------
-  const [isVertical916, setIsVertical916] = useState(false); // NOT default
-  const [durationS, setDurationS] = useState(3); // default 3s (user can switch to 5s)
+  // ✅ UI like VideoFromPromptPanel
+  const [useNineSixteen, setUseNineSixteen] = useState(false); // NOT default
+  const [durationSec, setDurationSec] = useState(3); // default 3s
   const fps = 24;
-
-  const width = isVertical916 ? 576 : 1024;
-  const height = isVertical916 ? 1024 : 576;
-  const num_frames = Math.round(fps * durationS);
 
   // ---------------------------
   // Job state
@@ -52,14 +41,12 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState("");
 
-  // ✅ cost from central pricing (fallback 12)
-  const cost = COSTS?.IMG2VIDEO ?? 12;
-
+  const COST_I2V = COSTS?.IMG2VIDEO ?? 12;
   const currentJades = userStatus?.jades ?? 0;
-  const hasEnough = currentJades >= cost;
-  const canUse = !!user;
+  const hasEnough = currentJades >= COST_I2V;
 
   const fileInputId = "img2video-file-input";
+  const lockRef = useRef(false);
 
   // ---------------------------
   // Prompt Optimizer (OpenAI)
@@ -74,27 +61,47 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
     setOptimizedPrompt("");
     setOptimizedNegative("");
     setOptError("");
+    // do NOT auto-disable the checkbox; user may want it enabled always
   }, [prompt, negative]);
+
+  async function getAuthHeaders() {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token || null;
+    if (!token) throw new Error("MISSING_AUTH_TOKEN");
+    return { Authorization: `Bearer ${token}` };
+  }
+
+  // ✅ JSON safe parse (same pattern you use in T2V)
+  async function safeFetchJson(url, options = {}) {
+    const r = await fetch(url, options);
+    const txt = await r.text();
+    let j = null;
+    try {
+      j = JSON.parse(txt);
+    } catch {
+      j = { ok: false, error: txt?.slice(0, 300) || "Server returned non-JSON response." };
+    }
+    return { r, j, txt };
+  }
 
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
 
     try {
-      const res = await fetch("/api/optimize-prompt", {
+      const { r, j } = await safeFetchJson("/api/optimize-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          negative_prompt: negative,
+          negative_prompt: negative || "",
         }),
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "Prompt optimization failed.");
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Prompt optimization failed.");
 
-      setOptimizedPrompt(String(data.optimizedPrompt || "").trim());
-      setOptimizedNegative(String(data.optimizedNegative || "").trim());
+      setOptimizedPrompt(String(j.optimizedPrompt || "").trim());
+      setOptimizedNegative(String(j.optimizedNegative || "").trim());
       setUseOptimized(true);
     } catch (e) {
       setOptError(e?.message || String(e));
@@ -106,12 +113,13 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   const getEffectivePrompts = () => {
     const canUseOpt = useOptimized && optimizedPrompt?.trim()?.length > 0;
     return {
-      finalPrompt: canUseOpt ? optimizedPrompt.trim() : (prompt || ""),
-      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : (negative || ""),
+      finalPrompt: canUseOpt ? optimizedPrompt.trim() : (prompt || "").trim(),
+      finalNegative: canUseOpt ? (optimizedNegative || "").trim() : (negative || "").trim(),
+      usingOptimized: canUseOpt,
     };
   };
 
-  // ---------------------------
+// ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -139,227 +147,134 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
       setPureB64(parts[1] || null);
 
       setImageUrl("");
-    } catch (err) {
-      console.error(err);
+      setError("");
+    } catch {
       setError("Could not read the image.");
     }
   };
 
   // ---------------------------
-  // Auth headers (SAFE)
-  // - Avoids "a is not a function" crashes
-  // - Uses existing getAuthHeadersGlobal if present
-  // - Falls back to Supabase auth token in localStorage
+  // Poll video-status (job_id)
   // ---------------------------
-  const getAuthHeadersSafe = async () => {
-    try {
-      // If your app exposes a global auth header function, use it (optional).
-      // We keep it behind typeof check so it never throws.
-      // eslint-disable-next-line no-undef
-      if (typeof getAuthHeadersGlobal === "function") {
-        // eslint-disable-next-line no-undef
-        return await getAuthHeadersGlobal();
-      }
-    } catch {
-      // ignore and fallback below
-    }
-
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-      const key1 = supabaseUrl ? `sb-${supabaseUrl}-auth-token` : null;
-
-      const raw =
-        (key1 && localStorage.getItem(key1)) ||
-        localStorage.getItem("supabase.auth.token") ||
-        null;
-
-      if (!raw) return {};
-
-      const parsed = JSON.parse(raw);
-      const access_token =
-        parsed?.access_token ||
-        parsed?.currentSession?.access_token ||
-        parsed?.session?.access_token ||
-        null;
-
-      if (!access_token) return {};
-      return { Authorization: `Bearer ${access_token}` };
-    } catch {
-      return {};
-    }
-  };
-
-  // ---------------------------
-  // Poll video-status (AUTHORIZED)
-  // ---------------------------
-  const pollVideoStatus = async (job_id) => {
-    const auth = await getAuthHeadersSafe();
-
-    const r = await fetch(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
+  async function pollVideoStatus(job_id) {
+    const auth = await getAuthHeaders();
+    const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
       headers: { ...auth },
     });
+    if (!r.ok || !j) throw new Error(j?.error || "video-status error");
+    return j;
+  }
 
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data) throw new Error(data?.error || "Error calling /api/video-status");
-    return data;
+  const setErrorState = (msg) => {
+    setStatus("ERROR");
+    setStatusText("Error.");
+    setError(msg || "An error occurred.");
   };
 
-  // ✅ Rehydrate active i2v job (keeps continuity if user reloads)
-  // Note: Your /api/video-status must support mode=i2v, otherwise it will just no-op.
-  const rehydrateActiveI2V = async () => {
-    if (!user) return null;
+  // ✅ helpers for duration checkboxes (only one active)
+  const setDuration3 = () => setDurationSec(3);
+  const setDuration5 = () => setDurationSec(5);
 
-    const auth = await getAuthHeadersSafe();
-
-    const r = await fetch(`/api/video-status?mode=i2v`, {
-      headers: { ...auth },
-    });
-
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.ok) return null;
-
-    if (data.status === "IDLE" || !data.job_id) return null;
-
-    setJobId(data.job_id);
-    setStatus(data.status || "IN_PROGRESS");
-    setStatusText(`Current status: ${data.status || "IN_PROGRESS"}... (rehydrated)`);
-
-    if (data.video_url) setVideoUrl(data.video_url);
-    return data;
-  };
-
-  // Auto-rehydrate on enter
-  useEffect(() => {
-    setError("");
-    setVideoUrl(null);
-
-    if (!user) {
-      setJobId(null);
-      setStatus("IDLE");
-      setStatusText("");
-      return;
-    }
-
-    rehydrateActiveI2V().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-// ---------------------------
-  // Generate (CHARGE + create job)
   // ---------------------------
-  const handleGenerate = async () => {
-    setError("");
-    setVideoUrl(null);
-
-    if (!canUse) {
-      setStatus("ERROR");
-      setStatusText("You must be logged in.");
-      setError("You must be logged in to use Image → Video.");
-      return;
-    }
-
-    // If there is already an active job, rehydrate instead of creating another
-    if (jobId && ["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(status)) {
-      setStatusText("A generation is already running. Rehydrating status...");
-      await rehydrateActiveI2V();
-      return;
-    }
-
-    setStatus("IN_QUEUE");
-    setStatusText("Sending Image → Video...");
+  // Generate
+  // ---------------------------
+  async function handleGenerate() {
+    if (lockRef.current) return;
+    lockRef.current = true;
 
     try {
-      if (!hasEnough) {
-        setStatus("ERROR");
-        setStatusText("Not enough jades.");
-        setError(`You need ${cost} jades.`);
-        return;
-      }
+      setError("");
+      setVideoUrl(null);
 
-      if (!pureB64 && !imageUrl) {
-        setStatus("ERROR");
-        setStatusText("Missing image.");
-        setError("Upload an image or paste a URL.");
-        return;
-      }
+      if (!user) return setErrorState("You must be logged in to use Image → Video.");
+      if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades to generate Image → Video.`);
 
-      // ✅ Charge jades (FRONTEND)
-      if (typeof spendJades === "function") {
-        await spendJades({ amount: cost, reason: "img2video" });
+      if (!pureB64 && !imageUrl) return setErrorState("Upload an image or paste an image URL.");
+
+      // ✅ If user enabled "Use optimized" but hasn't optimized yet, auto-optimize now
+      if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
+        if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
+        await handleOptimize(); // sets optimizedPrompt/Negative
       }
 
       const { finalPrompt, finalNegative } = getEffectivePrompts();
 
-      // ✅ Auth header
-      const auth = await getAuthHeadersSafe();
+      setStatus("STARTING");
+      setStatusText("Submitting job...");
 
-      // ✅ Create job
-      const res = await fetch("/api/generate-img2video", {
+      const auth = await getAuthHeaders();
+      const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
+      const aspect_ratio = useNineSixteen ? "9:16" : "";
+
+      // IMPORTANT:
+      // Make sure your API route name matches this path:
+      // - file: /api/generate-img2video.js  -> /api/generate-img2video
+      // If your file is named /api/generar-img2video.js then call /api/generar-img2video instead.
+      const { r, j } = await safeFetchJson("/api/generate-img2video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
+          mode: "i2v",
+
           prompt: finalPrompt || "",
           negative_prompt: finalNegative || "",
-          steps: Number(steps),
 
-          // Preset controls
+          // ratio only if checked
+          ...(aspect_ratio ? { aspect_ratio } : {}),
+
+          duration_s: Number(durationSec),
           fps,
-          duration_s: Number(durationS),
-          num_frames,
-          width,
-          height,
-          aspect_ratio: isVertical916 ? "9:16" : "",
+          num_frames: numFrames,
+
+          steps: Number(steps),
 
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
-
-          // ✅ Avoid double-charge if backend also charges
-          already_billed: true,
         }),
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok || !data?.job_id) throw new Error(data?.error || "Error calling /api/generate-img2video");
+      if (!r.ok || !j?.ok || !j?.job_id) {
+        throw new Error(j?.error || "Could not create Image → Video job.");
+      }
 
-      const jid = data.job_id;
+      const jid = j.job_id;
       setJobId(jid);
       setStatus("IN_PROGRESS");
-      setStatusText(`Job submitted. ID: ${jid}. Generating...`);
+      setStatusText(`Generating... Job: ${jid}`);
 
       // Poll loop
       let finished = false;
-
       while (!finished) {
-        await new Promise((r) => setTimeout(r, 3000));
-
+        await new Promise((t) => setTimeout(t, 5000));
         const stData = await pollVideoStatus(jid);
         const st = stData.status || "IN_PROGRESS";
 
-        setStatus(st);
-        setStatusText(`Current status: ${st}...`);
-
-        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING"].includes(st)) continue;
+        if (["IN_QUEUE", "IN_PROGRESS", "DISPATCHED", "QUEUED", "RUNNING", "STARTING"].includes(st)) {
+          setStatus("IN_PROGRESS");
+          setStatusText(`Status: ${st}`);
+          continue;
+        }
 
         finished = true;
 
         if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
-          const maybeUrl = stData.video_url || stData.output?.video_url || null;
-          if (!maybeUrl) throw new Error("Completed but missing video_url.");
-          setVideoUrl(maybeUrl);
-          setStatusText("Video generated successfully.");
+          const url = stData.video_url || stData.output?.video_url || stData.output?.videoUrl || null;
+          if (!url) throw new Error("Job finished but video_url is missing.");
+          setVideoUrl(url);
+          setStatus("DONE");
+          setStatusText("Video ready.");
         } else {
-          throw new Error(stData.error || "Video generation failed.");
+          throw new Error(stData.error || "Generation failed.");
         }
       }
-    } catch (err) {
-      console.error(err);
-      setStatus("ERROR");
-      setStatusText("Failed to generate video.");
-      setError(err?.message || String(err));
+    } catch (e) {
+      setErrorState(e?.message || String(e));
+    } finally {
+      lockRef.current = false;
     }
-  };
+  }
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!videoUrl) return;
     const link = document.createElement("a");
     link.href = videoUrl;
@@ -369,7 +284,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
     document.body.removeChild(link);
   };
 
-  if (!canUse) {
+  if (!user) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
         You must be logged in to use Image → Video.
@@ -380,9 +295,9 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Visual transformation · Image to video</h2>
+        <h2 className="text-lg font-semibold text-white">Image → Video</h2>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-2 text-xs text-neutral-300">
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Status: {statusText || "Ready."}</span>
             <span className="text-[11px] text-neutral-400">
@@ -391,64 +306,73 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
           </div>
 
           <div className="mt-1 text-[11px] text-neutral-400">
-            Cost: <span className="font-semibold text-white">{cost}</span> jades per video
+            Cost: <span className="font-semibold text-white">{COST_I2V}</span> jades per video
           </div>
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
         </div>
 
-        {/* Preset controls */}
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="flex items-center gap-2 text-xs text-neutral-200">
+        {/* Format + Duration like T2V */}
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Format / size</div>
+
+            <div className="mt-3 flex items-center gap-2">
               <input
+                id="i2v_916"
                 type="checkbox"
-                checked={isVertical916}
-                onChange={(e) => setIsVertical916(e.target.checked)}
+                checked={useNineSixteen}
+                onChange={(e) => setUseNineSixteen(e.target.checked)}
                 className="h-4 w-4"
               />
-              9:16 (vertical)
-            </label>
+              <label htmlFor="i2v_916" className="text-[12px] text-neutral-200">
+                9:16 (Reels / TikTok)
+              </label>
+            </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-neutral-300">Duration</span>
-
-              <button
-                type="button"
-                onClick={() => setDurationS(3)}
-                className={`rounded-xl border px-3 py-1 text-[11px] ${
-                  durationS === 3
-                    ? "border-cyan-400/60 bg-cyan-500/10 text-white"
-                    : "border-white/15 text-neutral-200 hover:bg-white/5"
-                }`}
-              >
-                3s
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDurationS(5)}
-                className={`rounded-xl border px-3 py-1 text-[11px] ${
-                  durationS === 5
-                    ? "border-cyan-400/60 bg-cyan-500/10 text-white"
-                    : "border-white/15 text-neutral-200 hover:bg-white/5"
-                }`}
-              >
-                5s
-              </button>
+            <div className="mt-2 text-[10px] text-neutral-500">
+              {useNineSixteen ? "Will send 9:16" : "Will send default (faster)"}
             </div>
           </div>
 
-          <div className="mt-2 text-[11px] text-neutral-400">
-            Current preset: <span className="text-white">{width}×{height}</span> ·{" "}
-            <span className="text-white">{durationS}s</span> ·{" "}
-            <span className="text-white">{fps}fps</span> ({num_frames} frames)
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Duration</div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                id="i2v_3s"
+                type="checkbox"
+                checked={durationSec === 3}
+                onChange={(e) => (e.target.checked ? setDuration3() : null)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="i2v_3s" className="text-[12px] text-neutral-200">
+                3 seconds (default)
+              </label>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="i2v_5s"
+                type="checkbox"
+                checked={durationSec === 5}
+                onChange={(e) => (e.target.checked ? setDuration5() : null)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="i2v_5s" className="text-[12px] text-neutral-200">
+                5 seconds (optional)
+              </label>
+            </div>
+
+            <div className="mt-2 text-[10px] text-neutral-500">
+              fps: {fps} · frames: {Math.round(Number(durationSec) * fps)}
+            </div>
           </div>
         </div>
 
         <div className="mt-4 space-y-4 text-sm">
           <div>
-            <p className="text-xs text-neutral-300">1. Upload your image</p>
+            <p className="text-xs text-neutral-300">1. Upload an image</p>
             <button
               type="button"
               onClick={handlePickFile}
@@ -461,13 +385,13 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
 
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                <img src={dataUrl} alt="Base" className="w-full object-cover" />
+                <img src={dataUrl} alt="Base image" className="w-full object-cover" />
               </div>
             )}
           </div>
 
           <div>
-            <p className="text-xs text-neutral-300">or paste a URL</p>
+            <p className="text-xs text-neutral-300">or paste an image URL</p>
             <input
               type="text"
               value={imageUrl}
@@ -483,6 +407,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
               className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Describe motion, camera, mood..."
             />
           </div>
 
@@ -492,6 +417,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
               className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
+              placeholder="blurry, low quality, deformed..."
             />
           </div>
 
@@ -536,7 +462,7 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
             {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
-          {/* Steps + Button */}
+          {/* Steps + Generate */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-neutral-300">Steps</label>
@@ -554,10 +480,10 @@ export function Img2VideoPanel({ userStatus, spendJades }) {
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={status === "IN_QUEUE" || status === "IN_PROGRESS" || !hasEnough}
+                disabled={status === "STARTING" || status === "IN_PROGRESS" || !hasEnough}
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {status === "IN_QUEUE" || status === "IN_PROGRESS"
+                {status === "STARTING" || status === "IN_PROGRESS"
                   ? "Generating..."
                   : !hasEnough
                   ? "Not enough jades"
