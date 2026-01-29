@@ -1,173 +1,179 @@
 // api/generate-video.js
-export const runtime = "nodejs";
+import { createClient } from "@supabase/supabase-js";
 
-import { getSupabaseAdmin } from "../src/lib/supabaseAdmin.js";
-import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function pick(obj, allowedKeys) {
-  const out = {};
-  for (const k of allowedKeys) {
-    if (obj[k] !== undefined) out[k] = obj[k];
-  }
-  return out;
+// RunPod (usa uno de estos)
+const RUNPOD_API_KEY = process.env.VIDEO_RUNPOD_API_KEY || process.env.RUNPOD_API_KEY;
+const RUNPOD_ENDPOINT = process.env.VIDEO_RUNPOD_ENDPOINT || process.env.RUNPOD_VIDEO_ENDPOINT || process.env.RUNPOD_ENDPOINT;
+
+const COST_VIDEO_PROMPT = parseInt(process.env.COST_VIDEO_PROMPT || "10", 10);
+
+function json(res, code, obj) {
+  res.status(code).setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(obj));
 }
 
-async function getTableColumns(admin, tableName = "video_jobs") {
-  // lee columnas reales del schema
-  const { data, error } = await admin
-    .from("information_schema.columns")
-    .select("column_name")
-    .eq("table_schema", "public")
-    .eq("table_name", tableName);
-
-  if (error) throw new Error(`Cannot read schema columns: ${error.message}`);
-  return (data || []).map((r) => r.column_name);
+function getBearerToken(req) {
+  const h = req.headers.authorization || req.headers.Authorization || "";
+  const m = String(h).match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
 }
 
-async function runpodRun({ endpointId, apiKey, input }) {
-  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ input }),
+async function getUserIdFromRequest(req) {
+  // usamos el JWT del usuario para obtener su id (NO service role)
+  const jwt = getBearerToken(req);
+  if (!jwt) return null;
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`RunPod /run failed: ${r.status} ${JSON.stringify(data)}`);
-  return data;
+
+  const { data, error } = await userClient.auth.getUser();
+  if (error) return null;
+  return data?.user?.id || null;
+}
+
+function buildRunpodRunUrl(endpointOrUrl) {
+  if (!endpointOrUrl) return null;
+  const v = String(endpointOrUrl).trim();
+  if (v.startsWith("http://") || v.startsWith("https://")) return v; // ya viene URL completa
+  // si solo viene el ID del endpoint:
+  return `https://api.runpod.ai/v2/${v}/run`;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST") {
+    return json(res, 405, { ok: false, error: "Method not allowed" });
+  }
 
   try {
-    const admin = getSupabaseAdmin();
-
-    // Sanity: confirmar que service role está presente
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing SUPABASE_SERVICE_ROLE_KEY in Vercel env",
-      });
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return json(res, 500, { ok: false, error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    }
+    if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT) {
+      return json(res, 500, { ok: false, error: "Missing RUNPOD_API_KEY or VIDEO_RUNPOD_ENDPOINT" });
     }
 
-    const user_id = await getUserIdFromAuthHeader(req);
-    if (!user_id) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const userId = await getUserIdFromRequest(req);
+    if (!userId) return json(res, 401, { ok: false, error: "Unauthorized (no user)" });
 
-    const body = req.body || {};
-    const prompt = String(body.prompt || "").trim();
-    const negative_prompt = String(body.negative_prompt || body.negative || "").trim();
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const fps = Number(body.fps || 24);
-    const seconds = Number(body.seconds || 3);
-    const frames = Number(body.frames || Math.round(fps * seconds));
-    const width = Number(body.width || 1080);
-    const height = Number(body.height || 1920);
-    const steps = Number(body.steps || 25);
-    const aspect = String(body.aspect || "9:16");
+    const prompt = String(body?.prompt || "").trim();
+    const negative = String(body?.negative || "").trim();
 
-    if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" });
+    const width = parseInt(body?.width || "1080", 10);
+    const height = parseInt(body?.height || "1920", 10);
+    const fps = parseInt(body?.fps || "24", 10);
+    const seconds = parseInt(body?.seconds || "3", 10);
 
-    // 1) columnas reales
-    const cols = await getTableColumns(admin, "video_jobs");
-    const colset = new Set(cols);
+    // frames = fps * seconds
+    const frames = Math.max(1, fps * seconds);
 
-    // 2) payload “ideal”
-    const desired = {
-      user_id,
+    if (!prompt) return json(res, 400, { ok: false, error: "Missing prompt" });
+
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // 1) Crear job en DB primero (QUEUED)
+    const insertPayload = {
+      user_id: userId,
       status: "QUEUED",
       prompt,
-      negative_prompt,
-      provider: "runpod",
-      provider_status: "QUEUED",
-      provider_request_id: null,
-      video_url: null,
-
+      negative_prompt: negative || null,
+      width,
+      height,
       fps,
       seconds,
       frames,
-      width,
-      height,
-      steps,
-      aspect,
+      provider: "runpod",
+      provider_status: "CREATED",
+      video_url: null,
     };
 
-    // 3) solo lo que existe en tu tabla
-    const allowedKeys = Object.keys(desired).filter((k) => colset.has(k));
-    const insertPayload = pick(desired, allowedKeys);
-
-    // 4) INSERT
-    const { data: job, error: insertErr } = await admin
+    const { data: jobRow, error: insErr } = await admin
       .from("video_jobs")
       .insert(insertPayload)
       .select("*")
       .single();
 
-    if (insertErr || !job?.id) {
-      return res.status(500).json({
-        ok: false,
-        error: "video_jobs insert failed",
-        message: insertErr?.message || null,
-        details: insertErr?.details || null,
-        hint: insertErr?.hint || null,
-        code: insertErr?.code || null,
-        insertPayload,
-        existingColumns: cols,
-      });
+    if (insErr) {
+      return json(res, 500, { ok: false, error: "video_jobs insert failed", details: insErr.message });
     }
 
-    // 5) (opcional) mandar a runpod solo si tienes env
-    const endpointId = process.env.RUNPOD_VIDEO_ENDPOINT_ID || null;
-    const apiKey = process.env.RUNPOD_API_KEY || null;
+    const jobId = jobRow.id;
 
-    if (!endpointId || !apiKey) {
-      // job creado, pero no enviamos a runpod
-      return res.status(200).json({
-        ok: true,
-        job_id: job.id,
-        status: job.status || "QUEUED",
-        warning: "Job inserted but RUNPOD env missing (RUNPOD_VIDEO_ENDPOINT_ID / RUNPOD_API_KEY)",
-        job,
-      });
+    // 2) Cobrar jades (tu RPC)
+    const { error: spendErr } = await admin.rpc("spend_jades", {
+      p_user_id: userId,
+      p_amount: COST_VIDEO_PROMPT,
+      p_reason: "video_prompt",
+      p_ref: String(jobId),
+    });
+
+    if (spendErr) {
+      // rollback del job (opcional)
+      await admin.from("video_jobs").update({ status: "FAILED", provider_status: "SPEND_FAILED" }).eq("id", jobId);
+      return json(res, 402, { ok: false, error: "Jades spend failed", details: spendErr.message });
     }
 
-    const rp = await runpodRun({
-      endpointId,
-      apiKey,
-      input: {
-        job_id: job.id,
-        user_id,
-        prompt,
-        negative_prompt,
-        fps,
-        frames,
-        seconds,
-        width,
-        height,
-        steps,
-        aspect,
+    // 3) Mandar a RunPod
+    const runUrl = buildRunpodRunUrl(RUNPOD_ENDPOINT);
+    const rpResp = await fetch(runUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${RUNPOD_API_KEY}`,
       },
+      body: JSON.stringify({
+        input: {
+          job_id: String(jobId),
+          user_id: String(userId),
+          prompt,
+          negative: negative || "",
+          width,
+          height,
+          fps,
+          seconds,
+          frames,
+        },
+      }),
     });
 
-    const provider_request_id = rp?.id || null;
+    const rpJson = await rpResp.json().catch(() => ({}));
+    if (!rpResp.ok) {
+      await admin
+        .from("video_jobs")
+        .update({ status: "FAILED", provider_status: "RUNPOD_SUBMIT_FAILED", provider_error: JSON.stringify(rpJson) })
+        .eq("id", jobId);
 
-    // update si existen esas columnas
-    const upd = {};
-    if (colset.has("provider_request_id")) upd.provider_request_id = provider_request_id;
-    if (colset.has("provider_status")) upd.provider_status = rp?.status || "IN_QUEUE";
-    if (colset.has("status")) upd.status = "IN_PROGRESS";
-
-    if (Object.keys(upd).length > 0) {
-      await admin.from("video_jobs").update(upd).eq("id", job.id);
+      return json(res, 500, { ok: false, error: "RunPod submit failed", details: rpJson });
     }
 
-    return res.status(200).json({
+    const providerRequestId = rpJson?.id || rpJson?.requestId || rpJson?.jobId || null;
+
+    await admin
+      .from("video_jobs")
+      .update({
+        status: "QUEUED",
+        provider_status: "SUBMITTED",
+        provider_request_id: providerRequestId,
+      })
+      .eq("id", jobId);
+
+    return json(res, 200, {
       ok: true,
-      job_id: job.id,
-      provider_request_id,
-      runpod_status: rp?.status || "IN_QUEUE",
+      job_id: jobId,
+      provider_request_id: providerRequestId,
     });
-  } catch (err) {
-    console.error("generate-video fatal:", err);
-    return res.status(500).json({ ok: false, error: err?.message || "server_error" });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: "Server error", details: String(e?.message || e) });
   }
 }
