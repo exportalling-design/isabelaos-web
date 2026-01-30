@@ -25,11 +25,15 @@ export function Img2VideoPanel({ userStatus }) {
 
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
+
+  // ✅ PERF: default steps 18 (como querés)
   const [steps, setSteps] = useState(18);
 
   // ✅ UI like VideoFromPromptPanel
   const [useNineSixteen, setUseNineSixteen] = useState(false); // NOT default
   const [durationSec, setDurationSec] = useState(3); // default 3s
+
+  // ✅ PERF: fps fijo a 16 (como querés)
   const fps = 16;
 
   // ---------------------------
@@ -56,7 +60,14 @@ export function Img2VideoPanel({ userStatus }) {
   // Poll control refs
   const pollTimerRef = useRef(null);
   const progTimerRef = useRef(null);
-  const currentParamsRef = useRef({ steps: 25, numFrames: 72, durationSec: 3, fps: 24 });
+
+  // ✅ FIX: defaults del estimador UI alineados a tu config (16 fps / 18 steps / 3s)
+  const currentParamsRef = useRef({
+    steps: 18,
+    numFrames: 48,
+    durationSec: 3,
+    fps: 16,
+  });
 
   // ---------------------------
   // Prompt Optimizer (OpenAI)
@@ -129,7 +140,7 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-  // ---------------------------
+// ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -195,18 +206,15 @@ export function Img2VideoPanel({ userStatus }) {
       m.includes("networkerror") ||
       m.includes("network request failed") ||
       m.includes("load failed") ||
-      m.includes("fetch") // keep broad for mobile webviews
+      m.includes("fetch")
     );
   }
 
   function getExpectedSeconds() {
-    // Estimación estable (solo UI): depende de steps + frames.
-    // Mantiene progreso suave y NO toca backend.
     const p = currentParamsRef.current || {};
-    const s = Number(p.steps || 25);
-    const f = Number(p.numFrames || 72);
-    // base + coeficientes (suave)
-    const est = 35 + s * 2.0 + f * 1.2; // ~130s default
+    const s = Number(p.steps || 18);
+    const f = Number(p.numFrames || 48);
+    const est = 35 + s * 2.0 + f * 1.2;
     return Math.max(45, Math.min(420, est));
   }
 
@@ -218,7 +226,6 @@ export function Img2VideoPanel({ userStatus }) {
     const elapsedS = Math.max(0, (Date.now() - startedAtMs) / 1000);
     const expected = getExpectedSeconds();
 
-    // Sube hasta 95% mientras corre
     const raw = (elapsedS / expected) * 95;
     const clamped = Math.max(3, Math.min(95, Math.round(raw)));
     return clamped;
@@ -244,7 +251,6 @@ export function Img2VideoPanel({ userStatus }) {
       const stData = await pollVideoStatus(jobId);
       const st = stData?.status || "IN_PROGRESS";
 
-      // Guardar job si viene
       if (stData?.job) setLastKnownJob(stData.job);
 
       if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
@@ -257,7 +263,6 @@ export function Img2VideoPanel({ userStatus }) {
           stopPolling();
           return;
         }
-        // DONE pero sin url
         setStatus("DONE");
         setStatusText("Finished.");
         setProgress(100);
@@ -274,13 +279,11 @@ export function Img2VideoPanel({ userStatus }) {
         return;
       }
 
-      // sigue
       setStatus("IN_PROGRESS");
       setStatusText(`Status: ${stData?.rp_status || st}`);
       const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
       if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
     } catch (e) {
-      // ✅ NO matamos el job por errores de red
       if (isFetchDisconnectError(e)) {
         setNeedsManualRefresh(true);
         setStatus("IN_PROGRESS");
@@ -288,7 +291,6 @@ export function Img2VideoPanel({ userStatus }) {
         setError("Connection lost. Click “Update status”.");
         return;
       }
-      // otros errores sí los mostramos
       setErrorState(e?.message || String(e));
     }
   }
@@ -296,7 +298,6 @@ export function Img2VideoPanel({ userStatus }) {
   function startPolling(job_id, startedAtIsoMaybe) {
     stopPolling();
 
-    // progreso suave cada 1s (solo si no está DONE)
     progTimerRef.current = setInterval(() => {
       const startedAt = startedAtIsoMaybe || lastKnownJob?.started_at || null;
       if (!startedAt) return;
@@ -306,26 +307,19 @@ export function Img2VideoPanel({ userStatus }) {
       });
     }, 1000);
 
-    // polling status (rápido al inicio, luego más suave)
     let tick = 0;
     pollTimerRef.current = setInterval(async () => {
       tick += 1;
-
-      // si el user está en manual refresh mode, no spamear
       if (needsManualRefresh) return;
 
-      // primeros ~15s cada 2s, luego cada 5s (hacemos “skip”)
       if (tick <= 8) {
-        // correr siempre (2s interval)
         await refreshStatusOnce();
       } else {
-        // cada 5s aprox si interval es 2s => uno de cada 3
         if (tick % 3 === 0) await refreshStatusOnce();
       }
     }, 2000);
   }
 
-  // ✅ refrescar al volver al tab (móvil)
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible" && jobId) {
@@ -337,12 +331,11 @@ export function Img2VideoPanel({ userStatus }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  // cleanup on unmount
   useEffect(() => {
     return () => stopPolling();
   }, []);
 
-  // ---------------------------
+// ---------------------------
   // Generate
   // ---------------------------
   async function handleGenerate() {
@@ -358,13 +351,11 @@ export function Img2VideoPanel({ userStatus }) {
 
       if (!user) return setErrorState("You must be logged in to use Image → Video.");
       if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades to generate Image → Video.`);
-
       if (!pureB64 && !imageUrl) return setErrorState("Upload an image or paste an image URL.");
 
-      // ✅ If user enabled "Use optimized" but hasn't optimized yet, auto-optimize now
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
         if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
-        await handleOptimize(); // sets optimizedPrompt/Negative
+        await handleOptimize();
       }
 
       const { finalPrompt, finalNegative } = getEffectivePrompts();
@@ -376,31 +367,26 @@ export function Img2VideoPanel({ userStatus }) {
       const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
       const aspect_ratio = useNineSixteen ? "9:16" : "";
 
-      // keep params for progress estimate
-      currentParamsRef.current = { steps: Number(steps), numFrames, durationSec: Number(durationSec), fps: Number(fps) };
+      // ✅ keep params for progress estimate (alineado a 16 fps)
+      currentParamsRef.current = {
+        steps: Number(steps),
+        numFrames,
+        durationSec: Number(durationSec),
+        fps: Number(fps),
+      };
 
-      // IMPORTANT:
-      // Make sure your API route name matches this path:
-      // - file: /api/generate-img2video.js  -> /api/generate-img2video
-      // If your file is named /api/generar-img2video.js then call /api/generar-img2video instead.
       const { r, j } = await safeFetchJson("/api/generate-img2video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           mode: "i2v",
-
           prompt: finalPrompt || "",
           negative_prompt: finalNegative || "",
-
-          // ratio only if checked
           ...(aspect_ratio ? { aspect_ratio } : {}),
-
           duration_s: Number(durationSec),
           fps,
           num_frames: numFrames,
-
           steps: Number(steps),
-
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
         }),
@@ -416,14 +402,11 @@ export function Img2VideoPanel({ userStatus }) {
       setStatusText(`Generating... Job: ${jid}`);
       setProgress(3);
 
-// primer refresh inmediato + polling
-      // NOTA: video-status devuelve job.started_at cuando ya está IN_PROGRESS; al inicio puede ser null.
       await new Promise((t) => setTimeout(t, 700));
       await refreshStatusOnce();
       const startedAt = lastKnownJob?.started_at || null;
       startPolling(jid, startedAt);
     } catch (e) {
-      // si es red, no matar; mostrar botón actualizar
       if (isFetchDisconnectError(e) && jobId) {
         setNeedsManualRefresh(true);
         setStatus("IN_PROGRESS");
@@ -478,7 +461,6 @@ export function Img2VideoPanel({ userStatus }) {
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
 
-          {/* ✅ Progress bar */}
           {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
             <div className="mt-3">
               <div className="flex items-center justify-between text-[10px] text-neutral-400">
@@ -499,7 +481,6 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
           )}
 
-          {/* ✅ Update status button */}
           {jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh) && (
             <div className="mt-3">
               <button
@@ -513,7 +494,6 @@ export function Img2VideoPanel({ userStatus }) {
           )}
         </div>
 
-        {/* Format + Duration like T2V */}
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Format / size</div>
@@ -622,7 +602,6 @@ export function Img2VideoPanel({ userStatus }) {
             />
           </div>
 
-          {/* Optimizer */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
@@ -663,7 +642,6 @@ export function Img2VideoPanel({ userStatus }) {
             {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
-          {/* Steps + Generate */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-neutral-300">Steps</label>
