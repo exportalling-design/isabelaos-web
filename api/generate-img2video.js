@@ -95,10 +95,14 @@ export default async function handler(req, res) {
 
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
-    // ✅ CLON POD: defaults exactos
-    const fps = Number(body?.fps ?? 24);
-    const num_frames = Number(body?.num_frames ?? body?.frames ?? 75);
-    const steps = Number(body?.steps ?? 34);
+    // ✅ Defaults (CAMBIO SOLO AQUÍ):
+    // - fps: 24 -> 16
+    // - frames: 75 -> 48  (3s * 16fps)
+    // - steps: 34 -> 18
+    // ✅ Si el frontend manda valores, se respetan.
+    const fps = Number(body?.fps ?? 16);
+    const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
+    const steps = Number(body?.steps ?? 18);
     const guidance_scale = Number(body?.guidance_scale ?? 6.5);
 
     // ✅ CLON POD: resolución exacta si no viene
