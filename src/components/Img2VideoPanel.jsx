@@ -25,12 +25,12 @@ export function Img2VideoPanel({ userStatus }) {
 
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
-  const [steps, setSteps] = useState(25);
+  const [steps, setSteps] = useState(18);
 
   // ✅ UI like VideoFromPromptPanel
   const [useNineSixteen, setUseNineSixteen] = useState(false); // NOT default
   const [durationSec, setDurationSec] = useState(3); // default 3s
-  const fps = 24;
+  const fps = 16;
 
   // ---------------------------
   // Job state
