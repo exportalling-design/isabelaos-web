@@ -140,7 +140,7 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-// ---------------------------
+  // ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -210,25 +210,58 @@ export function Img2VideoPanel({ userStatus }) {
     );
   }
 
+  // ✅ UPDATED: expected time realista (12/18 min base) + etapas
   function getExpectedSeconds() {
     const p = currentParamsRef.current || {};
     const s = Number(p.steps || 18);
     const f = Number(p.numFrames || 48);
-    const est = 35 + s * 2.0 + f * 1.2;
-    return Math.max(45, Math.min(420, est));
+    const dur = Number(p.durationSec || 3);
+
+    // 12 min para 3s, 18 min para 5s (base)
+    const base = dur <= 3 ? 720 : 1080;
+
+    // Ajustes suaves por steps/frames (sin exagerar)
+    const stepAdj = Math.max(0, (s - 18) * 10);
+    const frameAdj = Math.max(0, (f - 48) * 4);
+
+    const est = base + stepAdj + frameAdj;
+    return Math.max(240, Math.min(1800, est));
   }
 
   function computeProgressFromStartedAt(startedAtIso) {
-    if (!startedAtIso) return Math.max(progress, 5);
+    if (!startedAtIso) return Math.max(progress, 2);
     const startedAtMs = new Date(startedAtIso).getTime();
-    if (!isFinite(startedAtMs)) return Math.max(progress, 5);
+    if (!isFinite(startedAtMs)) return Math.max(progress, 2);
 
     const elapsedS = Math.max(0, (Date.now() - startedAtMs) / 1000);
     const expected = getExpectedSeconds();
+    const t = Math.min(1, elapsedS / expected);
 
-    const raw = (elapsedS / expected) * 95;
-    const clamped = Math.max(3, Math.min(95, Math.round(raw)));
-    return clamped;
+    // Etapas (sin llegar a 95% “fake”)
+    // 0..0.20 => 0..25
+    // 0.20..0.85 => 25..85
+    // 0.85..0.97 => 85..92
+    // >=0.97 => 92 fijo hasta resultado real
+    let p = 0;
+    if (t <= 0.2) {
+      p = (t / 0.2) * 25;
+    } else if (t <= 0.85) {
+      p = 25 + ((t - 0.2) / 0.65) * 60;
+    } else if (t <= 0.97) {
+      p = 85 + ((t - 0.85) / 0.12) * 7;
+    } else {
+      p = 92;
+    }
+
+    return Math.max(3, Math.min(92, Math.round(p)));
+  }
+
+  // ✅ ETA text (pequeño pero visible)
+  function getEtaText() {
+    // Pedido: 3s => fijo 8–13 min
+    // 5s => mi estimado
+    if (Number(durationSec) === 5) return "Estimated wait: 13–20 min";
+    return "Estimated wait: 8–13 min";
   }
 
   function stopPolling() {
@@ -402,9 +435,13 @@ export function Img2VideoPanel({ userStatus }) {
       setStatusText(`Generating... Job: ${jid}`);
       setProgress(3);
 
+      // ✅ FIX: obtener started_at real antes de startPolling (sin depender del state async)
       await new Promise((t) => setTimeout(t, 700));
-      await refreshStatusOnce();
-      const startedAt = lastKnownJob?.started_at || null;
+      const stData = await pollVideoStatus(jid);
+      if (stData?.job) setLastKnownJob(stData.job);
+
+      const startedAt = stData?.job?.started_at || null;
+      if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
       startPolling(jid, startedAt);
     } catch (e) {
       if (isFetchDisconnectError(e) && jobId) {
@@ -473,6 +510,10 @@ export function Img2VideoPanel({ userStatus }) {
                   style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }}
                 />
               </div>
+
+              {/* ✅ small but visible ETA under bar */}
+              <div className="mt-2 text-[11px] text-neutral-300">{getEtaText()}</div>
+
               {needsManualRefresh && (
                 <div className="mt-2 text-[11px] text-yellow-200">
                   Connection lost. Click <span className="font-semibold">“Update status”</span>.
