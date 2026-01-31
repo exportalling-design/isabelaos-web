@@ -2,7 +2,7 @@
 // - Defaults alineados al worker WAN:
 //   fps=16, duration_s=3/5, num_frames WAN (49/81),
 //   default size = 576x512, reels 9:16 = 576x1024
-// - Usa prompt final (optimizado si viene), SIN inventar prompts (excepto fallback default si falta)
+// - Prompt: siempre fuerza encuadre centrado (evita ojos-only / fuera de cuadro)
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -13,7 +13,6 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
 
-// ✅ T2V endpoint id (Vercel env)
 function pickT2VEndpointId() {
   return (
     process.env.RP_WAN22_T2V_ENDPOINT ||
@@ -48,44 +47,56 @@ async function runpodRun({ endpointId, input }) {
 }
 
 // ------------------------------------------------------------
-// ✅ PROMPTS DEFAULT (ultradetalle + hiperrealismo)
+// ✅ COMPOSICIÓN FORZADA (solo encuadre, no cambia el concepto)
+// ------------------------------------------------------------
+const COMPOSITION_SUFFIX =
+  " | centered subject, stable framing, head and shoulders, medium shot, " +
+  "subject fully in frame, face fully visible, looking at camera, " +
+  "no extreme close-up, no partial face";
+
+// ------------------------------------------------------------
+// ✅ PROMPTS DEFAULT (ultradetalle + hiperrealismo + encuadre centrado)
 // ------------------------------------------------------------
 const DEFAULT_PROMPT =
   "ultra detailed, hyperrealistic, photorealistic, cinematic lighting, " +
   "sharp focus, high dynamic range, realistic skin texture, natural colors, " +
-  "high quality, professional video, film look";
+  "high quality, professional video, film look, " +
+  "portrait of a beautiful woman, centered, medium shot, head and shoulders, " +
+  "face fully visible, subject fully in frame, looking at camera";
 
 const DEFAULT_NEGATIVE =
   "low quality, blurry, noisy, jpeg artifacts, deformed, distorted, " +
-  "extra limbs, bad anatomy, out of frame, cropped, text, watermark, logo";
+  "extra limbs, bad anatomy, out of frame, cropped, cut off, " +
+  "cut off head, cut off face, partial face, extreme close-up, " +
+  "text, watermark, logo";
 
 // ------------------------------------------------------------
-// ✅ pickFinalPrompts (compatible)
-// Prioridad:
-// 1) body.finalPrompt / body.finalNegative
-// 2) body.optimizedPrompt / body.optimizedNegative
-// 3) body.prompt / body.negative_prompt|negative
-// 4) DEFAULT_PROMPT / DEFAULT_NEGATIVE
+// ✅ pickFinalPrompts
+// - Luego SIEMPRE aplica COMPOSITION_SUFFIX
 // ------------------------------------------------------------
 function pickFinalPrompts(body) {
   const b = body || {};
 
-  const finalPrompt =
+  const basePrompt =
     String(b?.finalPrompt || "").trim() ||
     String(b?.optimizedPrompt || "").trim() ||
     String(b?.prompt || "").trim() ||
     DEFAULT_PROMPT;
 
-  const finalNegative =
+  const baseNegative =
     String(b?.finalNegative || "").trim() ||
     String(b?.optimizedNegative || "").trim() ||
     String(b?.negative_prompt || b?.negative || "").trim() ||
     DEFAULT_NEGATIVE;
 
-  const usingOptimized = !!(
-    (String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim()) &&
-    finalPrompt
-  );
+  // ✅ aplica composición SIEMPRE (aunque venga prompt del user)
+  const finalPrompt = `${basePrompt}${COMPOSITION_SUFFIX}`;
+
+  // ✅ refuerza negativos aunque el user mande negativos flojos
+  // (sin romper si ya trae algo)
+  const finalNegative = baseNegative
+    ? `${baseNegative}, out of frame, cropped, cut off head, cut off face, partial face, extreme close-up`
+    : DEFAULT_NEGATIVE;
 
   const usedDefault = !(
     String(b?.finalPrompt || "").trim() ||
@@ -93,7 +104,7 @@ function pickFinalPrompts(body) {
     String(b?.prompt || "").trim()
   );
 
-  return { finalPrompt, finalNegative, usingOptimized, usedDefault };
+  return { finalPrompt, finalNegative, usedDefault };
 }
 
 // ------------------------------------------------------------
@@ -106,7 +117,6 @@ function clampInt(v, lo, hi, def) {
   return Math.max(lo, Math.min(hi, r));
 }
 
-// WAN exige (num_frames - 1) % 4 == 0
 function fixFramesForWan(numFrames) {
   let nf = Math.max(5, Math.round(Number(numFrames) || 0));
   const r = (nf - 1) % 4;
@@ -114,7 +124,6 @@ function fixFramesForWan(numFrames) {
   return nf + (4 - r);
 }
 
-// duration: solo 3 o 5 (como tu worker)
 function normalizeDurationSeconds(body) {
   const raw = body?.duration_s ?? body?.seconds ?? null;
   let s = raw === null || raw === undefined || raw === "" ? 3 : Number(raw);
@@ -123,7 +132,7 @@ function normalizeDurationSeconds(body) {
   return s < 4 ? 3 : 5;
 }
 
-// pick dims: default 576x512, reels 576x1024
+// ✅ default = mujer nieve (576x512), reels = 576x1024
 function pickDims(body) {
   const ar = String(body?.aspect_ratio || "").trim();
   if (ar === "9:16") return { width: 576, height: 1024 };
@@ -141,18 +150,13 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    // ✅ prompt final (con fallback default)
     const { finalPrompt, finalNegative, usedDefault } = pickFinalPrompts(body);
 
-    // Aspect ratio opcional ("9:16" solo si UI lo manda)
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
-    // ✅ Defaults alineados al worker WAN
     const seconds = normalizeDurationSeconds(body);
     const fps = clampInt(body?.fps ?? 16, 8, 30, 16);
 
-    // Si el usuario manda num_frames explícito, lo respetamos pero lo corregimos a WAN.
-    // Si no manda, lo calculamos a partir de seconds*fps y lo corregimos a WAN.
     const requestedFrames =
       body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
 
@@ -162,12 +166,9 @@ export default async function handler(req, res) {
         : seconds * fps
     );
 
-    // steps/guidance alineados a tu worker actual
     const steps = Number(body?.steps ?? 18);
     const guidance_scale = Number(body?.guidance_scale ?? 5.0);
 
-    // ✅ resolución default = mujer nieve 576x512, reels 576x1024
-    // Si el user manda width/height manual, lo respetamos; si no, usamos defaults.
     const dims = pickDims(body);
 
     const width =
@@ -237,7 +238,6 @@ export default async function handler(req, res) {
       prompt: finalPrompt,
       negative_prompt: finalNegative || "",
 
-      // ✅ worker-friendly
       duration_s: seconds,
       fps,
       num_frames,
@@ -271,8 +271,6 @@ export default async function handler(req, res) {
       provider_request_id: runpodId,
       spend: spendData ?? null,
       used_default_prompt: !!usedDefault,
-
-      // ✅ debug útil para verificar que estás mandando 576x512 + 49 frames por default
       resolved_defaults: {
         width,
         height,
