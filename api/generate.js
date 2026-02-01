@@ -56,59 +56,37 @@ export default async function handler(req) {
     }
 
 // ---------------------------------------------------------
-// ✅ COBRO DE 1 JADE (ÚNICO CAMBIO)
-// ---------------------------------------------------------
-const auth = req.headers.get("authorization") || "";
-if (!auth.toLowerCase().startsWith("bearer ")) {
-  return new Response(JSON.stringify({ ok: false, error: "MISSING_AUTH" }), {
-    status: 401,
-    headers: cors,
-  });
-}
+    // ✅ COBRO DE 1 JADE (MISMO PATRÓN QUE VIDEO)
+    // ---------------------------------------------------------
+    const userId = await getUserIdFromAuthHeader(req);
+    if (!userId) {
+      res.writeHead(401, cors);
+      return res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+    }
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const ref = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
 
-if (!SUPABASE_URL || !SUPABASE_ANON) {
-  return new Response(JSON.stringify({ ok: false, error: "MISSING_SUPABASE_ENV" }), {
-    status: 500,
-    headers: cors,
-  });
-}
+    const { data: spendData, error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+      p_user_id: userId,
+      p_amount: 1,
+      p_reason: "image_generate",
+      p_ref: ref,
+    });
 
-const rpcRes = await fetch(
-  `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/spend_jades`,
-  {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_ANON,
-      authorization: auth, // JWT del usuario
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      amount: 1,
-      reason: "image_generate",
-      meta: {
-        width: input.width,
-        height: input.height,
-        steps: input.steps,
-      },
-    }),
-  }
-);
-
-if (!rpcRes.ok) {
-  const txt = await rpcRes.text();
-  return new Response(
-    JSON.stringify({
-      ok: false,
-      error: "JADE_CHARGE_FAILED",
-      details: txt,
-    }),
-    { status: 402, headers: cors }
-  );
-}
-// ---------------------------------------------------------
+    if (spendErr) {
+      // ⛔️ si falla cobro, no mandamos a RunPod
+      res.writeHead(400, cors);
+      return res.end(
+        JSON.stringify({
+          ok: false,
+          error: "JADE_CHARGE_FAILED",
+          details: spendErr.message,
+        })
+      );
+    }
+    // ---------------------------------------------------------
 
     const runUrl = `https://api.runpod.ai/v2/${endpointId}/run`;
 
