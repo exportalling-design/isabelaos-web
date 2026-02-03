@@ -1,47 +1,102 @@
-// /api/dispatch-video.js
-import { createClient } from "@supabase/supabase-js";
+// api/dispatch-video.js
+import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const RUNPOD_API_KEY =
+  process.env.RP_API_KEY ||
+  process.env.RUNPOD_API_KEY ||
+  process.env.VIDEO_RUNPOD_API_KEY ||
+  null;
 
-// TU POD FIJO
-const POD_BASE = "https://2dz3jc4mbgcyq3-8000.proxy.runpod.net";
+function pickEndpointIdByMode(mode) {
+  if (mode === "i2v") {
+    return (
+      process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
+      process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+      process.env.VIDEO_RUNPOD_ENDPOINT ||
+      null
+    );
+  }
+  // default t2v
+  return (
+    process.env.RP_WAN22_T2V_ENDPOINT ||
+    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT ||
+    null
+  );
+}
 
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+async function runpodRun({ endpointId, input }) {
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / RP_API_KEY");
+  if (!endpointId) throw new Error("Missing RunPod endpoint id");
+
+  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${RUNPOD_API_KEY}`,
+    },
+    body: JSON.stringify({ input }),
+  });
+
+  const data = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = data?.error || data?.message || JSON.stringify(data);
+    throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
+  }
+  return data;
+}
 
 export default async function handler(req, res) {
   try {
-    // 1. Tomar un job pendiente
-    const { data: job } = await sb
+    if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+
+    // 1) Claim job atomically
+    const { data: claimed, error: claimErr } = await supabaseAdmin.rpc("claim_next_video_job");
+    if (claimErr) return res.status(500).json({ ok: false, error: claimErr.message });
+
+    const job = Array.isArray(claimed) ? claimed[0] : claimed;
+    if (!job?.id) return res.status(200).json({ ok: true, dispatched: false, reason: "no_jobs" });
+
+    const endpointId = pickEndpointIdByMode(job.mode);
+
+    // 2) Build rpInput from job row (reconstruye lo mínimo necesario)
+    const rpInput = {
+      mode: job.mode,                 // "t2v" | "i2v"
+      job_id: job.id,
+      user_id: job.user_id,
+      prompt: job.prompt,
+      negative_prompt: job.negative_prompt || "",
+      width: job.width,
+      height: job.height,
+      fps: job.fps,
+      num_frames: job.num_frames,
+      steps: job.steps,
+      guidance_scale: job.guidance_scale,
+      // Si guardaste payload original, podés parsearlo y sumar fields extra:
+      ...(job.payload ? (() => { try { return JSON.parse(job.payload); } catch { return {}; } })() : {}),
+    };
+
+    // 3) Dispatch to RunPod
+    const rp = await runpodRun({ endpointId, input: rpInput });
+    const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
+
+    // 4) Update job
+    await supabaseAdmin
       .from("video_jobs")
-      .select("*")
-      .eq("status", "PENDING")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .update({
+        provider: "runpod",
+        provider_request_id: runpodId ? String(runpodId) : null,
+        provider_status: "submitted",
+        status: "IN_PROGRESS",
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
 
-    if (!job) {
-      return res.json({ ok: true, message: "No hay jobs pendientes" });
-    }
-
-    // 2. Bloquearlo
-    await sb
-      .from("video_jobs")
-      .update({ status: "RUNNING" })
-      .eq("job_id", job.job_id);
-
-    // 3. Enviar el job al pod (FIRE & FORGET)
-    fetch(`${POD_BASE}/api/video_async`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(job),
-    }).catch(() => {});
-
-    return res.json({
-      ok: true,
-      dispatched: job.job_id,
-    });
+    return res.status(200).json({ ok: true, dispatched: true, job_id: job.id, provider_request_id: runpodId });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e?.message || "Server error" });
   }
 }
