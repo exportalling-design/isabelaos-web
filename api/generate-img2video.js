@@ -1,4 +1,4 @@
-// api/generate-img2video.js ✅ CON COLA REAL
+// api/generate-img2video.js ✅ COLA REAL + NO payload con image_b64 + LIBERAR SLOT EN FAIL
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -43,6 +43,14 @@ async function runpodRun({ endpointId, input }) {
   return data;
 }
 
+function reserveOk(v) {
+  if (v === true) return true;
+  if (v === 1) return true;
+  if (typeof v === "string" && v.toLowerCase() === "true") return true;
+  if (v && typeof v === "object" && v.ok === true) return true;
+  return false;
+}
+
 function pickFinalPrompts(body) {
   const b = body || {};
 
@@ -61,14 +69,8 @@ function pickFinalPrompts(body) {
 
 export default async function handler(req, res) {
   try {
-    console.log("[GEN_I2V] VERSION 2026-02-02");
+    console.log("[GEN_I2V] VERSION 2026-02-02b");
     console.log("[GEN_I2V] VIDEO_MAX_ACTIVE:", VIDEO_MAX_ACTIVE);
-    console.log("[GEN_I2V] env:", {
-      IMG2VIDEO_RUNPOD_ENDPOINT_ID: process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ? "set" : "missing",
-      VIDEO_RUNPOD_ENDPOINT_ID: process.env.VIDEO_RUNPOD_ENDPOINT_ID ? "set" : "missing",
-      VIDEO_RUNPOD_ENDPOINT: process.env.VIDEO_RUNPOD_ENDPOINT ? "set" : "missing",
-      RUNPOD_API_KEY: RUNPOD_API_KEY ? "set" : "missing",
-    });
 
     if (req.method !== "POST") {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -105,6 +107,10 @@ export default async function handler(req, res) {
         ? Number(body.height)
         : 720;
 
+    // ✅ 0) payload seguro (NO guardar base64)
+    const safePayload = { ...(body || {}) };
+    delete safePayload.image_b64;
+
     // ✅ 1) spend jades
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
@@ -139,23 +145,22 @@ export default async function handler(req, res) {
       num_frames,
       steps,
       guidance_scale,
-      payload: body ? JSON.stringify(body) : null,
+      payload: safePayload ? JSON.stringify(safePayload) : null,
       provider: "runpod",
     };
 
-    console.log("[GEN_I2V] inserting video_jobs:", { id: jobId, user_id: userId, mode: "i2v" });
-
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
     if (insErr) {
-      console.log("[GEN_I2V] insert FAILED:", insErr);
       return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
     // ✅ 3) reservar cupo (COLA REAL)
-    const { data: canDispatch, error: lockErr } = await supabaseAdmin.rpc("reserve_video_slot", {
+    const { data: canDispatchRaw, error: lockErr } = await supabaseAdmin.rpc("reserve_video_slot", {
       p_job_id: jobId,
       p_max_active: VIDEO_MAX_ACTIVE,
     });
+
+    const canDispatch = reserveOk(canDispatchRaw);
 
     if (lockErr || !canDispatch) {
       return res.status(200).json({ ok: true, job_id: jobId, queued: true });
@@ -178,7 +183,7 @@ export default async function handler(req, res) {
       ...(aspect_ratio ? { aspect_ratio } : {}),
       width,
       height,
-      image_b64,
+      image_b64,  // ✅ se manda al worker, pero NO se guarda en DB
       image_url,
     };
 
@@ -207,6 +212,11 @@ export default async function handler(req, res) {
           provider_status: `dispatch_failed: ${String(e?.message || e).slice(0, 180)}`,
         })
         .eq("id", jobId);
+
+      // ✅ LIBERAR SLOT
+      try {
+        await supabaseAdmin.rpc("release_video_slot", { p_job_id: jobId });
+      } catch {}
 
       return res.status(200).json({
         ok: true,
