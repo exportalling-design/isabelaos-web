@@ -1,4 +1,7 @@
-// api/video-status.js
+// api/video-status.js ✅ (FULL) con auto-dispatch + polling RunPod + export a Storage
+
+export const config = { runtime: "nodejs" };
+
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -12,11 +15,13 @@ const RUNPOD_API_KEY =
 
 const RUNPOD_T2V_ENDPOINT_ID =
   process.env.RP_WAN22_T2V_ENDPOINT ||
-  process.env.VIDEO_RUNPOD_ENDPOINT_ID;
+  process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+  process.env.VIDEO_RUNPOD_ENDPOINT;
 
 const RUNPOD_I2V_ENDPOINT_ID =
   process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
-  process.env.VIDEO_RUNPOD_ENDPOINT_ID;
+  process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+  process.env.VIDEO_RUNPOD_ENDPOINT;
 
 const VIDEO_MAX_ACTIVE = Number(process.env.VIDEO_MAX_ACTIVE ?? 1);
 
@@ -122,7 +127,6 @@ function pickEndpointForJob(job) {
 }
 
 function buildRunInputFromJob(job) {
-  // Base desde columnas del job
   const input = {
     mode: job.mode,
     job_id: job.id,
@@ -137,7 +141,6 @@ function buildRunInputFromJob(job) {
     height: Number(job.height ?? 512),
   };
 
-  // Extras desde payload si existe (aspect_ratio, duration_s, image_b64, image_url, etc.)
   const payload = safeParseJson(job.payload);
 
   const aspect_ratio = String(payload?.aspect_ratio || "").trim();
@@ -182,7 +185,6 @@ export default async function handler(req, res) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // --- Load job (owned by user) ---
     const { data: job, error: jobErr } = await admin
       .from("video_jobs")
       .select("*")
@@ -192,22 +194,28 @@ export default async function handler(req, res) {
 
     if (jobErr || !job) return json(res, 404, { ok: false, error: "Job not found" });
 
-    // ✅ Si YA hay url final (y NO es placeholder), devolvemos
     if (job.video_url && job.video_url !== PENDING_PLACEHOLDER) {
       return json(res, 200, { ok: true, status: job.status, video_url: job.video_url, job });
     }
 
-    // ---------------------------------------------------------
-    // ✅ AUTO-DISPATCH SI ESTÁ EN COLA (QUEUED) Y NO TIENE request_id
-    // ---------------------------------------------------------
+    // ✅ AUTO-DISPATCH desde cola
     if (String(job.status || "").toUpperCase() === "QUEUED" && !job.provider_request_id) {
-      // Intentar reservar slot atómico (cola real)
       const { data: canDispatch, error: lockErr } = await admin.rpc("reserve_video_slot", {
         p_job_id: job.id,
         p_max_active: VIDEO_MAX_ACTIVE,
       });
 
       if (lockErr || !canDispatch) {
+        await admin
+          .from("video_jobs")
+          .update({
+            provider_status: lockErr
+              ? `reserve_slot_error: ${String(lockErr.message || lockErr).slice(0, 180)}`
+              : "reserve_slot_no_capacity",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+
         return json(res, 200, {
           ok: true,
           status: "QUEUED",
@@ -217,11 +225,18 @@ export default async function handler(req, res) {
         });
       }
 
-      // Tenemos slot -> despachamos
       const endpointId = pickEndpointForJob(job);
       const rpInput = buildRunInputFromJob(job);
 
       try {
+        await admin
+          .from("video_jobs")
+          .update({
+            provider_status: `dispatching_to_runpod:${String(endpointId || "null")}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+
         const rp = await runpodRun({ endpointId, input: rpInput });
         const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
@@ -236,9 +251,18 @@ export default async function handler(req, res) {
               updated_at: new Date().toISOString(),
             })
             .eq("id", jobId);
+        } else {
+          await admin
+            .from("video_jobs")
+            .update({
+              provider_status: "submitted_no_request_id",
+              status: "IN_PROGRESS",
+              started_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobId);
         }
 
-        // recarga job actualizado
         const { data: job2 } = await admin
           .from("video_jobs")
           .select("*")
@@ -254,7 +278,6 @@ export default async function handler(req, res) {
           job: job2 || job,
         });
       } catch (e) {
-        // Si falla dispatch, devolvemos a cola
         await admin
           .from("video_jobs")
           .update({
@@ -275,7 +298,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Si todavía no tiene request_id, solo devolvemos estado actual
     if (!job.provider_request_id) {
       return json(res, 200, {
         ok: true,
@@ -307,7 +329,6 @@ export default async function handler(req, res) {
     const rpStatus = rpJson?.status || null;
     const output = rpJson?.output || null;
 
-    // ✅ 1) Caso: el worker ya da una URL directa
     const directUrl = output?.video_url || output?.videoUrl || null;
     if (rpStatus === "COMPLETED" && directUrl) {
       await admin
@@ -323,7 +344,6 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, status: "DONE", video_url: directUrl });
     }
 
-    // ✅ 2) Caso: worker devuelve video_b64
     const videoB64 = output?.video_b64 || output?.videoB64 || null;
     if (rpStatus === "COMPLETED" && videoB64) {
       const mime = output?.mime || output?.content_type || "video/mp4";
@@ -377,28 +397,13 @@ export default async function handler(req, res) {
         if (!error) finalUrl = data?.signedUrl || null;
       }
 
-      if (!finalUrl) {
-        await admin
-          .from("video_jobs")
-          .update({
-            status: "DONE",
-            provider_status: "COMPLETED",
-            video_url: null,
-            error: "Uploaded but could not generate URL",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", jobId);
-
-        return json(res, 200, { ok: true, status: "DONE", video_url: null, note: "uploaded_no_url" });
-      }
-
       await admin
         .from("video_jobs")
         .update({
           status: "DONE",
           provider_status: "COMPLETED",
           video_url: finalUrl,
-          error: null,
+          error: finalUrl ? null : "Uploaded but could not generate URL",
           updated_at: new Date().toISOString(),
         })
         .eq("id", jobId);
@@ -406,7 +411,6 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl });
     }
 
-    // ✅ FAILED
     if (rpStatus === "FAILED") {
       await admin
         .from("video_jobs")
@@ -421,7 +425,6 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, status: "FAILED", rp: rpJson });
     }
 
-    // ✅ sigue en progreso
     await admin
       .from("video_jobs")
       .update({
