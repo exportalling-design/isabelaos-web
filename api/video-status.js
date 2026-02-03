@@ -1,4 +1,5 @@
-// api/video-status.js ✅ COLA REAL + AUTO-DISPATCH + LIBERA SLOT en DONE/FAILED/dispatch_fail
+// api/video-status.js ✅ Poll + auto-dispatch + release slot
+export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -17,14 +18,13 @@ const RUNPOD_T2V_ENDPOINT_ID =
 
 const RUNPOD_I2V_ENDPOINT_ID =
   process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
+  process.env.RP_WAN22_I2V_ENDPOINT ||
   process.env.VIDEO_RUNPOD_ENDPOINT_ID;
 
 const VIDEO_MAX_ACTIVE = Number(process.env.VIDEO_MAX_ACTIVE ?? 1);
 
 const VIDEO_BUCKET = process.env.SUPABASE_VIDEO_BUCKET || "videos";
 const BUCKET_PUBLIC = String(process.env.SUPABASE_VIDEO_BUCKET_PUBLIC ?? "true").toLowerCase() === "true";
-
-const PENDING_PLACEHOLDER = "[PENDING_EXPORT_FROM_B64]";
 
 function json(res, code, obj) {
   res.statusCode = code;
@@ -53,14 +53,9 @@ async function getUserIdFromRequest(req) {
   return data?.user?.id || null;
 }
 
-function runpodStatusUrl(endpointIdOrUrl, requestId) {
-  const v = String(endpointIdOrUrl || "").trim();
-  if (!v || !requestId) return null;
-  if (v.startsWith("http://") || v.startsWith("https://")) {
-    const base = v.replace(/\/run\/?$/i, "");
-    return `${base}/status/${requestId}`;
-  }
-  return `https://api.runpod.ai/v2/${v}/status/${requestId}`;
+function runpodStatusUrl(endpointId, requestId) {
+  if (!endpointId || !requestId) return null;
+  return `https://api.runpod.ai/v2/${endpointId}/status/${requestId}`;
 }
 
 async function runpodRun({ endpointId, input }) {
@@ -79,10 +74,7 @@ async function runpodRun({ endpointId, input }) {
   });
 
   const data = await r.json().catch(() => null);
-  if (!r.ok) {
-    const msg = data?.error || data?.message || JSON.stringify(data);
-    throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
-  }
+  if (!r.ok) throw new Error(`RunPod /run failed: ${r.status} ${data?.error || data?.message || JSON.stringify(data)}`);
   return data;
 }
 
@@ -118,13 +110,15 @@ function safeParseJson(s) {
 
 function pickEndpointForJob(job) {
   const mode = String(job?.mode || "").toLowerCase();
-  if (mode === "i2v") return RUNPOD_I2V_ENDPOINT_ID;
-  return RUNPOD_T2V_ENDPOINT_ID;
+  return mode === "i2v" ? RUNPOD_I2V_ENDPOINT_ID : RUNPOD_T2V_ENDPOINT_ID;
 }
 
 function buildRunInputFromJob(job) {
+  const payload = safeParseJson(job.payload) || {};
+  const aspect_ratio = String(payload?.aspect_ratio || "").trim();
+
   const input = {
-    mode: job.mode,
+    mode: String(job.mode || "t2v"),
     job_id: job.id,
     user_id: job.user_id,
     prompt: job.prompt || "",
@@ -137,32 +131,26 @@ function buildRunInputFromJob(job) {
     height: Number(job.height ?? 512),
   };
 
-  const payload = safeParseJson(job.payload);
+  const duration_s = payload?.duration_s ?? payload?.seconds ?? null;
+  if (duration_s !== null && duration_s !== undefined && duration_s !== "") input.duration_s = duration_s;
 
-  const aspect_ratio = String(payload?.aspect_ratio || "").trim();
   if (aspect_ratio) input.aspect_ratio = aspect_ratio;
 
-  const duration_s = payload?.duration_s ?? payload?.seconds ?? null;
-  if (duration_s !== null && duration_s !== undefined && duration_s !== "") {
-    input.duration_s = duration_s;
-  }
-
   if (String(job.mode).toLowerCase() === "i2v") {
-    const image_b64 = payload?.image_b64 ? String(payload.image_b64) : null;
-    const image_url = payload?.image_url ? String(payload.image_url).trim() : null;
-
-    // ✅ OJO: idealmente i2v use image_url, pero soportamos ambos
-    if (image_b64) input.image_b64 = image_b64;
-    if (image_url) input.image_url = image_url;
+    if (payload?.image_b64) input.image_b64 = String(payload.image_b64);
+    if (payload?.image_url) input.image_url = String(payload.image_url).trim();
   }
 
   return input;
 }
 
-async function safeReleaseSlot(admin, jobId) {
+async function releaseSlot(admin, jobId) {
   try {
     await admin.rpc("release_video_slot", { p_job_id: jobId });
-  } catch {}
+  } catch (e) {
+    // no romper status si falla liberar slot
+    console.log("[VIDEO_STATUS] release_video_slot failed:", e?.message || e);
+  }
 }
 
 export default async function handler(req, res) {
@@ -177,21 +165,14 @@ export default async function handler(req, res) {
     const jobId = String(req.query?.job_id || "").trim();
     if (!jobId) return json(res, 400, { ok: false, error: "Missing job_id" });
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json(res, 500, { ok: false, error: "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" });
-    }
-    if (!RUNPOD_API_KEY) {
-      return json(res, 500, { ok: false, error: "Missing RUNPOD_API_KEY" });
-    }
-    if (!RUNPOD_T2V_ENDPOINT_ID || !RUNPOD_I2V_ENDPOINT_ID) {
-      return json(res, 500, { ok: false, error: "Missing RunPod endpoint env (T2V/I2V)" });
-    }
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return json(res, 500, { ok: false, error: "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" });
+    if (!RUNPOD_API_KEY) return json(res, 500, { ok: false, error: "Missing RUNPOD_API_KEY" });
+    if (!RUNPOD_T2V_ENDPOINT_ID || !RUNPOD_I2V_ENDPOINT_ID) return json(res, 500, { ok: false, error: "Missing RunPod endpoint env (T2V/I2V)" });
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // --- Load job (owned by user) ---
     const { data: job, error: jobErr } = await admin
       .from("video_jobs")
       .select("*")
@@ -201,28 +182,17 @@ export default async function handler(req, res) {
 
     if (jobErr || !job) return json(res, 404, { ok: false, error: "Job not found" });
 
-    // ✅ Si YA hay url final (y NO es placeholder), devolvemos
-    if (job.video_url && job.video_url !== PENDING_PLACEHOLDER) {
-      return json(res, 200, { ok: true, status: job.status, video_url: job.video_url, job });
-    }
+    if (job.video_url) return json(res, 200, { ok: true, status: job.status, video_url: job.video_url, job });
 
-    // ✅ AUTO-DISPATCH si QUEUED sin request_id
+    // ✅ auto-dispatch si está QUEUED y no tiene request_id
     if (String(job.status || "").toUpperCase() === "QUEUED" && !job.provider_request_id) {
       const { data: canDispatch, error: lockErr } = await admin.rpc("reserve_video_slot", {
         p_job_id: job.id,
         p_max_active: VIDEO_MAX_ACTIVE,
       });
 
-      const okDispatch = canDispatch === true || (canDispatch && canDispatch.ok === true);
-
-      if (lockErr || !okDispatch) {
-        return json(res, 200, {
-          ok: true,
-          status: "QUEUED",
-          queued: true,
-          queue_message: "Video en cola, estará listo en unos minutos.",
-          job,
-        });
+      if (lockErr || !canDispatch) {
+        return json(res, 200, { ok: true, status: "QUEUED", queued: true, job });
       }
 
       const endpointId = pickEndpointForJob(job);
@@ -232,33 +202,18 @@ export default async function handler(req, res) {
         const rp = await runpodRun({ endpointId, input: rpInput });
         const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
-        if (runpodId) {
-          await admin
-            .from("video_jobs")
-            .update({
-              provider_request_id: String(runpodId),
-              provider_status: "submitted",
-              status: "IN_PROGRESS",
-              started_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", jobId);
-        }
-
-        const { data: job2 } = await admin
+        await admin
           .from("video_jobs")
-          .select("*")
-          .eq("id", jobId)
-          .eq("user_id", userId)
-          .single();
+          .update({
+            provider_request_id: runpodId ? String(runpodId) : null,
+            provider_status: "submitted",
+            status: "IN_PROGRESS",
+            started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
 
-        return json(res, 200, {
-          ok: true,
-          status: "IN_PROGRESS",
-          queued: false,
-          provider_request_id: runpodId,
-          job: job2 || job,
-        });
+        return json(res, 200, { ok: true, status: "IN_PROGRESS", queued: false, provider_request_id: runpodId });
       } catch (e) {
         await admin
           .from("video_jobs")
@@ -269,90 +224,59 @@ export default async function handler(req, res) {
           })
           .eq("id", jobId);
 
-        // ✅ LIBERAR SLOT si falló dispatch
-        await safeReleaseSlot(admin, jobId);
+        // ⚠️ liberar slot si dispatch falla
+        await releaseSlot(admin, jobId);
 
-        return json(res, 200, {
-          ok: true,
-          status: "QUEUED",
-          queued: true,
-          queue_message: "Video en cola, estará listo en unos minutos.",
-          error: "dispatch_failed_returned_to_queue",
-          job,
-        });
+        return json(res, 200, { ok: true, status: "QUEUED", queued: true, error: "dispatch_failed_returned_to_queue" });
       }
     }
 
-    // Si todavía no tiene request_id
     if (!job.provider_request_id) {
-      return json(res, 200, {
-        ok: true,
-        status: job.status,
-        queued: String(job.status || "").toUpperCase() === "QUEUED",
-        queue_message:
-          String(job.status || "").toUpperCase() === "QUEUED"
-            ? "Video en cola, estará listo en unos minutos."
-            : null,
-        job,
-      });
+      return json(res, 200, { ok: true, status: job.status, queued: String(job.status || "").toUpperCase() === "QUEUED", job });
     }
 
-    // --- RunPod status polling ---
+    // ✅ poll RunPod
     const endpointIdForStatus = pickEndpointForJob(job);
     const statusUrl = runpodStatusUrl(endpointIdForStatus, job.provider_request_id);
     if (!statusUrl) return json(res, 500, { ok: false, error: "Could not build RunPod status url" });
 
-    const rpResp = await fetch(statusUrl, {
-      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
-    });
-
+    const rpResp = await fetch(statusUrl, { headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` } });
     const rpJson = await rpResp.json().catch(() => ({}));
+
     if (!rpResp.ok) return json(res, 200, { ok: true, status: job.status, rp: rpJson, job });
 
     const rpStatus = rpJson?.status || null;
     const output = rpJson?.output || null;
 
-    // ✅ COMPLETED con URL directa
-    const directUrl = output?.video_url || output?.videoUrl || null;
-    if (rpStatus === "COMPLETED" && directUrl) {
-      await admin
-        .from("video_jobs")
-        .update({
-          status: "DONE",
-          provider_status: "COMPLETED",
-          video_url: String(directUrl),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", jobId);
-
-      // ✅ LIBERAR SLOT al finalizar
-      await safeReleaseSlot(admin, jobId);
-
-      return json(res, 200, { ok: true, status: "DONE", video_url: directUrl });
-    }
-
-    // ✅ COMPLETED con video_b64
-    const videoB64 = output?.video_b64 || output?.videoB64 || null;
-    if (rpStatus === "COMPLETED" && videoB64) {
-      const mime = output?.mime || output?.content_type || "video/mp4";
+    // ✅ COMPLETED -> video_b64 -> subir a Storage
+    if (rpStatus === "COMPLETED") {
+      const videoB64 = output?.video_b64 || output?.videoB64 || null;
+      const mime = output?.video_mime || output?.mime || output?.content_type || "video/mp4";
       const ext = safeExtFromMime(mime);
+
+      if (!videoB64) {
+        await admin.from("video_jobs").update({
+          status: "FAILED",
+          provider_status: "FAILED",
+          provider_error: JSON.stringify(rpJson),
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
+
+        await releaseSlot(admin, jobId);
+        return json(res, 200, { ok: true, status: "FAILED", error: "COMPLETED but missing video_b64" });
+      }
 
       const buf = decodeB64ToBuffer(videoB64);
       if (!buf || !buf.length) {
-        await admin
-          .from("video_jobs")
-          .update({
-            status: "FAILED",
-            provider_status: "FAILED",
-            error: "COMPLETED but video_b64 could not be decoded",
-            provider_error: JSON.stringify(rpJson),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", jobId);
+        await admin.from("video_jobs").update({
+          status: "FAILED",
+          provider_status: "FAILED",
+          error: "COMPLETED but video_b64 could not be decoded",
+          provider_error: JSON.stringify(rpJson),
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
 
-        // ✅ LIBERAR SLOT
-        await safeReleaseSlot(admin, jobId);
-
+        await releaseSlot(admin, jobId);
         return json(res, 200, { ok: true, status: "FAILED", error: "video_b64 decode failed" });
       }
 
@@ -364,20 +288,15 @@ export default async function handler(req, res) {
       });
 
       if (upErr) {
-        await admin
-          .from("video_jobs")
-          .update({
-            status: "FAILED",
-            provider_status: "FAILED",
-            error: `Storage upload failed: ${upErr.message}`,
-            provider_error: JSON.stringify(rpJson),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", jobId);
+        await admin.from("video_jobs").update({
+          status: "FAILED",
+          provider_status: "FAILED",
+          error: `Storage upload failed: ${upErr.message}`,
+          provider_error: JSON.stringify(rpJson),
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
 
-        // ✅ LIBERAR SLOT
-        await safeReleaseSlot(admin, jobId);
-
+        await releaseSlot(admin, jobId);
         return json(res, 200, { ok: true, status: "FAILED", error: upErr.message });
       }
 
@@ -390,50 +309,35 @@ export default async function handler(req, res) {
         if (!error) finalUrl = data?.signedUrl || null;
       }
 
-      await admin
-        .from("video_jobs")
-        .update({
-          status: "DONE",
-          provider_status: "COMPLETED",
-          video_url: finalUrl,
-          error: finalUrl ? null : "Uploaded but could not generate URL",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", jobId);
+      await admin.from("video_jobs").update({
+        status: "DONE",
+        provider_status: "COMPLETED",
+        video_url: finalUrl,
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
 
-      // ✅ LIBERAR SLOT
-      await safeReleaseSlot(admin, jobId);
-
+      await releaseSlot(admin, jobId);
       return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl });
     }
 
-    // ✅ FAILED
     if (rpStatus === "FAILED") {
-      await admin
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          provider_status: "FAILED",
-          provider_error: JSON.stringify(rpJson),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", jobId);
+      await admin.from("video_jobs").update({
+        status: "FAILED",
+        provider_status: "FAILED",
+        provider_error: JSON.stringify(rpJson),
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
 
-      // ✅ LIBERAR SLOT
-      await safeReleaseSlot(admin, jobId);
-
+      await releaseSlot(admin, jobId);
       return json(res, 200, { ok: true, status: "FAILED", rp: rpJson });
     }
 
-    // ✅ sigue en progreso
-    await admin
-      .from("video_jobs")
-      .update({
-        status: "IN_PROGRESS",
-        provider_status: rpStatus || "IN_PROGRESS",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", jobId);
+    // sigue en progreso
+    await admin.from("video_jobs").update({
+      status: "IN_PROGRESS",
+      provider_status: rpStatus || "IN_PROGRESS",
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId);
 
     return json(res, 200, { ok: true, status: "IN_PROGRESS", rp_status: rpStatus, job });
   } catch (e) {
