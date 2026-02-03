@@ -1,8 +1,4 @@
-// api/generate-video.js  (WAN Serverless)
-// - Defaults alineados al worker WAN:
-//   fps=16, duration_s=3/5, num_frames WAN (49/81),
-//   default size = 576x512, reels 9:16 = 576x1024
-// - Prompt: siempre fuerza encuadre centrado (evita ojos-only / fuera de cuadro)
+// api/generate-video.js  (WAN Serverless)  ✅ CON COLA REAL
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -12,6 +8,8 @@ const RUNPOD_API_KEY =
   process.env.RUNPOD_API_KEY ||
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
+
+const VIDEO_MAX_ACTIVE = Number(process.env.VIDEO_MAX_ACTIVE ?? 1);
 
 function pickT2VEndpointId() {
   return (
@@ -42,12 +40,11 @@ async function runpodRun({ endpointId, input }) {
     const msg = data?.error || data?.message || JSON.stringify(data);
     throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
   }
-
   return data;
 }
 
 // ------------------------------------------------------------
-// ✅ COMPOSICIÓN FORZADA (solo encuadre, no cambia el concepto)
+// ✅ COMPOSICIÓN FORZADA
 // ------------------------------------------------------------
 const COMPOSITION_SUFFIX =
   " | centered subject, stable framing, head and shoulders, medium shot, " +
@@ -55,7 +52,7 @@ const COMPOSITION_SUFFIX =
   "no extreme close-up, no partial face";
 
 // ------------------------------------------------------------
-// ✅ PROMPTS DEFAULT (ultradetalle + hiperrealismo + encuadre centrado)
+// ✅ PROMPTS DEFAULT
 // ------------------------------------------------------------
 const DEFAULT_PROMPT =
   "ultra detailed, hyperrealistic, photorealistic, cinematic lighting, " +
@@ -70,10 +67,6 @@ const DEFAULT_NEGATIVE =
   "cut off head, cut off face, partial face, extreme close-up, " +
   "text, watermark, logo";
 
-// ------------------------------------------------------------
-// ✅ pickFinalPrompts
-// - Luego SIEMPRE aplica COMPOSITION_SUFFIX
-// ------------------------------------------------------------
 function pickFinalPrompts(body) {
   const b = body || {};
 
@@ -89,11 +82,7 @@ function pickFinalPrompts(body) {
     String(b?.negative_prompt || b?.negative || "").trim() ||
     DEFAULT_NEGATIVE;
 
-  // ✅ aplica composición SIEMPRE (aunque venga prompt del user)
   const finalPrompt = `${basePrompt}${COMPOSITION_SUFFIX}`;
-
-  // ✅ refuerza negativos aunque el user mande negativos flojos
-  // (sin romper si ya trae algo)
   const finalNegative = baseNegative
     ? `${baseNegative}, out of frame, cropped, cut off head, cut off face, partial face, extreme close-up`
     : DEFAULT_NEGATIVE;
@@ -108,7 +97,7 @@ function pickFinalPrompts(body) {
 }
 
 // ------------------------------------------------------------
-// ✅ WAN helpers: timing + frames
+// ✅ WAN helpers
 // ------------------------------------------------------------
 function clampInt(v, lo, hi, def) {
   const n = Number(v);
@@ -132,7 +121,6 @@ function normalizeDurationSeconds(body) {
   return s < 4 ? 3 : 5;
 }
 
-// ✅ default = mujer nieve (576x512), reels = 576x1024
 function pickDims(body) {
   const ar = String(body?.aspect_ratio || "").trim();
   if (ar === "9:16") return { width: 576, height: 1024 };
@@ -151,15 +139,12 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     const { finalPrompt, finalNegative, usedDefault } = pickFinalPrompts(body);
-
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+    const aspect_ratio = String(body?.aspect_ratio || "").trim();
 
     const seconds = normalizeDurationSeconds(body);
     const fps = clampInt(body?.fps ?? 16, 8, 30, 16);
 
-    const requestedFrames =
-      body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
-
+    const requestedFrames = body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
     const num_frames = fixFramesForWan(
       requestedFrames !== null && requestedFrames !== undefined && requestedFrames !== ""
         ? Number(requestedFrames)
@@ -197,7 +182,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ 2) crear job
+    // ✅ 2) crear job en cola
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -209,10 +194,8 @@ export default async function handler(req, res) {
       mode: "t2v",
       prompt: finalPrompt,
       negative_prompt: finalNegative || "",
-
       width,
       height,
-
       fps,
       num_frames,
       steps,
@@ -223,12 +206,37 @@ export default async function handler(req, res) {
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
     if (insErr) {
-      return res
-        .status(400)
-        .json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
+      return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
-    // ✅ 3) RunPod
+    // ✅ 3) intentar reservar cupo (COLA REAL)
+    const { data: canDispatch, error: lockErr } = await supabaseAdmin.rpc("reserve_video_slot", {
+      p_job_id: jobId,
+      p_max_active: VIDEO_MAX_ACTIVE,
+    });
+
+    if (lockErr) {
+      // si falló el lock, deja en cola
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        queued: true,
+        reason: `reserve_video_slot error: ${lockErr.message}`,
+      });
+    }
+
+    if (!canDispatch) {
+      // ✅ NO hay cupo => queda en cola, NO llamamos RunPod
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        queued: true,
+        used_default_prompt: !!usedDefault,
+        resolved_defaults: { width, height, duration_s: seconds, fps, num_frames, steps, guidance_scale, aspect_ratio: aspect_ratio || "" },
+      });
+    }
+
+    // ✅ 4) hay cupo => despachar a RunPod
     const endpointId = pickT2VEndpointId();
 
     const rpInput = {
@@ -237,51 +245,58 @@ export default async function handler(req, res) {
       user_id: userId,
       prompt: finalPrompt,
       negative_prompt: finalNegative || "",
-
       duration_s: seconds,
       fps,
       num_frames,
       steps,
       guidance_scale,
-
       ...(aspect_ratio ? { aspect_ratio } : {}),
       width,
       height,
     };
 
-    const rp = await runpodRun({ endpointId, input: rpInput });
+    try {
+      const rp = await runpodRun({ endpointId, input: rpInput });
+      const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
-    const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
+      if (runpodId) {
+        await supabaseAdmin
+          .from("video_jobs")
+          .update({
+            provider_request_id: String(runpodId),
+            provider_status: "submitted",
+            status: "IN_PROGRESS",
+            started_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+      }
 
-    if (runpodId) {
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        queued: false,
+        provider_request_id: runpodId,
+        spend: spendData ?? null,
+        used_default_prompt: !!usedDefault,
+        resolved_defaults: { width, height, duration_s: seconds, fps, num_frames, steps, guidance_scale, aspect_ratio: aspect_ratio || "" },
+      });
+    } catch (e) {
+      // ✅ si RunPod falla, devolvemos a cola (para reintentar)
       await supabaseAdmin
         .from("video_jobs")
         .update({
-          provider_request_id: String(runpodId),
-          provider_status: "submitted",
-          status: "IN_PROGRESS",
-          started_at: new Date().toISOString(),
+          status: "QUEUED",
+          provider_status: `dispatch_failed: ${String(e?.message || e).slice(0, 180)}`,
         })
         .eq("id", jobId);
-    }
 
-    return res.status(200).json({
-      ok: true,
-      job_id: jobId,
-      provider_request_id: runpodId,
-      spend: spendData ?? null,
-      used_default_prompt: !!usedDefault,
-      resolved_defaults: {
-        width,
-        height,
-        duration_s: seconds,
-        fps,
-        num_frames,
-        steps,
-        guidance_scale,
-        aspect_ratio: aspect_ratio || "",
-      },
-    });
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        queued: true,
+        reason: "dispatch_failed_returned_to_queue",
+      });
+    }
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Server error" });
   }
