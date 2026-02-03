@@ -1,4 +1,6 @@
-// api/generate-video.js  (WAN Serverless)  ✅ CON COLA REAL (T2V)
+// api/generate-video.js  (WAN Serverless)  ✅ CON COLA REAL (FULL)
+
+export const config = { runtime: "nodejs" };
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -127,16 +129,6 @@ function pickDims(body) {
   return { width: 576, height: 512 };
 }
 
-// ✅ Intentar liberar slot si existe RPC (no rompe si no está)
-async function tryReleaseSlot(jobId) {
-  try {
-    if (!jobId) return;
-    await supabaseAdmin.rpc("release_video_slot", { p_job_id: jobId });
-  } catch {
-    // no-op
-  }
-}
-
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -212,6 +204,8 @@ export default async function handler(req, res) {
       guidance_scale,
       provider: "runpod",
       payload: body ? JSON.stringify(body) : null,
+      provider_status: "created_queued",
+      video_url: "[PENDING_EXPORT_FROM_B64]",
     };
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
@@ -226,7 +220,14 @@ export default async function handler(req, res) {
     });
 
     if (lockErr) {
-      // si falló el lock, deja en cola
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_status: `reserve_slot_error: ${String(lockErr.message || lockErr).slice(0, 180)}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+
       return res.status(200).json({
         ok: true,
         job_id: jobId,
@@ -236,7 +237,14 @@ export default async function handler(req, res) {
     }
 
     if (!canDispatch) {
-      // ✅ NO hay cupo => queda en cola, NO llamamos RunPod
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_status: "reserve_slot_no_capacity",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+
       return res.status(200).json({
         ok: true,
         job_id: jobId,
@@ -254,16 +262,6 @@ export default async function handler(req, res) {
         },
       });
     }
-
-    // ✅ 3.1) marcar DISPATCHING (evita race)
-    await supabaseAdmin
-      .from("video_jobs")
-      .update({
-        status: "DISPATCHING",
-        provider_status: "dispatching",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", jobId);
 
     // ✅ 4) hay cupo => despachar a RunPod
     const endpointId = pickT2VEndpointId();
@@ -285,6 +283,14 @@ export default async function handler(req, res) {
     };
 
     try {
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_status: `dispatching_to_runpod:${String(endpointId || "null")}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+
       const rp = await runpodRun({ endpointId, input: rpInput });
       const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
@@ -300,24 +306,15 @@ export default async function handler(req, res) {
           })
           .eq("id", jobId);
       } else {
-        // si RunPod devolvió algo raro sin id, devolvemos a cola + liberamos slot
-        await tryReleaseSlot(jobId);
-
         await supabaseAdmin
           .from("video_jobs")
           .update({
-            status: "QUEUED",
-            provider_status: "dispatch_no_request_id_returned_to_queue",
+            provider_status: "submitted_no_request_id",
+            status: "IN_PROGRESS",
+            started_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
-
-        return res.status(200).json({
-          ok: true,
-          job_id: jobId,
-          queued: true,
-          reason: "dispatch_no_request_id_returned_to_queue",
-        });
       }
 
       return res.status(200).json({
@@ -339,9 +336,6 @@ export default async function handler(req, res) {
         },
       });
     } catch (e) {
-      // ✅ si RunPod falla, devolvemos a cola (para reintentar) + LIBERAMOS SLOT
-      await tryReleaseSlot(jobId);
-
       await supabaseAdmin
         .from("video_jobs")
         .update({
