@@ -286,6 +286,14 @@ export function Img2VideoPanel({ userStatus }) {
 
       if (stData?.job) setLastKnownJob(stData.job);
 
+            // ✅ QUEUED (en cola)
+      if (st === "QUEUED" || stData?.queued) {
+        setStatus("QUEUED");
+        setStatusText(stData?.queue_message || "Video en cola, estará listo en unos minutos.");
+        setProgress((p) => Math.max(p, 3)); // no usar started_at
+        return; // seguir polling normal
+      }
+
       if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
         const url = stData.video_url || stData.output?.video_url || stData.output?.videoUrl || null;
         if (url) {
@@ -498,7 +506,7 @@ export function Img2VideoPanel({ userStatus }) {
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
 
-          {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
+          {(status === "IN_PROGRESS" || status === "STARTING" || status === "QUEUED" || status === "DONE") && (
             <div className="mt-3">
               <div className="flex items-center justify-between text-[10px] text-neutral-400">
                 <span>Progress</span>
