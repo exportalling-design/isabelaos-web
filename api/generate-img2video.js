@@ -1,4 +1,4 @@
-// api/generate-img2video.js ✅ CON COLA REAL
+// api/generate-img2video.js ✅ CON COLA REAL (I2V)
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -57,6 +57,16 @@ function pickFinalPrompts(body) {
     String(b?.negative_prompt || b?.negative || "").trim();
 
   return { finalPrompt, finalNegative };
+}
+
+// ✅ Intentar liberar slot si existe RPC (no rompe si no está)
+async function tryReleaseSlot(jobId) {
+  try {
+    if (!jobId) return;
+    await supabaseAdmin.rpc("release_video_slot", { p_job_id: jobId });
+  } catch {
+    // no-op
+  }
 }
 
 export default async function handler(req, res) {
@@ -149,6 +159,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, job_id: jobId, queued: true });
     }
 
+    // ✅ 3.1) marcar DISPATCHING (evita race)
+    await supabaseAdmin
+      .from("video_jobs")
+      .update({
+        status: "DISPATCHING",
+        provider_status: "dispatching",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+
     // ✅ 4) despachar
     const endpointId = pickI2VEndpointId();
 
@@ -182,21 +202,49 @@ export default async function handler(req, res) {
             provider_status: "submitted",
             status: "IN_PROGRESS",
             started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+      } else {
+        // si RunPod devolvió algo raro sin id, devolvemos a cola + liberamos slot
+        await tryReleaseSlot(jobId);
+        await supabaseAdmin
+          .from("video_jobs")
+          .update({
+            status: "QUEUED",
+            provider_status: "dispatch_no_request_id_returned_to_queue",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+
+        return res.status(200).json({
+          ok: true,
+          job_id: jobId,
+          queued: true,
+          reason: "dispatch_no_request_id_returned_to_queue",
+        });
       }
 
       return res.status(200).json({ ok: true, job_id: jobId, queued: false, provider_request_id: runpodId });
     } catch (e) {
+      // ✅ si RunPod falla, devolvemos a cola y LIBERAMOS SLOT
+      await tryReleaseSlot(jobId);
+
       await supabaseAdmin
         .from("video_jobs")
         .update({
           status: "QUEUED",
           provider_status: `dispatch_failed: ${String(e?.message || e).slice(0, 180)}`,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", jobId);
 
-      return res.status(200).json({ ok: true, job_id: jobId, queued: true, reason: "dispatch_failed_returned_to_queue" });
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        queued: true,
+        reason: "dispatch_failed_returned_to_queue",
+      });
     }
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Server error" });
