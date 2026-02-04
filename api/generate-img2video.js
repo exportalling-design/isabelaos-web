@@ -1,7 +1,11 @@
-// api/generate-img2video.js  (CLON POD)
-// - Defaults exactos del POD: steps 34, 1280x720, 75 frames, 24 fps, guidance 6.5
-// - NO inventa prompt. Si falta prompt => "Falta prompt" (idéntico)
+// api/generate-img2video.js  (CLON POD - UPDATED for SERVERLESS WAN I2V)
+// - Mantiene la lógica actual (auth, jades, job insert, RunPod dispatch)
+// - ✅ Mejora calidad/estabilidad en serverless:
+//    - defaults seguros: cfg 5.0, denoise 0.45, seed fijo, motion_strength 0.6
+//    - resolución default más estable (evita 1280x720 por defecto)
+//    - acepta aliases desde frontend: cfg, denoise/strength, motion_strength
 // - Requiere imagen_b64 o image_url
+// - Si falta prompt => "Falta prompt" (idéntico)
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -67,6 +71,9 @@ function pickFinalPrompts(body) {
   return { finalPrompt, finalNegative, usingOptimized };
 }
 
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const isNum = (x) => Number.isFinite(Number(x));
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -95,26 +102,45 @@ export default async function handler(req, res) {
 
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
-    // ✅ Defaults (CAMBIO SOLO AQUÍ):
-    // - fps: 24 -> 16
-    // - frames: 75 -> 48  (3s * 16fps)
-    // - steps: 34 -> 18
-    // ✅ Si el frontend manda valores, se respetan.
+    // ✅ PERF: defaults serverless (frontend puede override)
     const fps = Number(body?.fps ?? 16);
     const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
     const steps = Number(body?.steps ?? 18);
-    const guidance_scale = Number(body?.guidance_scale ?? 6.5);
 
-    // ✅ CLON POD: resolución exacta si no viene
+    // ✅ CFG / guidance: aceptar alias "cfg" desde frontend y bajar default a 5.0
+    const guidance_scale_raw = body?.guidance_scale ?? body?.cfg ?? 5.0;
+    const guidance_scale = clamp(Number(guidance_scale_raw), 1.0, 10.0);
+
+    // ✅ I2V stability controls (si el worker los usa)
+    // denoise/strength controla cuánto "reinventa" (alto => halos + inconsistencia)
+    const denoise_raw = body?.denoise ?? body?.strength ?? 0.45;
+    const denoise = clamp(Number(denoise_raw), 0.2, 0.8);
+
+    // seed fijo reduce vibración (si no mandan seed, usamos uno fijo)
+    const seed = isNum(body?.seed) ? Number(body.seed) : 12345;
+
+    // motion strength (si el worker lo soporta)
+    const motion_strength_raw = body?.motion_strength ?? 0.6;
+    const motion_strength = clamp(Number(motion_strength_raw), 0.1, 1.0);
+
+    // ✅ Resolución: en serverless evita 1280x720 default (rompe consistencia/halo)
+    // Si viene width/height, se respetan.
+    // Si no vienen, defaults estables por aspect ratio:
+    // - 16:9 => 832x480
+    // - 9:16 => 576x1024
     const width =
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
-        : 1280;
+        : aspect_ratio === "9:16"
+        ? 576
+        : 832;
 
     const height =
       body?.height !== undefined && body?.height !== null && body?.height !== ""
         ? Number(body.height)
-        : 720;
+        : aspect_ratio === "9:16"
+        ? 1024
+        : 480;
 
     // ✅ 1) spend jades
     const ref = globalThis.crypto?.randomUUID
@@ -153,6 +179,11 @@ export default async function handler(req, res) {
       steps,
       guidance_scale,
 
+      // ✅ extras (si tu tabla no tiene estas columnas, bórralas y queda igual)
+      denoise,
+      seed,
+      motion_strength,
+
       payload: body ? JSON.stringify(body) : null,
       provider: "runpod",
     };
@@ -178,6 +209,11 @@ export default async function handler(req, res) {
       num_frames,
       steps,
       guidance_scale,
+
+      // ✅ stability params (worker debe leerlos)
+      denoise,
+      seed,
+      motion_strength,
 
       duration_s: body?.duration_s ?? body?.seconds ?? null,
 
