@@ -29,6 +29,15 @@ export function Img2VideoPanel({ userStatus }) {
   // ✅ PERF: default steps 18 (como querés)
   const [steps, setSteps] = useState(18);
 
+  // ✅ WAN extra controls (suaves, no rompen)
+  const [guidanceScale, setGuidanceScale] = useState(5.0);
+  const [strength, setStrength] = useState(0.65); // denoise/strength: 0.55–0.75 recomendado
+  const [motionStrength, setMotionStrength] = useState(1.0); // 0.8–1.2
+
+  // ✅ Seed: vacío = random por job
+  const [seedMode, setSeedMode] = useState("RANDOM"); // RANDOM | FIXED
+  const [seedFixed, setSeedFixed] = useState(12345);
+
   // ✅ UI like VideoFromPromptPanel
   const [useNineSixteen, setUseNineSixteen] = useState(false); // NOT default
   const [durationSec, setDurationSec] = useState(3); // default 3s
@@ -64,7 +73,7 @@ export function Img2VideoPanel({ userStatus }) {
   // ✅ FIX: defaults del estimador UI alineados a tu config (16 fps / 18 steps / 3s)
   const currentParamsRef = useRef({
     steps: 18,
-    numFrames: 48,
+    numFrames: 49,
     durationSec: 3,
     fps: 16,
   });
@@ -140,7 +149,7 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-  // ---------------------------
+// ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -197,6 +206,34 @@ export function Img2VideoPanel({ userStatus }) {
   const setDuration5 = () => setDurationSec(5);
 
   // ---------------------------
+  // WAN helpers (frames + clamp)
+  // ---------------------------
+  function clampInt(v, lo, hi, def) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return def;
+    const r = Math.round(n);
+    return Math.max(lo, Math.min(hi, r));
+  }
+
+  function clampFloat(v, lo, hi, def) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return def;
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  function fixFramesForWan(numFrames) {
+    let nf = Math.max(5, Math.round(Number(numFrames) || 0));
+    const r = (nf - 1) % 4;
+    if (r === 0) return nf;
+    return nf + (4 - r);
+  }
+
+  function getSeedForRequest() {
+    if (seedMode === "FIXED") return clampInt(seedFixed, 0, 2147483647, 12345);
+    return Math.floor(Date.now() % 2147483647);
+  }
+
+// ---------------------------
   // Progress helpers (front-only estimation)
   // ---------------------------
   function isFetchDisconnectError(e) {
@@ -214,15 +251,15 @@ export function Img2VideoPanel({ userStatus }) {
   function getExpectedSeconds() {
     const p = currentParamsRef.current || {};
     const s = Number(p.steps || 18);
-    const f = Number(p.numFrames || 48);
+    const f = Number(p.numFrames || 49);
     const dur = Number(p.durationSec || 3);
 
     // 12 min para 3s, 18 min para 5s (base)
     const base = dur <= 3 ? 720 : 1080;
 
-    // Ajustes suaves por steps/frames (sin exagerar)
+    // Ajustes suaves por steps/frames
     const stepAdj = Math.max(0, (s - 18) * 10);
-    const frameAdj = Math.max(0, (f - 48) * 4);
+    const frameAdj = Math.max(0, (f - 49) * 4);
 
     const est = base + stepAdj + frameAdj;
     return Math.max(240, Math.min(1800, est));
@@ -237,11 +274,6 @@ export function Img2VideoPanel({ userStatus }) {
     const expected = getExpectedSeconds();
     const t = Math.min(1, elapsedS / expected);
 
-    // Etapas (sin llegar a 95% “fake”)
-    // 0..0.20 => 0..25
-    // 0.20..0.85 => 25..85
-    // 0.85..0.97 => 85..92
-    // >=0.97 => 92 fijo hasta resultado real
     let p = 0;
     if (t <= 0.2) {
       p = (t / 0.2) * 25;
@@ -258,8 +290,6 @@ export function Img2VideoPanel({ userStatus }) {
 
   // ✅ ETA text (pequeño pero visible)
   function getEtaText() {
-    // Pedido: 3s => fijo 8–13 min
-    // 5s => mi estimado
     if (Number(durationSec) === 5) return "Estimated wait: 13–20 min";
     return "Estimated wait: 8–13 min";
   }
@@ -397,16 +427,27 @@ export function Img2VideoPanel({ userStatus }) {
       setStatusText("Submitting job...");
 
       const auth = await getAuthHeaders();
-      const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
+
+      // ✅ WAN frames: 3s=>49, 5s=>81 (fps=16)
+      const rawFrames = Math.max(1, Math.round(Number(durationSec) * fps));
+      const numFrames = fixFramesForWan(rawFrames);
+
       const aspect_ratio = useNineSixteen ? "9:16" : "";
 
-      // ✅ keep params for progress estimate (alineado a 16 fps)
+      // ✅ keep params for progress estimate
       currentParamsRef.current = {
-        steps: Number(steps),
+        steps: clampInt(steps, 1, 80, 18),
         numFrames,
         durationSec: Number(durationSec),
         fps: Number(fps),
       };
+
+      // ✅ WAN aligned params
+      const stp = clampInt(steps, 1, 80, 18);
+      const gs = clampFloat(guidanceScale, 1.0, 10.0, 5.0);
+      const den = clampFloat(strength, 0.1, 1.0, 0.65);
+      const ms = clampFloat(motionStrength, 0.1, 2.0, 1.0);
+      const seed = getSeedForRequest();
 
       const { r, j } = await safeFetchJson("/api/generate-img2video", {
         method: "POST",
@@ -419,7 +460,16 @@ export function Img2VideoPanel({ userStatus }) {
           duration_s: Number(durationSec),
           fps,
           num_frames: numFrames,
-          steps: Number(steps),
+
+          steps: stp,
+          guidance_scale: gs,
+
+          // ✅ extras (si backend/worker no los usa, no rompe)
+          strength: den,
+          denoise: den,
+          motion_strength: ms,
+          seed,
+
           image_b64: pureB64 || null,
           image_url: imageUrl || null,
         }),
@@ -435,7 +485,7 @@ export function Img2VideoPanel({ userStatus }) {
       setStatusText(`Generating... Job: ${jid}`);
       setProgress(3);
 
-      // ✅ FIX: obtener started_at real antes de startPolling (sin depender del state async)
+      // ✅ FIX: obtener started_at real antes de startPolling
       await new Promise((t) => setTimeout(t, 700));
       const stData = await pollVideoStatus(jid);
       if (stData?.job) setLastKnownJob(stData.job);
@@ -587,7 +637,7 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
-              fps: {fps} · frames: {Math.round(Number(durationSec) * fps)}
+              fps: {fps} · frames WAN: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
             </div>
           </div>
         </div>
@@ -683,19 +733,104 @@ export function Img2VideoPanel({ userStatus }) {
             {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* ✅ WAN Quality Controls */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <label className="text-neutral-300">Steps</label>
               <input
                 type="number"
-                min={5}
-                max={60}
+                min={1}
+                max={80}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={steps}
                 onChange={(e) => setSteps(Number(e.target.value))}
               />
             </div>
 
+            <div>
+              <label className="text-neutral-300">Guidance (CFG)</label>
+              <input
+                type="number"
+                step="0.5"
+                min={1}
+                max={10}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={guidanceScale}
+                onChange={(e) => setGuidanceScale(Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-neutral-300">Strength (denoise)</label>
+              <input
+                type="number"
+                step="0.05"
+                min={0.1}
+                max={1.0}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={strength}
+                onChange={(e) => setStrength(Number(e.target.value))}
+              />
+              <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.60–0.70</div>
+            </div>
+
+            <div>
+              <label className="text-neutral-300">Motion strength</label>
+              <input
+                type="number"
+                step="0.05"
+                min={0.1}
+                max={2.0}
+                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={motionStrength}
+                onChange={(e) => setMotionStrength(Number(e.target.value))}
+              />
+              <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.9–1.1</div>
+            </div>
+          </div>
+
+          {/* ✅ Seed simple */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Seed</div>
+            <div className="mt-2 flex items-center gap-3">
+              <input
+                id="i2v_seed_random"
+                type="checkbox"
+                checked={seedMode === "RANDOM"}
+                onChange={(e) => (e.target.checked ? setSeedMode("RANDOM") : null)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="i2v_seed_random" className="text-[12px] text-neutral-200">
+                Random (recommended)
+              </label>
+
+              <input
+                id="i2v_seed_fixed"
+                type="checkbox"
+                checked={seedMode === "FIXED"}
+                onChange={(e) => (e.target.checked ? setSeedMode("FIXED") : null)}
+                className="ml-4 h-4 w-4"
+              />
+              <label htmlFor="i2v_seed_fixed" className="text-[12px] text-neutral-200">
+                Fixed
+              </label>
+            </div>
+
+            {seedMode === "FIXED" && (
+              <input
+                type="number"
+                min={0}
+                max={2147483647}
+                value={seedFixed}
+                onChange={(e) => setSeedFixed(Number(e.target.value))}
+                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              />
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex items-end">
               <button
                 type="button"
