@@ -1,11 +1,8 @@
-// api/generate-img2video.js  (CLON POD - UPDATED for SERVERLESS WAN I2V)
-// - Mantiene la lógica actual (auth, jades, job insert, RunPod dispatch)
-// - ✅ Mejora calidad/estabilidad en serverless:
-//    - defaults seguros: cfg 5.0, denoise 0.45, seed fijo, motion_strength 0.6
-//    - resolución default más estable (evita 1280x720 por defecto)
-//    - acepta aliases desde frontend: cfg, denoise/strength, motion_strength
-// - Requiere imagen_b64 o image_url
-// - Si falta prompt => "Falta prompt" (idéntico)
+// api/generate-img2video.js (UPDATED - NO DB CHANGES)
+// - Mantiene cobro de jades igual (12)
+// - NO inserta columnas nuevas en video_jobs (evita error schema cache)
+// - Sí manda denoise/seed/motion_strength al worker por rpInput
+// - Defaults serverless más estables
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -49,7 +46,6 @@ async function runpodRun({ endpointId, input }) {
   return data;
 }
 
-// Mismo selector que T2V (para mantenerlo idéntico)
 function pickFinalPrompts(body) {
   const b = body || {};
 
@@ -87,12 +83,10 @@ export default async function handler(req, res) {
 
     const { finalPrompt, finalNegative } = pickFinalPrompts(body);
 
-    // ✅ CLON POD: si falta prompt => error (idéntico al worker)
     if (!finalPrompt) {
       return res.status(400).json({ ok: false, error: "Falta prompt" });
     }
 
-    // Imagen input
     const image_b64 = body?.image_b64 ? String(body.image_b64) : null;
     const image_url = body?.image_url ? String(body.image_url).trim() : null;
 
@@ -102,32 +96,25 @@ export default async function handler(req, res) {
 
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
-    // ✅ PERF: defaults serverless (frontend puede override)
+    // Defaults serverless (frontend puede override)
     const fps = Number(body?.fps ?? 16);
     const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
     const steps = Number(body?.steps ?? 18);
 
-    // ✅ CFG / guidance: aceptar alias "cfg" desde frontend y bajar default a 5.0
+    // guidance (acepta cfg alias)
     const guidance_scale_raw = body?.guidance_scale ?? body?.cfg ?? 5.0;
     const guidance_scale = clamp(Number(guidance_scale_raw), 1.0, 10.0);
 
-    // ✅ I2V stability controls (si el worker los usa)
-    // denoise/strength controla cuánto "reinventa" (alto => halos + inconsistencia)
+    // estabilidad I2V (se envía al worker; NO se guarda en DB)
     const denoise_raw = body?.denoise ?? body?.strength ?? 0.45;
     const denoise = clamp(Number(denoise_raw), 0.2, 0.8);
 
-    // seed fijo reduce vibración (si no mandan seed, usamos uno fijo)
     const seed = isNum(body?.seed) ? Number(body.seed) : 12345;
 
-    // motion strength (si el worker lo soporta)
     const motion_strength_raw = body?.motion_strength ?? 0.6;
     const motion_strength = clamp(Number(motion_strength_raw), 0.1, 1.0);
 
-    // ✅ Resolución: en serverless evita 1280x720 default (rompe consistencia/halo)
-    // Si viene width/height, se respetan.
-    // Si no vienen, defaults estables por aspect ratio:
-    // - 16:9 => 832x480
-    // - 9:16 => 576x1024
+    // Resolución default estable (respeta overrides)
     const width =
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
@@ -142,7 +129,7 @@ export default async function handler(req, res) {
         ? 1024
         : 480;
 
-    // ✅ 1) spend jades
+    // ✅ 1) spend jades (IGUAL)
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -158,7 +145,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // ✅ 2) create job
+    // ✅ 2) create job (SIN columnas nuevas)
     const jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -178,11 +165,6 @@ export default async function handler(req, res) {
       num_frames,
       steps,
       guidance_scale,
-
-      // ✅ extras (si tu tabla no tiene estas columnas, bórralas y queda igual)
-      denoise,
-      seed,
-      motion_strength,
 
       payload: body ? JSON.stringify(body) : null,
       provider: "runpod",
@@ -210,7 +192,7 @@ export default async function handler(req, res) {
       steps,
       guidance_scale,
 
-      // ✅ stability params (worker debe leerlos)
+      // ✅ estabilidad (worker debe leerlo)
       denoise,
       seed,
       motion_strength,
@@ -226,7 +208,6 @@ export default async function handler(req, res) {
     };
 
     const rp = await runpodRun({ endpointId, input: rpInput });
-
     const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
     if (runpodId) {
