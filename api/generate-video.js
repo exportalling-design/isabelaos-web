@@ -1,165 +1,288 @@
-// /api/generate-video.js
-export const runtime = "nodejs";
+// api/generate-video.js  (WAN Serverless)
+// - Defaults alineados al worker WAN:
+//   fps=16, duration_s=3/5, num_frames WAN (49/81),
+//   default size = 576x512, reels 9:16 = 576x1024
+// - Prompt: siempre fuerza encuadre centrado (evita ojos-only / fuera de cuadro)
 
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
+import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
-const SB_URL = process.env.SUPABASE_URL;
-const SB_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const RUNPOD_API_KEY =
+  process.env.RP_API_KEY ||
+  process.env.RUNPOD_API_KEY ||
+  process.env.VIDEO_RUNPOD_API_KEY ||
+  null;
 
-const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
-const RUNPOD_VIDEO_ENDPOINT_ID = process.env.RUNPOD_VIDEO_ENDPOINT_ID;
-
-const COST_T2V = Number(process.env.COST_VIDEO_T2V || 10); // tu costo default
-
-function json(code, obj) {
-  return new Response(JSON.stringify(obj), {
-    status: code,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
+function pickT2VEndpointId() {
+  return (
+    process.env.RP_WAN22_T2V_ENDPOINT ||
+    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
+    process.env.VIDEO_RUNPOD_ENDPOINT ||
+    null
+  );
 }
 
-function getBearer(req) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : null;
-}
+async function runpodRun({ endpointId, input }) {
+  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / RP_API_KEY");
+  if (!endpointId) throw new Error("Missing T2V endpoint id env var");
 
-async function runpodRun(payload) {
-  const url = `https://api.runpod.ai/v2/${RUNPOD_VIDEO_ENDPOINT_ID}/run`;
+  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+
   const r = await fetch(url, {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
       Authorization: `Bearer ${RUNPOD_API_KEY}`,
-      "content-type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ input }),
   });
-  const j = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`runpod_run_failed_${r.status}: ${JSON.stringify(j)}`);
-  return j;
+
+  const data = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = data?.error || data?.message || JSON.stringify(data);
+    throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
+  }
+
+  return data;
 }
 
-export default async function handler(req) {
+// ------------------------------------------------------------
+// ✅ COMPOSICIÓN FORZADA (solo encuadre, no cambia el concepto)
+// ------------------------------------------------------------
+const COMPOSITION_SUFFIX =
+  " | centered subject, stable framing, head and shoulders, medium shot, " +
+  "subject fully in frame, face fully visible, looking at camera, " +
+  "no extreme close-up, no partial face";
+
+// ------------------------------------------------------------
+// ✅ PROMPTS DEFAULT (ultradetalle + hiperrealismo + encuadre centrado)
+// ------------------------------------------------------------
+const DEFAULT_PROMPT =
+  "ultra detailed, hyperrealistic, photorealistic, cinematic lighting, " +
+  "sharp focus, high dynamic range, realistic skin texture, natural colors, " +
+  "high quality, professional video, film look, " +
+  "portrait of a beautiful woman, centered, medium shot, head and shoulders, " +
+  "face fully visible, subject fully in frame, looking at camera";
+
+const DEFAULT_NEGATIVE =
+  "low quality, blurry, noisy, jpeg artifacts, deformed, distorted, " +
+  "extra limbs, bad anatomy, out of frame, cropped, cut off, " +
+  "cut off head, cut off face, partial face, extreme close-up, " +
+  "text, watermark, logo";
+
+// ------------------------------------------------------------
+// ✅ pickFinalPrompts
+// - Luego SIEMPRE aplica COMPOSITION_SUFFIX
+// ------------------------------------------------------------
+function pickFinalPrompts(body) {
+  const b = body || {};
+
+  const basePrompt =
+    String(b?.finalPrompt || "").trim() ||
+    String(b?.optimizedPrompt || "").trim() ||
+    String(b?.prompt || "").trim() ||
+    DEFAULT_PROMPT;
+
+  const baseNegative =
+    String(b?.finalNegative || "").trim() ||
+    String(b?.optimizedNegative || "").trim() ||
+    String(b?.negative_prompt || b?.negative || "").trim() ||
+    DEFAULT_NEGATIVE;
+
+  // ✅ aplica composición SIEMPRE (aunque venga prompt del user)
+  const finalPrompt = `${basePrompt}${COMPOSITION_SUFFIX}`;
+
+  // ✅ refuerza negativos aunque el user mande negativos flojos
+  // (sin romper si ya trae algo)
+  const finalNegative = baseNegative
+    ? `${baseNegative}, out of frame, cropped, cut off head, cut off face, partial face, extreme close-up`
+    : DEFAULT_NEGATIVE;
+
+  const usedDefault = !(
+    String(b?.finalPrompt || "").trim() ||
+    String(b?.optimizedPrompt || "").trim() ||
+    String(b?.prompt || "").trim()
+  );
+
+  return { finalPrompt, finalNegative, usedDefault };
+}
+
+// ------------------------------------------------------------
+// ✅ WAN helpers: timing + frames
+// ------------------------------------------------------------
+function clampInt(v, lo, hi, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
+  const r = Math.round(n);
+  return Math.max(lo, Math.min(hi, r));
+}
+
+function fixFramesForWan(numFrames) {
+  let nf = Math.max(5, Math.round(Number(numFrames) || 0));
+  const r = (nf - 1) % 4;
+  if (r === 0) return nf;
+  return nf + (4 - r);
+}
+
+function normalizeDurationSeconds(body) {
+  const raw = body?.duration_s ?? body?.seconds ?? null;
+  let s = raw === null || raw === undefined || raw === "" ? 3 : Number(raw);
+  if (!Number.isFinite(s)) s = 3;
+  s = clampInt(s, 3, 5, 3);
+  return s < 4 ? 3 : 5;
+}
+
+// ✅ default = mujer nieve (576x512), reels = 576x1024
+function pickDims(body) {
+  const ar = String(body?.aspect_ratio || "").trim();
+  if (ar === "9:16") return { width: 576, height: 1024 };
+  return { width: 576, height: 512 };
+}
+
+export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
-
-    const token = getBearer(req);
-    if (!token) return json(401, { ok: false, error: "missing_auth" });
-
-    const body = await req.json().catch(() => null);
-    if (!body) return json(400, { ok: false, error: "invalid_json" });
-
-    const {
-      prompt,
-      negative = "",
-      duration_s = 3,
-      fps = 24,
-      aspect_ratio = "1:1",
-      steps = 18,
-      guidance_scale = 5,
-    } = body;
-
-    if (!prompt || String(prompt).trim().length < 2) {
-      return json(400, { ok: false, error: "missing_prompt" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    // Supabase client (service role) + validar usuario desde token
-    const supabase = createClient(SB_URL, SB_SERVICE_ROLE);
-    const { data: u, error: uerr } = await supabase.auth.getUser(token);
-    if (uerr || !u?.user?.id) return json(401, { ok: false, error: "invalid_auth" });
-    const userId = u.user.id;
+    const userId = await getUserIdFromAuthHeader(req);
+    if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    // 1) Cobro jades (RPC)
-    // Ajusta nombres si tu RPC es diferente: spend_jades(user_id, amount, reason, meta)
-    const { data: spendRes, error: spendErr } = await supabase.rpc("spend_jades", {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    const { finalPrompt, finalNegative, usedDefault } = pickFinalPrompts(body);
+
+    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+
+    const seconds = normalizeDurationSeconds(body);
+    const fps = clampInt(body?.fps ?? 16, 8, 30, 16);
+
+    const requestedFrames =
+      body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
+
+    const num_frames = fixFramesForWan(
+      requestedFrames !== null && requestedFrames !== undefined && requestedFrames !== ""
+        ? Number(requestedFrames)
+        : seconds * fps
+    );
+
+    const steps = Number(body?.steps ?? 18);
+    const guidance_scale = Number(body?.guidance_scale ?? 5.0);
+
+    const dims = pickDims(body);
+
+    const width =
+      body?.width !== undefined && body?.width !== null && body?.width !== ""
+        ? Number(body.width)
+        : dims.width;
+
+    const height =
+      body?.height !== undefined && body?.height !== null && body?.height !== ""
+        ? Number(body.height)
+        : dims.height;
+
+    // ✅ 1) cobrar jades
+    const ref = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
+
+    const { data: spendData, error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
-      p_amount: COST_T2V,
-      p_reason: "video_t2v",
-      p_meta: { duration_s, fps, aspect_ratio, steps, guidance_scale },
+      p_amount: 10,
+      p_reason: "t2v_generate",
+      p_ref: ref,
     });
 
     if (spendErr) {
-      return json(402, { ok: false, error: "insufficient_jades_or_spend_failed", detail: spendErr.message });
+      return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     }
 
-    // (Opcional) si tu RPC devuelve balance:
-    const jadesAfter = spendRes?.new_balance ?? spendRes?.balance ?? null;
+    // ✅ 2) crear job
+    const jobId = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
 
-    // 2) Crear job DB
-    const jobInsert = {
+    const jobRow = {
+      id: jobId,
       user_id: userId,
       status: "QUEUED",
-      provider: "runpod",
-      provider_status: "QUEUED",
-      progress: 3,
-      prompt,
-      negative_prompt: negative,
-      duration_s,
+      mode: "t2v",
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
+
+      width,
+      height,
+
       fps,
-      aspect_ratio,
+      num_frames,
       steps,
       guidance_scale,
-      cost_jades: COST_T2V,
+      provider: "runpod",
+      payload: body ? JSON.stringify(body) : null,
     };
 
-    const { data: job, error: jerr } = await supabase
-      .from("video_jobs")
-      .insert(jobInsert)
-      .select("*")
-      .single();
-
-    if (jerr || !job) {
-      return json(500, { ok: false, error: "db_insert_failed", detail: jerr?.message });
+    const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
+    if (insErr) {
+      return res
+        .status(400)
+        .json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
     }
 
-    // 3) Enviar a RunPod
-    if (!RUNPOD_API_KEY || !RUNPOD_VIDEO_ENDPOINT_ID) {
-      // Si no hay creds, queda en cola (pero ya cobró)
-      return json(200, { ok: true, job_id: job.id, status: "QUEUED", jades_after: jadesAfter, note: "missing_runpod_env" });
+    // ✅ 3) RunPod
+    const endpointId = pickT2VEndpointId();
+
+    const rpInput = {
+      mode: "t2v",
+      job_id: jobId,
+      user_id: userId,
+      prompt: finalPrompt,
+      negative_prompt: finalNegative || "",
+
+      duration_s: seconds,
+      fps,
+      num_frames,
+      steps,
+      guidance_scale,
+
+      ...(aspect_ratio ? { aspect_ratio } : {}),
+      width,
+      height,
+    };
+
+    const rp = await runpodRun({ endpointId, input: rpInput });
+
+    const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
+
+    if (runpodId) {
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_request_id: String(runpodId),
+          provider_status: "submitted",
+          status: "IN_PROGRESS",
+          started_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
     }
 
-    const rpPayload = {
-      input: {
-        mode: "t2v",
-        prompt,
-        negative_prompt: negative,
-        duration_s,
+    return res.status(200).json({
+      ok: true,
+      job_id: jobId,
+      provider_request_id: runpodId,
+      spend: spendData ?? null,
+      used_default_prompt: !!usedDefault,
+      resolved_defaults: {
+        width,
+        height,
+        duration_s: seconds,
         fps,
-        aspect_ratio,
+        num_frames,
         steps,
         guidance_scale,
-        // Para que el worker pueda devolver el job_id y tú lo logs
-        job_id: job.id,
-        user_id: userId,
+        aspect_ratio: aspect_ratio || "",
       },
-    };
-
-    const rp = await runpodRun(rpPayload);
-
-    // Runpod devuelve típicamente { id: "xxxx-u2", ... }
-    const providerRequestId = rp?.id || rp?.requestId || null;
-
-    await supabase
-      .from("video_jobs")
-      .update({
-        provider_request_id: providerRequestId,
-        provider_status: "SUBMITTED",
-        status: "PROCESSING",
-        progress: 7,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.id);
-
-    return json(200, {
-      ok: true,
-      job_id: job.id,
-      provider_request_id: providerRequestId,
-      status: "PROCESSING",
-      progress: 7,
-      cost: COST_T2V,
-      jades_after: jadesAfter,
     });
-  } catch (err) {
-    return json(500, { ok: false, error: "generate_video_exception", detail: String(err) });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || "Server error" });
   }
 }
