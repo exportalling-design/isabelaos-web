@@ -117,6 +117,12 @@ function clampInt(v, lo, hi, def) {
   return Math.max(lo, Math.min(hi, r));
 }
 
+function clampFloat(v, lo, hi, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(lo, Math.min(hi, n));
+}
+
 function fixFramesForWan(numFrames) {
   let nf = Math.max(5, Math.round(Number(numFrames) || 0));
   const r = (nf - 1) % 4;
@@ -139,6 +145,13 @@ function pickDims(body) {
   return { width: 576, height: 512 };
 }
 
+function pickSeed(body) {
+  const s = body?.seed;
+  const n = Number(s);
+  if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  return Math.floor(Date.now() % 2147483647);
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -154,20 +167,26 @@ export default async function handler(req, res) {
 
     const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
 
+    // ✅ aligned defaults
     const seconds = normalizeDurationSeconds(body);
     const fps = clampInt(body?.fps ?? 16, 8, 30, 16);
 
-    const requestedFrames =
-      body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
+    const requestedFrames = body?.num_frames ?? body?.frames ?? body?.numFrames ?? null;
 
+    // ✅ WAN frames => 49/81 (y siempre (n-1)%4==0)
     const num_frames = fixFramesForWan(
       requestedFrames !== null && requestedFrames !== undefined && requestedFrames !== ""
         ? Number(requestedFrames)
         : seconds * fps
     );
 
-    const steps = Number(body?.steps ?? 18);
-    const guidance_scale = Number(body?.guidance_scale ?? 5.0);
+    const steps = clampInt(body?.steps ?? 18, 1, 80, 18);
+    const guidance_scale = clampFloat(body?.guidance_scale ?? 5.0, 1.0, 10.0, 5.0);
+
+    // ✅ optional extras (worker may ignore if not supported)
+    const seed = pickSeed(body);
+    const strength = clampFloat(body?.strength ?? body?.denoise ?? 0.65, 0.1, 1.0, 0.65);
+    const motion_strength = clampFloat(body?.motion_strength ?? 1.0, 0.1, 2.0, 1.0);
 
     const dims = pickDims(body);
 
@@ -244,6 +263,12 @@ export default async function handler(req, res) {
       steps,
       guidance_scale,
 
+      // ✅ optional extras (safe)
+      seed,
+      strength,
+      denoise: strength,
+      motion_strength,
+
       ...(aspect_ratio ? { aspect_ratio } : {}),
       width,
       height,
@@ -280,6 +305,9 @@ export default async function handler(req, res) {
         steps,
         guidance_scale,
         aspect_ratio: aspect_ratio || "",
+        seed,
+        strength,
+        motion_strength,
       },
     });
   } catch (e) {
