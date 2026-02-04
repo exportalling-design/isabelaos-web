@@ -1,244 +1,165 @@
-// api/generate-video.js
+// /api/generate-video.js
 export const runtime = "nodejs";
 
-// ---------------------------------------------------------
-// Generate Video (dispatch inmediato a RunPod Serverless)
-// - Inserta video_jobs en QUEUED
-// - Valida limite de concurrencia (VIDEO_MAX_ACTIVE)
-// - Llama a RunPod /run
-// - Actualiza job a RUNNING + provider_request_id
-// ---------------------------------------------------------
-
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Ajusta el import a TU auth real (no invento /var/task/pages)
-// Si ya tienes getAuthHeadersGlobal en frontend, aquí validamos JWT desde Authorization
-async function requireUser(req, supabaseAdmin) {
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token) return { ok: false, status: 401, error: "Missing Bearer token" };
+const SB_URL = process.env.SUPABASE_URL;
+const SB_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user?.id) {
-    return { ok: false, status: 401, error: "Invalid token" };
-  }
-  return { ok: true, user: data.user };
+const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
+const RUNPOD_VIDEO_ENDPOINT_ID = process.env.RUNPOD_VIDEO_ENDPOINT_ID;
+
+const COST_T2V = Number(process.env.COST_VIDEO_T2V || 10); // tu costo default
+
+function json(code, obj) {
+  return new Response(JSON.stringify(obj), {
+    status: code,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
-function json(res, status, obj) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(obj));
+function getBearer(req) {
+  const h = req.headers.get("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
 }
 
-function nowISO() {
-  return new Date().toISOString();
-}
-
-// RunPod serverless:
-// POST https://api.runpod.ai/v2/{ENDPOINT_ID}/run
-// GET  https://api.runpod.ai/v2/{ENDPOINT_ID}/status/{REQUEST_ID}
-async function runpodRun({ endpointId, apiKey, input }) {
-  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+async function runpodRun(payload) {
+  const url = `https://api.runpod.ai/v2/${RUNPOD_VIDEO_ENDPOINT_ID}/run`;
   const r = await fetch(url, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${RUNPOD_API_KEY}`,
+      "content-type": "application/json",
     },
-    body: JSON.stringify({ input }),
+    body: JSON.stringify(payload),
   });
-
-  const data = await r.json().catch(() => null);
-  if (!r.ok) {
-    throw new Error(data?.error || data?.message || `RunPod /run failed (${r.status})`);
-  }
-  // Normalmente devuelve { id: "xxxx", status: "IN_QUEUE" ... }
-  if (!data?.id) throw new Error("RunPod /run: missing id");
-  return data;
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(`runpod_run_failed_${r.status}: ${JSON.stringify(j)}`);
+  return j;
 }
 
-export default async function handler(req, res) {
+export default async function handler(req) {
   try {
-    if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
+    if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
 
-    // ---- ENV ----
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const token = getBearer(req);
+    if (!token) return json(401, { ok: false, error: "missing_auth" });
 
-    const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
-    const VIDEO_RUNPOD_ENDPOINT_ID = process.env.VIDEO_RUNPOD_ENDPOINT_ID; // <- endpoint serverless id
-    const VIDEO_MAX_ACTIVE = parseInt(process.env.VIDEO_MAX_ACTIVE || "1", 10);
+    const body = await req.json().catch(() => null);
+    if (!body) return json(400, { ok: false, error: "invalid_json" });
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json(res, 500, { ok: false, error: "Missing Supabase env" });
+    const {
+      prompt,
+      negative = "",
+      duration_s = 3,
+      fps = 24,
+      aspect_ratio = "1:1",
+      steps = 18,
+      guidance_scale = 5,
+    } = body;
+
+    if (!prompt || String(prompt).trim().length < 2) {
+      return json(400, { ok: false, error: "missing_prompt" });
     }
-    if (!RUNPOD_API_KEY || !VIDEO_RUNPOD_ENDPOINT_ID) {
-      return json(res, 500, { ok: false, error: "Missing RunPod env" });
-    }
 
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false },
+    // Supabase client (service role) + validar usuario desde token
+    const supabase = createClient(SB_URL, SB_SERVICE_ROLE);
+    const { data: u, error: uerr } = await supabase.auth.getUser(token);
+    if (uerr || !u?.user?.id) return json(401, { ok: false, error: "invalid_auth" });
+    const userId = u.user.id;
+
+    // 1) Cobro jades (RPC)
+    // Ajusta nombres si tu RPC es diferente: spend_jades(user_id, amount, reason, meta)
+    const { data: spendRes, error: spendErr } = await supabase.rpc("spend_jades", {
+      p_user_id: userId,
+      p_amount: COST_T2V,
+      p_reason: "video_t2v",
+      p_meta: { duration_s, fps, aspect_ratio, steps, guidance_scale },
     });
 
-    // ---- AUTH ----
-    const au = await requireUser(req, supabaseAdmin);
-    if (!au.ok) return json(res, au.status, { ok: false, error: au.error });
-    const user = au.user;
-
-    // ---- BODY ----
-    const body = await new Promise((resolve) => {
-      let raw = "";
-      req.on("data", (c) => (raw += c));
-      req.on("end", () => {
-        try {
-          resolve(raw ? JSON.parse(raw) : {});
-        } catch {
-          resolve({});
-        }
-      });
-    });
-
-    const prompt = (body.prompt || "").trim();
-    const negative_prompt = (body.negative || "").trim();
-
-    const duration_s = Number(body.duration_s || body.duration || 3);
-    const fps = Number(body.fps || 24);
-    const steps = Number(body.steps || 18);
-    const guidance_scale = Number(body.guidance_scale || body.guidance || 5);
-
-    const aspect_ratio = body.aspect_ratio || (body.isVertical ? "9:16" : "1:1");
-    const mode = body.mode || "t2v"; // text-to-video (tu worker ya acepta "t2v")
-
-    if (!prompt) return json(res, 400, { ok: false, error: "Missing prompt" });
-
-    // ---- Limite de concurrencia (global por usuario) ----
-    // Cuenta RUNNING recientes para evitar jobs pegados eternos:
-    // si quieres, sube/baja ventana a 30 min
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-
-    const { data: activeRows, error: activeErr } = await supabaseAdmin
-      .from("video_jobs")
-      .select("id", { count: "exact", head: false })
-      .eq("user_id", user.id)
-      .eq("status", "RUNNING")
-      .gte("updated_at", thirtyMinAgo);
-
-    if (activeErr) throw activeErr;
-
-    const activeCount = Array.isArray(activeRows) ? activeRows.length : 0;
-    if (activeCount >= VIDEO_MAX_ACTIVE) {
-      return json(res, 429, {
-        ok: false,
-        error: `Too many active videos (${activeCount}/${VIDEO_MAX_ACTIVE}). Wait for completion.`,
-      });
+    if (spendErr) {
+      return json(402, { ok: false, error: "insufficient_jades_or_spend_failed", detail: spendErr.message });
     }
 
-    // ---- Insert job (QUEUED) ----
-    const slotToken = crypto.randomBytes(16).toString("hex");
+    // (Opcional) si tu RPC devuelve balance:
+    const jadesAfter = spendRes?.new_balance ?? spendRes?.balance ?? null;
 
-    const insertPayload = {
-      user_id: user.id,
+    // 2) Crear job DB
+    const jobInsert = {
+      user_id: userId,
       status: "QUEUED",
       provider: "runpod",
-      provider_status: null,
-      provider_request_id: null,
-      progress: 0,
-      result_url: null,
-      error: null,
-      // campos slot (si existen en tu tabla)
-      slot_reserved: true, // A: reservamos de una vez (para no quedar colgado)
-      slot_token: slotToken,
-      started_at: null,
-      updated_at: nowISO(),
-      created_at: nowISO(),
-      // params útiles para debugging (si tu tabla tiene columnas json)
-      params: {
-        mode,
-        prompt,
-        negative_prompt,
-        duration_s,
-        fps,
-        steps,
-        guidance_scale,
-        aspect_ratio,
-      },
-    };
-
-    const { data: jobRow, error: insErr } = await supabaseAdmin
-      .from("video_jobs")
-      .insert(insertPayload)
-      .select("*")
-      .single();
-
-    if (insErr) throw insErr;
-
-    // ---- Dispatch inmediato a RunPod ----
-    const runInput = {
-      mode,
+      provider_status: "QUEUED",
+      progress: 3,
       prompt,
-      negative_prompt,
-      steps,
-      guidance_scale,
+      negative_prompt: negative,
       duration_s,
       fps,
       aspect_ratio,
-      // opcionales:
-      job_id: jobRow.id,
-      user_id: user.id,
-      slot_token: slotToken,
+      steps,
+      guidance_scale,
+      cost_jades: COST_T2V,
     };
 
-    let runpodResp;
-    try {
-      runpodResp = await runpodRun({
-        endpointId: VIDEO_RUNPOD_ENDPOINT_ID,
-        apiKey: RUNPOD_API_KEY,
-        input: runInput,
-      });
-    } catch (e) {
-      // Si falla el dispatch, marca FAILED y libera slot
-      await supabaseAdmin
-        .from("video_jobs")
-        .update({
-          status: "FAILED",
-          provider_status: "DISPATCH_FAILED",
-          error: String(e?.message || e),
-          slot_reserved: false,
-          slot_token: null,
-          updated_at: nowISO(),
-        })
-        .eq("id", jobRow.id);
-
-      return json(res, 500, { ok: false, error: `Dispatch failed: ${String(e?.message || e)}` });
-    }
-
-    // ---- Update job a RUNNING ----
-    const { data: updRow, error: updErr } = await supabaseAdmin
+    const { data: job, error: jerr } = await supabase
       .from("video_jobs")
-      .update({
-        status: "RUNNING",
-        provider_status: runpodResp.status || "IN_QUEUE",
-        provider_request_id: runpodResp.id,
-        started_at: nowISO(),
-        progress: 1,
-        updated_at: nowISO(),
-      })
-      .eq("id", jobRow.id)
+      .insert(jobInsert)
       .select("*")
       .single();
 
-    if (updErr) throw updErr;
+    if (jerr || !job) {
+      return json(500, { ok: false, error: "db_insert_failed", detail: jerr?.message });
+    }
 
-    return json(res, 200, {
+    // 3) Enviar a RunPod
+    if (!RUNPOD_API_KEY || !RUNPOD_VIDEO_ENDPOINT_ID) {
+      // Si no hay creds, queda en cola (pero ya cobró)
+      return json(200, { ok: true, job_id: job.id, status: "QUEUED", jades_after: jadesAfter, note: "missing_runpod_env" });
+    }
+
+    const rpPayload = {
+      input: {
+        mode: "t2v",
+        prompt,
+        negative_prompt: negative,
+        duration_s,
+        fps,
+        aspect_ratio,
+        steps,
+        guidance_scale,
+        // Para que el worker pueda devolver el job_id y tú lo logs
+        job_id: job.id,
+        user_id: userId,
+      },
+    };
+
+    const rp = await runpodRun(rpPayload);
+
+    // Runpod devuelve típicamente { id: "xxxx-u2", ... }
+    const providerRequestId = rp?.id || rp?.requestId || null;
+
+    await supabase
+      .from("video_jobs")
+      .update({
+        provider_request_id: providerRequestId,
+        provider_status: "SUBMITTED",
+        status: "PROCESSING",
+        progress: 7,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+
+    return json(200, {
       ok: true,
-      job_id: updRow.id,
-      provider_request_id: updRow.provider_request_id,
-      provider_status: updRow.provider_status,
-      status: updRow.status,
+      job_id: job.id,
+      provider_request_id: providerRequestId,
+      status: "PROCESSING",
+      progress: 7,
+      cost: COST_T2V,
+      jades_after: jadesAfter,
     });
   } catch (err) {
-    return json(res, 500, { ok: false, error: String(err?.message || err) });
+    return json(500, { ok: false, error: "generate_video_exception", detail: String(err) });
   }
 }
