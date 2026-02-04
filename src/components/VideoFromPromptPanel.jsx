@@ -29,8 +29,16 @@ export function VideoFromPromptPanel({ userStatus }) {
   const [useNineSixteen, setUseNineSixteen] = useState(false);
   const [durationSec, setDurationSec] = useState(3);
 
-  // ✅ Mantengo fps fijo como estaba
-  const fps = 24;
+  // ✅ WAN: fps fijo a 16 (alineado a worker/backend)
+  const fps = 16;
+
+  // ✅ WAN: params básicos para calidad/estabilidad (worker ya los entiende)
+  const [steps, setSteps] = useState(18);
+  const [guidanceScale, setGuidanceScale] = useState(5.0);
+
+  // ✅ Seed: vacío = random por job (recomendado)
+  const [seedMode, setSeedMode] = useState("RANDOM"); // RANDOM | FIXED
+  const [seedFixed, setSeedFixed] = useState(12345);
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
@@ -52,7 +60,12 @@ export function VideoFromPromptPanel({ userStatus }) {
   // Poll control refs
   const pollTimerRef = useRef(null);
   const progTimerRef = useRef(null);
-  const currentParamsRef = useRef({ steps: 25, numFrames: 72, durationSec: 3, fps: 24 });
+  const currentParamsRef = useRef({
+    steps: 18,
+    numFrames: 49,
+    durationSec: 3,
+    fps: 16,
+  });
 
   // ==========================================================
   // Prompt Optimizer
@@ -133,6 +146,35 @@ export function VideoFromPromptPanel({ userStatus }) {
   const setDuration5 = () => setDurationSec(5);
 
   // ---------------------------
+  // WAN frame helpers (49/81)
+  // ---------------------------
+  function clampInt(v, lo, hi, def) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return def;
+    const r = Math.round(n);
+    return Math.max(lo, Math.min(hi, r));
+  }
+
+  function fixFramesForWan(numFrames) {
+    let nf = Math.max(5, Math.round(Number(numFrames) || 0));
+    const r = (nf - 1) % 4;
+    if (r === 0) return nf;
+    return nf + (4 - r);
+  }
+
+  function clampFloat(v, lo, hi, def) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return def;
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  function getSeedForRequest() {
+    if (seedMode === "FIXED") return clampInt(seedFixed, 0, 2147483647, 12345);
+    // random estable y corto (no enorme)
+    return Math.floor(Date.now() % 2147483647);
+  }
+
+// ---------------------------
   // Progress helpers (front-only estimation)
   // ---------------------------
   function isFetchDisconnectError(e) {
@@ -148,9 +190,9 @@ export function VideoFromPromptPanel({ userStatus }) {
 
   function getExpectedSeconds() {
     const p = currentParamsRef.current || {};
-    const f = Number(p.numFrames || 72);
-    // Estimación UI simple por frames (sin tocar backend)
-    const est = 40 + f * 1.4; // ~140s para 72 frames
+    const f = Number(p.numFrames || 49);
+    // Estimación UI simple por frames
+    const est = 40 + f * 1.4;
     return Math.max(50, Math.min(420, est));
   }
 
@@ -206,7 +248,6 @@ export function VideoFromPromptPanel({ userStatus }) {
           setVideoUrl(j.video_url);
           return;
         }
-        // si el backend ya marcó DONE pero aún no mandó url
         setStatusText("Video terminado.");
         return;
       }
@@ -311,13 +352,25 @@ export function VideoFromPromptPanel({ userStatus }) {
       setStatusText("Enviando job...");
 
       const auth = await getAuthHeaders();
-      const numFrames = Math.max(1, Math.round(Number(durationSec) * fps));
 
-      // keep params for progress estimate (T2V no steps aquí)
-      currentParamsRef.current = { numFrames, durationSec: Number(durationSec), fps: Number(fps) };
+      // ✅ WAN frames: 3s => 49, 5s => 81 (con fps=16)
+      const rawFrames = Math.max(1, Math.round(Number(durationSec) * fps));
+      const numFrames = fixFramesForWan(rawFrames);
+
+      // keep params for progress estimate
+      currentParamsRef.current = {
+        steps: clampInt(steps, 1, 80, 18),
+        numFrames,
+        durationSec: Number(durationSec),
+        fps: Number(fps),
+      };
 
       // ✅ Solo manda ratio si el usuario marcó 9:16
       const aspect_ratio = useNineSixteen ? "9:16" : "";
+
+      const gs = clampFloat(guidanceScale, 1.0, 10.0, 5.0);
+      const stp = clampInt(steps, 1, 80, 18);
+      const seed = getSeedForRequest();
 
       const { r, j } = await safeFetchJson("/api/generate-video", {
         method: "POST",
@@ -330,6 +383,12 @@ export function VideoFromPromptPanel({ userStatus }) {
           duration_s: Number(durationSec),
           fps,
           num_frames: numFrames,
+
+          // ✅ en sintonía con worker
+          steps: stp,
+          guidance_scale: gs,
+          seed,
+
           already_billed: false,
           used_optimized: usingOptimized,
         }),
@@ -474,9 +533,78 @@ export function VideoFromPromptPanel({ userStatus }) {
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
-              fps: {fps} · frames aprox: {Math.round(Number(durationSec) * fps)}
+              fps: {fps} · frames WAN: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
             </div>
           </div>
+        </div>
+
+        {/* ✅ Calidad / estabilidad WAN (mínimo, sin complicarte UI) */}
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Steps</div>
+            <input
+              type="number"
+              min={1}
+              max={80}
+              value={steps}
+              onChange={(e) => setSteps(Number(e.target.value))}
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+            <div className="mt-2 text-[10px] text-neutral-500">Default recomendado: 18</div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Guidance (CFG)</div>
+            <input
+              type="number"
+              step="0.5"
+              min={1}
+              max={10}
+              value={guidanceScale}
+              onChange={(e) => setGuidanceScale(Number(e.target.value))}
+              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+            <div className="mt-2 text-[10px] text-neutral-500">Default recomendado: 5</div>
+          </div>
+        </div>
+
+        {/* ✅ Seed simple */}
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+          <div className="text-xs text-neutral-300">Seed</div>
+          <div className="mt-2 flex items-center gap-3">
+            <input
+              id="t2v_seed_random"
+              type="checkbox"
+              checked={seedMode === "RANDOM"}
+              onChange={(e) => (e.target.checked ? setSeedMode("RANDOM") : null)}
+              className="h-4 w-4"
+            />
+            <label htmlFor="t2v_seed_random" className="text-[12px] text-neutral-200">
+              Random (recomendado)
+            </label>
+
+            <input
+              id="t2v_seed_fixed"
+              type="checkbox"
+              checked={seedMode === "FIXED"}
+              onChange={(e) => (e.target.checked ? setSeedMode("FIXED") : null)}
+              className="ml-4 h-4 w-4"
+            />
+            <label htmlFor="t2v_seed_fixed" className="text-[12px] text-neutral-200">
+              Fixed
+            </label>
+          </div>
+
+          {seedMode === "FIXED" && (
+            <input
+              type="number"
+              min={0}
+              max={2147483647}
+              value={seedFixed}
+              onChange={(e) => setSeedFixed(Number(e.target.value))}
+              className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            />
+          )}
         </div>
 
         <div className="mt-4">
