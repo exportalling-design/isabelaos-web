@@ -6,7 +6,7 @@ import ContactView from "./components/ContactView";
 // ✅ nuevos imports de panels (si antes estaban embebidos, ahora vienen desde components)
 import { VideoFromPromptPanel } from "./components/VideoFromPromptPanel";
 import { Img2VideoPanel } from "./components/Img2VideoPanel";
-
+import VoiceToVideoPanel from "./components/VoiceToVideoPanel";
 import { supabase } from "./lib/supabaseClient";
 
 import {
