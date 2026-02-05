@@ -1627,6 +1627,7 @@ function DashboardView() {
               ["generator", "Motor de imagen"],
               ["video_prompt", "Motor de video"],
               ["img2video", "Imagen → Video"],
+              ["voice2video", "Voz → Video (Beta)"],
               ["library", "Biblioteca"],
               ["headshot", "📸 Headshot Pro"],
               ["subscribe", "Suscribirse"],
@@ -1655,6 +1656,7 @@ function DashboardView() {
               ["generator", "Motor de imagen (render)"],
               ["video_prompt", "Motor de video (clips)"],
               ["img2video", "Transformación Imagen → Video"],
+              ["voice2video", "Voz → Video (Beta)"],
               ["library", "Biblioteca de producción"],
               ["headshot", "📸 Headshot Pro (Premium)"],
               ["subscribe", "Suscribirse"],
@@ -1684,7 +1686,8 @@ function DashboardView() {
 
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
-            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
+            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />} 
+            {appViewMode === "voice2video" && <VoiceToVideoPanel userStatus={userStatus} />}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
