@@ -319,3 +319,23 @@ export async function getTodayGenerationCount(userId: string) {
 
   return count ?? 0;
 }
+
+// ---------------------------------------------------------
+// COMPAT: exports viejos para no romper App.jsx
+// ---------------------------------------------------------
+export async function loadGenerationsForUser(userId: string) {
+  // Antes traía solo imágenes.
+  // Ahora devolvemos la librería completa (imágenes + videos)
+  return loadLibraryForUser(userId);
+}
+
+export async function deleteGenerationFromSupabase(id: string, userId: string) {
+  // Compat: borra solo filas DB (imágenes)
+  const { error } = await supabase
+    .from("generations")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  return !error;
+}
