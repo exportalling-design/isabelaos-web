@@ -9,7 +9,6 @@
 // ---------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
-import { useJobTracker } from "../lib/JobTrackerContext";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import { COSTS } from "../lib/pricing";
@@ -150,7 +149,7 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-// ---------------------------
+  // ---------------------------
   // Base64 helper
   // ---------------------------
   const fileToBase64 = (file) =>
@@ -234,7 +233,7 @@ export function Img2VideoPanel({ userStatus }) {
     return Math.floor(Date.now() % 2147483647);
   }
 
-// ---------------------------
+  // ---------------------------
   // Progress helpers (front-only estimation)
   // ---------------------------
   function isFetchDisconnectError(e) {
@@ -399,12 +398,15 @@ export function Img2VideoPanel({ userStatus }) {
     return () => stopPolling();
   }, []);
 
-// ---------------------------
+  // ---------------------------
   // Generate
   // ---------------------------
   async function handleGenerate() {
     if (lockRef.current) return;
     lockRef.current = true;
+
+    // ✅ FIX: guardamos el jid recién creado en variable local (por race del state jobId)
+    let jidLocal = null;
 
     try {
       setError("");
@@ -420,6 +422,13 @@ export function Img2VideoPanel({ userStatus }) {
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
         if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
         await handleOptimize();
+
+        // ✅ FIX: si falló optimización y el prompt quedó vacío, paramos
+        if (!optimizedPrompt?.trim() && !prompt?.trim()) {
+          return setErrorState(
+            "Optimization failed and prompt is empty. Type a prompt or disable optimized prompt."
+          );
+        }
       }
 
       const { finalPrompt, finalNegative } = getEffectivePrompts();
@@ -480,22 +489,23 @@ export function Img2VideoPanel({ userStatus }) {
         throw new Error(j?.error || "Could not create Image → Video job.");
       }
 
-      const jid = j.job_id;
-      setJobId(jid);
+      jidLocal = j.job_id; // ✅ FIX
+      setJobId(jidLocal);
       setStatus("IN_PROGRESS");
-      setStatusText(`Generating... Job: ${jid}`);
+      setStatusText(`Generating... Job: ${jidLocal}`);
       setProgress(3);
 
       // ✅ FIX: obtener started_at real antes de startPolling
       await new Promise((t) => setTimeout(t, 700));
-      const stData = await pollVideoStatus(jid);
+      const stData = await pollVideoStatus(jidLocal);
       if (stData?.job) setLastKnownJob(stData.job);
 
       const startedAt = stData?.job?.started_at || null;
       if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
-      startPolling(jid, startedAt);
+      startPolling(jidLocal, startedAt);
     } catch (e) {
-      if (isFetchDisconnectError(e) && jobId) {
+      // ✅ FIX: si el error fue disconnect, usamos jidLocal (por race del state jobId)
+      if (isFetchDisconnectError(e) && (jidLocal || jobId)) {
         setNeedsManualRefresh(true);
         setStatus("IN_PROGRESS");
         setStatusText("Connection lost.");
