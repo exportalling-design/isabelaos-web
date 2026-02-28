@@ -210,14 +210,19 @@ export default async function handler(req, res) {
     const rp = await runpodRun({ endpointId, input: rpInput });
     const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
 
+    // ✅ NEW: guardamos started_at para devolverlo al frontend (mejora polling/progreso)
+    let startedAtIso = null;
+
     if (runpodId) {
+      startedAtIso = new Date().toISOString();
+
       await supabaseAdmin
         .from("video_jobs")
         .update({
           provider_request_id: String(runpodId),
           provider_status: "submitted",
           status: "IN_PROGRESS",
-          started_at: new Date().toISOString(),
+          started_at: startedAtIso,
         })
         .eq("id", jobId);
     }
@@ -226,6 +231,7 @@ export default async function handler(req, res) {
       ok: true,
       job_id: jobId,
       provider_request_id: runpodId,
+      started_at: startedAtIso, // ✅ NEW
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Server error" });
