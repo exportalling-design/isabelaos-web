@@ -25,7 +25,7 @@ import { startPaypalSubscription } from "./lib/PaypalCheckout";
 // ---------------------------------------------------------
 // LÍMITES GLOBALES
 // ---------------------------------------------------------
-const DEMO_LIMIT = 3; // Invitado
+const DEMO_LIMIT = 5; // ✅ Invitado (se mantiene para UI/labels, pero ahora el demo de landing fuerza Google)
 const DAILY_LIMIT = 5; // Beta gratis (logueado)
 
 // ---------------------------------------------------------
@@ -47,6 +47,21 @@ const PAYPAL_CLIENT_ID =
 // ---------------------------------------------------------
 const PAYPAL_PLAN_ID_BASIC = import.meta.env.VITE_PAYPAL_PLAN_ID_BASIC || "";
 const PAYPAL_PLAN_ID_PRO = import.meta.env.VITE_PAYPAL_PLAN_ID_PRO || "";
+
+// ---------------------------------------------------------
+// ✅ Demo prompt handoff (Landing -> Creator)
+// ---------------------------------------------------------
+const DEMO_PROMPT_KEY = "isabela_demo_prompt_text2img";
+
+function saveDemoPrompt(prompt) {
+  try { localStorage.setItem(DEMO_PROMPT_KEY, String(prompt || "")); } catch {}
+}
+function readDemoPrompt() {
+  try { return localStorage.getItem(DEMO_PROMPT_KEY) || ""; } catch { return ""; }
+}
+function clearDemoPrompt() {
+  try { localStorage.removeItem(DEMO_PROMPT_KEY); } catch {}
+}
 
 // ---------------------------------------------------------
 // Helper scroll suave
@@ -375,6 +390,97 @@ function AuthModal({ open, onClose }) {
 }
 
 // ---------------------------------------------------------
+// ✅ Modal simple: “Regístrate con Google” (solo para landing demo)
+// ---------------------------------------------------------
+function GoogleOnlyModal({ open, onClose, onGoogle }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-black/90 p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Regístrate con Google</h3>
+          <button onClick={onClose} className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10">
+            ✕
+          </button>
+        </div>
+
+        <p className="mt-2 text-xs text-neutral-400">
+          Para ejecutar el demo, crea tu cuenta con Google. Al entrar recibirás tus{" "}
+          <span className="text-white font-semibold">10 jades gratis</span>.
+        </p>
+
+        <button
+          onClick={onGoogle}
+          className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.35)]"
+        >
+          Registrarme con Google
+        </button>
+
+        <button
+          onClick={onClose}
+          className="mt-3 w-full rounded-2xl border border-white/20 py-3 text-sm text-white hover:bg-white/10"
+        >
+          Cancelar
+        </button>
+
+        <p className="mt-3 text-[10px] text-neutral-500">
+          IsabelaOS Studio usa pipeline propio y ejecución directa en GPU (no “apikeys” de otros generadores).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// ✅ Collage de 5 videos (landing)
+// ---------------------------------------------------------
+function VideoCollage() {
+  const vids = [
+    "/gallery/video1.mp4?v=2",
+    "/gallery/video2.mp4?v=2",
+    "/gallery/video3.mp4?v=2",
+    "/gallery/video4.mp4?v=2",
+    "/gallery/video5.mp4?v=2",
+  ];
+
+  return (
+    <div className="mt-5 grid gap-3 rounded-3xl border border-white/10 bg-black/35 p-4 shadow-[0_0_60px_rgba(34,211,238,0.08)]">
+      <div className="grid gap-3 lg:grid-cols-12">
+        {/* Square */}
+        <div className="lg:col-span-4 overflow-hidden rounded-2xl border border-white/10 bg-black/60 aspect-square">
+          <video src={vids[0]} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+        </div>
+
+        {/* 9:16 vertical */}
+        <div className="lg:col-span-3 overflow-hidden rounded-2xl border border-white/10 bg-black/60 aspect-[9/16]">
+          <video src={vids[1]} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+        </div>
+
+        {/* Wide */}
+        <div className="lg:col-span-5 overflow-hidden rounded-2xl border border-white/10 bg-black/60 aspect-video">
+          <video src={vids[2]} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+        </div>
+
+        {/* 9:16 vertical */}
+        <div className="lg:col-span-3 overflow-hidden rounded-2xl border border-white/10 bg-black/60 aspect-[9/16]">
+          <video src={vids[3]} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+        </div>
+
+        {/* Square */}
+        <div className="lg:col-span-9 overflow-hidden rounded-2xl border border-white/10 bg-black/60 aspect-[16/9]">
+          <video src={vids[4]} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+        </div>
+      </div>
+
+      <div className="mt-2 text-[10px] text-neutral-500">
+        Clips en autoplay (demo). Los archivos se cargan desde /gallery/*.mp4.
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
 // CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN (CORREGIDO: plan/jades)
 // - No depende de useAuth().profile
 // - Lee profiles(plan, jade_balance) directo de Supabase
@@ -384,6 +490,9 @@ function AuthModal({ open, onClose }) {
 // - Botón "Optimizar con IA" + toggle "Usar prompt optimizado para generar"
 // - Muestra prompt/negative optimizados pequeños abajo
 // - Si está activo y está stale, se re-optimiza al generar
+//
+// ✅ NUEVO:
+// - Si vienes desde landing con DEMO_PROMPT_KEY, prefill del prompt y lo limpia.
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -407,6 +516,21 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   // ✅ Perfil (profiles)
   const [profilePlan, setProfilePlan] = useState("free");
   const [profileJades, setProfileJades] = useState(0);
+
+  // ---------------------------------------------------------
+  // ✅ Prefill prompt desde landing demo (solo cuando estás logueado)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!userLoggedIn) return;
+    try {
+      const p = readDemoPrompt();
+      if (p?.trim()) {
+        setPrompt(p);
+        clearDemoPrompt();
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLoggedIn]);
 
   // ---------------------------------------------------------
   // ✅ Optimizador de prompt (UI estilo VIDEO)
@@ -1759,6 +1883,9 @@ function PricingSection({ onOpenAuth }) {
 // Landing (no sesión) + demo
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
+  // ✅ NUEVO: demo prompt en landing (y forzar Google modal)
+  const [demoPrompt, setDemoPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
+
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -1831,48 +1958,96 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
 
             <p className="mt-3 max-w-xl text-xs text-neutral-400">
               No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo
-              de producción visual.
+              de producción visual. <strong>Pipeline propio</strong> (infraestructura + workers + render) ejecutado
+              directamente en GPU: <strong>no dependemos de “apikeys” de otros generadores</strong>.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
-                onClick={onStartDemo}
+                onClick={() => {
+                  // ✅ ahora “probar el motor” abre el demo de prompt (y fuerza Google al generar)
+                  scrollToId("demo-box");
+                }}
                 className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
               >
-                Probar el motor ({DEMO_LIMIT} outputs)
+                Probar el motor (demo)
               </button>
               <p className="max-w-xs text-[11px] text-neutral-400">
-                Luego crea tu cuenta para desbloquear {DAILY_LIMIT} renders diarios y biblioteca.
+                Escribe tu prompt y ejecuta el demo. Al generar, te pedirá registrarte con Google.
               </p>
             </div>
           </div>
 
-          <div className="relative order-first lg:order-last">
+          {/* ✅ NUEVO: Cuadro demo con imágenes difuminadas + rayos neón */}
+          <div id="demo-box" className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            <h2 className="text-sm font-semibold text-white mb-3">Calidad de estudio · Render del motor actual</h2>
+            {/* Neon rays */}
+            <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
+              <div className="absolute -top-24 left-1/3 h-96 w-[2px] rotate-12 bg-gradient-to-b from-cyan-400/0 via-cyan-300/60 to-fuchsia-400/0 blur-[0.5px]" />
+              <div className="absolute -top-10 left-[65%] h-80 w-[2px] -rotate-12 bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-300/55 to-yellow-300/0 blur-[0.5px]" />
+              <div className="absolute bottom-0 left-[15%] h-72 w-[2px] rotate-[18deg] bg-gradient-to-b from-yellow-300/0 via-yellow-200/45 to-cyan-300/0 blur-[0.5px]" />
+            </div>
 
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            {/* Blurred gallery images behind */}
+            <div className="pointer-events-none absolute inset-0 -z-10 opacity-60">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
                 <div
                   key={p}
-                  className={`rounded-2xl border border-white/10 overflow-hidden shadow-xl ${
-                    i % 2 === 0 ? "shadow-fuchsia-500/10" : "shadow-cyan-500/10"
-                  }`}
-                >
-                  <img src={`/gallery/${p}?v=2`} alt={p} className="w-full h-auto object-cover" />
-                </div>
+                  className="absolute rounded-3xl border border-white/10"
+                  style={{
+                    width: i % 2 === 0 ? 340 : 400,
+                    height: i % 2 === 0 ? 220 : 240,
+                    left: i === 0 ? "-30px" : i === 1 ? "52%" : i === 2 ? "8%" : "58%",
+                    top: i === 0 ? "18%" : i === 1 ? "8%" : i === 2 ? "62%" : "55%",
+                    transform: `rotate(${i === 0 ? -10 : i === 1 ? 8 : i === 2 ? 10 : -6}deg)`,
+                    backgroundImage: `url(/gallery/${p}?v=2)`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    filter: "blur(10px)",
+                    opacity: 0.45,
+                  }}
+                />
               ))}
             </div>
 
+            <h2 className="text-sm font-semibold text-white mb-3">Demo · Genera una imagen (prompt positivo)</h2>
+
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/45 p-5 backdrop-blur-md shadow-xl">
+              <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/16 via-transparent to-fuchsia-500/16 blur-3xl" />
+
+              <textarea
+                className="mt-1 h-28 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                value={demoPrompt}
+                onChange={(e) => setDemoPrompt(e.target.value)}
+                placeholder="Escribe tu prompt positivo..."
+              />
+
+              <button
+                onClick={() => {
+                  saveDemoPrompt(demoPrompt);
+                  onStartDemo(); // ✅ ahora onStartDemo abre modal Google (definido en Root App)
+                }}
+                disabled={!demoPrompt.trim()}
+                className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                Generar imagen (demo)
+              </button>
+
+              <div className="mt-3 text-[11px] text-neutral-400">
+                Al generar te pedirá registrarte con Google y entrarás directo al panel con{" "}
+                <span className="text-white font-semibold">10 jades gratis</span>.
+              </div>
+            </div>
+
             <p className="mt-3 text-[10px] text-neutral-500">
-              IsabelaOS Studio · motor de producción visual con IA desarrollado en Guatemala.
+              IsabelaOS Studio · pipeline propio · ejecución directa en GPU · desarrollado en Guatemala.
             </p>
           </div>
         </section>
 
         {/* ---------------------------------------------------------
-            NUEVO: Videos en Home (entre texto y planes)
+            NUEVO: Videos en Home (entre texto y planes) ✅ collage 5
            --------------------------------------------------------- */}
         <section className="mt-12">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1891,7 +2066,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
 
             <div className="mt-3 sm:mt-0">
               <button
-                onClick={onStartDemo}
+                onClick={() => scrollToId("demo-box")}
                 className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
               >
                 Probar el motor ahora
@@ -1899,57 +2074,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {[
-              {
-                src: "/gallery/video1.mp4?v=2",
-                title: "Video Demo 1",
-                desc: "Generación de video desde prompt (beta).",
-              },
-              {
-                src: "/gallery/video2.mp4?v=2",
-                title: "Video Demo 2",
-                desc: "Prueba de consistencia visual (beta).",
-              },
-            ].map((v) => (
-              <div
-                key={v.src}
-                className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/35 shadow-[0_0_60px_rgba(34,211,238,0.08)]"
-              >
-                <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/14 via-transparent to-fuchsia-500/16 blur-3xl" />
-
-                <div className="relative">
-                  <video
-                    className="w-full aspect-video object-cover"
-                    src={v.src}
-                    controls
-                    playsInline
-                    preload="metadata"
-                  />
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
-
-                  <div className="absolute left-4 top-4">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-1 text-[10px] font-semibold text-white">
-                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                      Demo real
-                    </span>
-                  </div>
-
-                  <div className="absolute bottom-3 left-4 right-4">
-                    <div className="flex items-end justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-white">{v.title}</div>
-                        <div className="text-[11px] text-neutral-200/80">{v.desc}</div>
-                      </div>
-                      <div className="hidden sm:block text-[10px] text-neutral-300/80">
-                        /gallery/{v.title === "Video Demo 1" ? "video1.mp4" : "video2.mp4"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <VideoCollage />
         </section>
 
         {/* ✅ Planes (se queda en Home) */}
@@ -1969,18 +2094,35 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
 // Root App
 // ---------------------------------------------------------
 export default function App() {
-  const { user } = useAuth();
+  const { user, signInWithGoogle } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
   // ✅ NUEVO: navegación simple en landing
   const [landingPage, setLandingPage] = useState("home"); // "home" | "contact"
 
+  // ✅ NUEVO: modal Google-only para el demo
+  const [googleModalOpen, setGoogleModalOpen] = useState(false);
+
   if (user) return <DashboardView />;
 
   return (
     <>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* ✅ NUEVO: modal dedicado */}
+      <GoogleOnlyModal
+        open={googleModalOpen}
+        onClose={() => setGoogleModalOpen(false)}
+        onGoogle={async () => {
+          try {
+            await signInWithGoogle();
+            setGoogleModalOpen(false);
+          } catch (e) {
+            alert(e?.message || "No se pudo iniciar con Google.");
+          }
+        }}
+      />
 
       {demoMode ? (
         <div className="min-h-screen bg-neutral-950 text-white">
@@ -2006,7 +2148,7 @@ export default function App() {
           {landingPage === "home" && (
             <LandingView
               onOpenAuth={() => setAuthOpen(true)}
-              onStartDemo={() => setDemoMode(true)}
+              onStartDemo={() => setGoogleModalOpen(true)}   // ✅ CAMBIO: ahora el demo de landing abre Google-only
               onOpenContact={() => setLandingPage("contact")}
             />
           )}
@@ -2019,5 +2161,3 @@ export default function App() {
     </>
   );
 }
-
-
