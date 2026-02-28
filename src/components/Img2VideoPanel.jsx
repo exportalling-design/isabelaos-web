@@ -16,6 +16,9 @@ import { COSTS } from "../lib/pricing";
 export function Img2VideoPanel({ userStatus }) {
   const { user } = useAuth();
 
+  // ✅ Persist key (per user)
+  const STORAGE_KEY = user?.id ? `i2v_job_state_${user.id}` : "i2v_job_state_guest";
+
   // ---------------------------
   // Inputs
   // ---------------------------
@@ -305,18 +308,29 @@ export function Img2VideoPanel({ userStatus }) {
     }
   }
 
-  async function refreshStatusOnce() {
-    if (!jobId) return;
+  // ✅ helper: clear persisted state
+  function clearPersistedJob() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function refreshStatusOnce(overrideJobId = null) {
+    const jid = overrideJobId || jobId;
+    if (!jid) return;
+
     try {
       setNeedsManualRefresh(false);
       setError("");
 
-      const stData = await pollVideoStatus(jobId);
+      const stData = await pollVideoStatus(jid);
       const st = stData?.status || "IN_PROGRESS";
 
       if (stData?.job) setLastKnownJob(stData.job);
 
-      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(st)) {
+      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(String(st).toUpperCase())) {
         const url = stData.video_url || stData.output?.video_url || stData.output?.videoUrl || null;
         if (url) {
           setVideoUrl(url);
@@ -324,21 +338,24 @@ export function Img2VideoPanel({ userStatus }) {
           setStatusText("Video ready.");
           setProgress(100);
           stopPolling();
+          clearPersistedJob(); // ✅ clear when finished
           return;
         }
         setStatus("DONE");
         setStatusText("Finished.");
         setProgress(100);
         stopPolling();
+        clearPersistedJob(); // ✅ clear when finished
         return;
       }
 
-      if (st === "FAILED") {
+      if (String(st).toUpperCase() === "FAILED") {
         setStatus("FAILED");
         setStatusText("Failed.");
         setError(stData?.error || "Generation failed.");
         setProgress(0);
         stopPolling();
+        clearPersistedJob(); // ✅ clear when failed
         return;
       }
 
@@ -376,17 +393,104 @@ export function Img2VideoPanel({ userStatus }) {
       if (needsManualRefresh) return;
 
       if (tick <= 8) {
-        await refreshStatusOnce();
+        await refreshStatusOnce(job_id);
       } else {
-        if (tick % 3 === 0) await refreshStatusOnce();
+        if (tick % 3 === 0) await refreshStatusOnce(job_id);
       }
     }, 2000);
   }
 
+  // ✅ Persist job state (survive panel switching)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const payload = {
+      jobId,
+      status,
+      statusText,
+      progress,
+      needsManualRefresh,
+      lastKnownJob,
+      videoUrl,
+      error,
+      currentParams: currentParamsRef.current,
+      savedAt: new Date().toISOString(),
+    };
+
+    try {
+      // only persist if there is a job in play or result
+      if (payload.jobId || payload.videoUrl || payload.status === "IN_PROGRESS" || payload.status === "STARTING") {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      }
+    } catch {
+      // ignore
+    }
+  }, [
+    user?.id,
+    jobId,
+    status,
+    statusText,
+    progress,
+    needsManualRefresh,
+    lastKnownJob,
+    videoUrl,
+    error,
+    STORAGE_KEY,
+  ]);
+
+  // ✅ Restore job state on mount (resume progress/polling)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      const saved = JSON.parse(raw);
+
+      if (saved?.currentParams) currentParamsRef.current = saved.currentParams;
+
+      if (saved?.jobId) setJobId(saved.jobId);
+      if (saved?.status) setStatus(saved.status);
+      if (saved?.statusText) setStatusText(saved.statusText || "");
+      if (typeof saved?.progress === "number") setProgress(saved.progress);
+      if (typeof saved?.needsManualRefresh === "boolean") setNeedsManualRefresh(saved.needsManualRefresh);
+      if (saved?.lastKnownJob) setLastKnownJob(saved.lastKnownJob);
+      if (saved?.videoUrl) setVideoUrl(saved.videoUrl);
+      if (saved?.error) setError(saved.error);
+
+      const wasRunning =
+        saved?.jobId &&
+        (saved?.status === "IN_PROGRESS" || saved?.status === "STARTING" || saved?.needsManualRefresh);
+
+      if (wasRunning) {
+        setTimeout(async () => {
+          try {
+            const stData = await pollVideoStatus(saved.jobId);
+            if (stData?.job) setLastKnownJob(stData.job);
+
+            const startedAt = stData?.job?.started_at || saved?.lastKnownJob?.started_at || null;
+            if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+
+            setStatus("IN_PROGRESS");
+            setStatusText(`Status: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`);
+            startPolling(saved.jobId, startedAt);
+          } catch {
+            setNeedsManualRefresh(true);
+          }
+        }, 300);
+      }
+    } catch {
+      // ignore
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible" && jobId) {
-        refreshStatusOnce();
+        refreshStatusOnce(jobId);
       }
     };
     document.addEventListener("visibilitychange", onVis);
@@ -422,13 +526,6 @@ export function Img2VideoPanel({ userStatus }) {
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
         if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
         await handleOptimize();
-
-        // ✅ FIX: si falló optimización y el prompt quedó vacío, paramos
-        if (!optimizedPrompt?.trim() && !prompt?.trim()) {
-          return setErrorState(
-            "Optimization failed and prompt is empty. Type a prompt or disable optimized prompt."
-          );
-        }
       }
 
       const { finalPrompt, finalNegative } = getEffectivePrompts();
@@ -529,7 +626,7 @@ export function Img2VideoPanel({ userStatus }) {
   };
 
   const handleUpdateStatus = async () => {
-    await refreshStatusOnce();
+    await refreshStatusOnce(jobId);
   };
 
   if (!user) {
@@ -563,7 +660,9 @@ export function Img2VideoPanel({ userStatus }) {
             <div className="mt-3">
               <div className="flex items-center justify-between text-[10px] text-neutral-400">
                 <span>Progress</span>
-                <span className="text-neutral-300">{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
+                <span className="text-neutral-300">
+                  {Math.max(0, Math.min(100, Number(progress) || 0))}%
+                </span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
                 <div
@@ -572,7 +671,6 @@ export function Img2VideoPanel({ userStatus }) {
                 />
               </div>
 
-              {/* ✅ small but visible ETA under bar */}
               <div className="mt-2 text-[11px] text-neutral-300">{getEtaText()}</div>
 
               {needsManualRefresh && (
@@ -664,7 +762,13 @@ export function Img2VideoPanel({ userStatus }) {
               {dataUrl ? "Change image" : "Click to upload an image"}
             </button>
 
-            <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            <input
+              id={fileInputId}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
 
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
@@ -744,7 +848,6 @@ export function Img2VideoPanel({ userStatus }) {
             {optError && <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>}
           </div>
 
-          {/* ✅ WAN Quality Controls */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <label className="text-neutral-300">Steps</label>
@@ -802,7 +905,6 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
           </div>
 
-          {/* ✅ Seed simple */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Seed</div>
             <div className="mt-2 flex items-center gap-3">
