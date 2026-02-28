@@ -9,6 +9,7 @@
 // ---------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
+import { useJobTracker } from "../lib/JobTrackerContext";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import { COSTS } from "../lib/pricing";
