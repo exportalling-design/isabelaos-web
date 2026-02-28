@@ -17,10 +17,6 @@ import { COSTS } from "../lib/pricing";
 export function Img2VideoPanel({ userStatus }) {
   const { user } = useAuth();
 
-  // ✅ Global job tracker (persiste entre pestañas/módulos)
-  const { activeJob, status: trackedStatus, error: trackedError, setJob: setTrackedJob, clearJob: clearTrackedJob } =
-    useJobTracker();
-  
   // ---------------------------
   // Inputs
   // ---------------------------
