@@ -1,10 +1,9 @@
-
-// pages/api/generate-headshot.js
+// api/generate-headshot.js
 // Lanza un job "headshot_pro" en RunPod (Serverless)
 // + AUTH UNIFICADO (requireUser)
 // + COBRO UNIFICADO (spend_jades) ANTES de generar
 
-import { requireUser } from "../../api/_auth";
+import { requireUser } from "./_auth.js"; // ✅ FIXED IMPORT
 
 // =====================
 // COSTOS (JADE)
@@ -64,23 +63,33 @@ export default async function handler(req, res) {
   }
 
   try {
+    // =====================
     // AUTH
+    // =====================
     const auth = await requireUser(req);
     if (!auth.ok) {
-      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+      return res.status(auth.code || 401).json({
+        ok: false,
+        error: auth.error,
+      });
     }
 
     const user_id = auth.user.id;
     const body = req.body || {};
 
     if (!body.image_b64) {
-      return res.status(400).json({ ok: false, error: "Falta image_b64 en el cuerpo." });
+      return res.status(400).json({
+        ok: false,
+        error: "Falta image_b64 en el cuerpo.",
+      });
     }
 
     const image_b64 = body.image_b64;
     const style = body.style || "corporate"; // corporate | influencer | creative
 
-    // COBRO
+    // =====================
+    // COBRO JADE
+    // =====================
     await spendJadesOrThrow(
       user_id,
       COST_HEADSHOT_JADES,
@@ -135,6 +144,7 @@ export default async function handler(req, res) {
     const msg = err?.message || String(err);
     const code = err?.code || 500;
     console.error("Error en /api/generate-headshot:", err);
+
     return res.status(code).json({
       ok: false,
       error: msg,
