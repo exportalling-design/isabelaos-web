@@ -10,6 +10,9 @@ export default function HeadshotProPanel({ userStatus }) {
   const [jobId, setJobId] = useState("");
   const [jadesLocal, setJadesLocal] = useState(null);
 
+  // ✅ NUEVO: modo
+  const [mode, setMode] = useState("product_studio"); // product_studio | anime_identity
+
   const jadesShown = useMemo(() => {
     const base = typeof userStatus?.jades === "number" ? userStatus.jades : 0;
     return typeof jadesLocal === "number" ? jadesLocal : base;
@@ -33,7 +36,7 @@ export default function HeadshotProPanel({ userStatus }) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  async function pollJob(jobIdToPoll, maxSeconds = 90) {
+  async function pollJob(jobIdToPoll, maxSeconds = 120) {
     const started = Date.now();
     while (true) {
       if ((Date.now() - started) / 1000 > maxSeconds) {
@@ -53,7 +56,6 @@ export default function HeadshotProPanel({ userStatus }) {
         return data.image_data_url;
       }
 
-      // sigue procesando
       await sleep(1500);
     }
   }
@@ -72,38 +74,39 @@ export default function HeadshotProPanel({ userStatus }) {
       const b64 = String(dataUrl).includes("base64,") ? String(dataUrl).split("base64,")[1] : "";
       if (!b64) throw new Error("No pude extraer base64 de la imagen.");
 
-      // 1) lanzar job
+      // Defaults por modo (para que se note y mantenga identidad)
+      const defaults =
+        mode === "anime_identity"
+          ? { strength: 0.55, steps: 32, guidance: 7.5, max_side: 768 }
+          : { strength: 0.38, steps: 30, guidance: 6.5, max_side: 768 };
+
       const r = await fetch("/api/generate-headshot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: b64,
-          style: "corporate",
-          ref: `headshotpro-${Date.now()}`,
-          // opcionales si tu worker los usa:
-          strength: 0.2,
-          steps: 20,
-          guidance: 5.0,
-          max_side: 768,
+          mode, // ✅ NUEVO
+          ref: `headshotpro-${mode}-${Date.now()}`,
+
+          // params:
+          ...defaults,
         }),
       });
 
       const data = await r.json().catch(() => null);
-      if (!r.ok || !data?.ok) throw new Error(data?.error || "Headshot error");
+      if (!r.ok || !data?.ok) throw new Error(data?.error || "Error");
 
       if (!data.jobId) throw new Error("Backend no devolvió jobId.");
-
       setJobId(data.jobId);
 
-      // reflejar cobro UI (el cobro real ya lo hace tu backend)
+      // UI: reflejar cobro
       const billedAmount = data?.billed?.amount ?? COST_JADES;
       setJadesLocal((prev) => {
         const base = typeof prev === "number" ? prev : (typeof userStatus?.jades === "number" ? userStatus.jades : 0);
         return Math.max(0, base - billedAmount);
       });
 
-      // 2) polling hasta obtener imagen
-      const img = await pollJob(data.jobId, 120);
+      const img = await pollJob(data.jobId, 140);
       setResultUrl(img);
       setStatus("DONE");
     } catch (e) {
@@ -133,13 +136,24 @@ export default function HeadshotProPanel({ userStatus }) {
           className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none"
         />
 
+        {/* ✅ NUEVO: selector de modo (sin cambiar App.jsx) */}
+        <label className="text-xs text-neutral-300 mt-2">Modo</label>
+        <select
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none"
+        >
+          <option value="product_studio">Product Studio (Premium)</option>
+          <option value="anime_identity">Anime Identity (mantiene rostro)</option>
+        </select>
+
         <button
           type="button"
           disabled={!imageUrl || status === "RUNNING"}
           onClick={run}
           className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {status === "RUNNING" ? "Generando..." : `Generar Headshot (−${COST_JADES})`}
+          {status === "RUNNING" ? "Generando..." : `Generar (−${COST_JADES})`}
         </button>
 
         {jobId ? (
@@ -159,7 +173,7 @@ export default function HeadshotProPanel({ userStatus }) {
             <p className="text-xs text-neutral-400 mb-2">Resultado</p>
             <img
               src={resultUrl}
-              alt="headshot"
+              alt="result"
               className="w-full rounded-2xl border border-white/10"
               onError={() => {
                 setError("El navegador no pudo renderizar la imagen (dataURL inválido).");
@@ -172,4 +186,4 @@ export default function HeadshotProPanel({ userStatus }) {
       </div>
     </section>
   );
-        }
+          }
