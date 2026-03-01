@@ -1,9 +1,9 @@
 // api/generate-headshot.js
-// Lanza un job "headshot_pro" en RunPod (Serverless)
-// + AUTH UNIFICADO (requireUser)
-// + COBRO UNIFICADO (spend_jades) ANTES de generar
+// Lanza un job en RunPod (Serverless)
+// + AUTH (requireUser)
+// + COBRO (spend_jades) ANTES de generar
 
-import { requireUser } from "./_auth.js"; // ✅ FIXED IMPORT
+import { requireUser } from "./_auth.js";
 
 // =====================
 // COSTOS (JADE)
@@ -54,60 +54,60 @@ export default async function handler(req, res) {
   res.setHeader("access-control-allow-methods", "POST, OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type, authorization");
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
 
   try {
-    // =====================
     // AUTH
-    // =====================
     const auth = await requireUser(req);
     if (!auth.ok) {
-      return res.status(auth.code || 401).json({
-        ok: false,
-        error: auth.error,
-      });
+      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     }
 
     const user_id = auth.user.id;
     const body = req.body || {};
 
     if (!body.image_b64) {
-      return res.status(400).json({
-        ok: false,
-        error: "Falta image_b64 en el cuerpo.",
-      });
+      return res.status(400).json({ ok: false, error: "Falta image_b64 en el cuerpo." });
     }
-
-    const image_b64 = body.image_b64;
-    const style = body.style || "corporate"; // corporate | influencer | creative
-
-    // =====================
-    // COBRO JADE
-    // =====================
-    await spendJadesOrThrow(
-      user_id,
-      COST_HEADSHOT_JADES,
-      "generation:headshot_pro",
-      body.ref || null
-    );
 
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     const apiKey = process.env.RUNPOD_API_KEY;
-
     if (!endpointId || !apiKey) {
-      return res.status(500).json({
-        ok: false,
-        error: "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY.",
-      });
+      return res.status(500).json({ ok: false, error: "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY." });
     }
 
+    // ✅ MODE: "product_studio" | "anime_identity"
+    const mode = String(body.mode || "product_studio").toLowerCase();
+
+    // Mapea modo -> action del worker
+    const action =
+      mode === "anime_identity"
+        ? "transform_anime_identity"
+        : "headshot_pro"; // legacy (product studio premium)
+
+    // COBRO
+    await spendJadesOrThrow(
+      user_id,
+      COST_HEADSHOT_JADES,
+      `generation:${mode}`,
+      body.ref || null
+    );
+
     const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+
+    // Pasamos params opcionales (si vienen)
+    const input = {
+      action,
+      image_b64: body.image_b64,
+      user_id,
+      // opcionales:
+      steps: body.steps,
+      guidance: body.guidance,
+      strength: body.strength,
+      max_side: body.max_side,
+      seed: body.seed,
+    };
 
     const rpRes = await fetch(url, {
       method: "POST",
@@ -115,39 +115,27 @@ export default async function handler(req, res) {
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        input: {
-          action: "headshot_pro",
-          image_b64,
-          style,
-          user_id,
-        },
-      }),
+      body: JSON.stringify({ input }),
     });
 
     const data = await rpRes.json().catch(() => null);
 
     if (!rpRes.ok || !data || data.error) {
       console.error("Error RunPod generate-headshot:", data);
-      return res.status(500).json({
-        ok: false,
-        error: data?.error || "Error al lanzar job en RunPod.",
-      });
+      return res.status(500).json({ ok: false, error: data?.error || "Error al lanzar job en RunPod." });
     }
 
     return res.status(200).json({
       ok: true,
       jobId: data.id,
       billed: { type: "JADE", amount: COST_HEADSHOT_JADES },
+      mode,
+      action,
     });
   } catch (err) {
     const msg = err?.message || String(err);
     const code = err?.code || 500;
     console.error("Error en /api/generate-headshot:", err);
-
-    return res.status(code).json({
-      ok: false,
-      error: msg,
-    });
+    return res.status(code).json({ ok: false, error: msg });
   }
-}
+      }
