@@ -24,7 +24,7 @@ function fileToDataURL(file) {
 export default function AvatarStudioPanel() {
   const { session } = useAuth();
   const token = session?.access_token || null;
-  const userId = session?.user?.id || ""; // ✅ IMPORTANTÍSIMO para tus endpoints
+  const userId = session?.user?.id || ""; // ✅ tus endpoints lo requieren
 
   const fileRef = useRef(null);
 
@@ -33,14 +33,13 @@ export default function AvatarStudioPanel() {
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
 
-  // avatar form
+  // avatar
   const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState("");
-  const [avatar, setAvatar] = useState(null);
+  const [avatar, setAvatar] = useState(null); // {id, user_id, name, trigger, status, ref_image_path...}
 
   // fotos
   const [files, setFiles] = useState([]); // pendientes (1x1)
-  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url, created_at, ...}]
+  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url, created_at}]
   const [thumbUrl, setThumbUrl] = useState("");
 
   // training
@@ -77,18 +76,16 @@ export default function AvatarStudioPanel() {
   }
 
   // ----------------------------
-  // Persistencia (no perder proceso)
+  // Persistencia
   // ----------------------------
   function persist(next = {}) {
     const payload = {
       name,
-      trigger,
       avatar,
       uploaded,
       thumbUrl,
       job,
       polling,
-      // files NO (File objects no se deben persistir)
       ...next,
     };
     try {
@@ -103,7 +100,6 @@ export default function AvatarStudioPanel() {
     if (!st) return;
 
     if (typeof st.name === "string") setName(st.name);
-    if (typeof st.trigger === "string") setTrigger(st.trigger);
     if (st.avatar && typeof st.avatar === "object") setAvatar(st.avatar);
     if (Array.isArray(st.uploaded)) setUploaded(st.uploaded);
     if (typeof st.thumbUrl === "string") setThumbUrl(st.thumbUrl);
@@ -125,18 +121,15 @@ export default function AvatarStudioPanel() {
   useEffect(() => {
     persist();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, trigger, avatar, uploaded, thumbUrl, job, polling]);
+  }, [name, avatar, uploaded, thumbUrl, job, polling]);
 
   const uploadedCount = uploaded?.length || 0;
   const pendingCount = files?.length || 0;
   const totalCount = uploadedCount + pendingCount;
 
   // ----------------------------
-  // Refresh helpers (AJUSTADOS A TUS ENDPOINTS)
+  // Refresh helpers (TUS ENDPOINTS)
   // ----------------------------
-
-  // ✅ OJO:
-  // - Tu avatars-get-photo-urls que pegaste es GET y requiere user_id y avatar_id en query.
   async function refreshPhotoUrls(avatarId) {
     try {
       const out = await apiGet(
@@ -151,15 +144,22 @@ export default function AvatarStudioPanel() {
     }
   }
 
-  // ✅ thumbnail: si tu endpoint es GET, deja esto así.
-  // Si tu endpoint es POST, cambia esta función a apiPost("/api/avatars-get-thumbnail-url", { avatar_id, user_id })
   async function refreshThumbnail(avatarId) {
     try {
       const out = await apiGet(
-        `/api/avatars-get-thumbnail-url?avatar_id=${encodeURIComponent(avatarId)}&user_id=${encodeURIComponent(userId)}`
+        `/api/avatars-get-thumbnail-url?avatar_id=${encodeURIComponent(avatarId)}&user_id=${encodeURIComponent(
+          userId
+        )}`
       );
-      const url = out?.url || out?.signedUrl || out?.signed_url || "";
+
+      // tu endpoint devuelve thumb_url
+      const url = out?.thumb_url || out?.url || out?.signedUrl || out?.signed_url || "";
       if (url) setThumbUrl(url);
+
+      // opcional: si devuelve status/ref_image_path también, guardarlo local
+      if (out?.status || out?.ref_image_path) {
+        setAvatar((prev) => (prev ? { ...prev, status: out.status ?? prev.status, ref_image_path: out.ref_image_path ?? prev.ref_image_path } : prev));
+      }
     } catch {
       // ok
     }
@@ -185,7 +185,7 @@ export default function AvatarStudioPanel() {
 
     setFiles((prev) => [...prev, f]);
 
-    // reset input para poder elegir el mismo archivo de nuevo si quisieras
+    // reset input
     e.target.value = "";
   }
 
@@ -201,21 +201,20 @@ export default function AvatarStudioPanel() {
   // Crear avatar / subir fotos
   // ----------------------------
   const needsMinPhotosToCreate = !avatar?.id;
+
   const canCreate =
     canUse &&
     name.trim().length > 0 &&
-    trigger.trim().length > 0 &&
     (needsMinPhotosToCreate ? totalCount >= 5 : true);
 
   async function createAvatarOnly() {
-    // ✅ Tu backend te estaba dando 400 por falta de user_id
+    // ✅ tu endpoint crea trigger automáticamente y requiere user_id + name
     const out = await apiPost("/api/avatars-create", {
       user_id: userId,
       name: name.trim(),
-      trigger: trigger.trim(),
     });
 
-    const created = out.avatar || out.data || out;
+    const created = out?.avatar || out?.data || out;
     if (!created?.id) throw new Error("AVATAR_CREATE_INVALID_RESPONSE");
 
     setAvatar(created);
@@ -223,9 +222,8 @@ export default function AvatarStudioPanel() {
     return created;
   }
 
-  // ✅ IMPORTANTE: tu upload handler que pegaste exige:
-  // { user_id, avatar_id, image_b64, filename }
   async function uploadPhotosForAvatar(avatarId, theFiles) {
+    // ✅ tu upload endpoint requiere user_id, avatar_id, image_b64, filename
     for (let i = 0; i < theFiles.length; i++) {
       const file = theFiles[i];
       const dataUrl = await fileToDataURL(file);
@@ -244,10 +242,10 @@ export default function AvatarStudioPanel() {
     setInfo("");
 
     if (!canUse) return setErr("Debes iniciar sesión.");
-    if (!name.trim() || !trigger.trim()) return setErr("Falta nombre o trigger.");
+    if (!name.trim()) return setErr("Falta el nombre del avatar.");
 
     if (!avatar?.id && totalCount < 5) {
-      return setErr("Agrega mínimo 5 fotos (una por una). La primera que SUBAS será la miniatura.");
+      return setErr("Agrega mínimo 5 fotos (una por una). La primera foto SUBIDA será la miniatura.");
     }
 
     setLoading(true);
@@ -256,11 +254,11 @@ export default function AvatarStudioPanel() {
       setBusyLabel(avatar?.id ? "Guardando..." : "Creando avatar...");
       const av = avatar?.id ? avatar : await createAvatarOnly();
 
-      // 2) subir pendientes si hay
+      // 2) subir pendientes
       if (files.length > 0) {
         setBusyLabel("Subiendo fotos... (esto puede tardar)");
-        const toUpload = [...files]; // snapshot
-        setFiles([]); // limpia rápido UI (evita doble click)
+        const toUpload = [...files];
+        setFiles([]); // limpia UI para evitar doble click
         await uploadPhotosForAvatar(av.id, toUpload);
       }
 
@@ -272,9 +270,7 @@ export default function AvatarStudioPanel() {
       await refreshPhotoUrls(av.id);
 
       setBusyLabel("");
-      setInfo(
-        "Listo ✅ Guardado. Nota: la miniatura/signed URLs a veces tardan unos segundos en verse (normal)."
-      );
+      setInfo("Listo ✅ Guardado. Si la miniatura tarda en verse, es normal: signed URLs a veces tardan unos segundos.");
       persist();
     } catch (e) {
       setBusyLabel("");
@@ -387,7 +383,6 @@ export default function AvatarStudioPanel() {
           type="button"
           onClick={() => {
             setName("");
-            setTrigger("");
             setAvatar(null);
             setFiles([]);
             setUploaded([]);
@@ -424,18 +419,11 @@ export default function AvatarStudioPanel() {
 
       {/* FORM */}
       <div className="mt-4 grid gap-3">
-        <div className="grid gap-2 md:grid-cols-[1fr_240px]">
+        <div className="grid gap-2 md:grid-cols-1">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Nombre del avatar (ej: Isabela Noir v1)"
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
-            disabled={!canUse || loading || polling}
-          />
-          <input
-            value={trigger}
-            onChange={(e) => setTrigger(e.target.value)}
-            placeholder="Trigger (ej: isanoir)"
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
             disabled={!canUse || loading || polling}
           />
@@ -447,8 +435,8 @@ export default function AvatarStudioPanel() {
               <span className="text-neutral-400">Avatar:</span>{" "}
               <span className="text-white font-semibold">{avatar.name || name}</span>{" "}
               <span className="text-neutral-500">·</span>{" "}
-              <span className="text-neutral-400">ID:</span>{" "}
-              <span className="text-neutral-200">{avatar.id}</span>
+              <span className="text-neutral-400">Trigger:</span>{" "}
+              <span className="text-neutral-200 font-semibold">{avatar.trigger || "—"}</span>
             </div>
 
             {thumbUrl ? (
@@ -482,7 +470,7 @@ export default function AvatarStudioPanel() {
               ref={fileRef}
               type="file"
               accept="image/*"
-              multiple={false} // ✅ 1 por 1
+              multiple={false}
               onChange={onPickOneFile}
               style={{ display: "none" }}
               disabled={!canUse || loading || polling}
@@ -500,15 +488,7 @@ export default function AvatarStudioPanel() {
             <div className="text-xs text-neutral-400">
               Total (subidas + pendientes):{" "}
               <span className="text-neutral-200 font-semibold">{totalCount}</span>
-              {needsMinPhotosToCreate ? (
-                <span className="ml-2 text-neutral-500">
-                  (mínimo 5 para crear)
-                </span>
-              ) : (
-                <span className="ml-2 text-neutral-500">
-                  (se suben cuando presionas “Guardar cambios”)
-                </span>
-              )}
+              {!avatar?.id ? <span className="ml-2 text-neutral-500">(mínimo 5 para crear)</span> : null}
             </div>
 
             {pendingCount > 0 && (
@@ -555,7 +535,7 @@ export default function AvatarStudioPanel() {
           {Array.isArray(uploaded) && uploaded.length > 0 && (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {uploaded.map((p, idx) => {
-                const url = p.url || p.signed_url || p.signedUrl || "";
+                const url = p.url || "";
                 return (
                   <div key={p.id || p.storage_path || idx} className="overflow-hidden rounded-xl border border-white/10 bg-black/40">
                     {url ? (
@@ -585,11 +565,7 @@ export default function AvatarStudioPanel() {
             canCreate ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95" : "bg-white/10 opacity-60"
           }`}
         >
-          {loading
-            ? busyLabel || "Procesando..."
-            : avatar?.id
-            ? "Guardar cambios"
-            : "Crear avatar"}
+          {loading ? busyLabel || "Procesando..." : avatar?.id ? "Guardar cambios" : "Crear avatar"}
         </button>
 
         {/* Entrenamiento */}
