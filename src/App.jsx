@@ -8,6 +8,7 @@ import { Img2VideoPanel } from "./components/Img2VideoPanel";
 import VoiceToVideoPanel from "./components/VoiceToVideoPanel";
 import { supabase } from "./lib/supabaseClient";
 import LibraryView from "./components/LibraryView";
+import AvatarStudioPanel from "./components/AvatarStudioPanel";
 
 import {
   saveGenerationInSupabase,
@@ -1632,6 +1633,7 @@ function DashboardView() {
               ["video_prompt", "Motor de video"],
               ["img2video", "Imagen → Video"],
               ["voice2video", "Voz → Video (Beta)"],
+              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca"],
               ["headshot", "📸 Headshot Pro"],
               ["subscribe", "Suscribirse"],
@@ -1661,6 +1663,7 @@ function DashboardView() {
               ["video_prompt", "Motor de video (clips)"],
               ["img2video", "Transformación Imagen → Video"],
               ["voice2video", "Voz → Video (Beta)"],
+              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca de producción"],
               ["headshot", "📸 Headshot Pro (Premium)"],
               ["subscribe", "Suscribirse"],
@@ -1692,6 +1695,7 @@ function DashboardView() {
             {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />} 
             {appViewMode === "voice2video" && <VoiceToVideoPanel userStatus={userStatus} />}
+            {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
