@@ -5,6 +5,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ✅ Tu endpoint ID fijo (si prefieres env var, lo cambias luego)
+const RUNPOD_ENDPOINT_ID = "uktq024dj0d4go";
+
+function runpodRunUrl() {
+  return `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/run`;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -52,7 +59,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Fotos (paths internos SIN bucket, ej: user/avatar/train/x.jpg)
+    // 2) Fotos (paths internos SIN bucket)
     const { data: photos, error: phErr } = await supabase
       .from("avatar_photos")
       .select("storage_path")
@@ -89,6 +96,7 @@ export default async function handler(req, res) {
             batch,
             grad_acc,
             photos_count: photoPaths.length,
+            endpoint_id: RUNPOD_ENDPOINT_ID,
           },
         },
       ])
@@ -103,22 +111,20 @@ export default async function handler(req, res) {
       .update({ status: "TRAINING", last_error: null })
       .eq("id", avatar_id);
 
-    // 5) RunPod config
-    const runpodEndpoint = process.env.RUNPOD_AVATAR_ENDPOINT; // https://api.runpod.ai/v2/<id>/run
+    // 5) RunPod key
     const runpodKey = process.env.RUNPOD_API_KEY;
-
-    if (!runpodEndpoint || !runpodKey) {
+    if (!runpodKey) {
       await supabase
         .from("avatar_jobs")
-        .update({ status: "FAILED", error: "RUNPOD_NOT_CONFIGURED" })
+        .update({ status: "FAILED", error: "RUNPOD_API_KEY_MISSING" })
         .eq("id", jobRow.id);
 
       await supabase
         .from("avatars")
-        .update({ status: "ERROR", last_error: "RUNPOD_NOT_CONFIGURED" })
+        .update({ status: "ERROR", last_error: "RUNPOD_API_KEY_MISSING" })
         .eq("id", avatar_id);
 
-      return res.status(400).json({ ok: false, error: "RUNPOD_NOT_CONFIGURED" });
+      return res.status(400).json({ ok: false, error: "RUNPOD_API_KEY_MISSING" });
     }
 
     // 6) Disparar RunPod
@@ -130,7 +136,7 @@ export default async function handler(req, res) {
         trigger: avatar.trigger,
         photos: photoPaths,
 
-        // params
+        // params para tu trainer
         steps,
         lr,
         lora_rank,
@@ -140,7 +146,7 @@ export default async function handler(req, res) {
       },
     };
 
-    const resp = await fetch(runpodEndpoint, {
+    const resp = await fetch(runpodRunUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -151,8 +157,10 @@ export default async function handler(req, res) {
 
     const out = await resp.json();
 
-    const jobId = out?.id; // RunPod returns { id: "...", ... }
-    if (!jobId) {
+    // RunPod normalmente devuelve { id: "jobid", status: ... }
+    const runpodJobId = out?.id;
+
+    if (!runpodJobId) {
       await supabase
         .from("avatar_jobs")
         .update({
@@ -174,7 +182,7 @@ export default async function handler(req, res) {
     await supabase
       .from("avatar_jobs")
       .update({
-        job_id: jobId,
+        job_id: runpodJobId,
         status: "RUNNING",
         result_json: { ...(jobRow.result_json || {}), runpod_start_response: out },
       })
@@ -184,7 +192,8 @@ export default async function handler(req, res) {
       ok: true,
       avatar_id,
       job_db_id: jobRow.id,
-      runpod_job_id: jobId,
+      runpod_job_id: runpodJobId,
+      runpod_run_url: runpodRunUrl(),
     });
   } catch (err) {
     console.error("[avatars-train]", err);
