@@ -12,6 +12,15 @@ function safeParse(json) {
   }
 }
 
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ""));
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 export default function AvatarStudioPanel() {
   const { session } = useAuth();
   const token = session?.access_token || null;
@@ -30,7 +39,7 @@ export default function AvatarStudioPanel() {
 
   // photos
   const [files, setFiles] = useState([]); // seleccionadas (no persistibles)
-  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url?}]
+  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url?, is_thumbnail?}]
   const [thumbUrl, setThumbUrl] = useState("");
 
   // training
@@ -51,13 +60,6 @@ export default function AvatarStudioPanel() {
       headers: authHeaders,
       body: JSON.stringify(body || {}),
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error || "API_ERROR");
-    return j;
-  }
-
-  async function apiGet(path) {
-    const r = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "API_ERROR");
     return j;
@@ -128,7 +130,7 @@ export default function AvatarStudioPanel() {
       const url = out?.url || out?.signed_url || out?.signedUrl || "";
       if (url) setThumbUrl(url);
     } catch {
-      // si no hay aún, ok
+      // ok
     }
   }
 
@@ -138,7 +140,7 @@ export default function AvatarStudioPanel() {
       const items = out?.photos || out?.data || out || [];
       if (Array.isArray(items)) setUploaded(items);
     } catch {
-      // opcional
+      // ok
     }
   }
 
@@ -168,7 +170,7 @@ export default function AvatarStudioPanel() {
     canUse &&
     name.trim().length > 0 &&
     trigger.trim().length > 0 &&
-    (avatar?.id ? true : files.length >= 5); // si no existe avatar, pedimos 5+ para crearlo con todo
+    (avatar?.id ? true : files.length >= 5); // si no existe avatar, pedimos 5+
 
   async function createAvatarOnly() {
     const out = await apiPost("/api/avatars-create", {
@@ -178,6 +180,7 @@ export default function AvatarStudioPanel() {
 
     const created = out.avatar || out.data || out;
     if (!created?.id) throw new Error("AVATAR_CREATE_INVALID_RESPONSE");
+
     setAvatar(created);
     setUploaded([]);
     setThumbUrl("");
@@ -185,26 +188,31 @@ export default function AvatarStudioPanel() {
     return created;
   }
 
-  async function uploadPhotosForAvatar(avatarId, theFiles) {
+  // ✅ IMPORTANTE: tu backend es JSON base64, NO FormData
+  async function uploadPhotosForAvatar(avatarId, theFiles, alreadyHasThumb) {
     const results = [];
+
     for (let i = 0; i < theFiles.length; i++) {
       const file = theFiles[i];
-      const form = new FormData();
-      form.append("avatar_id", avatarId);
-      form.append("file", file);
-      // importante: marcar la primera como miniatura
-      form.append("is_thumbnail", i === 0 ? "true" : "false");
+      const dataUrl = await fileToDataURL(file);
 
-      const r = await fetch("/api/avatars-upload-photo", {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
+      const out = await apiPost("/api/avatars-upload-photo", {
+        avatar_id: avatarId,
+        image_b64: dataUrl,
+        filename: file.name,
+        // si ya hay miniatura (ref_image_path), no forzamos thumbnail.
+        // si NO hay miniatura, la primera foto seleccionada se vuelve thumbnail.
+        is_thumbnail: !alreadyHasThumb && i === 0 ? "true" : "false",
       });
 
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "UPLOAD_FAILED");
-      results.push(j.photo || j.data || j);
+      const photo = out.photo || out.data || out;
+      results.push({
+        ...(photo || {}),
+        storage_path: out.storage_path || photo?.storage_path,
+        url: out.signed_url || photo?.url || null,
+      });
     }
+
     return results;
   }
 
@@ -221,17 +229,22 @@ export default function AvatarStudioPanel() {
     }
 
     setLoading(true);
+
     try {
-      setBusyLabel("Creando avatar...");
+      // 1) Crear avatar si no existe
+      setBusyLabel(avatar?.id ? "Preparando..." : "Creando avatar...");
       const av = avatar?.id ? avatar : await createAvatarOnly();
 
-      // Si hay fotos seleccionadas, subirlas
+      // 2) Subir fotos si hay seleccionadas
       if (files.length > 0) {
-        setBusyLabel("Subiendo fotos...");
-        await uploadPhotosForAvatar(av.id, files);
+        setBusyLabel("Subiendo fotos... (esto puede tardar)");
+        const hasThumbAlready = !!thumbUrl || uploaded?.some((p) => p?.is_thumbnail);
+
+        await uploadPhotosForAvatar(av.id, files, hasThumbAlready);
         setFiles([]);
       }
 
+      // 3) Refrescar UI
       setBusyLabel("Actualizando miniatura...");
       await refreshThumbnail(av.id);
 
@@ -239,7 +252,9 @@ export default function AvatarStudioPanel() {
       await refreshPhotoUrls(av.id);
 
       setBusyLabel("");
-      setInfo("Listo ✅ Avatar creado y fotos guardadas. Esto puede tardar un poco en reflejarse en la miniatura (signed URL).");
+      setInfo(
+        "Listo ✅ Avatar creado y fotos guardadas. Si la miniatura tarda en verse, es normal: los signed URL a veces toman unos segundos."
+      );
 
       persist(); // asegurar guardado final
     } catch (e) {
@@ -276,12 +291,12 @@ export default function AvatarStudioPanel() {
 
     setLoading(true);
     try {
-      setBusyLabel("Iniciando entrenamiento en RunPod...");
+      setBusyLabel("Iniciando entrenamiento en RunPod... (puede tardar)");
       const out = await apiPost("/api/avatars-train", { avatar_id: avatar.id });
       setJob(out);
       setPolling(true);
       setBusyLabel("");
-      setInfo("Entrenamiento iniciado. Esto puede tardar varios minutos dependiendo de la GPU y la cola.");
+      setInfo("Entrenamiento iniciado. Puede tardar varios minutos dependiendo de la GPU y la cola.");
     } catch (e) {
       setBusyLabel("");
       setErr(e.message);
@@ -343,7 +358,8 @@ export default function AvatarStudioPanel() {
         <div>
           <h2 className="text-lg font-semibold">Avatar Studio</h2>
           <p className="text-xs text-neutral-400 mt-1">
-            Crea un avatar y entrena un LoRA facial. <span className="text-neutral-300">Esto puede tardar varios minutos.</span>
+            Crea un avatar y entrena un LoRA facial.{" "}
+            <span className="text-neutral-300">Esto puede tardar varios minutos.</span>
           </p>
           <div className="mt-2 text-[11px] text-neutral-300">
             Estado: <span className="text-white">{headerStatus}</span>
@@ -420,11 +436,7 @@ export default function AvatarStudioPanel() {
             </div>
 
             {thumbUrl ? (
-              <img
-                src={thumbUrl}
-                alt="thumb"
-                className="h-12 w-12 rounded-xl border border-white/10 object-cover"
-              />
+              <img src={thumbUrl} alt="thumb" className="h-12 w-12 rounded-xl border border-white/10 object-cover" />
             ) : (
               <div className="grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/5 text-xs text-neutral-500">
                 —
@@ -469,9 +481,7 @@ export default function AvatarStudioPanel() {
 
             <div className="text-xs text-neutral-400">
               Seleccionadas: <span className="text-neutral-200 font-semibold">{files.length}</span>
-              {files.length > 0 ? (
-                <span className="ml-2 text-neutral-500">(No se suben hasta “Crear avatar”)</span>
-              ) : null}
+              {files.length > 0 ? <span className="ml-2 text-neutral-500">(Se suben al crear)</span> : null}
             </div>
           </div>
 
@@ -480,6 +490,7 @@ export default function AvatarStudioPanel() {
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {uploaded.map((p, idx) => {
                 const url = p.url || p.signed_url || p.signedUrl || "";
+                const isThumb = !!p.is_thumbnail || p.storage_path === avatar?.ref_image_path;
                 return (
                   <div key={p.id || p.storage_path || idx} className="overflow-hidden rounded-xl border border-white/10 bg-black/40">
                     {url ? (
@@ -488,10 +499,8 @@ export default function AvatarStudioPanel() {
                       <div className="grid h-24 place-items-center text-xs text-neutral-500">Sin URL</div>
                     )}
                     <div className="p-2 text-[10px] text-neutral-400">
-                      <div className="truncate">
-                        {p.storage_path ? p.storage_path.split("/").slice(-2).join("/") : "photo"}
-                      </div>
-                      {idx === 0 && <div className="mt-1 text-[10px] text-cyan-200 font-semibold">miniatura</div>}
+                      <div className="truncate">{p.storage_path ? p.storage_path.split("/").slice(-2).join("/") : "photo"}</div>
+                      {isThumb && <div className="mt-1 text-[10px] text-cyan-200 font-semibold">miniatura</div>}
                     </div>
                   </div>
                 );
@@ -506,23 +515,19 @@ export default function AvatarStudioPanel() {
           disabled={!canCreate || loading || polling}
           onClick={onCreateAll}
           className={`rounded-2xl px-4 py-3 text-sm font-semibold text-white ${
-            canCreate
-              ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95"
-              : "bg-white/10 opacity-60"
+            canCreate ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95" : "bg-white/10 opacity-60"
           }`}
         >
-          {loading ? (busyLabel ? busyLabel : "Procesando...") : "Crear avatar"}
+          {loading ? (busyLabel ? busyLabel : "Procesando...") : avatar?.id ? "Guardar cambios" : "Crear avatar"}
         </button>
 
-        {/* Entrenamiento (dejamos limpio) */}
+        {/* Entrenamiento */}
         {avatar?.id && (
           <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <div className="text-sm font-semibold text-white">Entrenamiento LoRA (RunPod)</div>
-                <div className="text-xs text-neutral-400">
-                  Cuando tengas 5+ fotos, puedes iniciar el entrenamiento. Puede tardar varios minutos.
-                </div>
+                <div className="text-xs text-neutral-400">Cuando tengas 5+ fotos, puedes iniciar el entrenamiento. Puede tardar varios minutos.</div>
               </div>
 
               <div className="flex gap-2 flex-wrap">
