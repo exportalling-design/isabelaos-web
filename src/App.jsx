@@ -1886,7 +1886,7 @@ function PricingSection({ onOpenAuth }) {
 // ---------------------------------------------------------
 // Landing (no sesión) + demo
 // ---------------------------------------------------------
-function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
+function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   // ✅ NUEVO: demo prompt en landing (y forzar Google modal)
   const [demoPrompt, setDemoPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
 
@@ -1920,6 +1920,14 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
               Planes
             </button>
 
+            {/* ✅ NUEVO */}
+            <button
+              onClick={onOpenAbout}
+              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+            >
+              Sobre nosotros
+            </button>
+
             {/* ✅ Antes hacía scroll a #contacto. Ahora abre "página" (vista) Contacto */}
             <button
               onClick={onOpenContact}
@@ -1939,12 +1947,9 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
+        <section className="grid gap-10 lg:grid-cols-[1.35fr_1fr]">
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300/90 shadow-[0_0_25px_rgba(34,211,238,0.35)]">
-              <span className="h-1 w-1 rounded-full bg-cyan-300" />
-              <span>BETA PRIVADA · MOTOR DE PRODUCCIÓN VISUAL CON IA</span>
-            </p>
+            {/* ✅ ELIMINADO: BETA PRIVADA */}
 
             <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
               Produce contenido visual con IA{" "}
@@ -1955,16 +1960,22 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
 
             <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
+            {/* ✅ Texto más corto en Home (lo largo se movió a Sobre nosotros) */}
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala,
-              diseñado para creadores, estudios y equipos que necesitan velocidad, consistencia y control creativo.
+              Motor de producción visual con IA para creadores y equipos que necesitan velocidad, consistencia y control creativo.
             </p>
 
-            <p className="mt-3 max-w-xl text-xs text-neutral-400">
-              No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo
-              de producción visual. <strong>Pipeline propio</strong> (infraestructura + workers + render) ejecutado
-              directamente en GPU: <strong>no dependemos de “apikeys” de otros generadores</strong>.
-            </p>
+            {/* ✅ Próximamente */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                Próximamente: Voz a video
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
+                Próximamente: Creación de avatares
+              </span>
+            </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
@@ -1976,13 +1987,21 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
               >
                 Probar el motor (demo)
               </button>
+
+              <button
+                onClick={onOpenAbout}
+                className="rounded-2xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Ver sobre nosotros
+              </button>
+
               <p className="max-w-xs text-[11px] text-neutral-400">
                 Escribe tu prompt y ejecuta el demo. Al generar, te pedirá registrarte con Google.
               </p>
             </div>
           </div>
 
-          {/* ✅ NUEVO: Cuadro demo con imágenes difuminadas + rayos neón */}
+          {/* ✅ Cuadro demo más grande + fondo menos difuminado */}
           <div id="demo-box" className="relative order-first lg:order-last">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
@@ -1993,23 +2012,23 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
               <div className="absolute bottom-0 left-[15%] h-72 w-[2px] rotate-[18deg] bg-gradient-to-b from-yellow-300/0 via-yellow-200/45 to-cyan-300/0 blur-[0.5px]" />
             </div>
 
-            {/* Blurred gallery images behind */}
-            <div className="pointer-events-none absolute inset-0 -z-10 opacity-60">
+            {/* Blurred gallery images behind (menos blur, un poco más visibles) */}
+            <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
                 <div
                   key={p}
                   className="absolute rounded-3xl border border-white/10"
                   style={{
-                    width: i % 2 === 0 ? 340 : 400,
-                    height: i % 2 === 0 ? 220 : 240,
-                    left: i === 0 ? "-30px" : i === 1 ? "52%" : i === 2 ? "8%" : "58%",
-                    top: i === 0 ? "18%" : i === 1 ? "8%" : i === 2 ? "62%" : "55%",
+                    width: i % 2 === 0 ? 360 : 420,
+                    height: i % 2 === 0 ? 240 : 260,
+                    left: i === 0 ? "-35px" : i === 1 ? "50%" : i === 2 ? "6%" : "56%",
+                    top: i === 0 ? "16%" : i === 1 ? "6%" : i === 2 ? "64%" : "54%",
                     transform: `rotate(${i === 0 ? -10 : i === 1 ? 8 : i === 2 ? 10 : -6}deg)`,
                     backgroundImage: `url(/gallery/${p}?v=2)`,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
-                    filter: "blur(10px)",
-                    opacity: 0.45,
+                    filter: "blur(7px)", // ✅ antes 10px
+                    opacity: 0.55, // ✅ más visible
                   }}
                 />
               ))}
@@ -2017,11 +2036,11 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
 
             <h2 className="text-sm font-semibold text-white mb-3">Demo · Genera una imagen (prompt positivo)</h2>
 
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/45 p-5 backdrop-blur-md shadow-xl">
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/45 p-6 backdrop-blur-md shadow-xl">
               <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/16 via-transparent to-fuchsia-500/16 blur-3xl" />
 
               <textarea
-                className="mt-1 h-28 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 h-36 w-full resize-none rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={demoPrompt}
                 onChange={(e) => setDemoPrompt(e.target.value)}
                 placeholder="Escribe tu prompt positivo..."
@@ -2033,7 +2052,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
                   onStartDemo(); // ✅ ahora onStartDemo abre modal Google (definido en Root App)
                 }}
                 disabled={!demoPrompt.trim()}
-                className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white disabled:opacity-60"
               >
                 Generar imagen (demo)
               </button>
@@ -2051,7 +2070,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
         </section>
 
         {/* ---------------------------------------------------------
-            NUEVO: Videos en Home (entre texto y planes) ✅ collage 5
+            Videos en Home (entre texto y planes) ✅ collage 5
            --------------------------------------------------------- */}
         <section className="mt-12">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -2063,7 +2082,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
                 Videos de prueba (pipeline actual)
               </h3>
               <p className="mt-1 max-w-2xl text-xs text-neutral-400">
-                Estos clips están generados por el sistema en beta. La prioridad ahora es estabilizar el flujo, mejorar
+                Estos clips están generados por el sistema. La prioridad ahora es estabilizar el flujo, mejorar
                 velocidad y pulir la calidad final del render.
               </p>
             </div>
@@ -2078,11 +2097,161 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact }) {
             </div>
           </div>
 
-          <VideoCollage />
+          {/* ✅ Wrapper para que se vea un poco más compacto visualmente */}
+          <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-4">
+            {/* TODO (si no hace autoplay): en VideoCollage asegúrate que cada <video> tenga:
+                autoPlay muted loop playsInline preload="metadata"
+            */}
+            <VideoCollage />
+          </div>
         </section>
 
-        {/* ✅ Planes (se queda en Home) */}
+        {/* ---------------------------------------------------------
+            NUEVO: Opiniones (testimonios)
+           --------------------------------------------------------- */}
+        <section className="mt-12">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                Opiniones
+              </p>
+              <h3 className="mt-1 text-xl font-semibold text-white">
+                Lo que dicen los primeros usuarios
+              </h3>
+              <p className="mt-1 max-w-2xl text-xs text-neutral-400">
+                A medida que escalamos, iremos agregando más feedback real de testers y creadores.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            {[
+              {
+                name: "Early Tester",
+                text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo.",
+              },
+              {
+                name: "Creador (beta)",
+                text: "Lo mejor es tener todo en un solo lugar: prompt → render → biblioteca. Eso ahorra tiempo.",
+              },
+              {
+                name: "Equipo creativo",
+                text: "La idea de voz a video y avatares es justo lo que necesitamos para escalar contenido.",
+              },
+            ].map((t, idx) => (
+              <div key={idx} className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
+                <div className="text-sm font-semibold text-white/90">{t.name}</div>
+                <div className="mt-2 text-sm text-white/70 leading-relaxed">{t.text}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ✅ Planes (se queda en Home y hasta abajo como querés) */}
         <PricingSection onOpenAuth={onOpenAuth} />
+      </main>
+
+      <footer className="border-t border-white/10 bg-black/30">
+        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
+          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// Sobre Nosotros (vista)
+// ---------------------------------------------------------
+function AboutView({ onBackHome }) {
+  return (
+    <div
+      className="min-h-screen w-full text-white"
+      style={{
+        background:
+          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
+      }}
+    >
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
+              io
+            </div>
+            <div>
+              <div className="text-sm font-semibold leading-tight">
+                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+              </div>
+              <div className="text-[10px] text-neutral-500">Sobre nosotros</div>
+            </div>
+          </div>
+
+          <button
+            onClick={onBackHome}
+            className="rounded-xl border border-white/20 bg-white/5 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+          >
+            Volver a la página principal
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        {/* ✅ Video arriba de todo */}
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
+          {/* ✅ Subirlo a: public/gallery/video10.mp4 */}
+          <video
+            className="w-full rounded-2xl border border-white/10 bg-black/40"
+            src="/gallery/video10.mp4"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+          />
+        </section>
+
+        {/* ✅ Info completa aquí */}
+        <section className="mt-8">
+          <h1 className="text-3xl font-semibold text-white">Sobre nosotros</h1>
+
+          <p className="mt-4 max-w-3xl text-sm text-neutral-300">
+            IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala,
+            diseñado para creadores, estudios y equipos que necesitan velocidad, consistencia y control creativo.
+          </p>
+
+          <p className="mt-3 max-w-3xl text-sm text-neutral-300">
+            No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo
+            de producción visual. <strong>Pipeline propio</strong> (infraestructura + workers + render) ejecutado
+            directamente en GPU: <strong>no dependemos de “apikeys” de otros generadores</strong>.
+          </p>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <div className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
+              <div className="text-sm font-semibold text-white/90">Estamos escalando</div>
+              <p className="mt-2 text-sm text-white/70 leading-relaxed">
+                Estamos en etapa de crecimiento: mejorando velocidad, estabilidad del render y preparando nuevos módulos
+                para creadores que necesitan resultados consistentes y un flujo de trabajo real.
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
+              <div className="text-sm font-semibold text-white/90">Lo que viene</div>
+              <ul className="mt-2 text-sm text-white/70 leading-relaxed list-disc pl-5">
+                <li>Voz a Video (próximamente)</li>
+                <li>Creación de Avatares (próximamente)</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <button
+              onClick={onBackHome}
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+            >
+              Regresar a la página principal
+            </button>
+          </div>
+        </section>
       </main>
 
       <footer className="border-t border-white/10 bg-black/30">
@@ -2103,7 +2272,7 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false);
 
   // ✅ NUEVO: navegación simple en landing
-  const [landingPage, setLandingPage] = useState("home"); // "home" | "contact"
+  const [landingPage, setLandingPage] = useState("home"); // "home" | "contact" | "about"
 
   // ✅ NUEVO: modal Google-only para el demo
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
@@ -2152,13 +2321,18 @@ export default function App() {
           {landingPage === "home" && (
             <LandingView
               onOpenAuth={() => setAuthOpen(true)}
-              onStartDemo={() => setGoogleModalOpen(true)}   // ✅ CAMBIO: ahora el demo de landing abre Google-only
+              onStartDemo={() => setGoogleModalOpen(true)} // ✅ CAMBIO: ahora el demo de landing abre Google-only
               onOpenContact={() => setLandingPage("contact")}
+              onOpenAbout={() => setLandingPage("about")}
             />
           )}
 
           {landingPage === "contact" && (
             <ContactView onBack={() => setLandingPage("home")} />
+          )}
+
+          {landingPage === "about" && (
+            <AboutView onBackHome={() => setLandingPage("home")} />
           )}
         </>
       )}
