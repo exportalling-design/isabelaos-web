@@ -24,6 +24,7 @@ function fileToDataURL(file) {
 export default function AvatarStudioPanel() {
   const { session } = useAuth();
   const token = session?.access_token || null;
+  const userId = session?.user?.id || ""; // ✅ IMPORTANTÍSIMO para tus endpoints
 
   const fileRef = useRef(null);
 
@@ -37,19 +38,18 @@ export default function AvatarStudioPanel() {
   const [trigger, setTrigger] = useState("");
   const [avatar, setAvatar] = useState(null);
 
-  // photos
-  // ✅ “uno por uno”: guardamos una cola de archivos por subir (pending)
-  const [pendingFiles, setPendingFiles] = useState([]); // [{id, file, name, size}]
-  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url?, is_thumbnail?}]
+  // fotos
+  const [files, setFiles] = useState([]); // pendientes (1x1)
+  const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url, created_at, ...}]
   const [thumbUrl, setThumbUrl] = useState("");
 
   // training
   const [job, setJob] = useState(null);
   const [polling, setPolling] = useState(false);
 
-  const canUse = !!token;
+  const canUse = !!token && !!userId;
 
-  const authHeaders = useMemo(() => {
+  const authJsonHeaders = useMemo(() => {
     const h = { "Content-Type": "application/json" };
     if (token) h.Authorization = `Bearer ${token}`;
     return h;
@@ -58,7 +58,7 @@ export default function AvatarStudioPanel() {
   async function apiPost(path, body) {
     const r = await fetch(path, {
       method: "POST",
-      headers: authHeaders,
+      headers: authJsonHeaders,
       body: JSON.stringify(body || {}),
     });
     const j = await r.json().catch(() => ({}));
@@ -66,8 +66,18 @@ export default function AvatarStudioPanel() {
     return j;
   }
 
+  async function apiGet(path) {
+    const r = await fetch(path, {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "API_ERROR");
+    return j;
+  }
+
   // ----------------------------
-  // Persistencia (para no perder proceso)
+  // Persistencia (no perder proceso)
   // ----------------------------
   function persist(next = {}) {
     const payload = {
@@ -78,14 +88,12 @@ export default function AvatarStudioPanel() {
       thumbUrl,
       job,
       polling,
-      // ❗ no persistimos File objects (pendingFiles no se puede serializar)
+      // files NO (File objects no se deben persistir)
       ...next,
     };
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   function restore() {
@@ -106,9 +114,7 @@ export default function AvatarStudioPanel() {
   function clearPersisted() {
     try {
       localStorage.removeItem(LS_KEY);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   useEffect(() => {
@@ -122,27 +128,38 @@ export default function AvatarStudioPanel() {
   }, [name, trigger, avatar, uploaded, thumbUrl, job, polling]);
 
   const uploadedCount = uploaded?.length || 0;
-  const pendingCount = pendingFiles?.length || 0;
+  const pendingCount = files?.length || 0;
   const totalCount = uploadedCount + pendingCount;
 
   // ----------------------------
-  // Refresh helpers
+  // Refresh helpers (AJUSTADOS A TUS ENDPOINTS)
   // ----------------------------
-  async function refreshThumbnail(avatarId) {
+
+  // ✅ OJO:
+  // - Tu avatars-get-photo-urls que pegaste es GET y requiere user_id y avatar_id en query.
+  async function refreshPhotoUrls(avatarId) {
     try {
-      const out = await apiPost("/api/avatars-get-thumbnail-url", { avatar_id: avatarId });
-      const url = out?.url || out?.signed_url || out?.signedUrl || "";
-      if (url) setThumbUrl(url);
+      const out = await apiGet(
+        `/api/avatars-get-photo-urls?avatar_id=${encodeURIComponent(avatarId)}&user_id=${encodeURIComponent(
+          userId
+        )}`
+      );
+      const items = out?.photos || [];
+      if (Array.isArray(items)) setUploaded(items);
     } catch {
       // ok
     }
   }
 
-  async function refreshPhotoUrls(avatarId) {
+  // ✅ thumbnail: si tu endpoint es GET, deja esto así.
+  // Si tu endpoint es POST, cambia esta función a apiPost("/api/avatars-get-thumbnail-url", { avatar_id, user_id })
+  async function refreshThumbnail(avatarId) {
     try {
-      const out = await apiPost("/api/avatars-get-photo-urls", { avatar_id: avatarId });
-      const items = out?.photos || out?.data || out || [];
-      if (Array.isArray(items)) setUploaded(items);
+      const out = await apiGet(
+        `/api/avatars-get-thumbnail-url?avatar_id=${encodeURIComponent(avatarId)}&user_id=${encodeURIComponent(userId)}`
+      );
+      const url = out?.url || out?.signedUrl || out?.signed_url || "";
+      if (url) setThumbUrl(url);
     } catch {
       // ok
     }
@@ -157,41 +174,43 @@ export default function AvatarStudioPanel() {
   }, [canUse, avatar?.id]);
 
   // ----------------------------
-  // File pick (✅ UNO POR UNO)
+  // File pick (1 por 1)
   // ----------------------------
   function onPickOneFile(e) {
     setErr("");
     setInfo("");
 
-    const file = (e.target.files && e.target.files[0]) || null;
-    // reset input para poder elegir el mismo archivo otra vez si quieren
-    if (e.target) e.target.value = "";
+    const f = e.target.files?.[0];
+    if (!f) return;
 
-    if (!file) return;
+    setFiles((prev) => [...prev, f]);
 
-    const id = (globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random()}`).toString();
-    setPendingFiles((prev) => [...prev, { id, file, name: file.name, size: file.size }]);
+    // reset input para poder elegir el mismo archivo de nuevo si quisieras
+    e.target.value = "";
   }
 
-  function removePending(id) {
-    setPendingFiles((prev) => prev.filter((x) => x.id !== id));
+  function removePending(index) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   function clearPending() {
-    setPendingFiles([]);
+    setFiles([]);
   }
 
   // ----------------------------
-  // Botón principal: Crear avatar / Guardar cambios
+  // Crear avatar / subir fotos
   // ----------------------------
+  const needsMinPhotosToCreate = !avatar?.id;
   const canCreate =
     canUse &&
     name.trim().length > 0 &&
     trigger.trim().length > 0 &&
-    (avatar?.id ? true : totalCount >= 5);
+    (needsMinPhotosToCreate ? totalCount >= 5 : true);
 
   async function createAvatarOnly() {
+    // ✅ Tu backend te estaba dando 400 por falta de user_id
     const out = await apiPost("/api/avatars-create", {
+      user_id: userId,
       name: name.trim(),
       trigger: trigger.trim(),
     });
@@ -200,50 +219,24 @@ export default function AvatarStudioPanel() {
     if (!created?.id) throw new Error("AVATAR_CREATE_INVALID_RESPONSE");
 
     setAvatar(created);
-    setUploaded([]);
-    setThumbUrl("");
     setJob(null);
-
     return created;
   }
 
-  // ✅ tu backend es JSON base64
-  async function uploadPendingForAvatar(avatarId) {
-    if (!pendingFiles.length) return;
-
-    // si ya hay miniatura en DB, no forzamos thumbnail
-    const hasThumbAlready = !!thumbUrl || uploaded?.some((p) => p?.is_thumbnail);
-
-    for (let i = 0; i < pendingFiles.length; i++) {
-      const item = pendingFiles[i];
-      const file = item.file;
-
-      setBusyLabel(`Subiendo foto ${i + 1}/${pendingFiles.length}...`);
-
+  // ✅ IMPORTANTE: tu upload handler que pegaste exige:
+  // { user_id, avatar_id, image_b64, filename }
+  async function uploadPhotosForAvatar(avatarId, theFiles) {
+    for (let i = 0; i < theFiles.length; i++) {
+      const file = theFiles[i];
       const dataUrl = await fileToDataURL(file);
 
-      const out = await apiPost("/api/avatars-upload-photo", {
+      await apiPost("/api/avatars-upload-photo", {
+        user_id: userId,
         avatar_id: avatarId,
         image_b64: dataUrl,
         filename: file.name,
-        // ✅ si aún NO hay miniatura, la PRIMERA foto subida en esta tanda será thumbnail
-        is_thumbnail: !hasThumbAlready && i === 0 ? "true" : "false",
       });
-
-      const photo = out.photo || out.data || out;
-
-      // si tu endpoint de upload no devuelve url, luego la refrescamos con avatars-get-photo-urls
-      const normalized = {
-        ...(photo || {}),
-        storage_path: out.storage_path || photo?.storage_path,
-        url: out.signed_url || photo?.url || null,
-      };
-
-      setUploaded((prev) => [...prev, normalized]);
     }
-
-    // ya subimos todo lo pending
-    setPendingFiles([]);
   }
 
   async function onCreateAll() {
@@ -253,29 +246,25 @@ export default function AvatarStudioPanel() {
     if (!canUse) return setErr("Debes iniciar sesión.");
     if (!name.trim() || !trigger.trim()) return setErr("Falta nombre o trigger.");
 
-    // Si no hay avatar, exigimos 5 totales (subidas + pendientes)
     if (!avatar?.id && totalCount < 5) {
-      return setErr("Agrega mínimo 5 fotos (una por una) para crear el avatar. La primera será miniatura.");
-    }
-
-    // Si ya existe avatar y no hay nada nuevo, no hacemos nada
-    if (avatar?.id && pendingCount === 0) {
-      return setInfo("No hay fotos nuevas por subir. Si quieres, agrega más fotos y presiona Guardar cambios.");
+      return setErr("Agrega mínimo 5 fotos (una por una). La primera que SUBAS será la miniatura.");
     }
 
     setLoading(true);
     try {
-      // 1) Crear avatar si no existe
-      setBusyLabel(avatar?.id ? "Preparando..." : "Creando avatar...");
+      // 1) crear avatar si no existe
+      setBusyLabel(avatar?.id ? "Guardando..." : "Creando avatar...");
       const av = avatar?.id ? avatar : await createAvatarOnly();
 
-      // 2) Subir las pendientes (una por una)
-      if (pendingCount > 0) {
+      // 2) subir pendientes si hay
+      if (files.length > 0) {
         setBusyLabel("Subiendo fotos... (esto puede tardar)");
-        await uploadPendingForAvatar(av.id);
+        const toUpload = [...files]; // snapshot
+        setFiles([]); // limpia rápido UI (evita doble click)
+        await uploadPhotosForAvatar(av.id, toUpload);
       }
 
-      // 3) Refrescar desde DB (firmadas)
+      // 3) refrescar UI
       setBusyLabel("Actualizando miniatura...");
       await refreshThumbnail(av.id);
 
@@ -284,13 +273,12 @@ export default function AvatarStudioPanel() {
 
       setBusyLabel("");
       setInfo(
-        "Listo ✅ Fotos guardadas. Si la miniatura tarda en verse, es normal: los signed URLs a veces tardan unos segundos."
+        "Listo ✅ Guardado. Nota: la miniatura/signed URLs a veces tardan unos segundos en verse (normal)."
       );
-
       persist();
     } catch (e) {
       setBusyLabel("");
-      setErr(e.message || "ERROR");
+      setErr(e?.message || "ERROR");
     } finally {
       setLoading(false);
     }
@@ -305,10 +293,10 @@ export default function AvatarStudioPanel() {
     if (!avatar?.id) return setErr("Primero crea un avatar.");
     setLoading(true);
     try {
-      await apiPost("/api/avatars-ready-to-train", { avatar_id: avatar.id });
+      await apiPost("/api/avatars-ready-to-train", { user_id: userId, avatar_id: avatar.id });
       setInfo("Marcado como listo ✅");
     } catch (e) {
-      setErr(e.message);
+      setErr(e?.message || "ERROR");
     } finally {
       setLoading(false);
     }
@@ -323,14 +311,14 @@ export default function AvatarStudioPanel() {
     setLoading(true);
     try {
       setBusyLabel("Iniciando entrenamiento en RunPod... (puede tardar)");
-      const out = await apiPost("/api/avatars-train", { avatar_id: avatar.id });
+      const out = await apiPost("/api/avatars-train", { user_id: userId, avatar_id: avatar.id });
       setJob(out);
       setPolling(true);
       setBusyLabel("");
-      setInfo("Entrenamiento iniciado. Puede tardar varios minutos dependiendo de la GPU y la cola.");
+      setInfo("Entrenamiento iniciado. Puede tardar varios minutos dependiendo de la GPU/cola.");
     } catch (e) {
       setBusyLabel("");
-      setErr(e.message);
+      setErr(e?.message || "ERROR");
     } finally {
       setLoading(false);
     }
@@ -344,7 +332,7 @@ export default function AvatarStudioPanel() {
       if (!avatar?.id) return;
 
       try {
-        const out = await apiPost("/api/avatars-poll-runpod", { avatar_id: avatar.id });
+        const out = await apiPost("/api/avatars-poll-runpod", { user_id: userId, avatar_id: avatar.id });
         setJob(out);
 
         const status = (out?.status || out?.job_status || "").toString().toUpperCase();
@@ -358,7 +346,7 @@ export default function AvatarStudioPanel() {
           setErr("Entrenamiento falló. Revisa el log del job en RunPod.");
         }
       } catch (e) {
-        setErr(e.message);
+        setErr(e?.message || "ERROR");
         setPolling(false);
       }
     }
@@ -372,7 +360,7 @@ export default function AvatarStudioPanel() {
   }, [polling, avatar?.id]);
 
   // ----------------------------
-  // UI helpers
+  // UI state
   // ----------------------------
   const headerStatus = useMemo(() => {
     if (loading && busyLabel) return busyLabel;
@@ -388,8 +376,7 @@ export default function AvatarStudioPanel() {
         <div>
           <h2 className="text-lg font-semibold">Avatar Studio</h2>
           <p className="text-xs text-neutral-400 mt-1">
-            Crea un avatar y entrena un LoRA facial.{" "}
-            <span className="text-neutral-300">Esto puede tardar varios minutos.</span>
+            Crea un avatar y entrena un LoRA facial. <span className="text-neutral-300">Esto puede tardar varios minutos.</span>
           </p>
           <div className="mt-2 text-[11px] text-neutral-300">
             Estado: <span className="text-white">{headerStatus}</span>
@@ -402,7 +389,7 @@ export default function AvatarStudioPanel() {
             setName("");
             setTrigger("");
             setAvatar(null);
-            setPendingFiles([]);
+            setFiles([]);
             setUploaded([]);
             setThumbUrl("");
             setJob(null);
@@ -435,26 +422,25 @@ export default function AvatarStudioPanel() {
         </div>
       )}
 
-      {/* FORM: nombre + trigger */}
+      {/* FORM */}
       <div className="mt-4 grid gap-3">
         <div className="grid gap-2 md:grid-cols-[1fr_240px]">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del avatar (ej: María v1)"
+            placeholder="Nombre del avatar (ej: Isabela Noir v1)"
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
             disabled={!canUse || loading || polling}
           />
           <input
             value={trigger}
             onChange={(e) => setTrigger(e.target.value)}
-            placeholder="Trigger (ej: mari)"
+            placeholder="Trigger (ej: isanoir)"
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
             disabled={!canUse || loading || polling}
           />
         </div>
 
-        {/* Avatar info + thumb */}
         {avatar?.id && (
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-xs text-neutral-300">
@@ -475,7 +461,7 @@ export default function AvatarStudioPanel() {
           </div>
         )}
 
-        {/* FILE PICKER (✅ UNO POR UNO) */}
+        {/* Fotos */}
         <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
@@ -496,7 +482,7 @@ export default function AvatarStudioPanel() {
               ref={fileRef}
               type="file"
               accept="image/*"
-              // ✅ sin multiple: el usuario agrega 1 foto cada vez
+              multiple={false} // ✅ 1 por 1
               onChange={onPickOneFile}
               style={{ display: "none" }}
               disabled={!canUse || loading || polling}
@@ -514,7 +500,15 @@ export default function AvatarStudioPanel() {
             <div className="text-xs text-neutral-400">
               Total (subidas + pendientes):{" "}
               <span className="text-neutral-200 font-semibold">{totalCount}</span>
-              <span className="ml-2 text-neutral-500">(Se suben cuando presiones “Crear avatar / Guardar cambios”)</span>
+              {needsMinPhotosToCreate ? (
+                <span className="ml-2 text-neutral-500">
+                  (mínimo 5 para crear)
+                </span>
+              ) : (
+                <span className="ml-2 text-neutral-500">
+                  (se suben cuando presionas “Guardar cambios”)
+                </span>
+              )}
             </div>
 
             {pendingCount > 0 && (
@@ -522,35 +516,32 @@ export default function AvatarStudioPanel() {
                 type="button"
                 onClick={clearPending}
                 disabled={loading || polling}
-                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+                className="ml-auto rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-50"
               >
                 Limpiar pendientes
               </button>
             )}
           </div>
 
-          {/* Lista de pendientes */}
+          {/* Pendientes */}
           {pendingCount > 0 && (
-            <div className="mt-3 rounded-xl border border-white/10 bg-black/50 p-3">
-              <div className="text-xs text-neutral-300 font-semibold mb-2">Pendientes por subir</div>
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/40 p-3">
+              <div className="text-xs font-semibold text-neutral-200 mb-2">Pendientes por subir</div>
               <div className="space-y-2">
-                {pendingFiles.map((p, idx) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2"
-                  >
+                {files.map((f, idx) => (
+                  <div key={`${f.name}-${idx}`} className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                     <div className="min-w-0">
                       <div className="text-xs text-neutral-200 truncate">
                         {idx === 0 && uploadedCount === 0 ? "⭐ (será miniatura) " : ""}
-                        {p.name}
+                        {f.name}
                       </div>
-                      <div className="text-[11px] text-neutral-500">{Math.round((p.size || 0) / 1024)} KB</div>
+                      <div className="text-[11px] text-neutral-500">{Math.round((f.size || 0) / 1024)} KB</div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => removePending(p.id)}
+                      onClick={() => removePending(idx)}
                       disabled={loading || polling}
-                      className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-50"
                     >
                       Quitar
                     </button>
@@ -560,17 +551,13 @@ export default function AvatarStudioPanel() {
             </div>
           )}
 
-          {/* Preview de lo ya subido */}
+          {/* Subidas */}
           {Array.isArray(uploaded) && uploaded.length > 0 && (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {uploaded.map((p, idx) => {
                 const url = p.url || p.signed_url || p.signedUrl || "";
-                const isThumb = !!p.is_thumbnail || p.storage_path === avatar?.ref_image_path || idx === 0;
                 return (
-                  <div
-                    key={p.id || p.storage_path || idx}
-                    className="overflow-hidden rounded-xl border border-white/10 bg-black/40"
-                  >
+                  <div key={p.id || p.storage_path || idx} className="overflow-hidden rounded-xl border border-white/10 bg-black/40">
                     {url ? (
                       <img src={url} alt="photo" className="h-24 w-full object-cover" />
                     ) : (
@@ -580,7 +567,7 @@ export default function AvatarStudioPanel() {
                       <div className="truncate">
                         {p.storage_path ? p.storage_path.split("/").slice(-2).join("/") : "photo"}
                       </div>
-                      {isThumb && <div className="mt-1 text-[10px] text-cyan-200 font-semibold">miniatura</div>}
+                      {idx === 0 && <div className="mt-1 text-[10px] text-cyan-200 font-semibold">miniatura</div>}
                     </div>
                   </div>
                 );
@@ -595,12 +582,14 @@ export default function AvatarStudioPanel() {
           disabled={!canCreate || loading || polling}
           onClick={onCreateAll}
           className={`rounded-2xl px-4 py-3 text-sm font-semibold text-white ${
-            canCreate
-              ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95"
-              : "bg-white/10 opacity-60"
+            canCreate ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95" : "bg-white/10 opacity-60"
           }`}
         >
-          {loading ? (busyLabel ? busyLabel : "Procesando...") : avatar?.id ? "Guardar cambios" : "Crear avatar"}
+          {loading
+            ? busyLabel || "Procesando..."
+            : avatar?.id
+            ? "Guardar cambios"
+            : "Crear avatar"}
         </button>
 
         {/* Entrenamiento */}
@@ -610,7 +599,7 @@ export default function AvatarStudioPanel() {
               <div>
                 <div className="text-sm font-semibold text-white">Entrenamiento LoRA (RunPod)</div>
                 <div className="text-xs text-neutral-400">
-                  Necesitas 5+ fotos <b>SUBIDAS</b>. Puede tardar varios minutos.
+                  Cuando tengas 5+ fotos SUBIDAS, puedes entrenar. Puede tardar varios minutos.
                 </div>
               </div>
 
