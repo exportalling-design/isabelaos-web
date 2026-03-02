@@ -28,7 +28,7 @@ export default function AvatarStudioPanel() {
   const fileRef = useRef(null);
 
   const [loading, setLoading] = useState(false);
-  const [busyLabel, setBusyLabel] = useState(""); // texto del paso actual
+  const [busyLabel, setBusyLabel] = useState("");
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
 
@@ -38,7 +38,8 @@ export default function AvatarStudioPanel() {
   const [avatar, setAvatar] = useState(null);
 
   // photos
-  const [files, setFiles] = useState([]); // seleccionadas (no persistibles)
+  // ✅ “uno por uno”: guardamos una cola de archivos por subir (pending)
+  const [pendingFiles, setPendingFiles] = useState([]); // [{id, file, name, size}]
   const [uploaded, setUploaded] = useState([]); // [{id, storage_path, url?, is_thumbnail?}]
   const [thumbUrl, setThumbUrl] = useState("");
 
@@ -77,6 +78,7 @@ export default function AvatarStudioPanel() {
       thumbUrl,
       job,
       polling,
+      // ❗ no persistimos File objects (pendingFiles no se puede serializar)
       ...next,
     };
     try {
@@ -119,7 +121,9 @@ export default function AvatarStudioPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, trigger, avatar, uploaded, thumbUrl, job, polling]);
 
-  const photoCount = uploaded?.length || 0;
+  const uploadedCount = uploaded?.length || 0;
+  const pendingCount = pendingFiles?.length || 0;
+  const totalCount = uploadedCount + pendingCount;
 
   // ----------------------------
   // Refresh helpers
@@ -144,7 +148,6 @@ export default function AvatarStudioPanel() {
     }
   }
 
-  // Al entrar al panel con un avatar ya creado: refresca
   useEffect(() => {
     if (!canUse) return;
     if (!avatar?.id) return;
@@ -154,23 +157,38 @@ export default function AvatarStudioPanel() {
   }, [canUse, avatar?.id]);
 
   // ----------------------------
-  // File pick
+  // File pick (✅ UNO POR UNO)
   // ----------------------------
-  function onPickFiles(e) {
+  function onPickOneFile(e) {
     setErr("");
     setInfo("");
-    const f = Array.from(e.target.files || []);
-    setFiles(f);
+
+    const file = (e.target.files && e.target.files[0]) || null;
+    // reset input para poder elegir el mismo archivo otra vez si quieren
+    if (e.target) e.target.value = "";
+
+    if (!file) return;
+
+    const id = (globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random()}`).toString();
+    setPendingFiles((prev) => [...prev, { id, file, name: file.name, size: file.size }]);
+  }
+
+  function removePending(id) {
+    setPendingFiles((prev) => prev.filter((x) => x.id !== id));
+  }
+
+  function clearPending() {
+    setPendingFiles([]);
   }
 
   // ----------------------------
-  // 1 solo botón: Crear avatar (y subir fotos)
+  // Botón principal: Crear avatar / Guardar cambios
   // ----------------------------
   const canCreate =
     canUse &&
     name.trim().length > 0 &&
     trigger.trim().length > 0 &&
-    (avatar?.id ? true : files.length >= 5); // si no existe avatar, pedimos 5+
+    (avatar?.id ? true : totalCount >= 5);
 
   async function createAvatarOnly() {
     const out = await apiPost("/api/avatars-create", {
@@ -185,35 +203,47 @@ export default function AvatarStudioPanel() {
     setUploaded([]);
     setThumbUrl("");
     setJob(null);
+
     return created;
   }
 
-  // ✅ IMPORTANTE: tu backend es JSON base64, NO FormData
-  async function uploadPhotosForAvatar(avatarId, theFiles, alreadyHasThumb) {
-    const results = [];
+  // ✅ tu backend es JSON base64
+  async function uploadPendingForAvatar(avatarId) {
+    if (!pendingFiles.length) return;
 
-    for (let i = 0; i < theFiles.length; i++) {
-      const file = theFiles[i];
+    // si ya hay miniatura en DB, no forzamos thumbnail
+    const hasThumbAlready = !!thumbUrl || uploaded?.some((p) => p?.is_thumbnail);
+
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const item = pendingFiles[i];
+      const file = item.file;
+
+      setBusyLabel(`Subiendo foto ${i + 1}/${pendingFiles.length}...`);
+
       const dataUrl = await fileToDataURL(file);
 
       const out = await apiPost("/api/avatars-upload-photo", {
         avatar_id: avatarId,
         image_b64: dataUrl,
         filename: file.name,
-        // si ya hay miniatura (ref_image_path), no forzamos thumbnail.
-        // si NO hay miniatura, la primera foto seleccionada se vuelve thumbnail.
-        is_thumbnail: !alreadyHasThumb && i === 0 ? "true" : "false",
+        // ✅ si aún NO hay miniatura, la PRIMERA foto subida en esta tanda será thumbnail
+        is_thumbnail: !hasThumbAlready && i === 0 ? "true" : "false",
       });
 
       const photo = out.photo || out.data || out;
-      results.push({
+
+      // si tu endpoint de upload no devuelve url, luego la refrescamos con avatars-get-photo-urls
+      const normalized = {
         ...(photo || {}),
         storage_path: out.storage_path || photo?.storage_path,
         url: out.signed_url || photo?.url || null,
-      });
+      };
+
+      setUploaded((prev) => [...prev, normalized]);
     }
 
-    return results;
+    // ya subimos todo lo pending
+    setPendingFiles([]);
   }
 
   async function onCreateAll() {
@@ -223,28 +253,29 @@ export default function AvatarStudioPanel() {
     if (!canUse) return setErr("Debes iniciar sesión.");
     if (!name.trim() || !trigger.trim()) return setErr("Falta nombre o trigger.");
 
-    // Si no hay avatar, exigimos 5+
-    if (!avatar?.id && files.length < 5) {
-      return setErr("Selecciona mínimo 5 fotos para crear el avatar. (La primera será miniatura)");
+    // Si no hay avatar, exigimos 5 totales (subidas + pendientes)
+    if (!avatar?.id && totalCount < 5) {
+      return setErr("Agrega mínimo 5 fotos (una por una) para crear el avatar. La primera será miniatura.");
+    }
+
+    // Si ya existe avatar y no hay nada nuevo, no hacemos nada
+    if (avatar?.id && pendingCount === 0) {
+      return setInfo("No hay fotos nuevas por subir. Si quieres, agrega más fotos y presiona Guardar cambios.");
     }
 
     setLoading(true);
-
     try {
       // 1) Crear avatar si no existe
       setBusyLabel(avatar?.id ? "Preparando..." : "Creando avatar...");
       const av = avatar?.id ? avatar : await createAvatarOnly();
 
-      // 2) Subir fotos si hay seleccionadas
-      if (files.length > 0) {
+      // 2) Subir las pendientes (una por una)
+      if (pendingCount > 0) {
         setBusyLabel("Subiendo fotos... (esto puede tardar)");
-        const hasThumbAlready = !!thumbUrl || uploaded?.some((p) => p?.is_thumbnail);
-
-        await uploadPhotosForAvatar(av.id, files, hasThumbAlready);
-        setFiles([]);
+        await uploadPendingForAvatar(av.id);
       }
 
-      // 3) Refrescar UI
+      // 3) Refrescar desde DB (firmadas)
       setBusyLabel("Actualizando miniatura...");
       await refreshThumbnail(av.id);
 
@@ -253,10 +284,10 @@ export default function AvatarStudioPanel() {
 
       setBusyLabel("");
       setInfo(
-        "Listo ✅ Avatar creado y fotos guardadas. Si la miniatura tarda en verse, es normal: los signed URL a veces toman unos segundos."
+        "Listo ✅ Fotos guardadas. Si la miniatura tarda en verse, es normal: los signed URLs a veces tardan unos segundos."
       );
 
-      persist(); // asegurar guardado final
+      persist();
     } catch (e) {
       setBusyLabel("");
       setErr(e.message || "ERROR");
@@ -287,7 +318,7 @@ export default function AvatarStudioPanel() {
     setErr("");
     setInfo("");
     if (!avatar?.id) return setErr("Primero crea un avatar.");
-    if (photoCount < 5) return setErr("Necesitas mínimo 5 fotos subidas para entrenar.");
+    if (uploadedCount < 5) return setErr("Necesitas mínimo 5 fotos SUBIDAS para entrenar.");
 
     setLoading(true);
     try {
@@ -305,7 +336,6 @@ export default function AvatarStudioPanel() {
     }
   }
 
-  // Poll runpod
   useEffect(() => {
     let t = null;
 
@@ -347,10 +377,10 @@ export default function AvatarStudioPanel() {
   const headerStatus = useMemo(() => {
     if (loading && busyLabel) return busyLabel;
     if (polling) return "Entrenando... (puede tardar varios minutos)";
-    if (avatar?.id && photoCount >= 5) return "Listo para entrenar ✅";
-    if (avatar?.id && photoCount < 5) return `Sube ${Math.max(0, 5 - photoCount)} foto(s) más para entrenar`;
+    if (avatar?.id && uploadedCount >= 5) return "Listo para entrenar ✅";
+    if (avatar?.id && uploadedCount < 5) return `Sube ${Math.max(0, 5 - uploadedCount)} foto(s) más (SUBIDAS) para entrenar`;
     return "Crea un avatar y sube mínimo 5 fotos";
-  }, [loading, busyLabel, polling, avatar?.id, photoCount]);
+  }, [loading, busyLabel, polling, avatar?.id, uploadedCount]);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
@@ -372,7 +402,7 @@ export default function AvatarStudioPanel() {
             setName("");
             setTrigger("");
             setAvatar(null);
-            setFiles([]);
+            setPendingFiles([]);
             setUploaded([]);
             setThumbUrl("");
             setJob(null);
@@ -445,17 +475,19 @@ export default function AvatarStudioPanel() {
           </div>
         )}
 
-        {/* FILE PICKER */}
+        {/* FILE PICKER (✅ UNO POR UNO) */}
         <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="text-sm font-semibold text-white">Fotos de entrenamiento</div>
               <div className="text-xs text-neutral-400">
-                Mínimo 5. La primera se usa como miniatura (thumbnail).
+                Agrega 5 fotos (una por una). La primera foto SUBIDA se usa como miniatura.
               </div>
             </div>
             <div className="text-xs text-neutral-300">
-              Subidas: <span className="text-white font-semibold">{photoCount}</span>
+              Subidas: <span className="text-white font-semibold">{uploadedCount}</span>
+              <span className="text-neutral-500"> · </span>
+              Pendientes: <span className="text-white font-semibold">{pendingCount}</span>
             </div>
           </div>
 
@@ -464,8 +496,8 @@ export default function AvatarStudioPanel() {
               ref={fileRef}
               type="file"
               accept="image/*"
-              multiple
-              onChange={onPickFiles}
+              // ✅ sin multiple: el usuario agrega 1 foto cada vez
+              onChange={onPickOneFile}
               style={{ display: "none" }}
               disabled={!canUse || loading || polling}
             />
@@ -476,30 +508,78 @@ export default function AvatarStudioPanel() {
               disabled={!canUse || loading || polling}
               className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-50"
             >
-              Elegir fotos
+              Agregar 1 foto
             </button>
 
             <div className="text-xs text-neutral-400">
-              Seleccionadas: <span className="text-neutral-200 font-semibold">{files.length}</span>
-              {files.length > 0 ? <span className="ml-2 text-neutral-500">(Se suben al crear)</span> : null}
+              Total (subidas + pendientes):{" "}
+              <span className="text-neutral-200 font-semibold">{totalCount}</span>
+              <span className="ml-2 text-neutral-500">(Se suben cuando presiones “Crear avatar / Guardar cambios”)</span>
             </div>
+
+            {pendingCount > 0 && (
+              <button
+                type="button"
+                onClick={clearPending}
+                disabled={loading || polling}
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+              >
+                Limpiar pendientes
+              </button>
+            )}
           </div>
 
-          {/* PREVIEW de lo ya subido */}
+          {/* Lista de pendientes */}
+          {pendingCount > 0 && (
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/50 p-3">
+              <div className="text-xs text-neutral-300 font-semibold mb-2">Pendientes por subir</div>
+              <div className="space-y-2">
+                {pendingFiles.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs text-neutral-200 truncate">
+                        {idx === 0 && uploadedCount === 0 ? "⭐ (será miniatura) " : ""}
+                        {p.name}
+                      </div>
+                      <div className="text-[11px] text-neutral-500">{Math.round((p.size || 0) / 1024)} KB</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removePending(p.id)}
+                      disabled={loading || polling}
+                      className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Preview de lo ya subido */}
           {Array.isArray(uploaded) && uploaded.length > 0 && (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {uploaded.map((p, idx) => {
                 const url = p.url || p.signed_url || p.signedUrl || "";
-                const isThumb = !!p.is_thumbnail || p.storage_path === avatar?.ref_image_path;
+                const isThumb = !!p.is_thumbnail || p.storage_path === avatar?.ref_image_path || idx === 0;
                 return (
-                  <div key={p.id || p.storage_path || idx} className="overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                  <div
+                    key={p.id || p.storage_path || idx}
+                    className="overflow-hidden rounded-xl border border-white/10 bg-black/40"
+                  >
                     {url ? (
                       <img src={url} alt="photo" className="h-24 w-full object-cover" />
                     ) : (
                       <div className="grid h-24 place-items-center text-xs text-neutral-500">Sin URL</div>
                     )}
                     <div className="p-2 text-[10px] text-neutral-400">
-                      <div className="truncate">{p.storage_path ? p.storage_path.split("/").slice(-2).join("/") : "photo"}</div>
+                      <div className="truncate">
+                        {p.storage_path ? p.storage_path.split("/").slice(-2).join("/") : "photo"}
+                      </div>
                       {isThumb && <div className="mt-1 text-[10px] text-cyan-200 font-semibold">miniatura</div>}
                     </div>
                   </div>
@@ -515,7 +595,9 @@ export default function AvatarStudioPanel() {
           disabled={!canCreate || loading || polling}
           onClick={onCreateAll}
           className={`rounded-2xl px-4 py-3 text-sm font-semibold text-white ${
-            canCreate ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95" : "bg-white/10 opacity-60"
+            canCreate
+              ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:opacity-95"
+              : "bg-white/10 opacity-60"
           }`}
         >
           {loading ? (busyLabel ? busyLabel : "Procesando...") : avatar?.id ? "Guardar cambios" : "Crear avatar"}
@@ -527,7 +609,9 @@ export default function AvatarStudioPanel() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <div className="text-sm font-semibold text-white">Entrenamiento LoRA (RunPod)</div>
-                <div className="text-xs text-neutral-400">Cuando tengas 5+ fotos, puedes iniciar el entrenamiento. Puede tardar varios minutos.</div>
+                <div className="text-xs text-neutral-400">
+                  Necesitas 5+ fotos <b>SUBIDAS</b>. Puede tardar varios minutos.
+                </div>
               </div>
 
               <div className="flex gap-2 flex-wrap">
@@ -542,10 +626,10 @@ export default function AvatarStudioPanel() {
 
                 <button
                   type="button"
-                  disabled={loading || polling || photoCount < 5}
+                  disabled={loading || polling || uploadedCount < 5}
                   onClick={onTrain}
                   className={`rounded-xl px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 ${
-                    photoCount < 5 ? "bg-white/10" : "bg-gradient-to-r from-cyan-500 to-fuchsia-500"
+                    uploadedCount < 5 ? "bg-white/10" : "bg-gradient-to-r from-cyan-500 to-fuchsia-500"
                   }`}
                 >
                   {polling ? "Entrenando..." : "Entrenar"}
