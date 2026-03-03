@@ -2160,10 +2160,28 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   );
 }
 
+
 // ---------------------------------------------------------
 // Sobre Nosotros (vista)
 // ---------------------------------------------------------
 function AboutView({ onBackHome }) {
+  const videoRef = useRef(null);
+  const [soundOn, setSoundOn] = useState(false);
+
+  const enableSound = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.muted = false;
+      v.volume = 1;
+      await v.play();
+      setSoundOn(true);
+    } catch (e) {
+      console.log(e);
+      // Si el navegador bloquea, al menos el usuario puede darle play manual
+    }
+  };
+
   return (
     <div
       className="min-h-screen w-full text-white"
@@ -2199,15 +2217,36 @@ function AboutView({ onBackHome }) {
         {/* ✅ Video arriba de todo */}
         <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
           {/* ✅ Subirlo a: public/gallery/video10.mp4 */}
-          <video
-            className="w-full rounded-2xl border border-white/10 bg-black/40"
-            src="/gallery/video10.mp4"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="metadata"
-          />
+          <div className="relative">
+            <video
+              ref={videoRef}
+              className="w-full h-[360px] md:h-[460px] object-cover rounded-2xl border border-white/10 bg-black/40"
+              src="/gallery/video10.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              controls={soundOn} // opcional: muestra controles después de activar audio
+            />
+
+            {/* Botón overlay para activar audio (los navegadores requieren interacción) */}
+            {!soundOn && (
+              <button
+                onClick={enableSound}
+                className="absolute bottom-4 left-4 rounded-2xl bg-black/60 border border-white/15 px-4 py-2 text-xs text-white hover:bg-black/70"
+              >
+                🔊 Activar audio
+              </button>
+            )}
+
+            {/* Mini nota opcional */}
+            {!soundOn && (
+              <div className="absolute bottom-4 right-4 hidden sm:block text-[10px] text-white/60 bg-black/50 border border-white/10 rounded-xl px-3 py-2">
+                El audio se activa al tocar el botón
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ✅ Info completa aquí */}
