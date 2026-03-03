@@ -1962,7 +1962,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
 
             {/* ✅ Texto más corto en Home (lo largo se movió a Sobre nosotros) */}
             <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Motor de producción visual con IA para creadores y equipos que necesitan velocidad, consistencia y control creativo.
+              Motor de producción visual con IA para creadores y equipos que necesitan, consistencia y control creativo.
             </p>
 
             {/* ✅ Próximamente */}
