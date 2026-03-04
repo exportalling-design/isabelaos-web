@@ -10,8 +10,11 @@ export default function HeadshotProPanel({ userStatus }) {
   const [jobId, setJobId] = useState("");
   const [jadesLocal, setJadesLocal] = useState(null);
 
-  // ✅ NUEVO: modo
+  // ✅ Modo
   const [mode, setMode] = useState("product_studio"); // product_studio | anime_identity
+
+  // ✅ NUEVO: prompt libre
+  const [prompt, setPrompt] = useState("");
 
   const jadesShown = useMemo(() => {
     const base = typeof userStatus?.jades === "number" ? userStatus.jades : 0;
@@ -85,8 +88,11 @@ export default function HeadshotProPanel({ userStatus }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: b64,
-          mode, // ✅ NUEVO
+          mode, // ✅
           ref: `headshotpro-${mode}-${Date.now()}`,
+
+          // ✅ NUEVO: prompt libre (si está vacío, el worker usa default)
+          prompt: (prompt || "").trim(),
 
           // params:
           ...defaults,
@@ -102,7 +108,12 @@ export default function HeadshotProPanel({ userStatus }) {
       // UI: reflejar cobro
       const billedAmount = data?.billed?.amount ?? COST_JADES;
       setJadesLocal((prev) => {
-        const base = typeof prev === "number" ? prev : (typeof userStatus?.jades === "number" ? userStatus.jades : 0);
+        const base =
+          typeof prev === "number"
+            ? prev
+            : typeof userStatus?.jades === "number"
+              ? userStatus.jades
+              : 0;
         return Math.max(0, base - billedAmount);
       });
 
@@ -136,7 +147,7 @@ export default function HeadshotProPanel({ userStatus }) {
           className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none"
         />
 
-        {/* ✅ NUEVO: selector de modo (sin cambiar App.jsx) */}
+        {/* ✅ selector de modo (sin cambiar App.jsx) */}
         <label className="text-xs text-neutral-300 mt-2">Modo</label>
         <select
           value={mode}
@@ -146,6 +157,16 @@ export default function HeadshotProPanel({ userStatus }) {
           <option value="product_studio">Product Studio (Premium)</option>
           <option value="anime_identity">Anime Identity (mantiene rostro)</option>
         </select>
+
+        {/* ✅ NUEVO: prompt libre */}
+        <label className="text-xs text-neutral-300 mt-2">Prompt (qué quieres que haga)</label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder='Ej: "anime limpio, fondo cyberpunk, luz cinematográfica" o "foto de producto en estudio, fondo blanco, sombra suave"'
+          rows={4}
+          className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none resize-none"
+        />
 
         <button
           type="button"
@@ -186,4 +207,4 @@ export default function HeadshotProPanel({ userStatus }) {
       </div>
     </section>
   );
-          }
+}
