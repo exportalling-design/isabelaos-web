@@ -9,7 +9,7 @@ import VoiceToVideoPanel from "./components/VoiceToVideoPanel";
 import { supabase } from "./lib/supabaseClient";
 import LibraryView from "./components/LibraryView";
 import AvatarStudioPanel from "./components/AvatarStudioPanel";
-import HeadshotProPanel from "./components/HeadshotProPanel";
+import HeadshotProPanel from "./components/HeadshotPhotoPanel";
 
 import {
   saveGenerationInSupabase,
