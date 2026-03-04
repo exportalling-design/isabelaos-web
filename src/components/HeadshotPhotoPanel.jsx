@@ -207,4 +207,4 @@ export default function HeadshotProPanel({ userStatus }) {
       </div>
     </section>
   );
-}
+                             }
