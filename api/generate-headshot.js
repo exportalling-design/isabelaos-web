@@ -101,6 +101,11 @@ export default async function handler(req, res) {
       action,
       image_b64: body.image_b64,
       user_id,
+
+      // ✅ NUEVO: prompt libre (opcionales)
+      prompt: body.prompt,
+      negative_prompt: body.negative_prompt,
+
       // opcionales:
       steps: body.steps,
       guidance: body.guidance,
@@ -138,4 +143,4 @@ export default async function handler(req, res) {
     console.error("Error en /api/generate-headshot:", err);
     return res.status(code).json({ ok: false, error: msg });
   }
-      }
+    }
