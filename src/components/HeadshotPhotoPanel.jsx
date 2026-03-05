@@ -1,19 +1,23 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 export default function HeadshotProPanel({ userStatus }) {
   const COST_JADES = 5;
 
-  const [imageUrl, setImageUrl] = useState("");
+  const fileRef = useRef(null);
+
+  const [fileObj, setFileObj] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+
   const [status, setStatus] = useState("IDLE"); // IDLE | RUNNING | DONE | ERROR
   const [resultUrl, setResultUrl] = useState("");
   const [error, setError] = useState("");
   const [jobId, setJobId] = useState("");
   const [jadesLocal, setJadesLocal] = useState(null);
 
-  // ✅ Modo
+  // ✅ modo
   const [mode, setMode] = useState("product_studio"); // product_studio | anime_identity
 
-  // ✅ NUEVO: prompt libre
+  // ✅ prompt libre
   const [prompt, setPrompt] = useState("");
 
   const jadesShown = useMemo(() => {
@@ -21,17 +25,41 @@ export default function HeadshotProPanel({ userStatus }) {
     return typeof jadesLocal === "number" ? jadesLocal : base;
   }, [userStatus?.jades, jadesLocal]);
 
-  async function urlToBase64(url) {
-    const resp = await fetch(url, { mode: "cors" });
-    if (!resp.ok) throw new Error("No pude descargar la imagen desde la URL (CORS o URL inválida).");
-    const blob = await resp.blob();
-    if (!blob.type.startsWith("image/")) throw new Error("La URL no parece ser una imagen válida.");
+  function resetRunUI() {
+    setError("");
+    setResultUrl("");
+    setJobId("");
+  }
 
+  function onPickFile(e) {
+    resetRunUI();
+    const f = e.target.files?.[0] || null;
+    if (!f) return;
+
+    if (!f.type.startsWith("image/")) {
+      setError("Ese archivo no parece una imagen.");
+      setFileObj(null);
+      setPreviewUrl("");
+      return;
+    }
+
+    setFileObj(f);
+    const url = URL.createObjectURL(f);
+    setPreviewUrl(url);
+  }
+
+  async function fileToBase64(file) {
+    // devuelve SOLO el b64 (sin data:image/...;base64,)
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result); // data:image/...;base64,....
-      reader.onerror = () => reject(new Error("Error convirtiendo imagen a base64."));
-      reader.readAsDataURL(blob);
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        const b64 = dataUrl.includes("base64,") ? dataUrl.split("base64,")[1] : "";
+        if (!b64) return reject(new Error("No pude extraer base64 de la imagen."));
+        resolve(b64);
+      };
+      reader.onerror = () => reject(new Error("Error leyendo la imagen."));
+      reader.readAsDataURL(file);
     });
   }
 
@@ -39,7 +67,7 @@ export default function HeadshotProPanel({ userStatus }) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  async function pollJob(jobIdToPoll, maxSeconds = 120) {
+  async function pollJob(jobIdToPoll, maxSeconds = 140) {
     const started = Date.now();
     while (true) {
       if ((Date.now() - started) / 1000 > maxSeconds) {
@@ -56,7 +84,7 @@ export default function HeadshotProPanel({ userStatus }) {
       if (!r.ok || !data?.ok) throw new Error(data?.error || "Error consultando status del job.");
 
       if (data.done && data.image_data_url) {
-        return data.image_data_url;
+        return data.image_data_url; // data:image/jpeg;base64,...
       }
 
       await sleep(1500);
@@ -64,20 +92,15 @@ export default function HeadshotProPanel({ userStatus }) {
   }
 
   const run = async () => {
-    setError("");
-    setResultUrl("");
-    setJobId("");
+    resetRunUI();
     setStatus("RUNNING");
 
     try {
-      if (!imageUrl) throw new Error("Pega una URL de imagen.");
+      if (!fileObj) throw new Error("Sube una foto primero.");
 
-      // URL -> base64
-      const dataUrl = await urlToBase64(imageUrl);
-      const b64 = String(dataUrl).includes("base64,") ? String(dataUrl).split("base64,")[1] : "";
-      if (!b64) throw new Error("No pude extraer base64 de la imagen.");
+      const b64 = await fileToBase64(fileObj);
 
-      // Defaults por modo (para que se note y mantenga identidad)
+      // Defaults por modo
       const defaults =
         mode === "anime_identity"
           ? { strength: 0.55, steps: 32, guidance: 7.5, max_side: 768 }
@@ -88,13 +111,12 @@ export default function HeadshotProPanel({ userStatus }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_b64: b64,
-          mode, // ✅
+          mode,
           ref: `headshotpro-${mode}-${Date.now()}`,
 
-          // ✅ NUEVO: prompt libre (si está vacío, el worker usa default)
+          // ✅ prompt libre (si va vacío, el worker usa su prompt default)
           prompt: (prompt || "").trim(),
 
-          // params:
           ...defaults,
         }),
       });
@@ -117,8 +139,8 @@ export default function HeadshotProPanel({ userStatus }) {
         return Math.max(0, base - billedAmount);
       });
 
-      const img = await pollJob(data.jobId, 140);
-      setResultUrl(img);
+      const imgDataUrl = await pollJob(data.jobId, 160);
+      setResultUrl(imgDataUrl);
       setStatus("DONE");
     } catch (e) {
       setStatus("ERROR");
@@ -139,15 +161,28 @@ export default function HeadshotProPanel({ userStatus }) {
       </div>
 
       <div className="mt-4 grid gap-3">
-        <label className="text-xs text-neutral-300">URL de foto</label>
-        <input
-          value={imageUrl}
-          onChange={(e) => setImageUrl(e.target.value)}
-          placeholder="https://..."
-          className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none"
-        />
+        {/* ✅ Upload como antes */}
+        <label className="text-xs text-neutral-300">Sube tu foto</label>
+        <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={onPickFile}
+            className="w-full text-xs text-neutral-200"
+          />
 
-        {/* ✅ selector de modo (sin cambiar App.jsx) */}
+          {previewUrl ? (
+            <div className="mt-3">
+              <p className="text-xs text-neutral-400 mb-2">Vista previa</p>
+              <img src={previewUrl} alt="preview" className="w-full rounded-2xl border border-white/10" />
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-neutral-500">Ej: foto de producto o rostro (mejor si está bien iluminada).</p>
+          )}
+        </div>
+
+        {/* modo */}
         <label className="text-xs text-neutral-300 mt-2">Modo</label>
         <select
           value={mode}
@@ -158,19 +193,19 @@ export default function HeadshotProPanel({ userStatus }) {
           <option value="anime_identity">Anime Identity (mantiene rostro)</option>
         </select>
 
-        {/* ✅ NUEVO: prompt libre */}
+        {/* prompt */}
         <label className="text-xs text-neutral-300 mt-2">Prompt (qué quieres que haga)</label>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder='Ej: "anime limpio, fondo cyberpunk, luz cinematográfica" o "foto de producto en estudio, fondo blanco, sombra suave"'
+          placeholder='Ej: "foto de producto en estudio, fondo blanco, sombra suave" o "anime limpio, fondo cyberpunk, luz cinematográfica"'
           rows={4}
           className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none resize-none"
         />
 
         <button
           type="button"
-          disabled={!imageUrl || status === "RUNNING"}
+          disabled={!fileObj || status === "RUNNING"}
           onClick={run}
           className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
@@ -184,9 +219,7 @@ export default function HeadshotProPanel({ userStatus }) {
         ) : null}
 
         {error ? (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
-            {error}
-          </div>
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div>
         ) : null}
 
         {resultUrl ? (
@@ -202,9 +235,16 @@ export default function HeadshotProPanel({ userStatus }) {
                 setResultUrl("");
               }}
             />
+            <a
+              href={resultUrl}
+              download="isabelaos_headshot.jpg"
+              className="mt-3 inline-block w-full rounded-2xl border border-white/10 bg-black/40 py-2 text-center text-sm text-white hover:bg-white/5"
+            >
+              Descargar
+            </a>
           </div>
         ) : null}
       </div>
     </section>
   );
-                             }
+}
