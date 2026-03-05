@@ -1437,7 +1437,7 @@ function DashboardView() {
             {appViewMode === "voice2video" && <VoiceToVideoPanel userStatus={userStatus} />}
             {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "headshot" && <HeadshotPhotoPanel userStatus={userStatus} />}
+            {appViewMode === "headshot" && <HeadshotProPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
           </div>
         </section>
