@@ -37,6 +37,7 @@ async function runpodRun({ endpointId, input }) {
   });
 
   const data = await r.json().catch(() => null);
+
   if (!r.ok) {
     const msg = data?.error || data?.message || JSON.stringify(data);
     throw new Error(`RunPod /run failed: ${r.status} ${msg}`);
@@ -73,11 +74,11 @@ function normalizeDuration(raw) {
 function getJadeCost({ isFastMode, duration }) {
   if (isFastMode) {
     if (duration === 5) return 12;
-    return 15;
+    return 15; // 8s Fast
   }
 
   if (duration === 5) return 11;
-  return 12;
+  return 12; // 8s Pro
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -90,19 +91,32 @@ async function refundJadesSafe({ userId, amount, ref, reason }) {
     });
 
     if (error) {
-      console.error("refund_jades failed:", error.message);
+      console.error("[generate-img2video] refund_jades failed:", error.message);
+    } else {
+      console.error("[generate-img2video] refund_jades ok:", {
+        userId,
+        amount,
+        reason,
+        ref,
+      });
     }
   } catch (e) {
-    console.error("refund_jades exception:", e?.message || e);
+    console.error("[generate-img2video] refund_jades exception:", e?.message || e);
   }
 }
 
 function decodeB64ToBuffer(b64) {
   if (!b64) return null;
+
   let s = String(b64).trim();
   const comma = s.indexOf(",");
-  if (s.startsWith("data:") && comma !== -1) s = s.slice(comma + 1);
+
+  if (s.startsWith("data:") && comma !== -1) {
+    s = s.slice(comma + 1);
+  }
+
   s = s.replace(/\s+/g, "");
+
   try {
     return Buffer.from(s, "base64");
   } catch {
@@ -112,11 +126,19 @@ function decodeB64ToBuffer(b64) {
 
 async function uploadImageForVeo({ userId, jobId, imageB64 }) {
   const buf = decodeB64ToBuffer(imageB64);
+
   if (!buf || !buf.length) {
     throw new Error("Invalid image_b64 for Veo");
   }
 
   const filePath = `${userId}/fast_i2v_${jobId}.png`;
+
+  console.error("[generate-img2video] uploadImageForVeo -> uploading", {
+    bucket: IMAGE_BUCKET,
+    filePath,
+    size: buf.length,
+    publicBucket: IMAGE_BUCKET_PUBLIC,
+  });
 
   const { error: upErr } = await supabaseAdmin.storage
     .from(IMAGE_BUCKET)
@@ -132,7 +154,15 @@ async function uploadImageForVeo({ userId, jobId, imageB64 }) {
   if (IMAGE_BUCKET_PUBLIC) {
     const { data } = supabaseAdmin.storage.from(IMAGE_BUCKET).getPublicUrl(filePath);
     const publicUrl = data?.publicUrl || null;
-    if (!publicUrl) throw new Error("Could not get public URL for Veo image");
+
+    if (!publicUrl) {
+      throw new Error("Could not get public URL for Veo image");
+    }
+
+    console.error("[generate-img2video] uploadImageForVeo -> public URL ready", {
+      publicUrl,
+    });
+
     return publicUrl;
   }
 
@@ -141,8 +171,14 @@ async function uploadImageForVeo({ userId, jobId, imageB64 }) {
     .createSignedUrl(filePath, 60 * 60 * 24);
 
   if (error || !data?.signedUrl) {
-    throw new Error(`Could not create signed URL for Veo image: ${error?.message || "unknown error"}`);
+    throw new Error(
+      `Could not create signed URL for Veo image: ${error?.message || "unknown error"}`
+    );
   }
+
+  console.error("[generate-img2video] uploadImageForVeo -> signed URL ready", {
+    signedUrl: data.signedUrl,
+  });
 
   return data.signedUrl;
 }
@@ -160,7 +196,9 @@ export default async function handler(req, res) {
     }
 
     userId = await getUserIdFromAuthHeader(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
@@ -214,6 +252,25 @@ export default async function handler(req, res) {
 
     jadeCost = getJadeCost({ isFastMode, duration: duration_s });
 
+    console.error("[generate-img2video] START", {
+      userId,
+      provider,
+      isFastMode,
+      duration_s,
+      aspect_ratio,
+      has_image_b64: !!image_b64,
+      has_image_url: !!image_url,
+      fps,
+      num_frames,
+      steps,
+      guidance_scale,
+      denoise,
+      seed,
+      motion_strength,
+      jadeCost,
+    });
+
+    // 1) gastar jades
     ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -226,6 +283,7 @@ export default async function handler(req, res) {
     });
 
     if (spendErr) {
+      console.error("[generate-img2video] spend_jades failed", spendErr.message);
       return res.status(400).json({
         ok: false,
         error: `Jades spend failed: ${spendErr.message}`,
@@ -234,6 +292,13 @@ export default async function handler(req, res) {
 
     jadesCharged = true;
 
+    console.error("[generate-img2video] spend_jades ok", {
+      userId,
+      jadeCost,
+      ref,
+    });
+
+    // 2) crear job
     jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -258,6 +323,8 @@ export default async function handler(req, res) {
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
 
     if (insErr) {
+      console.error("[generate-img2video] video_jobs insert failed", insErr.message);
+
       await refundJadesSafe({
         userId,
         amount: jadeCost,
@@ -271,23 +338,46 @@ export default async function handler(req, res) {
       });
     }
 
+    console.error("[generate-img2video] video_jobs insert ok", {
+      jobId,
+      provider,
+    });
+
     let providerRequestId = null;
     let startedAtIso = null;
 
+    // 3) FAST = VEO
     if (isFastMode) {
+      console.error("[generate-img2video] FAST MODE START", {
+        userId,
+        jobId,
+        has_image_url: !!image_url,
+        has_image_b64: !!image_b64,
+        aspect_ratio,
+        duration_s,
+      });
+
       let veoImageUrl = image_url || null;
 
       if (!veoImageUrl && image_b64) {
+        console.error("[generate-img2video] uploading image_b64 for Veo...");
         veoImageUrl = await uploadImageForVeo({
           userId,
           jobId,
           imageB64: image_b64,
         });
+        console.error("[generate-img2video] uploaded image url:", veoImageUrl);
       }
 
       if (!veoImageUrl) {
         throw new Error("Fast mode could not obtain a valid image URL for Veo");
       }
+
+      console.error("[generate-img2video] calling generateVeoVideo...", {
+        veoImageUrl,
+        aspect_ratio,
+        duration_s,
+      });
 
       const veoResult = await generateVeoVideo({
         prompt: finalPrompt,
@@ -295,6 +385,8 @@ export default async function handler(req, res) {
         aspectRatio: aspect_ratio,
         durationSeconds: duration_s,
       });
+
+      console.error("[generate-img2video] veoResult:", JSON.stringify(veoResult));
 
       providerRequestId =
         veoResult?.name ||
@@ -308,7 +400,7 @@ export default async function handler(req, res) {
 
       startedAtIso = new Date().toISOString();
 
-      await supabaseAdmin
+      const { error: updErr } = await supabaseAdmin
         .from("video_jobs")
         .update({
           provider_request_id: String(providerRequestId),
@@ -318,6 +410,16 @@ export default async function handler(req, res) {
           started_at: startedAtIso,
         })
         .eq("id", jobId);
+
+      if (updErr) {
+        throw new Error(`video_jobs update failed after Veo submit: ${updErr.message}`);
+      }
+
+      console.error("[generate-img2video] FAST MODE SUCCESS", {
+        jobId,
+        providerRequestId,
+        startedAtIso,
+      });
 
       return res.status(200).json({
         ok: true,
@@ -330,7 +432,15 @@ export default async function handler(req, res) {
       });
     }
 
+    // 4) PRO = RUNPOD
     const endpointId = pickI2VEndpointId();
+
+    console.error("[generate-img2video] PRO MODE START", {
+      endpointId,
+      jobId,
+      duration_s,
+      aspect_ratio,
+    });
 
     const rpInput = {
       mode: "i2v",
@@ -354,6 +464,9 @@ export default async function handler(req, res) {
     };
 
     const rp = await runpodRun({ endpointId, input: rpInput });
+
+    console.error("[generate-img2video] runpod response:", JSON.stringify(rp));
+
     providerRequestId = rp?.id || rp?.jobId || rp?.request_id || null;
 
     if (!providerRequestId) {
@@ -362,7 +475,7 @@ export default async function handler(req, res) {
 
     startedAtIso = new Date().toISOString();
 
-    await supabaseAdmin
+    const { error: updErr } = await supabaseAdmin
       .from("video_jobs")
       .update({
         provider_request_id: String(providerRequestId),
@@ -372,6 +485,16 @@ export default async function handler(req, res) {
         started_at: startedAtIso,
       })
       .eq("id", jobId);
+
+    if (updErr) {
+      throw new Error(`video_jobs update failed after RunPod submit: ${updErr.message}`);
+    }
+
+    console.error("[generate-img2video] PRO MODE SUCCESS", {
+      jobId,
+      providerRequestId,
+      startedAtIso,
+    });
 
     return res.status(200).json({
       ok: true,
@@ -383,9 +506,19 @@ export default async function handler(req, res) {
       mode: "PRO",
     });
   } catch (e) {
+    console.error("[generate-img2video] ERROR:", {
+      message: e?.message || "Server error",
+      stack: e?.stack || null,
+      userId,
+      jobId,
+      jadeCost,
+      jadesCharged,
+      ref,
+    });
+
     if (jobId) {
       try {
-        await supabaseAdmin
+        const { error: failUpdErr } = await supabaseAdmin
           .from("video_jobs")
           .update({
             status: "FAILED",
@@ -394,7 +527,19 @@ export default async function handler(req, res) {
             error: e?.message || "Server error",
           })
           .eq("id", jobId);
-      } catch (_) {}
+
+        if (failUpdErr) {
+          console.error(
+            "[generate-img2video] FAILED updating video_jobs:",
+            failUpdErr?.message || failUpdErr
+          );
+        }
+      } catch (innerErr) {
+        console.error(
+          "[generate-img2video] FAILED updating video_jobs exception:",
+          innerErr?.message || innerErr
+        );
+      }
     }
 
     if (jadesCharged && userId && jadeCost > 0 && ref) {
