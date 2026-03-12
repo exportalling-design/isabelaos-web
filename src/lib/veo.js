@@ -15,12 +15,23 @@ function getGoogleConfig() {
   try {
     credentials = JSON.parse(rawJson);
   } catch (e) {
-    throw new Error(
-      `Invalid GOOGLE_SERVICE_ACCOUNT_JSON: ${e?.message || "JSON parse failed"}`
-    );
+    throw new Error(`Invalid GOOGLE_SERVICE_ACCOUNT_JSON: ${e?.message || "JSON parse failed"}`);
   }
 
   return { projectId, location, model, credentials };
+}
+
+async function getAccessToken() {
+  const { credentials } = getGoogleConfig();
+
+  const auth = new GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+  return token?.token || token;
 }
 
 export async function generateVeoVideo({
@@ -29,27 +40,22 @@ export async function generateVeoVideo({
   aspectRatio = "9:16",
   durationSeconds = 8,
 }) {
-  const { projectId, location, model, credentials } = getGoogleConfig();
+  const { projectId, location, model } = getGoogleConfig();
+  const accessToken = await getAccessToken();
 
-  const auth = new GoogleAuth({
-    credentials,
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
-
-  const client = await auth.getClient();
-  const accessToken = await client.getAccessToken();
-
-  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
+  const endpoint =
+    `https://${location}-aiplatform.googleapis.com/v1/` +
+    `projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
 
   const body = {
     instances: [
       {
         prompt,
         image: imageUrl,
-        aspectRatio,
       },
     ],
     parameters: {
+      aspectRatio,
       durationSeconds,
     },
   };
@@ -57,7 +63,7 @@ export async function generateVeoVideo({
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken.token}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -77,9 +83,46 @@ export async function generateVeoVideo({
       data?.error?.message ||
         data?.message ||
         rawText ||
-        "Vertex Veo request failed"
+        "Vertex Veo predictLongRunning request failed"
+    );
+  }
+
+  return data; // devuelve Operation
+}
+
+export async function getVeoOperation(operationName) {
+  if (!operationName) throw new Error("Missing operationName");
+
+  const { location } = getGoogleConfig();
+  const accessToken = await getAccessToken();
+
+  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+
+  const res = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const rawText = await res.text();
+
+  let data = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    data = { raw: rawText };
+  }
+
+  if (!res.ok) {
+    throw new Error(
+      data?.error?.message ||
+        data?.message ||
+        rawText ||
+        "Vertex operation polling failed"
     );
   }
 
   return data;
-}
+    }
