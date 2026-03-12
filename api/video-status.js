@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { fetchVeoOperation } from "../src/lib/veo.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const RUNPOD_API_KEY =
@@ -75,7 +76,6 @@ function decodeB64ToBuffer(b64) {
 
 function safeExtFromMime(mime) {
   const m = String(mime || "").toLowerCase();
-  if (m.includes("mp4")) return "mp4";
   if (m.includes("webm")) return "webm";
   return "mp4";
 }
@@ -106,6 +106,110 @@ async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "
   }
 
   return { filePath, finalUrl };
+}
+
+function getDurationForRefund(job) {
+  const payload = job?.payload || {};
+  const raw =
+    payload?.duration_s ??
+    payload?.seconds ??
+    job?.duration_s ??
+    8;
+
+  const n = Number(raw);
+  return n === 5 ? 5 : 8;
+}
+
+function getRefundAmount(job) {
+  const provider = String(job?.provider || "").toLowerCase();
+  const duration = getDurationForRefund(job);
+
+  if (provider === "google_veo") {
+    return duration === 5 ? 12 : 15;
+  }
+
+  return duration === 5 ? 11 : 12;
+}
+
+async function refundJadesSafe({ admin, job, reason }) {
+  try {
+    const amount = getRefundAmount(job);
+    const ref = `refund:${job.id}:${reason}`;
+
+    const { error } = await admin.rpc("refund_jades", {
+      p_user_id: job.user_id,
+      p_amount: amount,
+      p_reason: reason,
+      p_ref: ref,
+    });
+
+    if (error) {
+      console.error("[video-status] refund_jades failed:", error.message, {
+        jobId: job.id,
+        amount,
+        reason,
+      });
+    } else {
+      console.error("[video-status] refund_jades ok:", {
+        jobId: job.id,
+        userId: job.user_id,
+        amount,
+        reason,
+      });
+    }
+  } catch (e) {
+    console.error("[video-status] refund_jades exception:", e?.message || e, {
+      jobId: job?.id,
+      reason,
+    });
+  }
+}
+
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractVeoVideoPayload(op) {
+  const response = op?.response || {};
+  const videos = Array.isArray(response?.videos) ? response.videos : [];
+  const firstVideo = videos[0] || null;
+
+  const directB64 =
+    firstVideo?.bytesBase64Encoded ||
+    firstVideo?.bytesBase64 ||
+    firstVideo?.video?.bytesBase64Encoded ||
+    firstVideo?.video?.bytesBase64 ||
+    response?.bytesBase64Encoded ||
+    response?.bytesBase64 ||
+    response?.video?.bytesBase64Encoded ||
+    response?.video?.bytesBase64 ||
+    null;
+
+  const mimeType =
+    firstVideo?.mimeType ||
+    firstVideo?.video?.mimeType ||
+    response?.mimeType ||
+    response?.video?.mimeType ||
+    "video/mp4";
+
+  const gcsUri =
+    firstVideo?.gcsUri ||
+    firstVideo?.video?.gcsUri ||
+    response?.gcsUri ||
+    response?.video?.gcsUri ||
+    null;
+
+  return {
+    directB64,
+    mimeType,
+    gcsUri,
+    hasVideosArray: videos.length > 0,
+    firstVideo,
+  };
 }
 
 export default async function handler(req, res) {
@@ -155,9 +259,13 @@ export default async function handler(req, res) {
       const op = await fetchVeoOperation(job.provider_request_id);
       const done = !!op?.done;
       const opError = op?.error || null;
-      const response = op?.response || null;
-      const videos = Array.isArray(response?.videos) ? response.videos : [];
-      const firstVideo = videos[0] || null;
+
+      console.error("[video-status] VEO operation fetched", {
+        jobId,
+        done,
+        hasError: !!opError,
+        operationName: job.provider_request_id,
+      });
 
       if (opError) {
         await admin
@@ -165,11 +273,18 @@ export default async function handler(req, res) {
           .update({
             status: "FAILED",
             provider_status: "FAILED",
-            provider_error: JSON.stringify(opError),
+            provider_error: safeStringify(opError),
             provider_reply: op,
+            error: opError?.message || "Veo operation failed",
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+
+        await refundJadesSafe({
+          admin,
+          job,
+          reason: "i2v_generation_failed",
+        });
 
         return json(res, 200, {
           ok: true,
@@ -198,18 +313,22 @@ export default async function handler(req, res) {
         });
       }
 
-      const videoB64 =
-        firstVideo?.bytesBase64Encoded ||
-        firstVideo?.bytesBase64 ||
-        null;
+      const extracted = extractVeoVideoPayload(op);
 
-      if (videoB64) {
+      console.error("[video-status] VEO done payload summary", {
+        jobId,
+        hasVideosArray: extracted.hasVideosArray,
+        hasDirectB64: !!extracted.directB64,
+        hasGcsUri: !!extracted.gcsUri,
+        mimeType: extracted.mimeType,
+      });
+
+      if (extracted.directB64) {
         try {
-          const mime = firstVideo?.mimeType || "video/mp4";
-          const buf = decodeB64ToBuffer(videoB64);
+          const buf = decodeB64ToBuffer(extracted.directB64);
 
           if (!buf || !buf.length) {
-            throw new Error("Veo COMPLETED but bytesBase64Encoded could not be decoded");
+            throw new Error("Veo COMPLETED but returned base64 video could not be decoded");
           }
 
           const { finalUrl } = await uploadVideoBufferToSupabase({
@@ -217,7 +336,7 @@ export default async function handler(req, res) {
             userId,
             jobId,
             buf,
-            mime,
+            mime: extracted.mimeType || "video/mp4",
           });
 
           await admin
@@ -245,11 +364,17 @@ export default async function handler(req, res) {
               status: "FAILED",
               provider_status: "FAILED",
               error: e?.message || "Veo upload failed",
-              provider_error: JSON.stringify(op),
+              provider_error: safeStringify(op),
               provider_reply: op,
               updated_at: new Date().toISOString(),
             })
             .eq("id", jobId);
+
+          await refundJadesSafe({
+            admin,
+            job,
+            reason: "i2v_generation_failed",
+          });
 
           return json(res, 200, {
             ok: true,
@@ -260,15 +385,17 @@ export default async function handler(req, res) {
         }
       }
 
-      const gcsUri = firstVideo?.gcsUri || null;
-      if (gcsUri) {
+      if (extracted.gcsUri) {
+        // Si Veo devolvió solo GCS, no lo marcamos como FAILED.
+        // Lo dejamos DONE con nota para no perder el resultado.
         await admin
           .from("video_jobs")
           .update({
             status: "DONE",
             provider_status: "COMPLETED",
-            result_url: gcsUri,
+            result_url: extracted.gcsUri,
             provider_reply: op,
+            error: null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
@@ -277,7 +404,7 @@ export default async function handler(req, res) {
           ok: true,
           status: "DONE",
           video_url: null,
-          gcs_uri: gcsUri,
+          gcs_uri: extracted.gcsUri,
           note: "veo_returned_gcs_uri_only",
           job,
         });
@@ -294,10 +421,22 @@ export default async function handler(req, res) {
         })
         .eq("id", jobId);
 
+      await refundJadesSafe({
+        admin,
+        job,
+        reason: "i2v_generation_failed",
+      });
+
       return json(res, 200, {
         ok: true,
         status: "FAILED",
         error: "Veo finished but no video payload was found",
+        debug: {
+          hasVideosArray: extracted.hasVideosArray,
+          hasDirectB64: !!extracted.directB64,
+          hasGcsUri: !!extracted.gcsUri,
+          mimeType: extracted.mimeType,
+        },
         job,
       });
     }
@@ -363,11 +502,17 @@ export default async function handler(req, res) {
             status: "FAILED",
             provider_status: "FAILED",
             error: "COMPLETED but video_b64 could not be decoded",
-            provider_error: JSON.stringify(rpJson),
+            provider_error: safeStringify(rpJson),
             provider_reply: rpJson,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+
+        await refundJadesSafe({
+          admin,
+          job,
+          reason: "i2v_generation_failed",
+        });
 
         return json(res, 200, {
           ok: true,
@@ -431,11 +576,17 @@ export default async function handler(req, res) {
             status: "FAILED",
             provider_status: "FAILED",
             error: e?.message || "Storage upload failed",
-            provider_error: JSON.stringify(rpJson),
+            provider_error: safeStringify(rpJson),
             provider_reply: rpJson,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+
+        await refundJadesSafe({
+          admin,
+          job,
+          reason: "i2v_generation_failed",
+        });
 
         return json(res, 200, {
           ok: true,
@@ -459,11 +610,17 @@ export default async function handler(req, res) {
           status: "FAILED",
           provider_status: "FAILED",
           error: workerError,
-          provider_error: JSON.stringify(rpJson),
+          provider_error: safeStringify(rpJson),
           provider_reply: rpJson,
           updated_at: new Date().toISOString(),
         })
         .eq("id", jobId);
+
+      await refundJadesSafe({
+        admin,
+        job,
+        reason: "i2v_generation_failed",
+      });
 
       return json(res, 200, {
         ok: true,
