@@ -8,6 +8,10 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
 
+const IMAGE_BUCKET = process.env.SUPABASE_IMAGE_BUCKET || "avatars";
+const IMAGE_BUCKET_PUBLIC =
+  String(process.env.SUPABASE_IMAGE_BUCKET_PUBLIC ?? "true").toLowerCase() === "true";
+
 function pickI2VEndpointId() {
   return (
     process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
@@ -69,11 +73,11 @@ function normalizeDuration(raw) {
 function getJadeCost({ isFastMode, duration }) {
   if (isFastMode) {
     if (duration === 5) return 12;
-    return 15; // 8s Fast
+    return 15;
   }
 
   if (duration === 5) return 11;
-  return 12; // 8s Pro
+  return 12;
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -91,6 +95,56 @@ async function refundJadesSafe({ userId, amount, ref, reason }) {
   } catch (e) {
     console.error("refund_jades exception:", e?.message || e);
   }
+}
+
+function decodeB64ToBuffer(b64) {
+  if (!b64) return null;
+  let s = String(b64).trim();
+  const comma = s.indexOf(",");
+  if (s.startsWith("data:") && comma !== -1) s = s.slice(comma + 1);
+  s = s.replace(/\s+/g, "");
+  try {
+    return Buffer.from(s, "base64");
+  } catch {
+    return null;
+  }
+}
+
+async function uploadImageForVeo({ userId, jobId, imageB64 }) {
+  const buf = decodeB64ToBuffer(imageB64);
+  if (!buf || !buf.length) {
+    throw new Error("Invalid image_b64 for Veo");
+  }
+
+  const filePath = `${userId}/fast_i2v_${jobId}.png`;
+
+  const { error: upErr } = await supabaseAdmin.storage
+    .from(IMAGE_BUCKET)
+    .upload(filePath, buf, {
+      contentType: "image/png",
+      upsert: true,
+    });
+
+  if (upErr) {
+    throw new Error(`Image upload for Veo failed: ${upErr.message}`);
+  }
+
+  if (IMAGE_BUCKET_PUBLIC) {
+    const { data } = supabaseAdmin.storage.from(IMAGE_BUCKET).getPublicUrl(filePath);
+    const publicUrl = data?.publicUrl || null;
+    if (!publicUrl) throw new Error("Could not get public URL for Veo image");
+    return publicUrl;
+  }
+
+  const { data, error } = await supabaseAdmin.storage
+    .from(IMAGE_BUCKET)
+    .createSignedUrl(filePath, 60 * 60 * 24);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(`Could not create signed URL for Veo image: ${error?.message || "unknown error"}`);
+  }
+
+  return data.signedUrl;
 }
 
 export default async function handler(req, res) {
@@ -221,9 +275,23 @@ export default async function handler(req, res) {
     let startedAtIso = null;
 
     if (isFastMode) {
+      let veoImageUrl = image_url || null;
+
+      if (!veoImageUrl && image_b64) {
+        veoImageUrl = await uploadImageForVeo({
+          userId,
+          jobId,
+          imageB64: image_b64,
+        });
+      }
+
+      if (!veoImageUrl) {
+        throw new Error("Fast mode could not obtain a valid image URL for Veo");
+      }
+
       const veoResult = await generateVeoVideo({
         prompt: finalPrompt,
-        imageUrl: image_url || image_b64,
+        imageUrl: veoImageUrl,
         aspectRatio: aspect_ratio,
         durationSeconds: duration_s,
       });
@@ -288,20 +356,22 @@ export default async function handler(req, res) {
     const rp = await runpodRun({ endpointId, input: rpInput });
     providerRequestId = rp?.id || rp?.jobId || rp?.request_id || null;
 
-    if (providerRequestId) {
-      startedAtIso = new Date().toISOString();
-
-      await supabaseAdmin
-        .from("video_jobs")
-        .update({
-          provider_request_id: String(providerRequestId),
-          provider_status: "submitted",
-          provider_raw: rp,
-          status: "IN_PROGRESS",
-          started_at: startedAtIso,
-        })
-        .eq("id", jobId);
+    if (!providerRequestId) {
+      throw new Error("RunPod did not return a request id");
     }
+
+    startedAtIso = new Date().toISOString();
+
+    await supabaseAdmin
+      .from("video_jobs")
+      .update({
+        provider_request_id: String(providerRequestId),
+        provider_status: "submitted",
+        provider_raw: rp,
+        status: "IN_PROGRESS",
+        started_at: startedAtIso,
+      })
+      .eq("id", jobId);
 
     return res.status(200).json({
       ok: true,
