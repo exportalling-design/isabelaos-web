@@ -69,11 +69,11 @@ function normalizeDuration(raw) {
 function getJadeCost({ isFastMode, duration }) {
   if (isFastMode) {
     if (duration === 5) return 12;
-    return 15; // 8s Veo Fast
+    return 15; // 8s Fast
   }
 
   if (duration === 5) return 11;
-  return 12; // 8s RunPod Pro
+  return 12; // 8s Pro
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -129,7 +129,6 @@ export default async function handler(req, res) {
     const aspect_ratio = String(body?.aspect_ratio || "").trim() || "9:16";
     const duration_s = normalizeDuration(body?.duration_s ?? body?.seconds ?? 8);
 
-    // Defaults del frontend / backend
     const fps = Number(body?.fps ?? 16);
     const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
     const steps = Number(body?.steps ?? 18);
@@ -149,19 +148,18 @@ export default async function handler(req, res) {
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
         : aspect_ratio === "9:16"
-        ? 576
-        : 832;
+          ? 576
+          : 832;
 
     const height =
       body?.height !== undefined && body?.height !== null && body?.height !== ""
         ? Number(body.height)
         : aspect_ratio === "9:16"
-        ? 1024
-        : 480;
+          ? 1024
+          : 480;
 
     jadeCost = getJadeCost({ isFastMode, duration: duration_s });
 
-    // 1) cobrar jades
     ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -182,7 +180,6 @@ export default async function handler(req, res) {
 
     jadesCharged = true;
 
-    // 2) crear job
     jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -223,7 +220,6 @@ export default async function handler(req, res) {
     let providerRequestId = null;
     let startedAtIso = null;
 
-    // 3) dispatch según modo
     if (isFastMode) {
       const veoResult = await generateVeoVideo({
         prompt: finalPrompt,
@@ -236,7 +232,11 @@ export default async function handler(req, res) {
         veoResult?.name ||
         veoResult?.id ||
         veoResult?.operationName ||
-        `veo-${jobId}`;
+        null;
+
+      if (!providerRequestId) {
+        throw new Error("Veo did not return an operation name");
+      }
 
       startedAtIso = new Date().toISOString();
 
@@ -262,7 +262,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // RunPod Pro
     const endpointId = pickI2VEndpointId();
 
     const rpInput = {
@@ -314,7 +313,6 @@ export default async function handler(req, res) {
       mode: "PRO",
     });
   } catch (e) {
-    // marcar job fallido si ya existe
     if (jobId) {
       try {
         await supabaseAdmin
@@ -329,7 +327,6 @@ export default async function handler(req, res) {
       } catch (_) {}
     }
 
-    // refund si ya cobró
     if (jadesCharged && userId && jadeCost > 0 && ref) {
       await refundJadesSafe({
         userId,
