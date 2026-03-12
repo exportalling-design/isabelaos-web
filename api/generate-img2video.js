@@ -1,11 +1,6 @@
-// api/generate-img2video.js (UPDATED - NO DB CHANGES)
-// - Mantiene cobro de jades igual (12)
-// - NO inserta columnas nuevas en video_jobs (evita error schema cache)
-// - Sí manda denoise/seed/motion_strength al worker por rpInput
-// - Defaults serverless más estables
-
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
+import { generateVeoVideo } from "../src/lib/veo.js";
 
 const RUNPOD_API_KEY =
   process.env.RP_API_KEY ||
@@ -59,24 +54,58 @@ function pickFinalPrompts(body) {
     String(b?.optimizedNegative || "").trim() ||
     String(b?.negative_prompt || b?.negative || "").trim();
 
-  const usingOptimized = !!(
-    (String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim()) &&
-    finalPrompt
-  );
-
-  return { finalPrompt, finalNegative, usingOptimized };
+  return { finalPrompt, finalNegative };
 }
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isNum = (x) => Number.isFinite(Number(x));
 
+function normalizeDuration(raw) {
+  const n = Number(raw);
+  if (n === 5) return 5;
+  return 8;
+}
+
+function getJadeCost({ isFastMode, duration }) {
+  if (isFastMode) {
+    if (duration === 5) return 12;
+    return 15; // 8s Veo Fast
+  }
+
+  if (duration === 5) return 11;
+  return 12; // 8s RunPod Pro
+}
+
+async function refundJadesSafe({ userId, amount, ref, reason }) {
+  try {
+    const { error } = await supabaseAdmin.rpc("refund_jades", {
+      p_user_id: userId,
+      p_amount: amount,
+      p_reason: reason,
+      p_ref: ref,
+    });
+
+    if (error) {
+      console.error("refund_jades failed:", error.message);
+    }
+  } catch (e) {
+    console.error("refund_jades exception:", e?.message || e);
+  }
+}
+
 export default async function handler(req, res) {
+  let userId = null;
+  let ref = null;
+  let jadeCost = 0;
+  let jadesCharged = false;
+  let jobId = null;
+
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    const userId = await getUserIdFromAuthHeader(req);
+    userId = await getUserIdFromAuthHeader(req);
     if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
@@ -94,18 +123,20 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
     }
 
-    const aspect_ratio = String(body?.aspect_ratio || "").trim(); // "" o "9:16"
+    const isFastMode = !!body?.is_fast_mode;
+    const provider = isFastMode ? "google_veo" : "runpod";
 
-    // Defaults serverless (frontend puede override)
+    const aspect_ratio = String(body?.aspect_ratio || "").trim() || "9:16";
+    const duration_s = normalizeDuration(body?.duration_s ?? body?.seconds ?? 8);
+
+    // Defaults del frontend / backend
     const fps = Number(body?.fps ?? 16);
     const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
     const steps = Number(body?.steps ?? 18);
 
-    // guidance (acepta cfg alias)
     const guidance_scale_raw = body?.guidance_scale ?? body?.cfg ?? 5.0;
     const guidance_scale = clamp(Number(guidance_scale_raw), 1.0, 10.0);
 
-    // estabilidad I2V (se envía al worker; NO se guarda en DB)
     const denoise_raw = body?.denoise ?? body?.strength ?? 0.45;
     const denoise = clamp(Number(denoise_raw), 0.2, 0.8);
 
@@ -114,7 +145,6 @@ export default async function handler(req, res) {
     const motion_strength_raw = body?.motion_strength ?? 0.6;
     const motion_strength = clamp(Number(motion_strength_raw), 0.1, 1.0);
 
-    // Resolución default estable (respeta overrides)
     const width =
       body?.width !== undefined && body?.width !== null && body?.width !== ""
         ? Number(body.width)
@@ -129,24 +159,31 @@ export default async function handler(req, res) {
         ? 1024
         : 480;
 
-    // ✅ 1) spend jades (IGUAL)
-    const ref = globalThis.crypto?.randomUUID
+    jadeCost = getJadeCost({ isFastMode, duration: duration_s });
+
+    // 1) cobrar jades
+    ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
 
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
-      p_amount: 12,
-      p_reason: "i2v_generate",
+      p_amount: jadeCost,
+      p_reason: isFastMode ? "i2v_generate_fast" : "i2v_generate_pro",
       p_ref: ref,
     });
 
     if (spendErr) {
-      return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
+      return res.status(400).json({
+        ok: false,
+        error: `Jades spend failed: ${spendErr.message}`,
+      });
     }
 
-    // ✅ 2) create job (SIN columnas nuevas)
-    const jobId = globalThis.crypto?.randomUUID
+    jadesCharged = true;
+
+    // 2) crear job
+    jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
 
@@ -157,27 +194,75 @@ export default async function handler(req, res) {
       mode: "i2v",
       prompt: finalPrompt,
       negative_prompt: finalNegative || "",
-
       width,
       height,
-
       fps,
       num_frames,
       steps,
       guidance_scale,
-
-      payload: body ? JSON.stringify(body) : null,
-      provider: "runpod",
+      payload: body || null,
+      provider,
     };
 
     const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
+
     if (insErr) {
-      return res
-        .status(400)
-        .json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
+      await refundJadesSafe({
+        userId,
+        amount: jadeCost,
+        ref,
+        reason: "i2v_insert_failed",
+      });
+
+      return res.status(400).json({
+        ok: false,
+        error: `video_jobs insert failed: ${insErr.message}`,
+      });
     }
 
-    // ✅ 3) RunPod dispatch
+    let providerRequestId = null;
+    let startedAtIso = null;
+
+    // 3) dispatch según modo
+    if (isFastMode) {
+      const veoResult = await generateVeoVideo({
+        prompt: finalPrompt,
+        imageUrl: image_url || image_b64,
+        aspectRatio: aspect_ratio,
+        durationSeconds: duration_s,
+      });
+
+      providerRequestId =
+        veoResult?.name ||
+        veoResult?.id ||
+        veoResult?.operationName ||
+        `veo-${jobId}`;
+
+      startedAtIso = new Date().toISOString();
+
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_request_id: String(providerRequestId),
+          provider_status: "submitted",
+          provider_raw: veoResult,
+          status: "IN_PROGRESS",
+          started_at: startedAtIso,
+        })
+        .eq("id", jobId);
+
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        provider: "google_veo",
+        provider_request_id: providerRequestId,
+        started_at: startedAtIso,
+        jade_spent: jadeCost,
+        mode: "FAST",
+      });
+    }
+
+    // RunPod Pro
     const endpointId = pickI2VEndpointId();
 
     const rpInput = {
@@ -186,41 +271,33 @@ export default async function handler(req, res) {
       user_id: userId,
       prompt: finalPrompt,
       negative_prompt: finalNegative || "",
-
       fps,
       num_frames,
       steps,
       guidance_scale,
-
-      // ✅ estabilidad (worker debe leerlo)
       denoise,
       seed,
       motion_strength,
-
-      duration_s: body?.duration_s ?? body?.seconds ?? null,
-
+      duration_s,
       ...(aspect_ratio ? { aspect_ratio } : {}),
       width,
       height,
-
       image_b64,
       image_url,
     };
 
     const rp = await runpodRun({ endpointId, input: rpInput });
-    const runpodId = rp?.id || rp?.jobId || rp?.request_id || null;
+    providerRequestId = rp?.id || rp?.jobId || rp?.request_id || null;
 
-    // ✅ NEW: guardamos started_at para devolverlo al frontend (mejora polling/progreso)
-    let startedAtIso = null;
-
-    if (runpodId) {
+    if (providerRequestId) {
       startedAtIso = new Date().toISOString();
 
       await supabaseAdmin
         .from("video_jobs")
         .update({
-          provider_request_id: String(runpodId),
+          provider_request_id: String(providerRequestId),
           provider_status: "submitted",
+          provider_raw: rp,
           status: "IN_PROGRESS",
           started_at: startedAtIso,
         })
@@ -230,10 +307,41 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       job_id: jobId,
-      provider_request_id: runpodId,
-      started_at: startedAtIso, // ✅ NEW
+      provider: "runpod",
+      provider_request_id: providerRequestId,
+      started_at: startedAtIso,
+      jade_spent: jadeCost,
+      mode: "PRO",
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || "Server error" });
+    // marcar job fallido si ya existe
+    if (jobId) {
+      try {
+        await supabaseAdmin
+          .from("video_jobs")
+          .update({
+            status: "FAILED",
+            provider_status: "failed",
+            provider_error: e?.message || "Server error",
+            error: e?.message || "Server error",
+          })
+          .eq("id", jobId);
+      } catch (_) {}
+    }
+
+    // refund si ya cobró
+    if (jadesCharged && userId && jadeCost > 0 && ref) {
+      await refundJadesSafe({
+        userId,
+        amount: jadeCost,
+        ref,
+        reason: "i2v_generation_failed",
+      });
+    }
+
+    return res.status(500).json({
+      ok: false,
+      error: e?.message || "Server error",
+    });
   }
 }
