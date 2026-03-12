@@ -198,7 +198,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // 1) bytesBase64Encoded
       const videoB64 =
         firstVideo?.bytesBase64Encoded ||
         firstVideo?.bytesBase64 ||
@@ -261,7 +260,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // 2) gcsUri
       const gcsUri = firstVideo?.gcsUri || null;
       if (gcsUri) {
         await admin
@@ -315,7 +313,9 @@ export default async function handler(req, res) {
     }
 
     const statusUrl = runpodStatusUrl(RUNPOD_ENDPOINT_ID, job.provider_request_id);
-    if (!statusUrl) return json(res, 500, { ok: false, error: "Could not build RunPod status url" });
+    if (!statusUrl) {
+      return json(res, 500, { ok: false, error: "Could not build RunPod status url" });
+    }
 
     const rpResp = await fetch(statusUrl, {
       headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
@@ -324,7 +324,12 @@ export default async function handler(req, res) {
     const rpJson = await rpResp.json().catch(() => ({}));
 
     if (!rpResp.ok) {
-      return json(res, 200, { ok: true, status: job.status, rp: rpJson, job });
+      return json(res, 200, {
+        ok: true,
+        status: job.status,
+        rp: rpJson,
+        job,
+      });
     }
 
     const rpStatus = rpJson?.status || null;
@@ -338,11 +343,12 @@ export default async function handler(req, res) {
           status: "DONE",
           provider_status: "COMPLETED",
           video_url: String(directUrl),
+          provider_reply: rpJson,
           updated_at: new Date().toISOString(),
         })
         .eq("id", jobId);
 
-      return json(res, 200, { ok: true, status: "DONE", video_url: directUrl });
+      return json(res, 200, { ok: true, status: "DONE", video_url: directUrl, job });
     }
 
     const videoB64 = output?.video_b64 || output?.videoB64 || null;
@@ -358,11 +364,16 @@ export default async function handler(req, res) {
             provider_status: "FAILED",
             error: "COMPLETED but video_b64 could not be decoded",
             provider_error: JSON.stringify(rpJson),
+            provider_reply: rpJson,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
 
-        return json(res, 200, { ok: true, status: "FAILED", error: "video_b64 decode failed" });
+        return json(res, 200, {
+          ok: true,
+          status: "FAILED",
+          error: "video_b64 decode failed",
+        });
       }
 
       try {
@@ -381,6 +392,7 @@ export default async function handler(req, res) {
               status: "DONE",
               provider_status: "COMPLETED",
               video_url: null,
+              provider_reply: rpJson,
               error: "Uploaded but could not generate URL",
               updated_at: new Date().toISOString(),
             })
@@ -400,12 +412,18 @@ export default async function handler(req, res) {
             status: "DONE",
             provider_status: "COMPLETED",
             video_url: finalUrl,
+            provider_reply: rpJson,
             error: null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
 
-        return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl });
+        return json(res, 200, {
+          ok: true,
+          status: "DONE",
+          video_url: finalUrl,
+          job,
+        });
       } catch (e) {
         await admin
           .from("video_jobs")
@@ -414,6 +432,7 @@ export default async function handler(req, res) {
             provider_status: "FAILED",
             error: e?.message || "Storage upload failed",
             provider_error: JSON.stringify(rpJson),
+            provider_reply: rpJson,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
@@ -427,17 +446,31 @@ export default async function handler(req, res) {
     }
 
     if (rpStatus === "FAILED") {
+      const workerError =
+        output?.error ||
+        output?.message ||
+        rpJson?.error ||
+        rpJson?.message ||
+        "RunPod job failed";
+
       await admin
         .from("video_jobs")
         .update({
           status: "FAILED",
           provider_status: "FAILED",
+          error: workerError,
           provider_error: JSON.stringify(rpJson),
+          provider_reply: rpJson,
           updated_at: new Date().toISOString(),
         })
         .eq("id", jobId);
 
-      return json(res, 200, { ok: true, status: "FAILED", rp: rpJson });
+      return json(res, 200, {
+        ok: true,
+        status: "FAILED",
+        error: workerError,
+        rp: rpJson,
+      });
     }
 
     await admin
@@ -445,6 +478,7 @@ export default async function handler(req, res) {
       .update({
         status: "IN_PROGRESS",
         provider_status: rpStatus || "IN_PROGRESS",
+        provider_reply: rpJson,
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);
