@@ -5,6 +5,7 @@ function getGoogleConfig() {
   const location = process.env.GOOGLE_LOCATION;
   const model = process.env.GOOGLE_VEO_MODEL;
   const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const outputStorageUri = process.env.GOOGLE_VEO_OUTPUT_STORAGE_URI || "";
 
   if (!projectId) throw new Error("Missing GOOGLE_PROJECT_ID");
   if (!location) throw new Error("Missing GOOGLE_LOCATION");
@@ -20,7 +21,7 @@ function getGoogleConfig() {
     );
   }
 
-  return { projectId, location, model, credentials };
+  return { projectId, location, model, credentials, outputStorageUri };
 }
 
 async function getAccessToken() {
@@ -36,7 +37,6 @@ async function getAccessToken() {
   return token?.token || token;
 }
 
-// Inicia generación Veo y devuelve operation
 export async function generateVeoVideo({
   prompt,
   imageB64,
@@ -44,7 +44,7 @@ export async function generateVeoVideo({
   aspectRatio = "9:16",
   durationSeconds = 8,
 }) {
-  const { projectId, location, model } = getGoogleConfig();
+  const { projectId, location, model, outputStorageUri } = getGoogleConfig();
   const accessToken = await getAccessToken();
 
   if (!imageB64) {
@@ -59,15 +59,22 @@ export async function generateVeoVideo({
     instances: [
       {
         prompt,
-        image: {
-          bytesBase64Encoded: imageB64,
-          mimeType: imageMimeType,
-        },
+        referenceImages: [
+          {
+            image: {
+              bytesBase64Encoded: imageB64,
+              mimeType: imageMimeType,
+            },
+            referenceType: "asset",
+          },
+        ],
       },
     ],
     parameters: {
       aspectRatio,
       durationSeconds,
+      sampleCount: 1,
+      ...(outputStorageUri ? { storageUri: outputStorageUri } : {}),
     },
   };
 
@@ -98,10 +105,9 @@ export async function generateVeoVideo({
     );
   }
 
-  return data; // { name: "projects/.../operations/..." }
+  return data;
 }
 
-// Consulta operación Veo
 export async function fetchVeoOperation(operationName) {
   if (!operationName) throw new Error("Missing operationName");
 
