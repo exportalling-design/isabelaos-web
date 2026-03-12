@@ -8,10 +8,6 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
 
-const IMAGE_BUCKET = process.env.SUPABASE_IMAGE_BUCKET || "avatars";
-const IMAGE_BUCKET_PUBLIC =
-  String(process.env.SUPABASE_IMAGE_BUCKET_PUBLIC ?? "true").toLowerCase() === "true";
-
 function pickI2VEndpointId() {
   return (
     process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
@@ -74,11 +70,11 @@ function normalizeDuration(raw) {
 function getJadeCost({ isFastMode, duration }) {
   if (isFastMode) {
     if (duration === 5) return 12;
-    return 15; // 8s Fast
+    return 15;
   }
 
   if (duration === 5) return 11;
-  return 12; // 8s Pro
+  return 12;
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -105,82 +101,19 @@ async function refundJadesSafe({ userId, amount, ref, reason }) {
   }
 }
 
-function decodeB64ToBuffer(b64) {
-  if (!b64) return null;
+function inferImageMimeType(body) {
+  const explicit =
+    String(body?.image_mime_type || body?.mimeType || body?.imageMimeType || "").trim();
 
-  let s = String(b64).trim();
-  const comma = s.indexOf(",");
+  if (explicit) return explicit;
 
-  if (s.startsWith("data:") && comma !== -1) {
-    s = s.slice(comma + 1);
-  }
+  const dataUrl = String(body?.image_data_url || "").trim();
+  if (dataUrl.startsWith("data:image/jpeg")) return "image/jpeg";
+  if (dataUrl.startsWith("data:image/jpg")) return "image/jpeg";
+  if (dataUrl.startsWith("data:image/webp")) return "image/webp";
+  if (dataUrl.startsWith("data:image/png")) return "image/png";
 
-  s = s.replace(/\s+/g, "");
-
-  try {
-    return Buffer.from(s, "base64");
-  } catch {
-    return null;
-  }
-}
-
-async function uploadImageForVeo({ userId, jobId, imageB64 }) {
-  const buf = decodeB64ToBuffer(imageB64);
-
-  if (!buf || !buf.length) {
-    throw new Error("Invalid image_b64 for Veo");
-  }
-
-  const filePath = `${userId}/fast_i2v_${jobId}.png`;
-
-  console.error("[generate-img2video] uploadImageForVeo -> uploading", {
-    bucket: IMAGE_BUCKET,
-    filePath,
-    size: buf.length,
-    publicBucket: IMAGE_BUCKET_PUBLIC,
-  });
-
-  const { error: upErr } = await supabaseAdmin.storage
-    .from(IMAGE_BUCKET)
-    .upload(filePath, buf, {
-      contentType: "image/png",
-      upsert: true,
-    });
-
-  if (upErr) {
-    throw new Error(`Image upload for Veo failed: ${upErr.message}`);
-  }
-
-  if (IMAGE_BUCKET_PUBLIC) {
-    const { data } = supabaseAdmin.storage.from(IMAGE_BUCKET).getPublicUrl(filePath);
-    const publicUrl = data?.publicUrl || null;
-
-    if (!publicUrl) {
-      throw new Error("Could not get public URL for Veo image");
-    }
-
-    console.error("[generate-img2video] uploadImageForVeo -> public URL ready", {
-      publicUrl,
-    });
-
-    return publicUrl;
-  }
-
-  const { data, error } = await supabaseAdmin.storage
-    .from(IMAGE_BUCKET)
-    .createSignedUrl(filePath, 60 * 60 * 24);
-
-  if (error || !data?.signedUrl) {
-    throw new Error(
-      `Could not create signed URL for Veo image: ${error?.message || "unknown error"}`
-    );
-  }
-
-  console.error("[generate-img2video] uploadImageForVeo -> signed URL ready", {
-    signedUrl: data.signedUrl,
-  });
-
-  return data.signedUrl;
+  return "image/png";
 }
 
 export default async function handler(req, res) {
@@ -214,6 +147,8 @@ export default async function handler(req, res) {
     if (!image_b64 && !image_url) {
       return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
     }
+
+    const imageMimeType = inferImageMimeType(body);
 
     const isFastMode = !!body?.is_fast_mode;
     const provider = isFastMode ? "google_veo" : "runpod";
@@ -260,6 +195,7 @@ export default async function handler(req, res) {
       aspect_ratio,
       has_image_b64: !!image_b64,
       has_image_url: !!image_url,
+      imageMimeType,
       fps,
       num_frames,
       steps,
@@ -270,7 +206,6 @@ export default async function handler(req, res) {
       jadeCost,
     });
 
-    // 1) gastar jades
     ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -298,7 +233,6 @@ export default async function handler(req, res) {
       ref,
     });
 
-    // 2) crear job
     jobId = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
@@ -346,42 +280,34 @@ export default async function handler(req, res) {
     let providerRequestId = null;
     let startedAtIso = null;
 
-    // 3) FAST = VEO
     if (isFastMode) {
       console.error("[generate-img2video] FAST MODE START", {
         userId,
         jobId,
-        has_image_url: !!image_url,
         has_image_b64: !!image_b64,
+        has_image_url: !!image_url,
+        imageMimeType,
         aspect_ratio,
         duration_s,
       });
 
-      let veoImageUrl = image_url || null;
-
-      if (!veoImageUrl && image_b64) {
-        console.error("[generate-img2video] uploading image_b64 for Veo...");
-        veoImageUrl = await uploadImageForVeo({
-          userId,
-          jobId,
-          imageB64: image_b64,
-        });
-        console.error("[generate-img2video] uploaded image url:", veoImageUrl);
-      }
-
-      if (!veoImageUrl) {
-        throw new Error("Fast mode could not obtain a valid image URL for Veo");
+      if (!image_b64) {
+        throw new Error(
+          "Fast mode requires image_b64. Do not send only image_url for Veo."
+        );
       }
 
       console.error("[generate-img2video] calling generateVeoVideo...", {
-        veoImageUrl,
+        has_image_b64: !!image_b64,
+        imageMimeType,
         aspect_ratio,
         duration_s,
       });
 
       const veoResult = await generateVeoVideo({
         prompt: finalPrompt,
-        imageUrl: veoImageUrl,
+        imageB64: image_b64,
+        imageMimeType,
         aspectRatio: aspect_ratio,
         durationSeconds: duration_s,
       });
@@ -432,7 +358,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) PRO = RUNPOD
     const endpointId = pickI2VEndpointId();
 
     console.error("[generate-img2video] PRO MODE START", {
@@ -556,4 +481,4 @@ export default async function handler(req, res) {
       error: e?.message || "Server error",
     });
   }
-}
+ }
