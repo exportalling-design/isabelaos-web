@@ -1,11 +1,4 @@
 // src/components/Img2VideoPanel.jsx
-// ---------------------------------------------------------
-// Img2VideoPanel (Image -> Video)
-// - AUTH: uses supabase session token
-// - Defaults: FAST / 9:16 / 8s
-// - Prompt Optimizer: optional
-// - Billing assumed SERVER-SIDE
-// ---------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -14,7 +7,6 @@ import { supabase } from "../lib/supabaseClient";
 export function Img2VideoPanel({ userStatus }) {
   const { user } = useAuth();
 
-  // ✅ Persist key (per user)
   const STORAGE_KEY = user?.id ? `i2v_job_state_${user.id}` : "i2v_job_state_guest";
 
   // ---------------------------
@@ -27,24 +19,19 @@ export function Img2VideoPanel({ userStatus }) {
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
 
-  // Core settings
-  const [isFastMode, setIsFastMode] = useState(true); // default FAST
-  const [useNineSixteen, setUseNineSixteen] = useState(true); // default 9:16
-  const [durationSec, setDurationSec] = useState(8); // default 8s
-
-  // ✅ PERF: default steps 18
   const [steps, setSteps] = useState(18);
-
-  // Extra controls
   const [guidanceScale, setGuidanceScale] = useState(5.0);
   const [strength, setStrength] = useState(0.65);
   const [motionStrength, setMotionStrength] = useState(1.0);
 
-  // Seed
   const [seedMode, setSeedMode] = useState("RANDOM"); // RANDOM | FIXED
   const [seedFixed, setSeedFixed] = useState(12345);
 
-  // Fixed fps
+  // defaults pedidos
+  const [isFastMode, setIsFastMode] = useState(true);
+  const [useNineSixteen, setUseNineSixteen] = useState(true);
+  const [durationSec, setDurationSec] = useState(8);
+
   const fps = 16;
 
   // ---------------------------
@@ -62,16 +49,6 @@ export function Img2VideoPanel({ userStatus }) {
 
   const currentJades = userStatus?.jades ?? 0;
 
-  const COST_I2V = isFastMode
-    ? durationSec === 5
-      ? 12
-      : 15
-    : durationSec === 5
-      ? 11
-      : 12;
-
-  const hasEnough = currentJades >= COST_I2V;
-
   const fileInputId = "img2video-file-input";
   const lockRef = useRef(false);
 
@@ -83,8 +60,6 @@ export function Img2VideoPanel({ userStatus }) {
     numFrames: 129,
     durationSec: 8,
     fps: 16,
-    isFastMode: true,
-    aspectRatio: "9:16",
   });
 
   // ---------------------------
@@ -102,6 +77,37 @@ export function Img2VideoPanel({ userStatus }) {
     setOptError("");
   }, [prompt, negative]);
 
+  // ---------------------------
+  // Pricing
+  // ---------------------------
+  function getCurrentPrice() {
+    if (isFastMode) {
+      return Number(durationSec) === 5 ? 12 : 15;
+    }
+    return Number(durationSec) === 5 ? 11 : 12;
+  }
+
+  const COST_I2V = getCurrentPrice();
+  const hasEnough = currentJades >= COST_I2V;
+
+  function getPriceText() {
+    if (isFastMode) {
+      return Number(durationSec) === 5
+        ? "Fast • 5s = 12 jades"
+        : "Fast • 8s = 15 jades";
+    }
+    return Number(durationSec) === 5
+      ? "Pro • 5s = 11 jades"
+      : "Pro • 8s = 12 jades";
+  }
+
+  function getAllPricesText() {
+    return "Prices: Fast 5s = 12 jades • Fast 8s = 15 jades • Pro 5s = 11 jades • Pro 8s = 12 jades";
+  }
+
+  // ---------------------------
+  // Auth helpers
+  // ---------------------------
   async function getAuthHeaders() {
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token || null;
@@ -112,15 +118,20 @@ export function Img2VideoPanel({ userStatus }) {
   async function safeFetchJson(url, options = {}) {
     const r = await fetch(url, options);
     const txt = await r.text();
+
     let j = null;
     try {
       j = JSON.parse(txt);
     } catch {
-      j = { ok: false, error: txt?.slice(0, 300) || "Server returned non-JSON response." };
+      j = { ok: false, error: txt?.slice(0, 500) || "Server returned non-JSON response." };
     }
+
     return { r, j, txt };
   }
 
+  // ---------------------------
+  // Optimizer
+  // ---------------------------
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
@@ -152,7 +163,6 @@ export function Img2VideoPanel({ userStatus }) {
     return {
       finalPrompt: canUseOpt ? optimizedPrompt.trim() : (prompt || "").trim(),
       finalNegative: canUseOpt ? (optimizedNegative || "").trim() : (negative || "").trim(),
-      usingOptimized: canUseOpt,
     };
   };
 
@@ -191,13 +201,17 @@ export function Img2VideoPanel({ userStatus }) {
   };
 
   // ---------------------------
-  // Poll video-status (job_id)
+  // Poll status
   // ---------------------------
   async function pollVideoStatus(job_id) {
     const auth = await getAuthHeaders();
-    const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, {
-      headers: { ...auth },
-    });
+    const { r, j } = await safeFetchJson(
+      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
+      {
+        headers: { ...auth },
+      }
+    );
+
     if (!r.ok || !j) throw new Error(j?.error || "video-status error");
     return j;
   }
@@ -208,12 +222,6 @@ export function Img2VideoPanel({ userStatus }) {
     setError(msg || "An error occurred.");
   };
 
-  const setDuration5 = () => setDurationSec(5);
-  const setDuration8 = () => setDurationSec(8);
-
-  // ---------------------------
-  // Helpers
-  // ---------------------------
   function clampInt(v, lo, hi, def) {
     const n = Number(v);
     if (!Number.isFinite(n)) return def;
@@ -255,33 +263,29 @@ export function Img2VideoPanel({ userStatus }) {
     const s = Number(p.steps || 18);
     const f = Number(p.numFrames || 129);
     const dur = Number(p.durationSec || 8);
-    const fast = p.isFastMode !== false;
 
-    const base = fast
-      ? dur <= 5
-        ? 90
-        : 140
-      : dur <= 5
-        ? 780
-        : 1140;
+    const base = dur <= 5
+      ? (isFastMode ? 180 : 720)
+      : (isFastMode ? 240 : 1080);
 
-    const stepAdj = fast ? 0 : Math.max(0, (s - 18) * 10);
-    const frameAdj = fast ? 0 : Math.max(0, (f - 81) * 4);
+    const stepAdj = Math.max(0, (s - 18) * 8);
+    const frameAdj = Math.max(0, (f - 129) * 2);
 
     const est = base + stepAdj + frameAdj;
-    return Math.max(30, Math.min(1800, est));
+    return Math.max(60, Math.min(1800, est));
   }
 
   function computeProgressFromStartedAt(startedAtIso) {
     if (!startedAtIso) return Math.max(progress, 2);
+
     const startedAtMs = new Date(startedAtIso).getTime();
-    if (!isFinite(startedAtMs)) return Math.max(progress, 2);
+    if (!Number.isFinite(startedAtMs)) return Math.max(progress, 2);
 
     const elapsedS = Math.max(0, (Date.now() - startedAtMs) / 1000);
     const expected = getExpectedSeconds();
     const t = Math.min(1, elapsedS / expected);
 
-    let p = 0;
+    let p = 3;
     if (t <= 0.2) {
       p = 3 + (t / 0.2) * 22;
     } else if (t <= 0.85) {
@@ -297,12 +301,14 @@ export function Img2VideoPanel({ userStatus }) {
 
   function getEtaText() {
     if (isFastMode) {
-      if (Number(durationSec) === 5) return "Estimated wait: 1–3 min";
-      return "Estimated wait: 2–4 min";
+      return Number(durationSec) === 5
+        ? "Estimated wait: 1-3 min"
+        : "Estimated wait: 2-4 min";
     }
 
-    if (Number(durationSec) === 5) return "Estimated wait: 13–20 min";
-    return "Estimated wait: 18–28 min";
+    return Number(durationSec) === 5
+      ? "Estimated wait: 12-18 min"
+      : "Estimated wait: 15-25 min";
   }
 
   function stopPolling() {
@@ -324,6 +330,25 @@ export function Img2VideoPanel({ userStatus }) {
     }
   }
 
+  function hardResetPanel() {
+    stopPolling();
+
+    setStatus("IDLE");
+    setStatusText("");
+    setJobId(null);
+    setVideoUrl(null);
+    setError("");
+    setProgress(0);
+    setNeedsManualRefresh(false);
+    setLastKnownJob(null);
+
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
   async function refreshStatusOnce(overrideJobId = null) {
     const jid = overrideJobId || jobId;
     if (!jid) return;
@@ -333,36 +358,30 @@ export function Img2VideoPanel({ userStatus }) {
       setError("");
 
       const stData = await pollVideoStatus(jid);
-      const st = stData?.status || "IN_PROGRESS";
+      const st = String(stData?.status || "IN_PROGRESS").toUpperCase();
 
       if (stData?.job) setLastKnownJob(stData.job);
 
-      if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(String(st).toUpperCase())) {
+      if (["DONE", "COMPLETED", "SUCCESS", "FINISHED"].includes(st)) {
         const url =
-          stData.video_url ||
-          stData.output?.video_url ||
-          stData.output?.videoUrl ||
+          stData?.video_url ||
+          stData?.output?.video_url ||
+          stData?.output?.videoUrl ||
           null;
 
         if (url) {
           setVideoUrl(url);
-          setStatus("DONE");
-          setStatusText("Video ready.");
-          setProgress(100);
-          stopPolling();
-          clearPersistedJob();
-          return;
         }
 
         setStatus("DONE");
-        setStatusText("Finished.");
+        setStatusText("Video ready.");
         setProgress(100);
         stopPolling();
         clearPersistedJob();
         return;
       }
 
-      if (String(st).toUpperCase() === "FAILED") {
+      if (st === "FAILED" || st === "ERROR") {
         setStatus("FAILED");
         setStatusText("Failed.");
         setError(stData?.error || "Generation failed.");
@@ -373,9 +392,16 @@ export function Img2VideoPanel({ userStatus }) {
       }
 
       setStatus("IN_PROGRESS");
-      setStatusText(`Status: ${stData?.rp_status || st}`);
-      const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
-      if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+      setStatusText(`Status: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`);
+
+      const startedAt =
+        stData?.job?.started_at ||
+        lastKnownJob?.started_at ||
+        null;
+
+      if (startedAt) {
+        setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+      }
     } catch (e) {
       if (isFetchDisconnectError(e)) {
         setNeedsManualRefresh(true);
@@ -384,6 +410,7 @@ export function Img2VideoPanel({ userStatus }) {
         setError('Connection lost. Click "Update status".');
         return;
       }
+
       setErrorState(e?.message || String(e));
     }
   }
@@ -394,6 +421,7 @@ export function Img2VideoPanel({ userStatus }) {
     progTimerRef.current = setInterval(() => {
       const startedAt = startedAtIsoMaybe || lastKnownJob?.started_at || null;
       if (!startedAt) return;
+
       setProgress((p) => {
         const next = computeProgressFromStartedAt(startedAt);
         return Math.max(p, next);
@@ -413,7 +441,9 @@ export function Img2VideoPanel({ userStatus }) {
     }, 2000);
   }
 
+  // ---------------------------
   // Persist state
+  // ---------------------------
   useEffect(() => {
     if (!user?.id) return;
 
@@ -426,9 +456,6 @@ export function Img2VideoPanel({ userStatus }) {
       lastKnownJob,
       videoUrl,
       error,
-      isFastMode,
-      durationSec,
-      useNineSixteen,
       currentParams: currentParamsRef.current,
       savedAt: new Date().toISOString(),
     };
@@ -438,10 +465,11 @@ export function Img2VideoPanel({ userStatus }) {
         payload.jobId ||
         payload.videoUrl ||
         payload.status === "IN_PROGRESS" ||
-        payload.status === "STARTING" ||
-        payload.needsManualRefresh
+        payload.status === "STARTING"
       ) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
       }
     } catch {
       // ignore
@@ -456,13 +484,12 @@ export function Img2VideoPanel({ userStatus }) {
     lastKnownJob,
     videoUrl,
     error,
-    isFastMode,
-    durationSec,
-    useNineSixteen,
     STORAGE_KEY,
   ]);
 
+  // ---------------------------
   // Restore state
+  // ---------------------------
   useEffect(() => {
     if (!user?.id) return;
 
@@ -472,33 +499,85 @@ export function Img2VideoPanel({ userStatus }) {
 
       const saved = JSON.parse(raw);
 
-      if (saved?.currentParams) currentParamsRef.current = saved.currentParams;
+      if (!saved?.jobId && !saved?.videoUrl) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
 
-      if (typeof saved?.isFastMode === "boolean") setIsFastMode(saved.isFastMode);
-      if (typeof saved?.durationSec === "number") setDurationSec(saved.durationSec);
-      if (typeof saved?.useNineSixteen === "boolean") setUseNineSixteen(saved.useNineSixteen);
+      if (saved?.status === "FAILED" || saved?.status === "ERROR") {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      const savedAt = saved?.savedAt ? new Date(saved.savedAt).getTime() : null;
+      const tooOld =
+        !savedAt || Number.isNaN(savedAt)
+          ? false
+          : Date.now() - savedAt > 1000 * 60 * 60 * 2;
+
+      if (tooOld) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      if (saved?.currentParams) currentParamsRef.current = saved.currentParams;
 
       if (saved?.jobId) setJobId(saved.jobId);
       if (saved?.status) setStatus(saved.status);
       if (saved?.statusText) setStatusText(saved.statusText || "");
       if (typeof saved?.progress === "number") setProgress(saved.progress);
-      if (typeof saved?.needsManualRefresh === "boolean") setNeedsManualRefresh(saved.needsManualRefresh);
+      if (typeof saved?.needsManualRefresh === "boolean") {
+        setNeedsManualRefresh(saved.needsManualRefresh);
+      }
       if (saved?.lastKnownJob) setLastKnownJob(saved.lastKnownJob);
       if (saved?.videoUrl) setVideoUrl(saved.videoUrl);
       if (saved?.error) setError(saved.error);
 
       const wasRunning =
         saved?.jobId &&
-        (saved?.status === "IN_PROGRESS" || saved?.status === "STARTING" || saved?.needsManualRefresh);
+        (saved?.status === "IN_PROGRESS" ||
+          saved?.status === "STARTING" ||
+          saved?.needsManualRefresh);
 
       if (wasRunning) {
         setTimeout(async () => {
           try {
             const stData = await pollVideoStatus(saved.jobId);
+
             if (stData?.job) setLastKnownJob(stData.job);
 
-            const startedAt = stData?.job?.started_at || saved?.lastKnownJob?.started_at || null;
-            if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+            const st = String(stData?.status || "").toUpperCase();
+
+            if (["FAILED", "ERROR"].includes(st)) {
+              hardResetPanel();
+              setStatus("FAILED");
+              setStatusText("Failed.");
+              setError(stData?.error || "Generation failed.");
+              return;
+            }
+
+            if (["DONE", "COMPLETED", "SUCCESS", "FINISHED"].includes(st)) {
+              setStatus("DONE");
+              setStatusText("Video ready.");
+              setVideoUrl(stData?.video_url || stData?.output?.video_url || null);
+              setProgress(100);
+              stopPolling();
+              try {
+                localStorage.removeItem(STORAGE_KEY);
+              } catch {
+                // ignore
+              }
+              return;
+            }
+
+            const startedAt =
+              stData?.job?.started_at ||
+              saved?.lastKnownJob?.started_at ||
+              null;
+
+            if (startedAt) {
+              setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+            }
 
             setStatus("IN_PROGRESS");
             setStatusText(`Status: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`);
@@ -509,9 +588,15 @@ export function Img2VideoPanel({ userStatus }) {
         }, 300);
       }
     } catch {
-      // ignore
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
     }
-  }, [user?.id, STORAGE_KEY]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     const onVis = () => {
@@ -519,8 +604,10 @@ export function Img2VideoPanel({ userStatus }) {
         refreshStatusOnce(jobId);
       }
     };
+
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
   useEffect(() => {
@@ -544,7 +631,7 @@ export function Img2VideoPanel({ userStatus }) {
       setLastKnownJob(null);
 
       if (!user) return setErrorState("You must be logged in to use Image → Video.");
-      if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades to generate Image → Video.`);
+      if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades for this video.`);
       if (!pureB64 && !imageUrl) return setErrorState("Upload an image or paste an image URL.");
 
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
@@ -562,45 +649,51 @@ export function Img2VideoPanel({ userStatus }) {
       const rawFrames = Math.max(1, Math.round(Number(durationSec) * fps));
       const numFrames = fixFramesForWan(rawFrames);
 
-      const aspect_ratio = useNineSixteen ? "9:16" : "16:9";
-
-      currentParamsRef.current = {
-        steps: clampInt(steps, 1, 80, 18),
-        numFrames,
-        durationSec: Number(durationSec),
-        fps: Number(fps),
-        isFastMode,
-        aspectRatio: aspect_ratio,
-      };
-
+      const aspect_ratio = useNineSixteen ? "9:16" : "";
       const stp = clampInt(steps, 1, 80, 18);
       const gs = clampFloat(guidanceScale, 1.0, 10.0, 5.0);
       const den = clampFloat(strength, 0.1, 1.0, 0.65);
       const ms = clampFloat(motionStrength, 0.1, 2.0, 1.0);
       const seed = getSeedForRequest();
 
+      currentParamsRef.current = {
+        steps: stp,
+        numFrames,
+        durationSec: Number(durationSec),
+        fps: Number(fps),
+      };
+
+      const payload = {
+        mode: "i2v",
+        is_fast_mode: isFastMode,
+        prompt: finalPrompt || "",
+        negative_prompt: finalNegative || "",
+        ...(aspect_ratio ? { aspect_ratio } : {}),
+        duration_s: Number(durationSec),
+        fps,
+        num_frames: numFrames,
+        steps: stp,
+        guidance_scale: gs,
+        strength: den,
+        denoise: den,
+        motion_strength: ms,
+        seed,
+        image_b64: pureB64 || null,
+        image_url: imageUrl || null,
+        image_data_url: dataUrl || null,
+      };
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+
       const { r, j } = await safeFetchJson("/api/generate-img2video", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
-        body: JSON.stringify({
-          mode: "i2v",
-          prompt: finalPrompt || "",
-          negative_prompt: finalNegative || "",
-          is_fast_mode: isFastMode,
-          ...(aspect_ratio ? { aspect_ratio } : {}),
-          duration_s: Number(durationSec),
-          fps,
-          num_frames: numFrames,
-          steps: stp,
-          guidance_scale: gs,
-          strength: den,
-          denoise: den,
-          motion_strength: ms,
-          seed,
-          image_b64: pureB64 || null,
-          image_url: imageUrl || null,
-        }),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      clearTimeout(timer);
 
       if (!r.ok || !j?.ok || !j?.job_id) {
         throw new Error(j?.error || "Could not create Image → Video job.");
@@ -613,14 +706,23 @@ export function Img2VideoPanel({ userStatus }) {
       setProgress(3);
 
       await new Promise((t) => setTimeout(t, 700));
+
       const stData = await pollVideoStatus(jidLocal);
       if (stData?.job) setLastKnownJob(stData.job);
 
-      const startedAt = stData?.job?.started_at || null;
-      if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+      const startedAt = stData?.job?.started_at || j?.started_at || null;
+      if (startedAt) {
+        setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
+      }
+
       startPolling(jidLocal, startedAt);
     } catch (e) {
-      if (isFetchDisconnectError(e) && (jidLocal || jobId)) {
+      if (e?.name === "AbortError") {
+        setNeedsManualRefresh(true);
+        setStatus("IN_PROGRESS");
+        setStatusText("Request timeout.");
+        setError('The request took too long. Click "Update status".');
+      } else if (isFetchDisconnectError(e) && (jidLocal || jobId)) {
         setNeedsManualRefresh(true);
         setStatus("IN_PROGRESS");
         setStatusText("Connection lost.");
@@ -663,14 +765,17 @@ export function Img2VideoPanel({ userStatus }) {
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>Status: {statusText || "Ready."}</span>
-            <span className="text-neutral-400">
+            <span>
               Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
             </span>
           </div>
 
           <div className="mt-1 text-[11px] text-neutral-400">
-            Cost: <span className="font-semibold text-white">{COST_I2V}</span> jades
+            Cost now: <span className="font-semibold text-white">{COST_I2V}</span> jades
           </div>
+
+          <div className="mt-1 text-[11px] text-neutral-400">{getPriceText()}</div>
+          <div className="mt-1 text-[10px] text-neutral-500">{getAllPricesText()}</div>
 
           {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
 
@@ -678,9 +783,7 @@ export function Img2VideoPanel({ userStatus }) {
             <div className="mt-3">
               <div className="flex items-center justify-between text-[10px] text-neutral-400">
                 <span>Progress</span>
-                <span className="text-neutral-300">
-                  {Math.max(0, Math.min(100, Number(progress) || 0))}%
-                </span>
+                <span>{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
               </div>
 
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -700,7 +803,7 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
           )}
 
-          {jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh) && (
+          {(jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh)) && (
             <div className="mt-3">
               <button
                 type="button"
@@ -711,13 +814,23 @@ export function Img2VideoPanel({ userStatus }) {
               </button>
             </div>
           )}
+
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={hardResetPanel}
+              className="w-full rounded-xl border border-red-400/30 px-3 py-2 text-[11px] text-red-300 hover:bg-red-500/10"
+            >
+              Reset panel
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Mode</div>
 
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex items-center gap-2">
               <input
                 id="i2v_fast"
                 type="checkbox"
@@ -731,14 +844,14 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
-              {isFastMode ? "Faster generation" : "Higher local processing mode"}
+              {isFastMode ? "Faster generation" : "Higher-latency mode"}
             </div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Format / size</div>
 
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex items-center gap-2">
               <input
                 id="i2v_916"
                 type="checkbox"
@@ -752,19 +865,19 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
-              {useNineSixteen ? "Vertical format selected" : "Horizontal format selected"}
+              {useNineSixteen ? "Vertical format selected" : "Default format selected"}
             </div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Duration</div>
 
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex items-center gap-2">
               <input
                 id="i2v_5s"
                 type="checkbox"
                 checked={durationSec === 5}
-                onChange={(e) => e.target.checked && setDuration5()}
+                onChange={(e) => e.target.checked && setDurationSec(5)}
                 className="h-4 w-4"
               />
               <label htmlFor="i2v_5s" className="text-[12px] text-neutral-200">
@@ -772,12 +885,12 @@ export function Img2VideoPanel({ userStatus }) {
               </label>
             </div>
 
-            <div className="mt-2 flex items-center gap-3">
+            <div className="mt-2 flex items-center gap-2">
               <input
                 id="i2v_8s"
                 type="checkbox"
                 checked={durationSec === 8}
-                onChange={(e) => e.target.checked && setDuration8()}
+                onChange={(e) => e.target.checked && setDurationSec(8)}
                 className="h-4 w-4"
               />
               <label htmlFor="i2v_8s" className="text-[12px] text-neutral-200">
@@ -786,7 +899,7 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
-              fps: {fps} · frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
+              fps: {fps} • frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
             </div>
           </div>
         </div>
@@ -797,7 +910,7 @@ export function Img2VideoPanel({ userStatus }) {
             <button
               type="button"
               onClick={handlePickFile}
-              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/40 text-sm text-neutral-200 hover:bg-white/5"
+              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/50 text-sm text-neutral-300 hover:bg-white/5"
             >
               {dataUrl ? "Change image" : "Click to upload an image"}
             </button>
@@ -812,7 +925,7 @@ export function Img2VideoPanel({ userStatus }) {
 
             {dataUrl && (
               <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                <img src={dataUrl} alt="Base image" className="w-full object-cover" />
+                <img src={dataUrl} alt="Base input" className="w-full object-cover" />
               </div>
             )}
           </div>
@@ -834,7 +947,7 @@ export function Img2VideoPanel({ userStatus }) {
               className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe motion, camera, mood..."
+              placeholder="Describe movement, camera, mood..."
             />
           </div>
 
@@ -853,7 +966,7 @@ export function Img2VideoPanel({ userStatus }) {
               <div className="text-xs text-neutral-300">
                 Prompt optimization (OpenAI)
                 {optimizedPrompt ? (
-                  <span className="ml-2 text-[10px] text-emerald-300/90">Ready ✔</span>
+                  <span className="ml-2 text-[10px] text-emerald-300">Ready ✓</span>
                 ) : (
                   <span className="ml-2 text-[10px] text-neutral-400">Optional</span>
                 )}
@@ -881,7 +994,7 @@ export function Img2VideoPanel({ userStatus }) {
                 Use optimized prompt for generation (auto)
               </label>
               <span className="ml-auto text-[10px] text-neutral-500">
-                {useOptimized && optimizedPrompt ? "Active" : "Optional"}
+                {useOptimized && optimizedPrompt ? "Active" : ""}
               </span>
             </div>
 
@@ -986,21 +1099,29 @@ export function Img2VideoPanel({ userStatus }) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={status === "STARTING" || status === "IN_PROGRESS" || !hasEnough}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {status === "STARTING" || status === "IN_PROGRESS"
-                  ? "Generating..."
-                  : !hasEnough
-                    ? "Not enough jades"
-                    : `Generate ${isFastMode ? "Fast" : "Pro"} Video`}
-              </button>
+          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[11px] text-cyan-100">
+            <div className="font-semibold text-white">Video pricing information</div>
+            <div className="mt-2">{getAllPricesText()}</div>
+            <div className="mt-1 text-cyan-200/80">
+              Current selection: <span className="font-semibold text-white">{getPriceText()}</span>
             </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={status === "STARTING" || status === "IN_PROGRESS" || !hasEnough}
+              className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {status === "STARTING" || status === "IN_PROGRESS"
+                ? "Generating..."
+                : !hasEnough
+                  ? "Not enough jades"
+                  : isFastMode
+                    ? "Generate Fast Video"
+                    : "Generate Video"}
+            </button>
           </div>
 
           {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
