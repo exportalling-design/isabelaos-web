@@ -9,9 +9,6 @@ export function Img2VideoPanel({ userStatus }) {
 
   const STORAGE_KEY = user?.id ? `i2v_job_state_${user.id}` : "i2v_job_state_guest";
 
-  // ---------------------------
-  // Inputs
-  // ---------------------------
   const [dataUrl, setDataUrl] = useState(null);
   const [pureB64, setPureB64] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
@@ -24,19 +21,15 @@ export function Img2VideoPanel({ userStatus }) {
   const [strength, setStrength] = useState(0.65);
   const [motionStrength, setMotionStrength] = useState(1.0);
 
-  const [seedMode, setSeedMode] = useState("RANDOM"); // RANDOM | FIXED
+  const [seedMode, setSeedMode] = useState("RANDOM");
   const [seedFixed, setSeedFixed] = useState(12345);
 
-  // defaults pedidos
   const [isFastMode, setIsFastMode] = useState(true);
   const [useNineSixteen, setUseNineSixteen] = useState(true);
   const [durationSec, setDurationSec] = useState(8);
 
   const fps = 16;
 
-  // ---------------------------
-  // Job state
-  // ---------------------------
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("");
   const [jobId, setJobId] = useState(null);
@@ -62,9 +55,6 @@ export function Img2VideoPanel({ userStatus }) {
     fps: 16,
   });
 
-  // ---------------------------
-  // Prompt Optimizer
-  // ---------------------------
   const [useOptimized, setUseOptimized] = useState(false);
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
@@ -77,9 +67,6 @@ export function Img2VideoPanel({ userStatus }) {
     setOptError("");
   }, [prompt, negative]);
 
-  // ---------------------------
-  // Pricing
-  // ---------------------------
   function getCurrentPrice() {
     if (isFastMode) {
       return Number(durationSec) === 5 ? 12 : 15;
@@ -105,9 +92,6 @@ export function Img2VideoPanel({ userStatus }) {
     return "Prices: Fast 5s = 12 jades • Fast 8s = 15 jades • Pro 5s = 11 jades • Pro 8s = 12 jades";
   }
 
-  // ---------------------------
-  // Auth helpers
-  // ---------------------------
   async function getAuthHeaders() {
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token || null;
@@ -129,9 +113,6 @@ export function Img2VideoPanel({ userStatus }) {
     return { r, j, txt };
   }
 
-  // ---------------------------
-  // Optimizer
-  // ---------------------------
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
@@ -166,9 +147,6 @@ export function Img2VideoPanel({ userStatus }) {
     };
   };
 
-  // ---------------------------
-  // Base64 helper
-  // ---------------------------
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -176,6 +154,42 @@ export function Img2VideoPanel({ userStatus }) {
       reader.onerror = (err) => reject(err);
       reader.readAsDataURL(file);
     });
+
+  async function compressImageFile(file, maxWidth = 1280, quality = 0.82) {
+    const originalDataUrl = await fileToBase64(file);
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const width = Math.round(img.width * scale);
+        const height = Math.round(img.height * scale);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas not supported"));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressed = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressed);
+      };
+
+      img.onerror = () => reject(new Error("Could not load image for compression"));
+      img.src = originalDataUrl;
+    });
+}
+  function estimateBase64Bytes(b64) {
+    const len = String(b64 || "").length;
+    return Math.ceil((len * 3) / 4);
+  }
 
   const handlePickFile = () => {
     const input = document.getElementById(fileInputId);
@@ -187,22 +201,28 @@ export function Img2VideoPanel({ userStatus }) {
     if (!file) return;
 
     try {
-      const durl = await fileToBase64(file);
-      setDataUrl(durl);
+      const compressedDataUrl = await compressImageFile(file, 1280, 0.82);
+      setDataUrl(compressedDataUrl);
 
-      const parts = String(durl).split(",");
-      setPureB64(parts[1] || null);
+      const parts = String(compressedDataUrl).split(",");
+      const onlyB64 = parts[1] || null;
 
+      const estimatedBytes = estimateBase64Bytes(onlyB64);
+
+      if (estimatedBytes > 1400000) {
+        setError("Image is still too large after compression. Use a smaller image or crop it first.");
+        setPureB64(null);
+        return;
+      }
+
+      setPureB64(onlyB64);
       setImageUrl("");
       setError("");
     } catch {
-      setError("Could not read the image.");
+      setError("Could not read or compress the image.");
     }
   };
 
-  // ---------------------------
-  // Poll status
-  // ---------------------------
   async function pollVideoStatus(job_id) {
     const auth = await getAuthHeaders();
     const { r, j } = await safeFetchJson(
@@ -329,7 +349,6 @@ export function Img2VideoPanel({ userStatus }) {
       // ignore
     }
   }
-
   function hardResetPanel() {
     stopPolling();
 
@@ -441,9 +460,6 @@ export function Img2VideoPanel({ userStatus }) {
     }, 2000);
   }
 
-  // ---------------------------
-  // Persist state
-  // ---------------------------
   useEffect(() => {
     if (!user?.id) return;
 
@@ -487,9 +503,6 @@ export function Img2VideoPanel({ userStatus }) {
     STORAGE_KEY,
   ]);
 
-  // ---------------------------
-  // Restore state
-  // ---------------------------
   useEffect(() => {
     if (!user?.id) return;
 
@@ -614,9 +627,6 @@ export function Img2VideoPanel({ userStatus }) {
     return () => stopPolling();
   }, []);
 
-// ---------------------------
-  // Generate
-  // ---------------------------
   async function handleGenerate() {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -680,7 +690,6 @@ export function Img2VideoPanel({ userStatus }) {
         seed,
         image_b64: pureB64 || null,
         image_url: imageUrl || null,
-        image_data_url: dataUrl || null,
       };
 
       const controller = new AbortController();
@@ -734,7 +743,6 @@ export function Img2VideoPanel({ userStatus }) {
       lockRef.current = false;
     }
   }
-
   const handleDownload = () => {
     if (!videoUrl) return;
     const link = document.createElement("a");
