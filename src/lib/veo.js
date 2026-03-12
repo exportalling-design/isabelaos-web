@@ -36,7 +36,7 @@ async function getAccessToken() {
   return token?.token || token;
 }
 
-// Inicia la generación Veo: devuelve Operation name
+// Inicia generación Veo y devuelve operation
 export async function generateVeoVideo({
   prompt,
   imageUrl,
@@ -46,6 +46,10 @@ export async function generateVeoVideo({
   const { projectId, location, model } = getGoogleConfig();
   const accessToken = await getAccessToken();
 
+  if (!imageUrl) {
+    throw new Error("Veo requires a valid imageUrl");
+  }
+
   const endpoint =
     `https://${location}-aiplatform.googleapis.com/v1/` +
     `projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
@@ -54,7 +58,9 @@ export async function generateVeoVideo({
     instances: [
       {
         prompt,
-        image: imageUrl,
+        image: {
+          uri: imageUrl,
+        },
       },
     ],
     parameters: {
@@ -93,7 +99,7 @@ export async function generateVeoVideo({
   return data; // { name: "projects/.../operations/..." }
 }
 
-// Consulta la operación Veo
+// Consulta operación Veo
 export async function fetchVeoOperation(operationName) {
   if (!operationName) throw new Error("Missing operationName");
 
