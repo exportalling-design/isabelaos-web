@@ -1,13 +1,27 @@
 import { GoogleAuth } from "google-auth-library";
 
-const projectId = process.env.GOOGLE_PROJECT_ID;
-const location = process.env.GOOGLE_LOCATION;
-const model = process.env.GOOGLE_VEO_MODEL;
+function getGoogleConfig() {
+  const projectId = process.env.GOOGLE_PROJECT_ID;
+  const location = process.env.GOOGLE_LOCATION;
+  const model = process.env.GOOGLE_VEO_MODEL;
+  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
-const auth = new GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
-  scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-});
+  if (!projectId) throw new Error("Missing GOOGLE_PROJECT_ID");
+  if (!location) throw new Error("Missing GOOGLE_LOCATION");
+  if (!model) throw new Error("Missing GOOGLE_VEO_MODEL");
+  if (!rawJson) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
+
+  let credentials;
+  try {
+    credentials = JSON.parse(rawJson);
+  } catch (e) {
+    throw new Error(
+      `Invalid GOOGLE_SERVICE_ACCOUNT_JSON: ${e?.message || "JSON parse failed"}`
+    );
+  }
+
+  return { projectId, location, model, credentials };
+}
 
 export async function generateVeoVideo({
   prompt,
@@ -15,6 +29,13 @@ export async function generateVeoVideo({
   aspectRatio = "9:16",
   durationSeconds = 8,
 }) {
+  const { projectId, location, model, credentials } = getGoogleConfig();
+
+  const auth = new GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+
   const client = await auth.getClient();
   const accessToken = await client.getAccessToken();
 
