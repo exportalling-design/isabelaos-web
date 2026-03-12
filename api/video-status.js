@@ -110,14 +110,8 @@ async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "
 
 function getDurationForRefund(job) {
   const payload = job?.payload || {};
-  const raw =
-    payload?.duration_s ??
-    payload?.seconds ??
-    job?.duration_s ??
-    8;
-
-  const n = Number(raw);
-  return n === 5 ? 5 : 8;
+  const raw = payload?.duration_s ?? payload?.seconds ?? 8;
+  return Number(raw) === 5 ? 5 : 8;
 }
 
 function getRefundAmount(job) {
@@ -180,13 +174,9 @@ function extractVeoVideoPayload(op) {
 
   const directB64 =
     firstVideo?.bytesBase64Encoded ||
-    firstVideo?.bytesBase64 ||
     firstVideo?.video?.bytesBase64Encoded ||
-    firstVideo?.video?.bytesBase64 ||
     response?.bytesBase64Encoded ||
-    response?.bytesBase64 ||
     response?.video?.bytesBase64Encoded ||
-    response?.video?.bytesBase64 ||
     null;
 
   const mimeType =
@@ -208,7 +198,6 @@ function extractVeoVideoPayload(op) {
     mimeType,
     gcsUri,
     hasVideosArray: videos.length > 0,
-    firstVideo,
   };
 }
 
@@ -252,20 +241,13 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, status: job.status, job });
     }
 
-    // ---------------------------------------------------------
+    // -----------------------------
     // GOOGLE VEO
-    // ---------------------------------------------------------
+    // -----------------------------
     if (job.provider === "google_veo") {
       const op = await fetchVeoOperation(job.provider_request_id);
       const done = !!op?.done;
       const opError = op?.error || null;
-
-      console.error("[video-status] VEO operation fetched", {
-        jobId,
-        done,
-        hasError: !!opError,
-        operationName: job.provider_request_id,
-      });
 
       if (opError) {
         await admin
@@ -386,8 +368,6 @@ export default async function handler(req, res) {
       }
 
       if (extracted.gcsUri) {
-        // Si Veo devolvió solo GCS, no lo marcamos como FAILED.
-        // Lo dejamos DONE con nota para no perder el resultado.
         await admin
           .from("video_jobs")
           .update({
@@ -441,9 +421,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // ---------------------------------------------------------
+    // -----------------------------
     // RUNPOD
-    // ---------------------------------------------------------
+    // -----------------------------
     if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
       return json(res, 500, {
         ok: false,
@@ -529,27 +509,6 @@ export default async function handler(req, res) {
           buf,
           mime,
         });
-
-        if (!finalUrl) {
-          await admin
-            .from("video_jobs")
-            .update({
-              status: "DONE",
-              provider_status: "COMPLETED",
-              video_url: null,
-              provider_reply: rpJson,
-              error: "Uploaded but could not generate URL",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", jobId);
-
-          return json(res, 200, {
-            ok: true,
-            status: "DONE",
-            video_url: null,
-            note: "uploaded_no_url",
-          });
-        }
 
         await admin
           .from("video_jobs")
