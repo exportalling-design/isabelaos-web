@@ -36,16 +36,6 @@ async function getAccessToken() {
   return token?.token || token;
 }
 
-function stripBase64Prefix(value) {
-  if (!value) return null;
-  let s = String(value).trim();
-  const comma = s.indexOf(",");
-  if (s.startsWith("data:") && comma !== -1) {
-    s = s.slice(comma + 1);
-  }
-  return s.replace(/\s+/g, "");
-}
-
 // Inicia generación Veo y devuelve operation
 export async function generateVeoVideo({
   prompt,
@@ -57,9 +47,8 @@ export async function generateVeoVideo({
   const { projectId, location, model } = getGoogleConfig();
   const accessToken = await getAccessToken();
 
-  const cleanB64 = stripBase64Prefix(imageB64);
-  if (!cleanB64) {
-    throw new Error("Veo requires a valid imageB64");
+  if (!imageB64) {
+    throw new Error("Veo requires imageB64");
   }
 
   const endpoint =
@@ -71,14 +60,14 @@ export async function generateVeoVideo({
       {
         prompt,
         image: {
-          bytesBase64Encoded: cleanB64,
+          bytesBase64Encoded: imageB64,
           mimeType: imageMimeType,
         },
       },
     ],
     parameters: {
-      durationSeconds,
       aspectRatio,
+      durationSeconds,
     },
   };
 
@@ -109,7 +98,7 @@ export async function generateVeoVideo({
     );
   }
 
-  return data;
+  return data; // { name: "projects/.../operations/..." }
 }
 
 // Consulta operación Veo
