@@ -15,7 +15,9 @@ function getGoogleConfig() {
   try {
     credentials = JSON.parse(rawJson);
   } catch (e) {
-    throw new Error(`Invalid GOOGLE_SERVICE_ACCOUNT_JSON: ${e?.message || "JSON parse failed"}`);
+    throw new Error(
+      `Invalid GOOGLE_SERVICE_ACCOUNT_JSON: ${e?.message || "JSON parse failed"}`
+    );
   }
 
   return { projectId, location, model, credentials };
@@ -34,6 +36,7 @@ async function getAccessToken() {
   return token?.token || token;
 }
 
+// Inicia la generación Veo: devuelve Operation name
 export async function generateVeoVideo({
   prompt,
   imageUrl,
@@ -64,7 +67,7 @@ export async function generateVeoVideo({
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(body),
   });
@@ -87,23 +90,29 @@ export async function generateVeoVideo({
     );
   }
 
-  return data; // devuelve Operation
+  return data; // { name: "projects/.../operations/..." }
 }
 
-export async function getVeoOperation(operationName) {
+// Consulta la operación Veo
+export async function fetchVeoOperation(operationName) {
   if (!operationName) throw new Error("Missing operationName");
 
-  const { location } = getGoogleConfig();
+  const { projectId, location, model } = getGoogleConfig();
   const accessToken = await getAccessToken();
 
-  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+  const endpoint =
+    `https://${location}-aiplatform.googleapis.com/v1/` +
+    `projects/${projectId}/locations/${location}/publishers/google/models/${model}:fetchPredictOperation`;
 
   const res = await fetch(endpoint, {
-    method: "GET",
+    method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
     },
+    body: JSON.stringify({
+      operationName,
+    }),
   });
 
   const rawText = await res.text();
@@ -120,9 +129,9 @@ export async function getVeoOperation(operationName) {
       data?.error?.message ||
         data?.message ||
         rawText ||
-        "Vertex operation polling failed"
+        "Vertex fetchPredictOperation failed"
     );
   }
 
   return data;
-    }
+}
