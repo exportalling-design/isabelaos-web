@@ -1370,9 +1370,7 @@ function DashboardView() {
           <div className="flex flex-wrap gap-2 text-xs">
             {[
               ["generator", "Motor de imagen"],
-              ["video_prompt", "Motor de video"],
               ["img2video", "Imagen → Video"],
-              ["voice2video", "Voz → Video (Beta)"],
               ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca"],
               ["headshot", "📸 Headshot Pro"],
@@ -1400,9 +1398,7 @@ function DashboardView() {
 
             {[
               ["generator", "Motor de imagen (render)"],
-              ["video_prompt", "Motor de video (clips)"],
               ["img2video", "Transformación Imagen → Video"],
-              ["voice2video", "Voz → Video (Beta)"],
               ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca de producción"],
               ["headshot", "📸 Headshot Pro (Premium)"],
@@ -1432,9 +1428,7 @@ function DashboardView() {
             </div>
 
             {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
-            {appViewMode === "video_prompt" && <VideoFromPromptPanel userStatus={userStatus} spendJades={spendJades} />}
-            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />} 
-            {appViewMode === "voice2video" && <VoiceToVideoPanel userStatus={userStatus} />}
+            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "headshot" && <HeadshotProPanel userStatus={userStatus} />}
