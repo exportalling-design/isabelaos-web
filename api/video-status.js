@@ -1,5 +1,27 @@
+// =====================================================
+// api/video-status.js
+// -----------------------------------------------------
+// Estado de jobs de video para:
+// 1) Google Veo (modo Fast)
+// 2) RunPod (modo Pro)
+// -----------------------------------------------------
+// Qué hace:
+// - autentica al usuario por Bearer token
+// - busca el job en Supabase
+// - si ya hay video_url, la devuelve
+// - si es Veo: consulta la operación y trata de extraer
+//   video en base64 o gcsUri
+// - si es RunPod: consulta status y trata de extraer
+//   direct URL o base64
+// - si algo falla: marca FAILED y devuelve jades
+// =====================================================
+
 import { createClient } from "@supabase/supabase-js";
 import { fetchVeoOperation } from "../src/lib/veo.js";
+
+// =====================================================
+// 1) Variables de entorno
+// =====================================================
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY =
@@ -24,10 +46,22 @@ const BUCKET_PUBLIC =
 
 const PENDING_PLACEHOLDER = "[PENDING_EXPORT_FROM_B64]";
 
+// =====================================================
+// 2) Helpers básicos
+// =====================================================
+
 function json(res, code, obj) {
   res.statusCode = code;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(obj));
+}
+
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
 }
 
 function getBearerToken(req) {
@@ -35,6 +69,10 @@ function getBearerToken(req) {
   const m = String(h).match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : null;
 }
+
+// =====================================================
+// 3) Obtener usuario autenticado desde el JWT
+// =====================================================
 
 async function getUserIdFromRequest(req) {
   const jwt = getBearerToken(req);
@@ -51,22 +89,39 @@ async function getUserIdFromRequest(req) {
   return data?.user?.id || null;
 }
 
+// =====================================================
+// 4) Helpers RunPod
+// =====================================================
+
 function runpodStatusUrl(endpointIdOrUrl, requestId) {
   const v = String(endpointIdOrUrl || "").trim();
   if (!v || !requestId) return null;
+
   if (v.startsWith("http://") || v.startsWith("https://")) {
     const base = v.replace(/\/run\/?$/i, "");
     return `${base}/status/${requestId}`;
   }
+
   return `https://api.runpod.ai/v2/${v}/status/${requestId}`;
 }
 
+// =====================================================
+// 5) Helpers de archivos / base64
+// =====================================================
+
 function decodeB64ToBuffer(b64) {
   if (!b64) return null;
+
   let s = String(b64).trim();
+
+  // soporta data URL
   const comma = s.indexOf(",");
-  if (s.startsWith("data:") && comma !== -1) s = s.slice(comma + 1);
+  if (s.startsWith("data:") && comma !== -1) {
+    s = s.slice(comma + 1);
+  }
+
   s = s.replace(/\s+/g, "");
+
   try {
     return Buffer.from(s, "base64");
   } catch {
@@ -79,6 +134,10 @@ function safeExtFromMime(mime) {
   if (m.includes("webm")) return "webm";
   return "mp4";
 }
+
+// =====================================================
+// 6) Subida del video final a Supabase Storage
+// =====================================================
 
 async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "video/mp4" }) {
   const ext = safeExtFromMime(mime);
@@ -102,11 +161,16 @@ async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "
     const { data, error } = await admin.storage
       .from(VIDEO_BUCKET)
       .createSignedUrl(filePath, 60 * 60 * 24 * 7);
+
     if (!error) finalUrl = data?.signedUrl || null;
   }
 
   return { filePath, finalUrl };
 }
+
+// =====================================================
+// 7) Refund de jades
+// =====================================================
 
 function getDurationForRefund(job) {
   const payload = job?.payload || {};
@@ -160,13 +224,12 @@ async function refundJadesSafe({ admin, job, reason }) {
   }
 }
 
-function safeStringify(value) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
+// =====================================================
+// 8) Extractores profundos para Veo
+// -----------------------------------------------------
+// Como la respuesta puede cambiar de estructura,
+// buscamos recursivamente campos probables.
+// =====================================================
 
 function deepFindBase64(obj) {
   if (!obj || typeof obj !== "object") return null;
@@ -226,17 +289,24 @@ function deepFindMimeType(obj) {
   return null;
 }
 
+// =====================================================
+// 9) Extraer payload de Veo
+// =====================================================
+
 function extractVeoVideoPayload(op) {
   const response = op?.response || {};
-
   const videos = Array.isArray(response?.videos) ? response.videos : [];
   const firstVideo = videos[0] || null;
 
   const directB64 =
     firstVideo?.bytesBase64Encoded ||
+    firstVideo?.bytesBase64 ||
     firstVideo?.video?.bytesBase64Encoded ||
+    firstVideo?.video?.bytesBase64 ||
     response?.bytesBase64Encoded ||
+    response?.bytesBase64 ||
     response?.video?.bytesBase64Encoded ||
+    response?.video?.bytesBase64 ||
     deepFindBase64(response) ||
     null;
 
@@ -265,12 +335,19 @@ function extractVeoVideoPayload(op) {
   };
 }
 
+// =====================================================
+// 10) Handler principal
+// =====================================================
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return json(res, 405, { ok: false, error: "Method not allowed" });
   }
 
   try {
+    // -------------------------------------------------
+    // 10.1) Auth y validación
+    // -------------------------------------------------
     const userId = await getUserIdFromRequest(req);
     if (!userId) return json(res, 401, { ok: false, error: "Unauthorized" });
 
@@ -288,6 +365,9 @@ export default async function handler(req, res) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // -------------------------------------------------
+    // 10.2) Buscar job
+    // -------------------------------------------------
     const { data: job, error: jobErr } = await admin
       .from("video_jobs")
       .select("*")
@@ -295,21 +375,38 @@ export default async function handler(req, res) {
       .eq("user_id", userId)
       .single();
 
-    if (jobErr || !job) return json(res, 404, { ok: false, error: "Job not found" });
-
-    if (job.video_url && job.video_url !== PENDING_PLACEHOLDER) {
-      return json(res, 200, { ok: true, status: job.status, video_url: job.video_url, job });
+    if (jobErr || !job) {
+      return json(res, 404, { ok: false, error: "Job not found" });
     }
 
+    // -------------------------------------------------
+    // 10.3) Si ya existe video final, devolverlo
+    // -------------------------------------------------
+    if (job.video_url && job.video_url !== PENDING_PLACEHOLDER) {
+      return json(res, 200, {
+        ok: true,
+        status: job.status,
+        video_url: job.video_url,
+        job,
+      });
+    }
+
+    // -------------------------------------------------
+    // 10.4) Si todavía no hay request id, devolver job
+    // -------------------------------------------------
     if (!job.provider_request_id) {
       return json(res, 200, { ok: true, status: job.status, job });
     }
 
-    // ---------------------------------------------------------
-    // GOOGLE VEO
-    // ---------------------------------------------------------
+    // =================================================
+    // 11) GOOGLE VEO
+    // =================================================
     if (job.provider === "google_veo") {
       const op = await fetchVeoOperation(job.provider_request_id);
+
+      // LOG COMPLETO para ver la estructura real
+      console.error("[video-status] FULL VEO OP:", JSON.stringify(op, null, 2));
+
       const done = !!op?.done;
       const opError = op?.error || null;
 
@@ -320,6 +417,9 @@ export default async function handler(req, res) {
         operationName: job.provider_request_id,
       });
 
+      // -----------------------------------------------
+      // 11.1) Si Veo devolvió error
+      // -----------------------------------------------
       if (opError) {
         await admin
           .from("video_jobs")
@@ -347,6 +447,9 @@ export default async function handler(req, res) {
         });
       }
 
+      // -----------------------------------------------
+      // 11.2) Si aún va corriendo
+      // -----------------------------------------------
       if (!done) {
         await admin
           .from("video_jobs")
@@ -366,6 +469,9 @@ export default async function handler(req, res) {
         });
       }
 
+      // -----------------------------------------------
+      // 11.3) Intentar extraer video final
+      // -----------------------------------------------
       const extracted = extractVeoVideoPayload(op);
 
       console.error("[video-status] VEO done summary", {
@@ -376,6 +482,9 @@ export default async function handler(req, res) {
         mimeType: extracted.mimeType,
       });
 
+      // -----------------------------------------------
+      // 11.4) Si vino video en base64
+      // -----------------------------------------------
       if (extracted.directB64) {
         try {
           const buf = decodeB64ToBuffer(extracted.directB64);
@@ -438,6 +547,9 @@ export default async function handler(req, res) {
         }
       }
 
+      // -----------------------------------------------
+      // 11.5) Si vino gcsUri
+      // -----------------------------------------------
       if (extracted.gcsUri) {
         await admin
           .from("video_jobs")
@@ -461,6 +573,9 @@ export default async function handler(req, res) {
         });
       }
 
+      // -----------------------------------------------
+      // 11.6) Terminó pero no encontramos video
+      // -----------------------------------------------
       await admin
         .from("video_jobs")
         .update({
@@ -494,9 +609,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // ---------------------------------------------------------
-    // RUNPOD
-    // ---------------------------------------------------------
+    // =================================================
+    // 12) RUNPOD
+    // =================================================
+
     if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
       return json(res, 500, {
         ok: false,
@@ -527,6 +643,9 @@ export default async function handler(req, res) {
     const rpStatus = rpJson?.status || null;
     const output = rpJson?.output || null;
 
+    // -----------------------------------------------
+    // 12.1) Si RunPod devuelve URL directa
+    // -----------------------------------------------
     const directUrl = output?.video_url || output?.videoUrl || null;
     if (rpStatus === "COMPLETED" && directUrl) {
       await admin
@@ -540,9 +659,17 @@ export default async function handler(req, res) {
         })
         .eq("id", jobId);
 
-      return json(res, 200, { ok: true, status: "DONE", video_url: directUrl, job });
+      return json(res, 200, {
+        ok: true,
+        status: "DONE",
+        video_url: directUrl,
+        job,
+      });
     }
 
+    // -----------------------------------------------
+    // 12.2) Si RunPod devuelve base64
+    // -----------------------------------------------
     const videoB64 = output?.video_b64 || output?.videoB64 || null;
     if (rpStatus === "COMPLETED" && videoB64) {
       const mime = output?.mime || output?.content_type || "video/mp4";
@@ -628,6 +755,9 @@ export default async function handler(req, res) {
       }
     }
 
+    // -----------------------------------------------
+    // 12.3) Si RunPod falla
+    // -----------------------------------------------
     if (rpStatus === "FAILED") {
       const workerError =
         output?.error ||
@@ -660,8 +790,11 @@ export default async function handler(req, res) {
         error: workerError,
         rp: rpJson,
       });
-    }
+      }
 
+  // -----------------------------------------------
+    // 12.4) Si sigue en progreso
+    // -----------------------------------------------
     await admin
       .from("video_jobs")
       .update({
@@ -684,5 +817,5 @@ export default async function handler(req, res) {
       error: "Server error",
       details: String(e?.message || e),
     });
-  }  
+  }
 }
