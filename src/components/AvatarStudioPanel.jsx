@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-const LS_KEY = "isabelaos_avatarstudio_state_v2";
+const LS_KEY = "isabelaos_avatarstudio_state_v3";
 
 function safeParse(json) {
   try {
@@ -40,7 +40,7 @@ function normalizeStatus(jobLike) {
 
   if (!raw) return "—";
   if (["IN_QUEUE", "QUEUED", "QUEUE", "PENDING"].includes(raw)) return "IN_QUEUE";
-  if (["IN_PROGRESS", "RUNNING", "PROCESSING", "STARTED"].includes(raw)) return "IN_PROGRESS";
+  if (["IN_PROGRESS", "RUNNING", "PROCESSING", "STARTED", "TRAINING"].includes(raw)) return "IN_PROGRESS";
   if (["SUCCEEDED", "COMPLETED", "DONE", "SUCCESS", "FINISHED", "READY"].includes(raw)) return "SUCCEEDED";
   if (["FAILED", "ERROR", "CANCELLED", "CANCELED"].includes(raw)) return "FAILED";
   return raw;
@@ -92,6 +92,7 @@ export default function AvatarStudioPanel() {
       headers: authHeaders,
       body: JSON.stringify(body || {}),
     });
+
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "API_ERROR");
     return j;
@@ -102,6 +103,7 @@ export default function AvatarStudioPanel() {
       method: "GET",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "API_ERROR");
     return j;
@@ -125,6 +127,7 @@ export default function AvatarStudioPanel() {
   function restore() {
     const raw = typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null;
     if (!raw) return;
+
     const st = safeParse(raw);
     if (!st) return;
 
@@ -156,16 +159,24 @@ export default function AvatarStudioPanel() {
 
   const runStatus = useMemo(() => normalizeStatus(job || avatar || {}), [job, avatar]);
   const isTraining = runStatus === "IN_QUEUE" || runStatus === "IN_PROGRESS";
-  const canTrainNow = !!canUse && !!avatar?.id && uploadedCount >= 5 && !loading && !isTraining;
+
+  const canCreateOrSave =
+    canUse &&
+    name.trim().length > 0 &&
+    (avatar?.id ? true : pendingCount >= 5);
+
+  const canTrainNow = canUse && !!avatar?.id && uploadedCount >= 5 && !loading && !isTraining;
 
   async function refreshThumbnail(avatarId) {
     if (!avatarId || !userId) return;
+
     try {
       const out = await apiGetJson(
         `/api/avatars-get-thumbnail-url?avatar_id=${encodeURIComponent(
           avatarId
         )}&user_id=${encodeURIComponent(userId)}`
       );
+
       const url = out?.thumb_url || out?.url || out?.signed_url || out?.signedUrl || "";
       setThumbUrl(url || "");
     } catch {}
@@ -173,31 +184,41 @@ export default function AvatarStudioPanel() {
 
   async function refreshPhotoUrls(avatarId) {
     if (!avatarId || !userId) return;
+
     try {
       const out = await apiGetJson(
         `/api/avatars-get-photo-urls?avatar_id=${encodeURIComponent(
           avatarId
         )}&user_id=${encodeURIComponent(userId)}`
       );
+
       const items = out?.photos || out?.data || out || [];
       if (Array.isArray(items)) setUploaded(items);
     } catch {}
   }
 
   async function refreshTrainingState(avatarId) {
-    if (!avatarId) return;
+    if (!avatarId || !userId) return;
+
     try {
-      const out = await apiPost("/api/avatars-get-training-state", { avatar_id: avatarId, user_id: userId });
+      const out = await apiPost("/api/avatars-get-training-state", {
+        avatar_id: avatarId,
+        user_id: userId,
+      });
+
       if (out?.avatar && typeof out.avatar === "object") {
         setAvatar((prev) => ({ ...(prev || {}), ...out.avatar }));
       }
+
       if (out?.job) setJob(out.job);
 
       const st = normalizeStatus(out?.job || out?.avatar || {});
       if (["SUCCEEDED", "FAILED"].includes(st)) {
         setPolling(false);
       }
-    } catch {}
+    } catch {
+      // Si este endpoint aún no existe, no rompemos el panel.
+    }
   }
 
   useEffect(() => {
@@ -210,16 +231,17 @@ export default function AvatarStudioPanel() {
   function onPickOne(e) {
     setErr("");
     setInfo("");
+
     const f = e.target.files?.[0];
     if (!f) return;
+
     e.target.value = "";
     setPending((prev) => [...prev, f]);
   }
 
   function removePending(idx) {
     setPending((prev) => prev.filter((_, i) => i !== idx));
-  }
-
+    }
   function clearPending() {
     setPending([]);
   }
@@ -243,6 +265,7 @@ export default function AvatarStudioPanel() {
 
   async function uploadPendingForAvatar(avatarId, filesArr) {
     const results = [];
+
     for (let i = 0; i < filesArr.length; i++) {
       const file = filesArr[i];
       const dataUrl = await fileToDataURL(file);
@@ -256,13 +279,9 @@ export default function AvatarStudioPanel() {
 
       results.push(out.photo || out.data || out);
     }
+
     return results;
   }
-
-  const canCreateOrSave =
-    canUse &&
-    name.trim().length > 0 &&
-    (avatar?.id ? true : pendingCount >= 5);
 
   async function onCreateOrSave() {
     setErr("");
@@ -270,11 +289,13 @@ export default function AvatarStudioPanel() {
 
     if (!canUse) return setErr("Debes iniciar sesión.");
     if (!name.trim()) return setErr("Falta nombre del avatar.");
+
     if (!avatar?.id && pendingCount < 5) {
       return setErr("Agrega mínimo 5 fotos (una por una). La primera foto subida se usa como miniatura.");
     }
 
     setLoading(true);
+
     try {
       setBusyLabel(avatar?.id ? "Preparando..." : "Creando avatar...");
       const av = avatar?.id ? avatar : await createAvatarOnly();
@@ -313,6 +334,7 @@ export default function AvatarStudioPanel() {
     if (uploadedCount < 5) return setErr("Necesitas mínimo 5 fotos SUBIDAS para entrenar.");
 
     setLoading(true);
+
     try {
       setBusyLabel("Enviando a RunPod...");
 
@@ -325,15 +347,18 @@ export default function AvatarStudioPanel() {
         setAvatar((prev) => ({ ...(prev || {}), ...out.avatar }));
       }
 
-      setJob(out?.job || out);
-      setPolling(true);
+      const nextJob = out?.job || out;
+      setJob(nextJob);
+
       pollNonceRef.current += 1;
+      setPolling(true);
 
       setBusyLabel("");
       setInfo("Entrenamiento iniciado. Puede tardar varios minutos.");
+
       persist({
         avatar: out?.avatar ? { ...(avatar || {}), ...out.avatar } : avatar,
-        job: out?.job || out,
+        job: nextJob,
         polling: true,
       });
     } catch (e) {
@@ -363,6 +388,7 @@ export default function AvatarStudioPanel() {
         if (out?.avatar) {
           setAvatar((prev) => ({ ...(prev || {}), ...out.avatar }));
         }
+
         if (out?.job) {
           setJob(out.job);
         } else {
@@ -370,6 +396,7 @@ export default function AvatarStudioPanel() {
         }
 
         const st = normalizeStatus(out?.job || out?.avatar || out || {});
+
         if (st === "SUCCEEDED") {
           setPolling(false);
           setInfo("Entrenamiento completado ✅");
@@ -391,7 +418,9 @@ export default function AvatarStudioPanel() {
       t = setInterval(tick, 4500);
     }
 
-    return () => t && clearInterval(t);
+    return () => {
+      if (t) clearInterval(t);
+    };
   }, [polling, avatar?.id, userId]);
 
   const headerStatus = useMemo(() => {
@@ -410,7 +439,7 @@ export default function AvatarStudioPanel() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">Avatar Studio</h2>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="mt-1 text-xs text-neutral-400">
             Crea un avatar y entrena un LoRA facial. Esto puede tardar varios minutos.
           </p>
           <div className="mt-2 text-[11px] text-neutral-300">
@@ -439,6 +468,12 @@ export default function AvatarStudioPanel() {
           Reiniciar
         </button>
       </div>
+
+      {!canUse && (
+        <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+          Inicia sesión para crear y entrenar avatares.
+        </div>
+      )}
 
       {err && (
         <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
@@ -470,7 +505,11 @@ export default function AvatarStudioPanel() {
             </div>
 
             {thumbUrl ? (
-              <img src={thumbUrl} alt="thumb" className="h-12 w-12 rounded-xl border border-white/10 object-cover" />
+              <img
+                src={thumbUrl}
+                alt="thumb"
+                className="h-12 w-12 rounded-xl border border-white/10 object-cover"
+              />
             ) : (
               <div className="grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/5 text-[10px] text-neutral-400">
                 —
@@ -483,7 +522,7 @@ export default function AvatarStudioPanel() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="text-sm font-semibold text-white">Fotos de entrenamiento</div>
-              <div className="text-xs text-neutral-400 mt-1">
+              <div className="mt-1 text-xs text-neutral-400">
                 Agrega 5 fotos, una por una. La primera subida será la miniatura.
               </div>
             </div>
@@ -514,7 +553,8 @@ export default function AvatarStudioPanel() {
             </button>
 
             <div className="text-xs text-neutral-400">
-              Total (subidas + pendientes): <span className="font-semibold text-neutral-200">{totalCount}</span>
+              Total (subidas + pendientes):{" "}
+              <span className="font-semibold text-neutral-200">{totalCount}</span>
             </div>
 
             {pendingCount > 0 && (
@@ -559,11 +599,16 @@ export default function AvatarStudioPanel() {
               {uploaded.map((p, idx) => {
                 const url = p?.url || "";
                 return (
-                  <div key={p?.id || p?.storage_path || idx} className="overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                  <div
+                    key={p?.id || p?.storage_path || idx}
+                    className="overflow-hidden rounded-xl border border-white/10 bg-black/40"
+                  >
                     {url ? (
                       <img src={url} alt={`photo-${idx}`} className="h-24 w-full object-cover" />
                     ) : (
-                      <div className="grid h-24 place-items-center text-xs text-neutral-500">Sin preview</div>
+                      <div className="grid h-24 place-items-center text-xs text-neutral-500">
+                        Sin preview
+                      </div>
                     )}
                     <div className="p-2 text-[10px] text-neutral-400">
                       {idx === 0 ? "miniatura" : "foto"}
@@ -581,7 +626,7 @@ export default function AvatarStudioPanel() {
           disabled={!canCreateOrSave || loading || isTraining}
           className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-40"
         >
-          {loading && busyLabel ? busyLabel : "Guardar cambios"}
+          {loading && busyLabel ? busyLabel : avatar?.id ? "Guardar cambios" : "Crear avatar"}
         </button>
 
         {avatar?.id && (
@@ -589,7 +634,7 @@ export default function AvatarStudioPanel() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <div className="text-sm font-semibold text-white">Entrenamiento LoRA (RunPod)</div>
-                <div className="text-xs text-neutral-400 mt-1">
+                <div className="mt-1 text-xs text-neutral-400">
                   Cuando tengas 5+ fotos SUBIDAS, puedes entrenar. Puede tardar varios minutos.
                 </div>
               </div>
@@ -613,7 +658,7 @@ export default function AvatarStudioPanel() {
             {runStatus === "FAILED" && (
               <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
                 {job?.error || avatar?.train_error || "Entrenamiento falló. Revisa logs en RunPod."}
-             </div>
+              </div>
             )}
 
             {runStatus === "SUCCEEDED" && (
