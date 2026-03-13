@@ -111,7 +111,8 @@ async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "
 function getDurationForRefund(job) {
   const payload = job?.payload || {};
   const raw = payload?.duration_s ?? payload?.seconds ?? 8;
-  return Number(raw) === 5 ? 5 : 8;
+  const n = Number(raw);
+  return n === 5 ? 5 : 8;
 }
 
 function getRefundAmount(job) {
@@ -167,8 +168,67 @@ function safeStringify(value) {
   }
 }
 
+function deepFindBase64(obj) {
+  if (!obj || typeof obj !== "object") return null;
+
+  if (typeof obj.bytesBase64Encoded === "string" && obj.bytesBase64Encoded.length > 100) {
+    return obj.bytesBase64Encoded;
+  }
+
+  if (typeof obj.bytesBase64 === "string" && obj.bytesBase64.length > 100) {
+    return obj.bytesBase64;
+  }
+
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (v && typeof v === "object") {
+      const found = deepFindBase64(v);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function deepFindGcsUri(obj) {
+  if (!obj || typeof obj !== "object") return null;
+
+  if (typeof obj.gcsUri === "string" && obj.gcsUri.startsWith("gs://")) {
+    return obj.gcsUri;
+  }
+
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (v && typeof v === "object") {
+      const found = deepFindGcsUri(v);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function deepFindMimeType(obj) {
+  if (!obj || typeof obj !== "object") return null;
+
+  if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("video/")) {
+    return obj.mimeType;
+  }
+
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (v && typeof v === "object") {
+      const found = deepFindMimeType(v);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
 function extractVeoVideoPayload(op) {
   const response = op?.response || {};
+
   const videos = Array.isArray(response?.videos) ? response.videos : [];
   const firstVideo = videos[0] || null;
 
@@ -177,6 +237,7 @@ function extractVeoVideoPayload(op) {
     firstVideo?.video?.bytesBase64Encoded ||
     response?.bytesBase64Encoded ||
     response?.video?.bytesBase64Encoded ||
+    deepFindBase64(response) ||
     null;
 
   const mimeType =
@@ -184,6 +245,7 @@ function extractVeoVideoPayload(op) {
     firstVideo?.video?.mimeType ||
     response?.mimeType ||
     response?.video?.mimeType ||
+    deepFindMimeType(response) ||
     "video/mp4";
 
   const gcsUri =
@@ -191,6 +253,7 @@ function extractVeoVideoPayload(op) {
     firstVideo?.video?.gcsUri ||
     response?.gcsUri ||
     response?.video?.gcsUri ||
+    deepFindGcsUri(response) ||
     null;
 
   return {
@@ -198,6 +261,7 @@ function extractVeoVideoPayload(op) {
     mimeType,
     gcsUri,
     hasVideosArray: videos.length > 0,
+    rawResponse: response,
   };
 }
 
@@ -241,13 +305,20 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, status: job.status, job });
     }
 
-    // -----------------------------
+    // ---------------------------------------------------------
     // GOOGLE VEO
-    // -----------------------------
+    // ---------------------------------------------------------
     if (job.provider === "google_veo") {
       const op = await fetchVeoOperation(job.provider_request_id);
       const done = !!op?.done;
       const opError = op?.error || null;
+
+      console.error("[video-status] VEO fetched", {
+        jobId,
+        done,
+        hasError: !!opError,
+        operationName: job.provider_request_id,
+      });
 
       if (opError) {
         await admin
@@ -297,7 +368,7 @@ export default async function handler(req, res) {
 
       const extracted = extractVeoVideoPayload(op);
 
-      console.error("[video-status] VEO done payload summary", {
+      console.error("[video-status] VEO done summary", {
         jobId,
         hasVideosArray: extracted.hasVideosArray,
         hasDirectB64: !!extracted.directB64,
@@ -396,6 +467,7 @@ export default async function handler(req, res) {
           status: "FAILED",
           provider_status: "FAILED",
           provider_reply: op,
+          provider_error: safeStringify(op),
           error: "Veo finished but no video payload was found",
           updated_at: new Date().toISOString(),
         })
@@ -416,14 +488,15 @@ export default async function handler(req, res) {
           hasDirectB64: !!extracted.directB64,
           hasGcsUri: !!extracted.gcsUri,
           mimeType: extracted.mimeType,
+          provider_reply_sample: extracted.rawResponse || null,
         },
         job,
       });
     }
 
-    // -----------------------------
+    // ---------------------------------------------------------
     // RUNPOD
-    // -----------------------------
+    // ---------------------------------------------------------
     if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
       return json(res, 500, {
         ok: false,
@@ -611,5 +684,5 @@ export default async function handler(req, res) {
       error: "Server error",
       details: String(e?.message || e),
     });
-  }
+  }  
 }
