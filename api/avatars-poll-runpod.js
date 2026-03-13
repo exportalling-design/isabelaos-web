@@ -6,24 +6,28 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Tu endpoint ID fijo
+// ID fijo de tu endpoint de RunPod
 const RUNPOD_ENDPOINT_ID = "uktq024dj0d4go";
 
+// Construye la URL de status para un job específico
 function runpodStatusUrl(jobId) {
   return `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`;
 }
 
+// Normaliza estados de RunPod / DB para que el frontend siempre vea lo mismo
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase();
+
   if (!s) return "IN_QUEUE";
   if (["IN_QUEUE", "QUEUED", "QUEUE", "PENDING"].includes(s)) return "IN_QUEUE";
-  if (["IN_PROGRESS", "RUNNING", "PROCESSING", "STARTED"].includes(s)) return "IN_PROGRESS";
-  if (["COMPLETED", "SUCCEEDED", "SUCCESS", "DONE", "FINISHED"].includes(s)) return "SUCCEEDED";
+  if (["IN_PROGRESS", "RUNNING", "PROCESSING", "STARTED", "TRAINING"].includes(s)) return "IN_PROGRESS";
+  if (["COMPLETED", "SUCCEEDED", "SUCCESS", "DONE", "FINISHED", "READY"].includes(s)) return "SUCCEEDED";
   if (["FAILED", "ERROR", "CANCELLED", "CANCELED", "TIMED_OUT", "TIMEOUT"].includes(s)) return "FAILED";
+
   return s;
 }
 
-// Saca un mensaje de error útil del payload de RunPod (tu log venía en st.output.error / st.error)
+// Extrae un mensaje de error útil desde la respuesta de RunPod
 function extractErrorMessage(st) {
   const candidates = [
     st?.output?.error,
@@ -34,20 +38,25 @@ function extractErrorMessage(st) {
     st?.output?.logs,
     st?.trace,
   ];
+
   for (const c of candidates) {
-    if (c && String(c).trim()) return String(c).trim().slice(0, 2000);
+    if (c && String(c).trim()) {
+      return String(c).trim().slice(0, 2000);
+    }
   }
-  // fallback: si el output trae algo grande
+
   try {
     const s = JSON.stringify(st);
     if (s && s !== "{}") return s.slice(0, 2000);
   } catch {}
+
   return "RUNPOD_FAILED";
 }
 
-// Intenta encontrar lora path desde la salida del trainer
+// Intenta extraer la ruta del LoRA desde la salida del trainer
 function extractLoraPath(st) {
   const out = st?.output || st?.result || st;
+
   let loraPath =
     out?.lora_path ||
     out?.lora_bucket_path ||
@@ -59,14 +68,17 @@ function extractLoraPath(st) {
 
   loraPath = String(loraPath);
 
-  // Normalizar si viene con "avatars/..."
-  if (loraPath.startsWith("avatars/")) loraPath = loraPath.slice("avatars/".length);
+  // Si viene con "avatars/..." lo normalizamos
+  if (loraPath.startsWith("avatars/")) {
+    loraPath = loraPath.slice("avatars/".length);
+  }
 
   return loraPath;
 }
 
 export default async function handler(req, res) {
   try {
+    // Solo POST
     if (req.method !== "POST") {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
@@ -77,16 +89,18 @@ export default async function handler(req, res) {
     }
 
     const {
-      avatar_id,       // ✅ recomendado (lo usa tu frontend)
-      job_id,          // opcional: poll de un job específico (runpod job id)
-      limit = 10,      // fallback: cuántos jobs activos revisar si no pasas avatar_id
+      avatar_id, // recomendado: el frontend lo manda
+      user_id,   // opcional, pero útil para validar dueño si luego quieres endurecer
+      job_id,    // opcional: poll por runpod job id
+      limit = 10,
     } = req.body || {};
 
-    // 1) Traer jobs activos desde DB (por avatar o por job_id o general)
+    // ------------------------------------------------------------
+    // 1) Buscar jobs activos en DB
+    // ------------------------------------------------------------
     let q = supabase
       .from("avatar_jobs")
       .select("id, avatar_id, job_id, status, result_json, error, created_at")
-      // ✅ ahora usamos los estados alineados con frontend
       .in("status", ["IN_QUEUE", "IN_PROGRESS", "RUNNING", "QUEUED"])
       .order("created_at", { ascending: false })
       .limit(Number(limit));
@@ -97,33 +111,46 @@ export default async function handler(req, res) {
     const { data: jobs, error: jErr } = await q;
     if (jErr) throw jErr;
 
-    // Si el frontend te llama con avatar_id y no hay jobs activos,
-    // igual devolvemos estado coherente leyendo avatars.
+    // ------------------------------------------------------------
+    // 2) Si no hay jobs activos pero sí hay avatar_id,
+    //    devolvemos el estado actual del avatar desde DB
+    // ------------------------------------------------------------
     if ((!jobs || jobs.length === 0) && avatar_id) {
-      const { data: av, error: avErr } = await supabase
+      let avQuery = supabase
         .from("avatars")
-        .select("id, status, lora_path, last_error, train_error, train_job_id, train_job_db_id")
+        .select("id, user_id, status, lora_path, last_error, train_error, train_job_id, train_job_db_id")
         .eq("id", avatar_id)
         .single();
 
+      const { data: av, error: avErr } = await avQuery;
       if (avErr) throw avErr;
+
+      // Si quieres endurecer seguridad, descomenta esto:
+      // if (user_id && av.user_id !== user_id) {
+      //   return res.status(403).json({ ok: false, error: "Not your avatar" });
+      // }
 
       return res.json({
         ok: true,
         endpoint_id: RUNPOD_ENDPOINT_ID,
         checked: 0,
         results: [],
-        // ✅ forma que tu frontend puede usar directo
         avatar: {
           id: av.id,
           status: av.status || "—",
           lora_path: av.lora_path || null,
           train_job_id: av.train_job_id || null,
-          train_error: av.train_error || av.last_error || null,
           train_job_db_id: av.train_job_db_id || null,
+          train_error: av.train_error || av.last_error || null,
         },
         job: av.train_job_id
-          ? { id: av.train_job_id, status: av.status || "—", error: av.train_error || av.last_error || null }
+          ? {
+              id: av.train_job_id,
+              status: normalizeStatus(av.status),
+              provider: "runpod",
+              error: av.train_error || av.last_error || null,
+              db_id: av.train_job_db_id || null,
+            }
           : null,
       });
     }
@@ -132,15 +159,19 @@ export default async function handler(req, res) {
     let lastAvatar = null;
     let lastJob = null;
 
+    // ------------------------------------------------------------
+    // 3) Consultar RunPod por cada job activo
+    // ------------------------------------------------------------
     for (const j of jobs || []) {
       if (!j.job_id) continue;
 
-      // 2) Consultar RunPod status
       const url = runpodStatusUrl(j.job_id);
 
       const r = await fetch(url, {
         method: "GET",
-        headers: { Authorization: `Bearer ${runpodKey}` },
+        headers: {
+          Authorization: `Bearer ${runpodKey}`,
+        },
       });
 
       const st = await r.json().catch(() => ({}));
@@ -150,7 +181,7 @@ export default async function handler(req, res) {
       const isDone = runStatus === "SUCCEEDED";
       const isFail = runStatus === "FAILED";
 
-      // Para devolver al frontend SIEMPRE un "job" claro
+      // Job base para frontend
       lastJob = {
         id: j.job_id,
         status: runStatus,
@@ -159,12 +190,14 @@ export default async function handler(req, res) {
         error: null,
       };
 
+      // ----------------------------------------------------------
+      // 3A) Sigue en cola o entrenando
+      // ----------------------------------------------------------
       if (isRunning) {
-        // Mantener IN_PROGRESS y guardar snapshot
         await supabase
           .from("avatar_jobs")
           .update({
-            status: "IN_PROGRESS",
+            status: runStatus,
             result_json: st,
             error: null,
           })
@@ -173,7 +206,7 @@ export default async function handler(req, res) {
         await supabase
           .from("avatars")
           .update({
-            status: runStatus,          // IN_QUEUE o IN_PROGRESS
+            status: runStatus,
             train_job_id: j.job_id,
             train_job_db_id: j.id,
             train_error: null,
@@ -185,13 +218,23 @@ export default async function handler(req, res) {
         results.push({
           job_id: j.job_id,
           runpod_status: runStatus,
-          db_status: "IN_PROGRESS",
+          db_status: runStatus,
         });
 
-        lastAvatar = { id: j.avatar_id, status: runStatus, train_job_id: j.job_id, train_job_db_id: j.id };
+        lastAvatar = {
+          id: j.avatar_id,
+          status: runStatus,
+          train_job_id: j.job_id,
+          train_job_db_id: j.id,
+          train_error: null,
+        };
+
         continue;
       }
 
+      // ----------------------------------------------------------
+      // 3B) Falló
+      // ----------------------------------------------------------
       if (isFail) {
         const errMsg = extractErrorMessage(st);
 
@@ -208,7 +251,7 @@ export default async function handler(req, res) {
         const { data: avFailed } = await supabase
           .from("avatars")
           .update({
-            status: "FAILED",           // ✅ no "ERROR" para que el frontend lo detecte claro
+            status: "FAILED",
             last_error: errMsg,
             train_error: errMsg,
             train_job_id: j.job_id,
@@ -235,12 +278,22 @@ export default async function handler(req, res) {
               train_job_db_id: avFailed.train_job_db_id,
               train_error: avFailed.train_error || avFailed.last_error || errMsg,
             }
-          : { id: j.avatar_id, status: "FAILED", train_job_id: j.job_id, train_job_db_id: j.id, train_error: errMsg };
+          : {
+              id: j.avatar_id,
+              status: "FAILED",
+              train_job_id: j.job_id,
+              train_job_db_id: j.id,
+              train_error: errMsg,
+            };
 
         lastJob.error = errMsg;
+        lastJob.status = "FAILED";
         continue;
       }
 
+      // ----------------------------------------------------------
+      // 3C) Terminó bien
+      // ----------------------------------------------------------
       if (isDone) {
         const loraPath = extractLoraPath(st);
 
@@ -285,16 +338,27 @@ export default async function handler(req, res) {
               train_job_db_id: avReady.train_job_db_id,
               train_error: null,
             }
-          : { id: j.avatar_id, status: "READY", lora_path: loraPath, train_job_id: j.job_id, train_job_db_id: j.id };
+          : {
+              id: j.avatar_id,
+              status: "READY",
+              lora_path: loraPath,
+              train_job_id: j.job_id,
+              train_job_db_id: j.id,
+              train_error: null,
+            };
 
         lastJob.status = "SUCCEEDED";
         continue;
       }
 
-      // Status desconocido: guardar raw y no romper
+      // ----------------------------------------------------------
+      // 3D) Estado raro / desconocido
+      // ----------------------------------------------------------
       await supabase
         .from("avatar_jobs")
-        .update({ result_json: st })
+        .update({
+          result_json: st,
+        })
         .eq("id", j.id);
 
       results.push({
@@ -303,18 +367,30 @@ export default async function handler(req, res) {
         db_status: j.status,
       });
 
-      lastAvatar = { id: j.avatar_id, status: runStatus || j.status, train_job_id: j.job_id, train_job_db_id: j.id };
+      lastAvatar = {
+        id: j.avatar_id,
+        status: runStatus || j.status,
+        train_job_id: j.job_id,
+        train_job_db_id: j.id,
+      };
     }
 
-    // ✅ Si te pidieron avatar_id, devolvemos "avatar" y "job" (lo usa tu frontend)
+    // ------------------------------------------------------------
+    // 4) Si pidieron avatar específico, devolvemos avatar + job listo
+    // ------------------------------------------------------------
     if (avatar_id) {
       const { data: av, error: avErr } = await supabase
         .from("avatars")
-        .select("id, status, lora_path, last_error, train_error, train_job_id, train_job_db_id")
+        .select("id, user_id, status, lora_path, last_error, train_error, train_job_id, train_job_db_id")
         .eq("id", avatar_id)
         .single();
 
       if (avErr) throw avErr;
+
+      // Si quieres endurecer seguridad, descomenta esto:
+      // if (user_id && av.user_id !== user_id) {
+      //   return res.status(403).json({ ok: false, error: "Not your avatar" });
+      // }
 
       const avatarOut = {
         id: av.id,
@@ -325,16 +401,15 @@ export default async function handler(req, res) {
         train_error: av.train_error || av.last_error || null,
       };
 
-      const jobOut =
-        av.train_job_id
-          ? {
-              id: av.train_job_id,
-              status: normalizeStatus(av.status),
-              provider: "runpod",
-              error: avatarOut.train_error || null,
-              db_id: av.train_job_db_id || null,
-            }
-          : (lastJob || null);
+      const jobOut = av.train_job_id
+        ? {
+            id: av.train_job_id,
+            status: normalizeStatus(av.status),
+            provider: "runpod",
+            error: avatarOut.train_error || null,
+            db_id: av.train_job_db_id || null,
+          }
+        : lastJob || null;
 
       return res.json({
         ok: true,
@@ -346,7 +421,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ respuesta general (si no pasaste avatar_id)
+    // ------------------------------------------------------------
+    // 5) Respuesta general
+    // ------------------------------------------------------------
     return res.json({
       ok: true,
       endpoint_id: RUNPOD_ENDPOINT_ID,
@@ -357,6 +434,9 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("[avatars-poll-runpod]", err);
-    return res.status(500).json({ ok: false, error: err?.message || "SERVER_ERROR" });
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "SERVER_ERROR",
+    });
   }
-}
+ }
