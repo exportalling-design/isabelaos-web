@@ -495,6 +495,7 @@ function VideoCollage() {
 //
 // ✅ NUEVO:
 // - Si vienes desde landing con DEMO_PROMPT_KEY, prefill del prompt y lo limpia.
+// - Selector de avatares READY para usar LoRA/trigger al generar
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -518,6 +519,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   // ✅ Perfil (profiles)
   const [profilePlan, setProfilePlan] = useState("free");
   const [profileJades, setProfileJades] = useState(0);
+
+  // ✅ NUEVO: avatares READY
+  const [avatars, setAvatars] = useState([]);
+  const [avatarsLoading, setAvatarsLoading] = useState(false);
+  const [selectedAvatarId, setSelectedAvatarId] = useState("");
+  const [selectedAvatar, setSelectedAvatar] = useState(null);
 
   // ---------------------------------------------------------
   // ✅ Prefill prompt desde landing demo (solo cuando estás logueado)
@@ -654,6 +661,70 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const hasPaidAccess = !isFreeUser || profileJades > 0;
 
   // ---------------------------------------------------------
+  // ✅ NUEVO: cargar avatares READY
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!userLoggedIn || !user?.id) {
+      setAvatars([]);
+      setSelectedAvatarId("");
+      setSelectedAvatar(null);
+      return;
+    }
+
+    (async () => {
+      try {
+        setAvatarsLoading(true);
+
+        const authHeaders = await getAuthHeadersGlobal();
+
+        const r = await fetch("/api/avatars-list", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            user_id: user.id,
+            only_ready: true,
+          }),
+        });
+
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.ok) {
+          throw new Error(j?.error || "No se pudieron cargar los avatares.");
+        }
+
+        const rows = Array.isArray(j.avatars) ? j.avatars : [];
+        setAvatars(rows);
+
+        if (selectedAvatarId) {
+          const found = rows.find((a) => a.id === selectedAvatarId);
+          if (!found) {
+            setSelectedAvatarId("");
+            setSelectedAvatar(null);
+          } else {
+            setSelectedAvatar(found);
+          }
+        }
+      } catch (e) {
+        console.error("Error cargando avatares:", e);
+        setAvatars([]);
+      } finally {
+        setAvatarsLoading(false);
+      }
+    })();
+  }, [userLoggedIn, user?.id]);
+
+  useEffect(() => {
+    if (!selectedAvatarId) {
+      setSelectedAvatar(null);
+      return;
+    }
+    const found = avatars.find((a) => a.id === selectedAvatarId) || null;
+    setSelectedAvatar(found);
+  }, [selectedAvatarId, avatars]);
+
+  // ---------------------------------------------------------
   // Contador diario (solo si aplica límite)
   // ---------------------------------------------------------
   useEffect(() => {
@@ -748,7 +819,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           const opt = await runOptimizeNow();
 
           if (!opt.ok || !opt.optimizedPrompt) {
-            // Si falla optimización, seguimos con el prompt original
             finalPrompt = prompt;
             finalNegative = negative;
           } else {
@@ -778,6 +848,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
+
+          // ✅ NUEVO: avatar seleccionado
+          avatar_id: selectedAvatar?.id || null,
+          avatar_name: selectedAvatar?.name || null,
+          avatar_trigger: selectedAvatar?.trigger || null,
+          avatar_lora_path: selectedAvatar?.lora_path || null,
 
           // opcional: para debug (no rompe backend)
           _ui_original_prompt: prompt,
@@ -829,23 +905,27 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             setDemoCount(next);
             localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
-            // ✅ Solo cuenta daily si aplica límite (free sin jades)
             if (!hasPaidAccess) setDailyCount((prev) => prev + 1);
 
             const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt, // guardamos el prompt del usuario (original)
-              negativePrompt: negative, // guardamos el negativo original
+              prompt,
+              negativePrompt: negative,
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
 
-              // opcional para trazabilidad
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
+
+              // ✅ NUEVO: guardar trazabilidad del avatar usado
+              avatarId: selectedAvatar?.id || null,
+              avatarName: selectedAvatar?.name || null,
+              avatarTrigger: selectedAvatar?.trigger || null,
+              avatarLoraPath: selectedAvatar?.lora_path || null,
             }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
         } else {
@@ -887,7 +967,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     );
   }
 
-  // UI: remaining
   const remaining = isDemo
     ? Math.max(0, DEMO_LIMIT - demoCount)
     : hasPaidAccess
@@ -919,6 +998,65 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         )}
 
         <div className="mt-4 space-y-4 text-sm">
+          {/* ✅ NUEVO: selector de avatar */}
+          {userLoggedIn && (
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-white">Avatar LoRA</div>
+                  <div className="text-[11px] text-neutral-400">
+                    Elige un avatar READY para usar su trigger y LoRA al generar.
+                  </div>
+                </div>
+
+                {avatarsLoading && (
+                  <div className="text-[11px] text-neutral-400">Cargando...</div>
+                )}
+              </div>
+
+              <div className="mt-3">
+                <select
+                  value={selectedAvatarId}
+                  onChange={(e) => setSelectedAvatarId(e.target.value)}
+                  className="w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                >
+                  <option value="">Sin avatar</option>
+                  {avatars.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} {a.trigger ? `· ${a.trigger}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedAvatar && (
+                <div className="mt-3 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                  {selectedAvatar.thumb_url ? (
+                    <img
+                      src={selectedAvatar.thumb_url}
+                      alt={selectedAvatar.name}
+                      className="h-14 w-14 rounded-xl object-cover"
+                    />
+                  ) : (
+                    <div className="h-14 w-14 rounded-xl bg-white/10" />
+                  )}
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-white">
+                      {selectedAvatar.name}
+                    </div>
+                    <div className="truncate text-[11px] text-neutral-400">
+                      Trigger: {selectedAvatar.trigger || "(sin trigger)"}
+                    </div>
+                    <div className="truncate text-[11px] text-neutral-500">
+                      LoRA: {selectedAvatar.lora_path || "(sin lora_path)"}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
@@ -1066,6 +1204,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               )}
               <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
               {useOptimizer && <span className="ml-2 opacity-70">(IA: ON)</span>}
+              {selectedAvatar && (
+                <span className="ml-2 opacity-70">(avatar: {selectedAvatar.name})</span>
+              )}
             </span>
           </div>
 
