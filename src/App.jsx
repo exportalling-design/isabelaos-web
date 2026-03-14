@@ -992,7 +992,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         {!isDemo && hasPaidAccess && (
           <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-[11px] text-emerald-100">
-            Acceso premium activo: renders ilimitados (por plan o jades).
+            Acceso premium activo: renders limitados por plan o jades.
             <span className="ml-2 text-emerald-200/80">Jades: {profileJades}</span>
           </div>
         )}
@@ -1196,7 +1196,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                   Uso: {demoCount} / {DEMO_LIMIT}
                 </>
               ) : hasPaidAccess ? (
-                <>Uso: ilimitado (por plan o jades)</>
+                <>Uso: limitado (por plan o jades)</>
               ) : (
                 <>
                   Uso: {dailyCount} / {DAILY_LIMIT}
