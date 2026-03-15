@@ -492,10 +492,6 @@ function VideoCollage() {
 // - Botón "Optimizar con IA" + toggle "Usar prompt optimizado para generar"
 // - Muestra prompt/negative optimizados pequeños abajo
 // - Si está activo y está stale, se re-optimiza al generar
-//
-// ✅ NUEVO:
-// - Si vienes desde landing con DEMO_PROMPT_KEY, prefill del prompt y lo limpia.
-// - Selector de avatares READY para usar LoRA/trigger al generar
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -504,8 +500,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const [prompt, setPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
   const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
-  const [width, setWidth] = useState(1080);
-  const [height, setHeight] = useState(1920);
+  const [width, setWidth] = useState(512);
+  const [height, setHeight] = useState(512);
   const [steps, setSteps] = useState(22);
 
   const [status, setStatus] = useState("IDLE");
@@ -516,51 +512,29 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [dailyCount, setDailyCount] = useState(0);
   const [demoCount, setDemoCount] = useState(0);
 
+  // ✅ Perfil (profiles)
   const [profilePlan, setProfilePlan] = useState("free");
   const [profileJades, setProfileJades] = useState(0);
 
   // ---------------------------------------------------------
-  // Avatares LoRA
+  // ✅ Optimizador de prompt (UI estilo VIDEO)
   // ---------------------------------------------------------
-  const [avatars, setAvatars] = useState([]);
-  const [avatarsLoading, setAvatarsLoading] = useState(false);
-  const [selectedAvatarId, setSelectedAvatarId] = useState("");
-
-  const selectedAvatar =
-    avatars.find((a) => String(a.id) === String(selectedAvatarId)) || null;
-
-  // ---------------------------------------------------------
-  // Prefill prompt desde landing demo
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (!userLoggedIn) return;
-    try {
-      const p = readDemoPrompt();
-      if (p?.trim()) {
-        setPrompt(p);
-        clearDemoPrompt();
-      }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userLoggedIn]);
-
-  // ---------------------------------------------------------
-  // Optimizador de prompt
-  // ---------------------------------------------------------
-  const [useOptimizer, setUseOptimizer] = useState(false);
-  const [optStatus, setOptStatus] = useState("IDLE");
+  const [useOptimizer, setUseOptimizer] = useState(false); // toggle "usar optimizado"
+  const [optStatus, setOptStatus] = useState("IDLE"); // IDLE | OPTIMIZING | READY | ERROR
   const [optError, setOptError] = useState("");
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [optSource, setOptSource] = useState({ prompt: "", negative: "" });
+  const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar stale
 
+  // Si el usuario cambia prompt/negative, marcamos stale
   useEffect(() => {
     setOptError("");
+    // NO borramos optimizedPrompt/Negative para que el usuario lo vea,
+    // pero sí queda stale y se re-optimiza si genera.
   }, [prompt, negative]);
 
   const isOptStale =
-    optStatus === "READY" &&
-    (optSource.prompt !== prompt || optSource.negative !== negative);
+    optStatus === "READY" && (optSource.prompt !== prompt || optSource.negative !== negative);
 
   async function runOptimizeNow() {
     setOptError("");
@@ -588,6 +562,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setOptimizedNegative(on);
       setOptSource({ prompt, negative });
       setOptStatus("READY");
+
+      // ✅ igual que video: si optimizas, activa el toggle automáticamente
       setUseOptimizer(true);
 
       return { ok: true, optimizedPrompt: op, optimizedNegative: on };
@@ -608,7 +584,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   }
 
   // ---------------------------------------------------------
-  // Cargar profile desde Supabase
+  // Cargar profile desde Supabase (plan + jade_balance)
+  // Usa tu helper getAuthHeadersGlobal() y REST /profiles
   // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) {
@@ -621,13 +598,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       try {
         const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
         const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
         if (!SUPABASE_URL || !SUPABASE_ANON) {
           console.warn("Faltan VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
           return;
         }
 
-        const authHeaders = await getAuthHeadersGlobal();
+        const authHeaders = await getAuthHeadersGlobal(); // Authorization Bearer user JWT
         const url =
           `${SUPABASE_URL.replace(/\/$/, "")}` +
           `/rest/v1/profiles?id=eq.${user.id}&select=plan,jade_balance`;
@@ -653,74 +629,20 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user?.id]);
 
-  const isFreeUser =
-    !profilePlan || profilePlan === "free" || profilePlan === "none";
+  // ✅ Regla correcta:
+  // - Si plan !== free/none  OR  jade_balance > 0  => NO límite 5
+  // - Si plan === free/none y jade_balance <= 0   => sí límite 5
+  const isFreeUser = !profilePlan || profilePlan === "free" || profilePlan === "none";
   const hasPaidAccess = !isFreeUser || profileJades > 0;
 
   // ---------------------------------------------------------
-  // Cargar avatares desde /api/avatars-list
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (!userLoggedIn || !user?.id || isDemo) {
-      setAvatars([]);
-      setSelectedAvatarId("");
-      return;
-    }
-
-    (async () => {
-      try {
-        setAvatarsLoading(true);
-
-        const authHeaders = await getAuthHeadersGlobal();
-        const r = await fetch(
-          `/api/avatars-list?user_id=${encodeURIComponent(user.id)}`,
-          {
-            method: "GET",
-            headers: {
-              ...authHeaders,
-            },
-          }
-        );
-
-        const j = await r.json().catch(() => null);
-
-        if (!r.ok || !j?.ok) {
-          throw new Error(j?.error || "No se pudieron cargar los avatares.");
-        }
-
-        const readyAvatars = (Array.isArray(j.avatars) ? j.avatars : []).filter(
-          (a) =>
-            String(a?.status || "").toUpperCase() === "READY" &&
-            String(a?.lora_path || "").trim()
-        );
-
-        setAvatars(readyAvatars);
-
-        setSelectedAvatarId((prev) => {
-          if (prev && readyAvatars.some((a) => String(a.id) === String(prev))) {
-            return prev;
-          }
-          return readyAvatars[0]?.id || "";
-        });
-      } catch (e) {
-        console.error("Error cargando avatares:", e);
-        setAvatars([]);
-        setSelectedAvatarId("");
-      } finally {
-        setAvatarsLoading(false);
-      }
-    })();
-  }, [userLoggedIn, user?.id, isDemo]);
-
-  // ---------------------------------------------------------
-  // Contador diario
+  // Contador diario (solo si aplica límite)
   // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) {
       setDailyCount(0);
       return;
     }
-
     if (hasPaidAccess) {
       setDailyCount(0);
       return;
@@ -762,7 +684,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const handleGenerate = async () => {
     setError("");
     setOptError("");
-    setImageB64(null);
 
     if (!isDemo && !userLoggedIn) {
       onAuthRequired?.();
@@ -788,10 +709,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
 
+    setImageB64(null);
     setStatus("IN_QUEUE");
     setStatusText("Preparando job...");
 
     try {
+      // ✅ Si el optimizador está activo: aseguramos tener prompts optimizados (y no stale)
       let finalPrompt = prompt;
       let finalNegative = negative;
 
@@ -807,6 +730,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           const opt = await runOptimizeNow();
 
           if (!opt.ok || !opt.optimizedPrompt) {
+            // Si falla optimización, seguimos con el prompt original
             finalPrompt = prompt;
             finalNegative = negative;
           } else {
@@ -837,11 +761,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           height: Number(height),
           steps: Number(steps),
 
-          avatar_id: selectedAvatar?.id || null,
-          avatar_name: selectedAvatar?.name || null,
-          avatar_trigger: selectedAvatar?.trigger || null,
-          avatar_lora_path: selectedAvatar?.lora_path || null,
-
+          // opcional: para debug (no rompe backend)
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
           _ui_used_optimizer: !!useOptimizer,
@@ -873,38 +793,17 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           throw new Error(statusData?.error || "Error consultando /api/status.");
         }
 
-        const st = statusData?.status;
-        setStatus(st || "IN_PROGRESS");
-        setStatusText(`Estado actual: ${st || "IN_PROGRESS"}...`);
+        const st = statusData.status;
+        setStatus(st);
+        setStatusText(`Estado actual: ${st}...`);
 
         if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
 
         finished = true;
 
-        const output = statusData?.output || {};
-        const rawDataUrl =
-          output?.image_data_url ||
-          statusData?.image_data_url ||
-          output?.data_url ||
-          null;
-
-        const rawB64 =
-          output?.image_b64 ||
-          statusData?.image_b64 ||
-          output?.b64 ||
-          output?.base64 ||
-          null;
-
-        let finalB64 = null;
-
-        if (rawB64 && typeof rawB64 === "string") {
-          finalB64 = rawB64;
-        } else if (rawDataUrl && typeof rawDataUrl === "string" && rawDataUrl.includes(",")) {
-          finalB64 = rawDataUrl.split(",")[1];
-        }
-
-        if (st === "COMPLETED" && finalB64) {
-          setImageB64(finalB64);
+        if (st === "COMPLETED" && statusData.output?.image_b64) {
+          const b64 = statusData.output.image_b64;
+          setImageB64(b64);
           setStatusText("Render completado.");
 
           if (isDemo) {
@@ -912,28 +811,25 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             setDemoCount(next);
             localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
+            // ✅ Solo cuenta daily si aplica límite (free sin jades)
             if (!hasPaidAccess) setDailyCount((prev) => prev + 1);
 
-            const dataUrl = `data:image/png;base64,${finalB64}`;
+            const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
-              prompt,
-              negativePrompt: negative,
+              prompt, // guardamos el prompt del usuario (original)
+              negativePrompt: negative, // guardamos el negativo original
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
+
+              // opcional para trazabilidad
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
             }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
-        } else if (st === "FAILED") {
-          throw new Error(
-            output?.error ||
-              statusData?.error ||
-              "El job terminó en FAILED."
-          );
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -952,7 +848,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       onAuthRequired?.();
       return;
     }
-
     if (!imageB64) return;
 
     const link = document.createElement("a");
@@ -974,6 +869,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     );
   }
 
+  // UI: remaining
   const remaining = isDemo
     ? Math.max(0, DEMO_LIMIT - demoCount)
     : hasPaidAccess
@@ -999,43 +895,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         {!isDemo && hasPaidAccess && (
           <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-[11px] text-emerald-100">
-            Acceso premium activo: renders limitados por plan o jades.
+            Acceso premium activo: renders ilimitados (por plan o jades).
             <span className="ml-2 text-emerald-200/80">Jades: {profileJades}</span>
           </div>
         )}
 
         <div className="mt-4 space-y-4 text-sm">
-          {!isDemo && (
-            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="text-sm font-medium text-white">Avatar LoRA</div>
-              <div className="mt-1 text-[11px] text-neutral-400">
-                Elige un avatar READY para usar su trigger y LoRA al generar.
-              </div>
-
-              <select
-                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-3 text-sm text-white outline-none ring-1 ring-cyan-400/60 focus:ring-2 focus:ring-cyan-400"
-                value={selectedAvatarId}
-                onChange={(e) => setSelectedAvatarId(e.target.value)}
-                disabled={avatarsLoading}
-              >
-                <option value="">Sin avatar</option>
-                {avatars.map((avatar) => (
-                  <option key={avatar.id} value={avatar.id}>
-                    {avatar.name} · {avatar.trigger}
-                  </option>
-                ))}
-              </select>
-
-              <div className="mt-2 text-[11px] text-neutral-500">
-                {avatarsLoading
-                  ? "Cargando avatares..."
-                  : avatars.length > 0
-                  ? `${avatars.length} avatar(es) READY encontrados`
-                  : "No hay avatares READY con LoRA todavía"}
-              </div>
-            </div>
-          )}
-
           <div>
             <label className="text-neutral-300">Prompt</label>
             <textarea
@@ -1054,6 +919,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             />
           </div>
 
+          {/* ✅ Optimizer UI (IGUAL AL DE VIDEO) */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
@@ -1123,7 +989,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             )}
 
             {optError && (
-              <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>
+              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
             )}
           </div>
 
@@ -1144,7 +1010,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <input
                 type="number"
                 min={256}
-                max={2048}
+                max={1024}
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={width}
@@ -1156,7 +1022,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <input
                 type="number"
                 min={256}
-                max={2048}
+                max={1024}
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={height}
@@ -1170,17 +1036,18 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <br />
             <span className="text-[11px] text-neutral-400">
               {isDemo ? (
-                <>Uso: {demoCount} / {DEMO_LIMIT}</>
+                <>
+                  Uso: {demoCount} / {DEMO_LIMIT}
+                </>
               ) : hasPaidAccess ? (
-                <>Uso: limitado (por plan o jades)</>
+                <>Uso: ilimitado (por plan o jades)</>
               ) : (
-                <>Uso: {dailyCount} / {DAILY_LIMIT}</>
+                <>
+                  Uso: {dailyCount} / {DAILY_LIMIT}
+                </>
               )}
               <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
               {useOptimizer && <span className="ml-2 opacity-70">(IA: ON)</span>}
-              {selectedAvatar && (
-                <span className="ml-2 opacity-70">(avatar: {selectedAvatar.name})</span>
-              )}
             </span>
           </div>
 
@@ -1231,6 +1098,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     </div>
   );
 }
+
  
 
 // ---------------------------------------------------------
