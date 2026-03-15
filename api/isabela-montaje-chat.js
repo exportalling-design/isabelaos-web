@@ -141,10 +141,13 @@ Tiene fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
 
     return res.status(200).json({ ok: true, ...parsed });
   } catch (err) {
+    console.error("ERROR /api/isabela-montaje-chat:", err);
+
     return res.status(500).json({
       ok: false,
       reply: "Lo siento, no pude procesar tu solicitud en este momento.",
       error: err?.message || String(err),
+      detail: err?.stack || err?.message || String(err),
     });
   }
 }
