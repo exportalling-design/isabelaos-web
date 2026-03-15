@@ -605,6 +605,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       finalNegative: canUseOpt ? (optimizedNegative || "") : negative,
       usingOptimized: !!canUseOpt,
     };
+  }
+
   // ---------------------------------------------------------
   // Cargar profile desde Supabase
   // ---------------------------------------------------------
