@@ -621,6 +621,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       try {
         const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
         const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
         if (!SUPABASE_URL || !SUPABASE_ANON) {
           console.warn("Faltan VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
           return;
@@ -652,7 +653,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user?.id]);
 
-  const isFreeUser = !profilePlan || profilePlan === "free" || profilePlan === "none";
+  const isFreeUser =
+    !profilePlan || profilePlan === "free" || profilePlan === "none";
   const hasPaidAccess = !isFreeUser || profileJades > 0;
 
   // ---------------------------------------------------------
@@ -718,6 +720,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setDailyCount(0);
       return;
     }
+
     if (hasPaidAccess) {
       setDailyCount(0);
       return;
@@ -759,6 +762,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const handleGenerate = async () => {
     setError("");
     setOptError("");
+    setImageB64(null);
 
     if (!isDemo && !userLoggedIn) {
       onAuthRequired?.();
@@ -784,7 +788,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       return;
     }
 
-    setImageB64(null);
     setStatus("IN_QUEUE");
     setStatusText("Preparando job...");
 
@@ -834,13 +837,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           height: Number(height),
           steps: Number(steps),
 
-          // avatar / lora
           avatar_id: selectedAvatar?.id || null,
           avatar_name: selectedAvatar?.name || null,
           avatar_trigger: selectedAvatar?.trigger || null,
           avatar_lora_path: selectedAvatar?.lora_path || null,
 
-          // debug UI
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
           _ui_used_optimizer: !!useOptimizer,
@@ -872,17 +873,38 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           throw new Error(statusData?.error || "Error consultando /api/status.");
         }
 
-        const st = statusData.status;
-        setStatus(st);
-        setStatusText(`Estado actual: ${st}...`);
+        const st = statusData?.status;
+        setStatus(st || "IN_PROGRESS");
+        setStatusText(`Estado actual: ${st || "IN_PROGRESS"}...`);
 
         if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
 
         finished = true;
 
-        if (st === "COMPLETED" && statusData.output?.image_b64) {
-          const b64 = statusData.output.image_b64;
-          setImageB64(b64);
+        const output = statusData?.output || {};
+        const rawDataUrl =
+          output?.image_data_url ||
+          statusData?.image_data_url ||
+          output?.data_url ||
+          null;
+
+        const rawB64 =
+          output?.image_b64 ||
+          statusData?.image_b64 ||
+          output?.b64 ||
+          output?.base64 ||
+          null;
+
+        let finalB64 = null;
+
+        if (rawB64 && typeof rawB64 === "string") {
+          finalB64 = rawB64;
+        } else if (rawDataUrl && typeof rawDataUrl === "string" && rawDataUrl.includes(",")) {
+          finalB64 = rawDataUrl.split(",")[1];
+        }
+
+        if (st === "COMPLETED" && finalB64) {
+          setImageB64(finalB64);
           setStatusText("Render completado.");
 
           if (isDemo) {
@@ -892,7 +914,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           } else if (userLoggedIn) {
             if (!hasPaidAccess) setDailyCount((prev) => prev + 1);
 
-            const dataUrl = `data:image/png;base64,${b64}`;
+            const dataUrl = `data:image/png;base64,${finalB64}`;
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
@@ -906,6 +928,12 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               usedOptimizer: !!useOptimizer,
             }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
+        } else if (st === "FAILED") {
+          throw new Error(
+            output?.error ||
+              statusData?.error ||
+              "El job terminó en FAILED."
+          );
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
         }
@@ -924,6 +952,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       onAuthRequired?.();
       return;
     }
+
     if (!imageB64) return;
 
     const link = document.createElement("a");
