@@ -19,7 +19,6 @@ export default function MontajeIAPanel({ userStatus }) {
 
   const [prompt, setPrompt] = useState("");
 
-  // ✅ NUEVO: respuesta y plan de Isabela
   const [isabelaReply, setIsabelaReply] = useState("");
   const [isabelaPlan, setIsabelaPlan] = useState(null);
   const [isabelaLoading, setIsabelaLoading] = useState(false);
@@ -102,9 +101,10 @@ export default function MontajeIAPanel({ userStatus }) {
     }
   }
 
-  // ✅ NUEVO: consultar a Isabela antes de generar
   async function handleAskIsabela() {
     try {
+      if (!prompt.trim()) return;
+
       setIsabelaLoading(true);
       setError("");
       setIsabelaReply("");
@@ -133,7 +133,7 @@ export default function MontajeIAPanel({ userStatus }) {
       const json = await resp.json().catch(() => null);
 
       if (!resp.ok || !json?.ok) {
-        throw new Error(json?.reply || json?.error || "No pude interpretar la solicitud.");
+        throw new Error(json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud.");
       }
 
       if (!json.allowed) {
@@ -151,7 +151,9 @@ export default function MontajeIAPanel({ userStatus }) {
       setIsabelaPlan(json);
     } catch (err) {
       console.error(err);
-      setError("Lo siento, no pude interpretar tu instrucción en este momento.");
+      setError(
+        err?.message || "Lo siento, no pude interpretar tu instrucción en este momento."
+      );
     } finally {
       setIsabelaLoading(false);
     }
@@ -194,7 +196,7 @@ export default function MontajeIAPanel({ userStatus }) {
           person_image: person_b64,
           background_image: bg_b64,
           prompt,
-          isabelaPlan, // ✅ NUEVO: mandar el plan ya confirmado
+          isabelaPlan,
           ref: `montajeia-${Date.now()}`,
         }),
       });
@@ -202,7 +204,7 @@ export default function MontajeIAPanel({ userStatus }) {
       const json = await resp.json().catch(() => null);
 
       if (!resp.ok || !json?.ok) {
-        throw new Error(json?.error || "ERROR_GENERATION");
+        throw new Error(json?.error || json?.detail || "ERROR_GENERATION");
       }
 
       if (json?.jobId) setJobId(json.jobId);
@@ -219,23 +221,30 @@ export default function MontajeIAPanel({ userStatus }) {
         });
       }
 
-      // ✅ primero intenta usar imagen directa
       if (json?.image_data_url) {
         setResultUrl(json.image_data_url);
         setStatus("DONE");
         return;
       }
 
-      // ✅ fallback por compatibilidad
       const finalImage = await pollJob(json.jobId, 160);
       setResultUrl(finalImage);
       setStatus("DONE");
     } catch (err) {
       console.error(err);
       setError(
-        "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
+        err?.message || "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
       );
       setStatus("ERROR");
+    }
+  }
+
+  function handlePromptKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!isabelaLoading && prompt.trim()) {
+        handleAskIsabela();
+      }
     }
   }
 
@@ -302,7 +311,7 @@ export default function MontajeIAPanel({ userStatus }) {
           <div className="mb-4 text-center">
             <p className="text-xl font-semibold text-white">Hola, soy Isabela.</p>
             <p className="mt-2 text-sm text-neutral-400">
-              Cuéntame cómo quieres montar tu imagen.
+              Escríbeme y presiona Enter. Te responderé al instante.
             </p>
           </div>
 
@@ -310,23 +319,33 @@ export default function MontajeIAPanel({ userStatus }) {
             value={prompt}
             onChange={(e) => {
               setPrompt(e.target.value);
-              // ✅ si cambian el prompt, invalida confirmación previa
               setIsabelaPlan(null);
               setIsabelaReply("");
             }}
-            placeholder="Ej: monta a la modelo caminando dentro de una tienda elegante, con luz natural y un look realista..."
+            onKeyDown={handlePromptKeyDown}
+            placeholder="Ej: ponla más a la derecha, un poco más pequeña y con sombra suave..."
             className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-4 text-sm text-white outline-none placeholder:text-neutral-500"
           />
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <button
-              onClick={handleAskIsabela}
-              disabled={isabelaLoading || !prompt.trim()}
-              className="rounded-2xl border border-cyan-400/30 bg-black/40 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {isabelaLoading ? "Isabela está pensando..." : "Consultar a Isabela"}
-            </button>
+          <div className="mt-3 text-xs text-neutral-500">
+            Enter = enviar a Isabela · Shift + Enter = salto de línea
+          </div>
 
+          {isabelaLoading ? (
+            <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-black/40 p-4 text-sm text-neutral-300">
+              <p className="font-semibold text-white">Isabela</p>
+              <p className="mt-2">Estoy revisando tu instrucción...</p>
+            </div>
+          ) : null}
+
+          {isabelaReply ? (
+            <div className="mt-4 rounded-2xl border border-fuchsia-500/20 bg-black/40 p-4 text-sm text-neutral-200">
+              <p className="mb-2 font-semibold text-white">Isabela</p>
+              <p>{isabelaReply}</p>
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex justify-end">
             <button
               onClick={handleGenerate}
               disabled={status === "RUNNING" || !prompt.trim() || !personFile}
@@ -335,13 +354,6 @@ export default function MontajeIAPanel({ userStatus }) {
               {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
             </button>
           </div>
-
-          {isabelaReply ? (
-            <div className="mt-4 rounded-2xl border border-fuchsia-500/20 bg-black/40 p-4 text-sm text-neutral-200">
-              <p className="mb-2 font-semibold text-white">Isabela</p>
-              <p>{isabelaReply}</p>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -355,7 +367,7 @@ export default function MontajeIAPanel({ userStatus }) {
         </div>
 
         <div className="text-sm text-neutral-400">
-          Consulta con Isabela y cuando esté correcto, genera el montaje.
+          Cuando Isabela confirme lo que entendió, pulsa Generar montaje.
         </div>
       </div>
 
