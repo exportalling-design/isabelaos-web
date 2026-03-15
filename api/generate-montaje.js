@@ -93,11 +93,18 @@ function safeParseJson(text) {
   }
 }
 
+function isUsablePlan(plan) {
+  return !!(
+    plan &&
+    typeof plan === "object" &&
+    plan.allowed === true &&
+    typeof plan.reply === "string"
+  );
+}
+
 // =====================
 // ISABELA INTERPRETER
 // =====================
-// Si hay fondo subido, Isabela solo interpreta colocación/integración.
-// Si NO hay fondo, Isabela devuelve prompt para generar escena.
 async function callIsabelaInterpreter(prompt, hasBackgroundImage) {
   const systemInstruction = `
 Eres Isabela, asistente interna del módulo "Montaje IA" de IsabelaOS.
@@ -174,46 +181,7 @@ Hay fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
 }
 
 // =====================
-// GOOGLE HELPERS (solo cuando NO hay fondo)
-// =====================
-async function describeBackgroundImage(backgroundB64) {
-  const body = {
-    systemInstruction: {
-      parts: [
-        {
-          text:
-            "Describe this background image in one short English sentence for image generation. Only return plain text. Focus on place, lighting, atmosphere, camera perspective. No markdown.",
-        },
-      ],
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            inlineData: {
-              mimeType: "image/png",
-              data: backgroundB64,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.2,
-    },
-  };
-
-  const data = await vertexFetch(
-    `/publishers/google/models/gemini-2.0-flash:generateContent`,
-    body
-  );
-
-  return extractText(data);
-}
-
-// =====================
-// RUNPOD HELPERS (para compose_scene local)
+// RUNPOD HELPERS (compose_scene local)
 // =====================
 function getRunpodConfig() {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
@@ -253,7 +221,7 @@ async function runpodRun(input) {
   return data.id;
 }
 
-async function runpodWaitForImage(jobId, maxSeconds = 160) {
+async function runpodWaitForImage(jobId, maxSeconds = 180) {
   const { endpointId, apiKey } = getRunpodConfig();
   const started = Date.now();
 
@@ -337,6 +305,7 @@ export default async function handler(req, res) {
     const person_image = body.person_image;
     const background_image = body.background_image || null;
     const userPrompt = String(body.prompt || "").trim();
+    const incomingPlan = body.isabelaPlan;
     ref = body.ref || `montajeia-${Date.now()}`;
 
     if (!person_image) {
@@ -356,8 +325,14 @@ export default async function handler(req, res) {
     // COBRO
     await spendJadesOrThrow(user_id, COST_MONTAJE_JADES, "generation:montaje_ia", ref);
 
-    // Interpreta con Isabela
-    const interpreted = await callIsabelaInterpreter(userPrompt, !!background_image);
+    // ✅ si ya viene plan confirmado desde el frontend, úsalo
+    let interpreted = null;
+
+    if (isUsablePlan(incomingPlan)) {
+      interpreted = incomingPlan;
+    } else {
+      interpreted = await callIsabelaInterpreter(userPrompt, !!background_image);
+    }
 
     if (!interpreted?.allowed) {
       await refundJadesSafe(user_id, COST_MONTAJE_JADES, "refund:montaje_ia_not_allowed", ref);
@@ -406,9 +381,9 @@ export default async function handler(req, res) {
     }
 
     // ==========================================================
-    // CASO 2: NO HAY FONDO -> USAR GOOGLE PARA GENERAR ESCENA
+    // CASO 2: NO HAY FONDO -> GOOGLE GENERA ESCENA
     // ==========================================================
-    let finalPrompt = interpreted?.scenePrompt || "";
+    const finalPrompt = interpreted?.scenePrompt || "";
     const subjectType =
       interpreted?.subjectType === "product"
         ? "SUBJECT_TYPE_PRODUCT"
@@ -455,7 +430,7 @@ export default async function handler(req, res) {
     const pred = imagenResp?.predictions?.[0] || {};
     const imageB64 =
       pred?.bytesBase64Encoded ||
-      ((pred?.mimeType && pred?.bytesBase64Encoded) ? pred.bytesBase64Encoded : null) ||
+      (((pred?.mimeType && pred?.bytesBase64Encoded) ? pred.bytesBase64Encoded : null)) ||
       pred?.image?.bytesBase64Encoded ||
       "";
 
