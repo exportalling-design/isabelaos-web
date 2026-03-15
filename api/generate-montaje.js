@@ -1,14 +1,15 @@
-// api/generate-headshot.js
+// api/generate-montaje.js
 // Lanza un job en RunPod (Serverless)
 // + AUTH (requireUser)
 // + COBRO (spend_jades) ANTES de generar
+// + Nuevo nombre para el módulo: Montaje IA
 
 import { requireUser } from "./_auth.js";
 
 // =====================
 // COSTOS (JADE)
 // =====================
-const COST_HEADSHOT_JADES = 1; // AJUSTA AQUÍ
+const COST_MONTAJE_JADES = 8;
 
 async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -45,6 +46,7 @@ async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
     err.code = 500;
     throw err;
   }
+
   return true;
 }
 
@@ -55,7 +57,9 @@ export default async function handler(req, res) {
   res.setHeader("access-control-allow-headers", "content-type, authorization");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+  }
 
   try {
     // AUTH
@@ -67,52 +71,91 @@ export default async function handler(req, res) {
     const user_id = auth.user.id;
     const body = req.body || {};
 
-    if (!body.image_b64) {
-      return res.status(400).json({ ok: false, error: "Falta image_b64 en el cuerpo." });
-    }
-
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     const apiKey = process.env.RUNPOD_API_KEY;
+
     if (!endpointId || !apiKey) {
-      return res.status(500).json({ ok: false, error: "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY." });
+      return res.status(500).json({
+        ok: false,
+        error: "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY.",
+      });
     }
 
-    // ✅ MODE: "product_studio" | "anime_identity"
-    const mode = String(body.mode || "product_studio").toLowerCase();
+    // =====================
+    // MODO NUEVO: MONTAJE IA
+    // =====================
+    // Caso 1: montaje con 2 imágenes (persona + fondo)
+    const hasPersonAndBg = !!body.person_image && !!body.background_image;
 
-    // Mapea modo -> action del worker
-    const action =
-      mode === "anime_identity"
-        ? "transform_anime_identity"
-        : "headshot_pro"; // legacy (product studio premium)
+    // Caso 2: fallback legacy de transformación con 1 sola imagen
+    const hasSingleImage = !!body.image_b64;
+
+    if (!hasPersonAndBg && !hasSingleImage) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debes enviar person_image + background_image, o image_b64.",
+      });
+    }
+
+    let action = "";
+    let input = {};
+
+    if (hasPersonAndBg) {
+      action = "compose_scene";
+
+      input = {
+        action,
+        fg_image_b64: body.person_image,
+        bg_image_b64: body.background_image,
+        user_id,
+
+        // prompt libre de Isabela
+        prompt: body.prompt,
+
+        // parámetros opcionales del montaje
+        x: body.x,
+        y: body.y,
+        scale: body.scale,
+        feather: body.feather,
+        mode: body.blend_mode || body.mode || "seamless",
+        color_match: body.color_match,
+      };
+    } else {
+      // =====================
+      // FALLBACK LEGACY
+      // =====================
+      const mode = String(body.mode || "product_studio").toLowerCase();
+
+      action =
+        mode === "anime_identity"
+          ? "transform_anime_identity"
+          : "headshot_pro";
+
+      input = {
+        action,
+        image_b64: body.image_b64,
+        user_id,
+
+        prompt: body.prompt,
+        negative_prompt: body.negative_prompt,
+
+        steps: body.steps,
+        guidance: body.guidance,
+        strength: body.strength,
+        max_side: body.max_side,
+        seed: body.seed,
+      };
+    }
 
     // COBRO
     await spendJadesOrThrow(
       user_id,
-      COST_HEADSHOT_JADES,
-      `generation:${mode}`,
+      COST_MONTAJE_JADES,
+      `generation:montaje_ia`,
       body.ref || null
     );
 
     const url = `https://api.runpod.ai/v2/${endpointId}/run`;
-
-    // Pasamos params opcionales (si vienen)
-    const input = {
-      action,
-      image_b64: body.image_b64,
-      user_id,
-
-      // ✅ NUEVO: prompt libre (opcionales)
-      prompt: body.prompt,
-      negative_prompt: body.negative_prompt,
-
-      // opcionales:
-      steps: body.steps,
-      guidance: body.guidance,
-      strength: body.strength,
-      max_side: body.max_side,
-      seed: body.seed,
-    };
 
     const rpRes = await fetch(url, {
       method: "POST",
@@ -126,21 +169,27 @@ export default async function handler(req, res) {
     const data = await rpRes.json().catch(() => null);
 
     if (!rpRes.ok || !data || data.error) {
-      console.error("Error RunPod generate-headshot:", data);
-      return res.status(500).json({ ok: false, error: data?.error || "Error al lanzar job en RunPod." });
+      console.error("Error RunPod generate-montaje:", data);
+      return res.status(500).json({
+        ok: false,
+        error: data?.error || "Error al lanzar job en RunPod.",
+      });
     }
 
     return res.status(200).json({
       ok: true,
       jobId: data.id,
-      billed: { type: "JADE", amount: COST_HEADSHOT_JADES },
-      mode,
+      billed: { type: "JADE", amount: COST_MONTAJE_JADES },
       action,
     });
   } catch (err) {
     const msg = err?.message || String(err);
     const code = err?.code || 500;
-    console.error("Error en /api/generate-headshot:", err);
-    return res.status(code).json({ ok: false, error: msg });
+    console.error("Error en /api/generate-montaje:", err);
+
+    return res.status(code).json({
+      ok: false,
+      error: msg,
+    });
   }
-    }
+}
