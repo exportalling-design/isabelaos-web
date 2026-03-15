@@ -1572,7 +1572,7 @@ function DashboardView() {
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "montaje" && <<MontajeIAPanel userStatus={userStatus} />}
+            {appViewMode === "montaje" && <MontajeIAPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
           </div>
         </section>
