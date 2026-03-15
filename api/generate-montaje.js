@@ -1,10 +1,6 @@
 // api/generate-montaje.js
-// Lanza un job en RunPod (Serverless)
-// + AUTH (requireUser)
-// + COBRO (spend_jades) ANTES de generar
-// + Nuevo nombre para el módulo: Montaje IA
-
 import { requireUser } from "./_auth.js";
+import { vertexFetch } from "./_googleVertex.js";
 
 // =====================
 // COSTOS (JADE)
@@ -50,8 +46,132 @@ async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   return true;
 }
 
+async function refundJadesSafe(user_id, amount, reason, ref = null) {
+  try {
+    const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const rpcUrl = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/refund_jades`;
+
+    await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_user_id: user_id,
+        p_amount: amount,
+        p_reason: reason,
+        p_ref: ref,
+      }),
+    });
+  } catch {
+    // no explotar si el refund falla
+  }
+}
+
+function extractText(resp) {
+  const parts =
+    resp?.candidates?.[0]?.content?.parts ||
+    resp?.candidates?.[0]?.content?.[0]?.parts ||
+    [];
+  return parts.map((p) => p.text || "").join("").trim();
+}
+
+function safeParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function callIsabelaInterpreter(prompt, hasBackgroundImage) {
+  const systemInstruction = `
+Eres Isabela, asistente interna del módulo Montaje IA de IsabelaOS.
+Tu salida debe ser SOLO JSON válido.
+No uses markdown.
+
+Devuelve:
+{
+  "allowed": true,
+  "reply": "texto corto para el usuario",
+  "subjectType": "person | product",
+  "scenePrompt": "prompt visual final en inglés, limpio y detallado para crear una escena realista",
+  "needsBackground": true/false
+}
+
+Si el mensaje no pertenece al módulo, devuelve:
+{"allowed":false,"reply":"Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes."}
+`;
+
+  const body = {
+    systemInstruction: {
+      parts: [{ text: systemInstruction }],
+    },
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `Instrucción del usuario: ${prompt}
+Hay fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: "application/json",
+    },
+  };
+
+  const data = await vertexFetch(
+    `/publishers/google/models/gemini-2.0-flash:generateContent`,
+    body
+  );
+
+  return safeParseJson(extractText(data));
+}
+
+async function describeBackgroundImage(backgroundB64) {
+  const body = {
+    systemInstruction: {
+      parts: [
+        {
+          text:
+            "Describe this background image in one short English sentence for image generation. Only return plain text. Focus on place, lighting, atmosphere, camera perspective. No markdown.",
+        },
+      ],
+    },
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              mimeType: "image/png",
+              data: backgroundB64,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2,
+    },
+  };
+
+  const data = await vertexFetch(
+    `/publishers/google/models/gemini-2.0-flash:generateContent`,
+    body
+  );
+
+  return extractText(data);
+}
+
 export default async function handler(req, res) {
-  // CORS básico
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "POST, OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type, authorization");
@@ -61,135 +181,129 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method Not Allowed" });
   }
 
+  let user_id = null;
+  let ref = null;
+
   try {
-    // AUTH
     const auth = await requireUser(req);
     if (!auth.ok) {
       return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     }
 
-    const user_id = auth.user.id;
+    user_id = auth.user.id;
+
     const body = req.body || {};
+    const person_image = body.person_image;
+    const background_image = body.background_image || null;
+    const userPrompt = String(body.prompt || "").trim();
+    ref = body.ref || `montajeia-${Date.now()}`;
 
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-    const apiKey = process.env.RUNPOD_API_KEY;
-
-    if (!endpointId || !apiKey) {
-      return res.status(500).json({
-        ok: false,
-        error: "Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY.",
-      });
-    }
-
-    // =====================
-    // MODO NUEVO: MONTAJE IA
-    // =====================
-    // Caso 1: montaje con 2 imágenes (persona + fondo)
-    const hasPersonAndBg = !!body.person_image && !!body.background_image;
-
-    // Caso 2: fallback legacy de transformación con 1 sola imagen
-    const hasSingleImage = !!body.image_b64;
-
-    if (!hasPersonAndBg && !hasSingleImage) {
+    if (!person_image) {
       return res.status(400).json({
         ok: false,
-        error: "Debes enviar person_image + background_image, o image_b64.",
+        error: "Debes enviar person_image.",
       });
     }
 
-    let action = "";
-    let input = {};
-
-    if (hasPersonAndBg) {
-      action = "compose_scene";
-
-      input = {
-        action,
-        fg_image_b64: body.person_image,
-        bg_image_b64: body.background_image,
-        user_id,
-
-        // prompt libre de Isabela
-        prompt: body.prompt,
-
-        // parámetros opcionales del montaje
-        x: body.x,
-        y: body.y,
-        scale: body.scale,
-        feather: body.feather,
-        mode: body.blend_mode || body.mode || "seamless",
-        color_match: body.color_match,
-      };
-    } else {
-      // =====================
-      // FALLBACK LEGACY
-      // =====================
-      const mode = String(body.mode || "product_studio").toLowerCase();
-
-      action =
-        mode === "anime_identity"
-          ? "transform_anime_identity"
-          : "headshot_pro";
-
-      input = {
-        action,
-        image_b64: body.image_b64,
-        user_id,
-
-        prompt: body.prompt,
-        negative_prompt: body.negative_prompt,
-
-        steps: body.steps,
-        guidance: body.guidance,
-        strength: body.strength,
-        max_side: body.max_side,
-        seed: body.seed,
-      };
+    if (!userPrompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debes escribir una instrucción para Isabela.",
+      });
     }
 
-    // COBRO
-    await spendJadesOrThrow(
-      user_id,
-      COST_MONTAJE_JADES,
-      `generation:montaje_ia`,
-      body.ref || null
+    await spendJadesOrThrow(user_id, COST_MONTAJE_JADES, "generation:montaje_ia", ref);
+
+    const interpreted = await callIsabelaInterpreter(userPrompt, !!background_image);
+
+    if (!interpreted?.allowed) {
+      await refundJadesSafe(user_id, COST_MONTAJE_JADES, "refund:montaje_ia_not_allowed", ref);
+      return res.status(200).json({
+        ok: false,
+        error:
+          interpreted?.reply ||
+          "Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes.",
+      });
+    }
+
+    let finalPrompt = interpreted.scenePrompt || "";
+    let subjectType = interpreted.subjectType === "product" ? "SUBJECT_TYPE_PRODUCT" : "SUBJECT_TYPE_PERSON";
+
+    if (background_image) {
+      const bgDescription = await describeBackgroundImage(background_image);
+      finalPrompt = `${finalPrompt}. Use a realistic scene matching this uploaded background: ${bgDescription}. Keep the subject natural, well integrated, realistic lighting, realistic scale, photo realism.`;
+    }
+
+    const imagenBody = {
+      instances: [
+        {
+          prompt: finalPrompt,
+          referenceImages: [
+            {
+              referenceType: "REFERENCE_TYPE_SUBJECT",
+              referenceId: 1,
+              referenceImage: {
+                bytesBase64Encoded: person_image,
+              },
+              subjectImageConfig: {
+                subjectDescription:
+                  subjectType === "SUBJECT_TYPE_PRODUCT"
+                    ? "main product"
+                    : "main person",
+                subjectType,
+              },
+            },
+          ],
+        },
+      ],
+      parameters: {
+        sampleCount: 1,
+        language: "en",
+        addWatermark: false,
+        outputOptions: {
+          mimeType: "image/jpeg",
+          compressionQuality: 92,
+        },
+      },
+    };
+
+    const imagenResp = await vertexFetch(
+      `/publishers/google/models/imagen-3.0-capability-001:predict`,
+      imagenBody
     );
 
-    const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+    const pred = imagenResp?.predictions?.[0] || {};
+    const imageB64 =
+      pred?.bytesBase64Encoded ||
+      pred?.mimeType && pred?.bytesBase64Encoded
+        ? pred.bytesBase64Encoded
+        : pred?.image?.bytesBase64Encoded || "";
 
-    const rpRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ input }),
-    });
-
-    const data = await rpRes.json().catch(() => null);
-
-    if (!rpRes.ok || !data || data.error) {
-      console.error("Error RunPod generate-montaje:", data);
+    if (!imageB64) {
+      await refundJadesSafe(user_id, COST_MONTAJE_JADES, "refund:montaje_ia_no_image", ref);
       return res.status(500).json({
         ok: false,
-        error: data?.error || "Error al lanzar job en RunPod.",
+        error: "No pude completar el montaje con esas imágenes.",
       });
     }
 
     return res.status(200).json({
       ok: true,
-      jobId: data.id,
+      jobId: `google-sync-${Date.now()}`,
       billed: { type: "JADE", amount: COST_MONTAJE_JADES },
-      action,
+      image_data_url: `data:image/jpeg;base64,${imageB64}`,
+      isabela_reply:
+        interpreted.reply || "Listo. Preparé tu montaje.",
     });
   } catch (err) {
-    const msg = err?.message || String(err);
-    const code = err?.code || 500;
-    console.error("Error en /api/generate-montaje:", err);
+    if (user_id && ref) {
+      await refundJadesSafe(user_id, COST_MONTAJE_JADES, "refund:montaje_ia_failed", ref);
+    }
 
-    return res.status(code).json({
+    return res.status(500).json({
       ok: false,
-      error: msg,
+      error: "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción.",
+      detail: err?.message || String(err),
     });
   }
 }
