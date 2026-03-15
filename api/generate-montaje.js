@@ -7,6 +7,9 @@ import { vertexFetch } from "./_googleVertex.js";
 // =====================
 const COST_MONTAJE_JADES = 8;
 
+// =====================
+// SUPABASE JADE HELPERS
+// =====================
 async function spendJadesOrThrow(user_id, amount, reason, ref = null) {
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -67,10 +70,13 @@ async function refundJadesSafe(user_id, amount, reason, ref = null) {
       }),
     });
   } catch {
-    // no explotar si el refund falla
+    // no romper si el refund falla
   }
 }
 
+// =====================
+// TEXT HELPERS
+// =====================
 function extractText(resp) {
   const parts =
     resp?.candidates?.[0]?.content?.parts ||
@@ -87,23 +93,55 @@ function safeParseJson(text) {
   }
 }
 
+// =====================
+// ISABELA INTERPRETER
+// =====================
+// Si hay fondo subido, Isabela solo interpreta colocación/integración.
+// Si NO hay fondo, Isabela devuelve prompt para generar escena.
 async function callIsabelaInterpreter(prompt, hasBackgroundImage) {
   const systemInstruction = `
-Eres Isabela, asistente interna del módulo Montaje IA de IsabelaOS.
-Tu salida debe ser SOLO JSON válido.
-No uses markdown.
+Eres Isabela, asistente interna del módulo "Montaje IA" de IsabelaOS.
 
-Devuelve:
+Tu única función es ayudar a montar:
+- una persona
+- un avatar
+- o un producto
+dentro de una escena.
+
+Nunca respondas cosas fuera del módulo.
+Si el usuario pregunta algo fuera del módulo, responde SOLO este JSON:
+{"allowed":false,"reply":"Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes."}
+
+IMPORTANTE:
+- Nunca menciones Gemini, Google, Vertex, APIs externas ni proveedores.
+- Devuelve SOLO JSON válido.
+- No uses markdown.
+
+Si hay fondo subido por el usuario:
+devuelve ESTE formato:
 {
   "allowed": true,
   "reply": "texto corto para el usuario",
+  "mode": "compose_existing_background",
   "subjectType": "person | product",
-  "scenePrompt": "prompt visual final en inglés, limpio y detallado para crear una escena realista",
-  "needsBackground": true/false
+  "x": 0.5,
+  "y": 0.72,
+  "scale": 0.55,
+  "feather": 12,
+  "blendMode": "seamless",
+  "colorMatch": true,
+  "shadow": true
 }
 
-Si el mensaje no pertenece al módulo, devuelve:
-{"allowed":false,"reply":"Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes."}
+Si NO hay fondo subido:
+devuelve ESTE formato:
+{
+  "allowed": true,
+  "reply": "texto corto para el usuario",
+  "mode": "generate_background_then_compose",
+  "subjectType": "person | product",
+  "scenePrompt": "clean English prompt to create a realistic background or full realistic scene"
+}
 `;
 
   const body = {
@@ -135,6 +173,9 @@ Hay fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
   return safeParseJson(extractText(data));
 }
 
+// =====================
+// GOOGLE HELPERS (solo cuando NO hay fondo)
+// =====================
 async function describeBackgroundImage(backgroundB64) {
   const body = {
     systemInstruction: {
@@ -171,6 +212,106 @@ async function describeBackgroundImage(backgroundB64) {
   return extractText(data);
 }
 
+// =====================
+// RUNPOD HELPERS (para compose_scene local)
+// =====================
+function getRunpodConfig() {
+  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+  const apiKey = process.env.RUNPOD_API_KEY;
+
+  if (!endpointId || !apiKey) {
+    throw new Error("Faltan RUNPOD_ENDPOINT_ID o RUNPOD_API_KEY.");
+  }
+
+  return { endpointId, apiKey };
+}
+
+async function runpodRun(input) {
+  const { endpointId, apiKey } = getRunpodConfig();
+
+  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ input }),
+  });
+
+  const data = await r.json().catch(() => null);
+
+  if (!r.ok || !data || data.error) {
+    throw new Error(data?.error || "RUNPOD_RUN_FAILED");
+  }
+
+  if (!data.id) {
+    throw new Error("RUNPOD_NO_JOB_ID");
+  }
+
+  return data.id;
+}
+
+async function runpodWaitForImage(jobId, maxSeconds = 160) {
+  const { endpointId, apiKey } = getRunpodConfig();
+  const started = Date.now();
+
+  while (true) {
+    if ((Date.now() - started) / 1000 > maxSeconds) {
+      throw new Error("RUNPOD_TIMEOUT");
+    }
+
+    const url = `https://api.runpod.ai/v2/${endpointId}/status/${jobId}`;
+    const r = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    const data = await r.json().catch(() => null);
+
+    if (!r.ok || !data) {
+      throw new Error("RUNPOD_STATUS_FAILED");
+    }
+
+    const status = String(data.status || "").toUpperCase();
+
+    if (status === "FAILED" || status === "CANCELLED") {
+      throw new Error(data?.output?.error || data?.error || "RUNPOD_FAILED");
+    }
+
+    if (status === "COMPLETED") {
+      if (data?.output?.error) {
+        throw new Error(data.output.error);
+      }
+
+      const imageDataUrl =
+        data?.output?.image_data_url ||
+        data?.output?.data_url ||
+        null;
+
+      const imageB64 =
+        data?.output?.image_b64 ||
+        data?.output?.result_b64 ||
+        data?.output?.resultBase64 ||
+        data?.output?.image_base64 ||
+        data?.output?.image ||
+        "";
+
+      if (imageDataUrl) return imageDataUrl;
+      if (imageB64) return `data:image/jpeg;base64,${imageB64}`;
+
+      throw new Error("RUNPOD_COMPLETED_WITHOUT_IMAGE");
+    }
+
+    await new Promise((r) => setTimeout(r, 1400));
+  }
+}
+
+// =====================
+// MAIN
+// =====================
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "POST, OPTIONS");
@@ -212,8 +353,10 @@ export default async function handler(req, res) {
       });
     }
 
+    // COBRO
     await spendJadesOrThrow(user_id, COST_MONTAJE_JADES, "generation:montaje_ia", ref);
 
+    // Interpreta con Isabela
     const interpreted = await callIsabelaInterpreter(userPrompt, !!background_image);
 
     if (!interpreted?.allowed) {
@@ -226,13 +369,50 @@ export default async function handler(req, res) {
       });
     }
 
-    let finalPrompt = interpreted.scenePrompt || "";
-    let subjectType = interpreted.subjectType === "product" ? "SUBJECT_TYPE_PRODUCT" : "SUBJECT_TYPE_PERSON";
-
+    // ==========================================================
+    // CASO 1: HAY FONDO -> USAR COMPOSITOR LOCAL EXACTO
+    // ==========================================================
     if (background_image) {
-      const bgDescription = await describeBackgroundImage(background_image);
-      finalPrompt = `${finalPrompt}. Use a realistic scene matching this uploaded background: ${bgDescription}. Keep the subject natural, well integrated, realistic lighting, realistic scale, photo realism.`;
+      const input = {
+        action: "compose_scene",
+
+        // imágenes
+        fg_image_b64: person_image,
+        bg_image_b64: background_image,
+
+        // parámetros interpretados por Isabela
+        x: interpreted?.x ?? 0.5,
+        y: interpreted?.y ?? 0.72,
+        scale: interpreted?.scale ?? 0.55,
+        feather: interpreted?.feather ?? 12,
+        mode: interpreted?.blendMode || "seamless",
+        color_match:
+          typeof interpreted?.colorMatch === "boolean" ? interpreted.colorMatch : true,
+        shadow:
+          typeof interpreted?.shadow === "boolean" ? interpreted.shadow : true,
+      };
+
+      const jobId = await runpodRun(input);
+      const image_data_url = await runpodWaitForImage(jobId, 180);
+
+      return res.status(200).json({
+        ok: true,
+        jobId,
+        billed: { type: "JADE", amount: COST_MONTAJE_JADES },
+        image_data_url,
+        isabela_reply:
+          interpreted?.reply || "Listo. Preparé tu montaje usando el fondo que subiste.",
+      });
     }
+
+    // ==========================================================
+    // CASO 2: NO HAY FONDO -> USAR GOOGLE PARA GENERAR ESCENA
+    // ==========================================================
+    let finalPrompt = interpreted?.scenePrompt || "";
+    const subjectType =
+      interpreted?.subjectType === "product"
+        ? "SUBJECT_TYPE_PRODUCT"
+        : "SUBJECT_TYPE_PERSON";
 
     const imagenBody = {
       instances: [
@@ -275,9 +455,9 @@ export default async function handler(req, res) {
     const pred = imagenResp?.predictions?.[0] || {};
     const imageB64 =
       pred?.bytesBase64Encoded ||
-      pred?.mimeType && pred?.bytesBase64Encoded
-        ? pred.bytesBase64Encoded
-        : pred?.image?.bytesBase64Encoded || "";
+      ((pred?.mimeType && pred?.bytesBase64Encoded) ? pred.bytesBase64Encoded : null) ||
+      pred?.image?.bytesBase64Encoded ||
+      "";
 
     if (!imageB64) {
       await refundJadesSafe(user_id, COST_MONTAJE_JADES, "refund:montaje_ia_no_image", ref);
@@ -293,7 +473,7 @@ export default async function handler(req, res) {
       billed: { type: "JADE", amount: COST_MONTAJE_JADES },
       image_data_url: `data:image/jpeg;base64,${imageB64}`,
       isabela_reply:
-        interpreted.reply || "Listo. Preparé tu montaje.",
+        interpreted?.reply || "Listo. Preparé tu montaje.",
     });
   } catch (err) {
     if (user_id && ref) {
