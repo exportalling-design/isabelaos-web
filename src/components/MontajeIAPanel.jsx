@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-export default function MontajeInteligentePanel({ userStatus }) {
-  const UI_COST_JADES_DEFAULT = 12;
+export default function MontajeIAPanel({ userStatus }) {
+  const UI_COST_JADES_DEFAULT = 8;
 
-  const [status, setStatus] = useState("IDLE");
+  const [status, setStatus] = useState("IDLE"); // IDLE | RUNNING | DONE | ERROR
   const [error, setError] = useState("");
   const [jobId, setJobId] = useState("");
 
@@ -53,6 +53,42 @@ export default function MontajeInteligentePanel({ userStatus }) {
     );
   }
 
+  async function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  async function pollJob(jobIdToPoll, maxSeconds = 140) {
+    const started = Date.now();
+
+    while (true) {
+      if ((Date.now() - started) / 1000 > maxSeconds) {
+        throw new Error("Tiempo de espera agotado esperando resultado del montaje.");
+      }
+
+      const r = await fetch("/api/montaje-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: jobIdToPoll }),
+      });
+
+      const data = await r.json().catch(() => null);
+
+      if (!r.ok || !data) {
+        throw new Error("Error consultando estado del montaje.");
+      }
+
+      if (data.done && data.ok && data.image_data_url) {
+        return data.image_data_url;
+      }
+
+      if (data.done && !data.ok) {
+        throw new Error(data.error || "No se pudo completar el montaje.");
+      }
+
+      await sleep(1500);
+    }
+  }
+
   async function handleGenerate() {
     if (!personFile) {
       setError("Debes subir una imagen de persona, modelo o producto.");
@@ -62,6 +98,8 @@ export default function MontajeInteligentePanel({ userStatus }) {
     try {
       setStatus("RUNNING");
       setError("");
+      setResultUrl("");
+      setJobId("");
 
       const person_b64 = await fileToBase64(personFile);
       const bg_b64 = backgroundFile ? await fileToBase64(backgroundFile) : null;
@@ -69,7 +107,11 @@ export default function MontajeInteligentePanel({ userStatus }) {
       const session = await supabase.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      const resp = await fetch("/api/montaje-inteligente", {
+      if (!token) {
+        throw new Error("MISSING_AUTH_TOKEN");
+      }
+
+      const resp = await fetch("/api/generate-montaje", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -79,25 +121,38 @@ export default function MontajeInteligentePanel({ userStatus }) {
           person_image: person_b64,
           background_image: bg_b64,
           prompt,
+          ref: `montajeia-${Date.now()}`,
         }),
       });
 
-      const json = await resp.json();
+      const json = await resp.json().catch(() => null);
 
-      if (!resp.ok) {
+      if (!resp.ok || !json?.ok) {
         throw new Error(json?.error || "ERROR_GENERATION");
       }
 
       if (json?.jobId) setJobId(json.jobId);
-      if (json?.image_data_url) setResultUrl(json.image_data_url);
 
       if (json?.billed?.amount) {
-        setJadesLocal((typeof jadesShown === "number" ? jadesShown : 0) - json.billed.amount);
+        setJadesLocal((prev) => {
+          const base =
+            typeof prev === "number"
+              ? prev
+              : typeof userStatus?.jades === "number"
+                ? userStatus.jades
+                : 0;
+          return Math.max(0, base - json.billed.amount);
+        });
       }
 
+      const finalImage = await pollJob(json.jobId, 160);
+      setResultUrl(finalImage);
       setStatus("DONE");
     } catch (err) {
-      setError("Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción.");
+      console.error(err);
+      setError(
+        "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
+      );
       setStatus("ERROR");
     }
   }
@@ -137,7 +192,7 @@ export default function MontajeInteligentePanel({ userStatus }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white">Montaje Inteligente</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-white">Montaje IA</h1>
         <p className="mt-2 text-sm text-neutral-400">
           Coloca una persona, producto o avatar dentro de cualquier escenario real.
         </p>
@@ -225,4 +280,4 @@ export default function MontajeInteligentePanel({ userStatus }) {
       </div>
     </div>
   );
- }
+}
