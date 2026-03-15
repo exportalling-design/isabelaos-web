@@ -16,7 +16,13 @@ export default function MontajeIAPanel({ userStatus }) {
 
   const [resultUrl, setResultUrl] = useState("");
   const [jadesLocal, setJadesLocal] = useState(null);
+
   const [prompt, setPrompt] = useState("");
+
+  // ✅ NUEVO: respuesta y plan de Isabela
+  const [isabelaReply, setIsabelaReply] = useState("");
+  const [isabelaPlan, setIsabelaPlan] = useState(null);
+  const [isabelaLoading, setIsabelaLoading] = useState(false);
 
   const jadesShown = useMemo(() => {
     const base = typeof userStatus?.jades === "number" ? userStatus.jades : 0;
@@ -30,12 +36,18 @@ export default function MontajeIAPanel({ userStatus }) {
     setStatus("IDLE");
   }
 
+  function resetInterpretation() {
+    setIsabelaReply("");
+    setIsabelaPlan(null);
+  }
+
   async function handlePersonFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     setPersonFile(f);
     setPersonPreview(URL.createObjectURL(f));
     resetRunUI();
+    resetInterpretation();
   }
 
   async function handleBackgroundFile(e) {
@@ -44,6 +56,7 @@ export default function MontajeIAPanel({ userStatus }) {
     setBackgroundFile(f);
     setBackgroundPreview(URL.createObjectURL(f));
     resetRunUI();
+    resetInterpretation();
   }
 
   async function fileToBase64(file) {
@@ -89,9 +102,69 @@ export default function MontajeIAPanel({ userStatus }) {
     }
   }
 
+  // ✅ NUEVO: consultar a Isabela antes de generar
+  async function handleAskIsabela() {
+    try {
+      setIsabelaLoading(true);
+      setError("");
+      setIsabelaReply("");
+      setIsabelaPlan(null);
+
+      const session = await supabase.auth.getSession();
+      const token = session?.data?.session?.access_token;
+
+      if (!token) {
+        throw new Error("MISSING_AUTH_TOKEN");
+      }
+
+      const resp = await fetch("/api/isabela-montaje-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: prompt,
+          hasPersonImage: !!personFile,
+          hasBackgroundImage: !!backgroundFile,
+        }),
+      });
+
+      const json = await resp.json().catch(() => null);
+
+      if (!resp.ok || !json?.ok) {
+        throw new Error(json?.reply || json?.error || "No pude interpretar la solicitud.");
+      }
+
+      if (!json.allowed) {
+        setIsabelaReply(
+          json.reply ||
+            "Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes."
+        );
+        setIsabelaPlan(null);
+        return;
+      }
+
+      setIsabelaReply(
+        json.reply || "Entendido. Si está correcto, da click en Generar montaje."
+      );
+      setIsabelaPlan(json);
+    } catch (err) {
+      console.error(err);
+      setError("Lo siento, no pude interpretar tu instrucción en este momento.");
+    } finally {
+      setIsabelaLoading(false);
+    }
+  }
+
   async function handleGenerate() {
     if (!personFile) {
       setError("Debes subir una imagen de persona, modelo o producto.");
+      return;
+    }
+
+    if (!prompt.trim()) {
+      setError("Debes escribir una instrucción para Isabela.");
       return;
     }
 
@@ -121,6 +194,7 @@ export default function MontajeIAPanel({ userStatus }) {
           person_image: person_b64,
           background_image: bg_b64,
           prompt,
+          isabelaPlan, // ✅ NUEVO: mandar el plan ya confirmado
           ref: `montajeia-${Date.now()}`,
         }),
       });
@@ -145,6 +219,14 @@ export default function MontajeIAPanel({ userStatus }) {
         });
       }
 
+      // ✅ primero intenta usar imagen directa
+      if (json?.image_data_url) {
+        setResultUrl(json.image_data_url);
+        setStatus("DONE");
+        return;
+      }
+
+      // ✅ fallback por compatibilidad
       const finalImage = await pollJob(json.jobId, 160);
       setResultUrl(finalImage);
       setStatus("DONE");
@@ -226,10 +308,40 @@ export default function MontajeIAPanel({ userStatus }) {
 
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              // ✅ si cambian el prompt, invalida confirmación previa
+              setIsabelaPlan(null);
+              setIsabelaReply("");
+            }}
             placeholder="Ej: monta a la modelo caminando dentro de una tienda elegante, con luz natural y un look realista..."
             className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-4 text-sm text-white outline-none placeholder:text-neutral-500"
           />
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleAskIsabela}
+              disabled={isabelaLoading || !prompt.trim()}
+              className="rounded-2xl border border-cyan-400/30 bg-black/40 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {isabelaLoading ? "Isabela está pensando..." : "Consultar a Isabela"}
+            </button>
+
+            <button
+              onClick={handleGenerate}
+              disabled={status === "RUNNING" || !prompt.trim() || !personFile}
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
+            >
+              {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
+            </button>
+          </div>
+
+          {isabelaReply ? (
+            <div className="mt-4 rounded-2xl border border-fuchsia-500/20 bg-black/40 p-4 text-sm text-neutral-200">
+              <p className="mb-2 font-semibold text-white">Isabela</p>
+              <p>{isabelaReply}</p>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -242,13 +354,9 @@ export default function MontajeIAPanel({ userStatus }) {
           </p>
         </div>
 
-        <button
-          onClick={handleGenerate}
-          disabled={status === "RUNNING"}
-          className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-8 py-4 text-base font-semibold text-white transition disabled:opacity-50"
-        >
-          {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
-        </button>
+        <div className="text-sm text-neutral-400">
+          Consulta con Isabela y cuando esté correcto, genera el montaje.
+        </div>
       </div>
 
       {jobId ? (
