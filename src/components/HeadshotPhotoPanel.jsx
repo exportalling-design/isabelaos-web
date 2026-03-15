@@ -2,8 +2,7 @@ import { useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 export default function MontajeInteligentePanel({ userStatus }) {
-
-  const UI_COST_JADES_DEFAULT = 5;
+  const UI_COST_JADES_DEFAULT = 12;
 
   const [status, setStatus] = useState("IDLE");
   const [error, setError] = useState("");
@@ -16,9 +15,7 @@ export default function MontajeInteligentePanel({ userStatus }) {
   const [backgroundPreview, setBackgroundPreview] = useState("");
 
   const [resultUrl, setResultUrl] = useState("");
-
   const [jadesLocal, setJadesLocal] = useState(null);
-
   const [prompt, setPrompt] = useState("");
 
   const jadesShown = useMemo(() => {
@@ -36,24 +33,16 @@ export default function MontajeInteligentePanel({ userStatus }) {
   async function handlePersonFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-
     setPersonFile(f);
-
-    const url = URL.createObjectURL(f);
-    setPersonPreview(url);
-
+    setPersonPreview(URL.createObjectURL(f));
     resetRunUI();
   }
 
   async function handleBackgroundFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-
     setBackgroundFile(f);
-
-    const url = URL.createObjectURL(f);
-    setBackgroundPreview(url);
-
+    setBackgroundPreview(URL.createObjectURL(f));
     resetRunUI();
   }
 
@@ -65,14 +54,12 @@ export default function MontajeInteligentePanel({ userStatus }) {
   }
 
   async function handleGenerate() {
-
     if (!personFile) {
-      setError("Debes subir una imagen de persona o producto.");
+      setError("Debes subir una imagen de persona, modelo o producto.");
       return;
     }
 
     try {
-
       setStatus("RUNNING");
       setError("");
 
@@ -86,13 +73,13 @@ export default function MontajeInteligentePanel({ userStatus }) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           person_image: person_b64,
           background_image: bg_b64,
-          prompt
-        })
+          prompt,
+        }),
       });
 
       const json = await resp.json();
@@ -102,158 +89,140 @@ export default function MontajeInteligentePanel({ userStatus }) {
       }
 
       if (json?.jobId) setJobId(json.jobId);
-
-      if (json?.image_data_url) {
-        setResultUrl(json.image_data_url);
-      }
+      if (json?.image_data_url) setResultUrl(json.image_data_url);
 
       if (json?.billed?.amount) {
-        setJadesLocal(jadesShown - json.billed.amount);
+        setJadesLocal((typeof jadesShown === "number" ? jadesShown : 0) - json.billed.amount);
       }
 
       setStatus("DONE");
-
     } catch (err) {
-
-      console.error(err);
-
-      setError(
-        "Lo siento, no pude generar la imagen. Intenta cambiar la descripción o las imágenes."
-      );
-
+      setError("Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción.");
       setStatus("ERROR");
     }
   }
 
+  function UploadCard({ title, subtitle, preview, onChange }) {
+    return (
+      <label className="group relative block cursor-pointer overflow-hidden rounded-3xl border border-cyan-400/20 bg-black/40 p-4 transition hover:border-fuchsia-400/40">
+        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(217,70,239,0.14),transparent_35%)]" />
+        <div className="relative z-10">
+          <p className="text-sm font-semibold text-white">{title}</p>
+          <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
+
+          <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/40 p-6 text-center">
+            {!preview ? (
+              <>
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-2xl">
+                  🖼️
+                </div>
+                <p className="text-sm font-semibold text-white">Sube foto aquí</p>
+                <p className="mt-1 text-xs text-neutral-500">Toca para seleccionar una imagen</p>
+              </>
+            ) : (
+              <img
+                src={preview}
+                alt="preview"
+                className="mx-auto max-h-[260px] w-full rounded-2xl object-cover"
+              />
+            )}
+          </div>
+        </div>
+
+        <input type="file" accept="image/*" onChange={onChange} className="hidden" />
+      </label>
+    );
+  }
+
   return (
     <div className="space-y-6">
-
       <div>
-        <h1 className="text-xl font-semibold text-white">
-          Montaje Inteligente
-        </h1>
-
-        <p className="text-xs text-neutral-400 mt-1">
+        <h1 className="text-3xl font-bold tracking-tight text-white">Montaje Inteligente</h1>
+        <p className="mt-2 text-sm text-neutral-400">
           Coloca una persona, producto o avatar dentro de cualquier escenario real.
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-
-        {/* PERSONA */}
-
-        <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-          <p className="text-xs text-neutral-300 mb-2">
-            Persona / modelo / producto
-          </p>
-
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handlePersonFile}
-            className="text-xs"
-          />
-
-          {personPreview && (
-            <img
-              src={personPreview}
-              className="mt-3 rounded-xl"
-              alt="preview"
-            />
-          )}
-        </div>
-
-        {/* FONDO */}
-
-        <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-          <p className="text-xs text-neutral-300 mb-2">
-            Escenario (opcional)
-          </p>
-
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleBackgroundFile}
-            className="text-xs"
-          />
-
-          {backgroundPreview && (
-            <img
-              src={backgroundPreview}
-              className="mt-3 rounded-xl"
-              alt="preview"
-            />
-          )}
-        </div>
-
-      </div>
-
-      {/* CHAT ISABELA */}
-
-      <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-
-        <p className="text-sm text-white mb-2">
-          Hola, soy Isabela.
-        </p>
-
-        <p className="text-xs text-neutral-400 mb-3">
-          Cuéntame cómo quieres montar tu imagen.
-        </p>
-
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Ej: pon a la modelo caminando en una tienda de ropa elegante..."
-          className="w-full rounded-xl bg-black/60 px-3 py-2 text-white text-xs"
-          rows={3}
+      <div className="grid gap-6 md:grid-cols-2">
+        <UploadCard
+          title="Persona / modelo / producto"
+          subtitle="Sube la imagen principal que quieres montar."
+          preview={personPreview}
+          onChange={handlePersonFile}
         />
 
+        <UploadCard
+          title="Escenario"
+          subtitle="Opcional. Sube un fondo real o deja vacío para que Isabela lo interprete."
+          preview={backgroundPreview}
+          onChange={handleBackgroundFile}
+        />
       </div>
 
-      {/* GENERAR */}
+      <div className="relative overflow-hidden rounded-3xl border border-cyan-400/25 bg-black/50 p-5 shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_0_24px_rgba(34,211,238,0.08),0_0_42px_rgba(217,70,239,0.06)]">
+        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(217,70,239,0.10),transparent_28%)]" />
+        <div className="relative z-10 mx-auto max-w-4xl">
+          <div className="mb-4 text-center">
+            <p className="text-xl font-semibold text-white">Hola, soy Isabela.</p>
+            <p className="mt-2 text-sm text-neutral-400">
+              Cuéntame cómo quieres montar tu imagen.
+            </p>
+          </div>
 
-      <div className="flex items-center justify-between">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Ej: monta a la modelo caminando dentro de una tienda elegante, con luz natural y un look realista..."
+            className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-4 text-sm text-white outline-none placeholder:text-neutral-500"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-black/40 p-5 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm text-neutral-400">Costo por generación</p>
+          <p className="text-2xl font-bold text-white">{UI_COST_JADES_DEFAULT} jades</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            Jades disponibles: {jadesShown}
+          </p>
+        </div>
 
         <button
           onClick={handleGenerate}
           disabled={status === "RUNNING"}
-          className="rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 px-6 text-white font-semibold disabled:opacity-50"
+          className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-8 py-4 text-base font-semibold text-white transition disabled:opacity-50"
         >
-          {status === "RUNNING" ? "Generando..." : "Generar montaje"}
+          {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
         </button>
-
-        <p className="text-xs text-neutral-400">
-          Jades disponibles: {jadesShown}
-        </p>
-
       </div>
 
-      {error && (
-        <p className="text-red-400 text-xs">
-          {error}
-        </p>
-      )}
+      {jobId ? (
+        <div className="rounded-2xl border border-white/10 bg-black/40 p-3 text-xs text-neutral-300">
+          Job: <span className="font-semibold text-white">{jobId}</span>
+        </div>
+      ) : null}
 
-      {/* RESULTADO */}
+      {error ? (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+          {error}
+        </div>
+      ) : null}
 
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+        <p className="text-lg font-semibold text-white">Resultado</p>
 
-        {resultUrl ? (
-          <>
-            <img
-              src={resultUrl}
-              className="rounded-xl"
-              alt="resultado"
-            />
-          </>
-        ) : (
-          <p className="text-neutral-400 text-xs">
-            Aquí aparecerá el resultado {status === "RUNNING" ? "(procesando...)" : ""}
+        {!resultUrl ? (
+          <p className="mt-3 text-sm text-neutral-400">
+            Aquí aparecerá el montaje {status === "RUNNING" ? "(procesando...)" : ""}
           </p>
+        ) : (
+          <img
+            src={resultUrl}
+            className="mt-4 w-full rounded-2xl border border-white/10"
+            alt="resultado"
+          />
         )}
-
       </div>
-
     </div>
   );
  }
