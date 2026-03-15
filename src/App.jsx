@@ -483,19 +483,7 @@ function VideoCollage() {
 }
 
 // ---------------------------------------------------------
-// CreatorPanel (RunPod) ✅ UNA SOLA VERSIÓN (CORREGIDO: plan/jades)
-// - No depende de useAuth().profile
-// - Lee profiles(plan, jade_balance) directo de Supabase
-// - Límite 5 SOLO si (plan free/none) Y jade_balance <= 0
-//
-// ✅ Optimización de prompt (OpenAI) estilo VIDEO:
-// - Botón "Optimizar con IA" + toggle "Usar prompt optimizado para generar"
-// - Muestra prompt/negative optimizados pequeños abajo
-// - Si está activo y está stale, se re-optimiza al generar
-//
-// ✅ NUEVO:
-// - Si vienes desde landing con DEMO_PROMPT_KEY, prefill del prompt y lo limpia.
-// - Selector de avatares READY para usar LoRA/trigger al generar
+// Imagenes de prompt
 // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
@@ -520,7 +508,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [profileJades, setProfileJades] = useState(0);
 
   // ---------------------------------------------------------
-  // Avatares LoRA
+  // Avatares LoRA (solo UI por ahora)
   // ---------------------------------------------------------
   const [avatars, setAvatars] = useState([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
@@ -671,15 +659,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       try {
         setAvatarsLoading(true);
 
-        const authHeaders = await getAuthHeadersGlobal();
         const r = await fetch(
           `/api/avatars-list?user_id=${encodeURIComponent(user.id)}`,
-          {
-            method: "GET",
-            headers: {
-              ...authHeaders,
-            },
-          }
+          { method: "GET" }
         );
 
         const j = await r.json().catch(() => null);
@@ -700,7 +682,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           if (prev && readyAvatars.some((a) => String(a.id) === String(prev))) {
             return prev;
           }
-          return readyAvatars[0]?.id || "";
+          return "";
         });
       } catch (e) {
         console.error("Error cargando avatares:", e);
@@ -837,10 +819,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           height: Number(height),
           steps: Number(steps),
 
-          avatar_id: selectedAvatar?.id || null,
-          avatar_name: selectedAvatar?.name || null,
-          avatar_trigger: selectedAvatar?.trigger || null,
-          avatar_lora_path: selectedAvatar?.lora_path || null,
+          // Dejamos el avatar solo en UI por ahora para no romper el backend
+          _ui_avatar_id: selectedAvatar?.id || null,
+          _ui_avatar_name: selectedAvatar?.name || null,
+          _ui_avatar_trigger: selectedAvatar?.trigger || null,
 
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
@@ -881,30 +863,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
         finished = true;
 
-        const output = statusData?.output || {};
-        const rawDataUrl =
-          output?.image_data_url ||
-          statusData?.image_data_url ||
-          output?.data_url ||
-          null;
-
-        const rawB64 =
-          output?.image_b64 ||
-          statusData?.image_b64 ||
-          output?.b64 ||
-          output?.base64 ||
-          null;
-
-        let finalB64 = null;
-
-        if (rawB64 && typeof rawB64 === "string") {
-          finalB64 = rawB64;
-        } else if (rawDataUrl && typeof rawDataUrl === "string" && rawDataUrl.includes(",")) {
-          finalB64 = rawDataUrl.split(",")[1];
-        }
-
-        if (st === "COMPLETED" && finalB64) {
-          setImageB64(finalB64);
+        if (st === "COMPLETED" && statusData?.output?.image_b64) {
+          const b64 = statusData.output.image_b64;
+          setImageB64(b64);
           setStatusText("Render completado.");
 
           if (isDemo) {
@@ -914,7 +875,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           } else if (userLoggedIn) {
             if (!hasPaidAccess) setDailyCount((prev) => prev + 1);
 
-            const dataUrl = `data:image/png;base64,${finalB64}`;
+            const dataUrl = `data:image/png;base64,${b64}`;
             saveGenerationInSupabase({
               userId: user.id,
               imageUrl: dataUrl,
@@ -930,7 +891,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           }
         } else if (st === "FAILED") {
           throw new Error(
-            output?.error ||
+            statusData?.output?.error ||
               statusData?.error ||
               "El job terminó en FAILED."
           );
@@ -1009,7 +970,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-sm font-medium text-white">Avatar LoRA</div>
               <div className="mt-1 text-[11px] text-neutral-400">
-                Elige un avatar READY para usar su trigger y LoRA al generar.
+                Elige un avatar READY para usarlo después al generar.
               </div>
 
               <select
@@ -1118,7 +1079,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               </div>
             ) : (
               <div className="mt-2 text-[10px] text-neutral-500">
-                Presiona “Optimizar con IA” para generar una versión más descriptiva (en inglés) manteniendo tu idea.
+                Presiona “Optimizar con IA” para generar una versión más descriptiva manteniendo tu idea.
               </div>
             )}
 
@@ -1231,7 +1192,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     </div>
   );
 }
- 
 
 // ---------------------------------------------------------
 // Dashboard: pestaña "Suscribirse" (antes estaba en el home)
