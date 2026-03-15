@@ -504,8 +504,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const [prompt, setPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
   const [negative, setNegative] = useState("blurry, low quality, deformed, watermark, text");
-  const [width, setWidth] = useState(512);
-  const [height, setHeight] = useState(512);
+  const [width, setWidth] = useState(1080);
+  const [height, setHeight] = useState(1920);
   const [steps, setSteps] = useState(22);
 
   const [status, setStatus] = useState("IDLE");
@@ -516,18 +516,21 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [dailyCount, setDailyCount] = useState(0);
   const [demoCount, setDemoCount] = useState(0);
 
-  // ✅ Perfil (profiles)
   const [profilePlan, setProfilePlan] = useState("free");
   const [profileJades, setProfileJades] = useState(0);
 
-  // ✅ NUEVO: avatares READY
+  // ---------------------------------------------------------
+  // Avatares LoRA
+  // ---------------------------------------------------------
   const [avatars, setAvatars] = useState([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
-  const [selectedAvatar, setSelectedAvatar] = useState(null);
+
+  const selectedAvatar =
+    avatars.find((a) => String(a.id) === String(selectedAvatarId)) || null;
 
   // ---------------------------------------------------------
-  // ✅ Prefill prompt desde landing demo (solo cuando estás logueado)
+  // Prefill prompt desde landing demo
   // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) return;
@@ -542,24 +545,22 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   }, [userLoggedIn]);
 
   // ---------------------------------------------------------
-  // ✅ Optimizador de prompt (UI estilo VIDEO)
+  // Optimizador de prompt
   // ---------------------------------------------------------
-  const [useOptimizer, setUseOptimizer] = useState(false); // toggle "usar optimizado"
-  const [optStatus, setOptStatus] = useState("IDLE"); // IDLE | OPTIMIZING | READY | ERROR
+  const [useOptimizer, setUseOptimizer] = useState(false);
+  const [optStatus, setOptStatus] = useState("IDLE");
   const [optError, setOptError] = useState("");
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [optSource, setOptSource] = useState({ prompt: "", negative: "" }); // para detectar stale
+  const [optSource, setOptSource] = useState({ prompt: "", negative: "" });
 
-  // Si el usuario cambia prompt/negative, marcamos stale
   useEffect(() => {
     setOptError("");
-    // NO borramos optimizedPrompt/Negative para que el usuario lo vea,
-    // pero sí queda stale y se re-optimiza si genera.
   }, [prompt, negative]);
 
   const isOptStale =
-    optStatus === "READY" && (optSource.prompt !== prompt || optSource.negative !== negative);
+    optStatus === "READY" &&
+    (optSource.prompt !== prompt || optSource.negative !== negative);
 
   async function runOptimizeNow() {
     setOptError("");
@@ -587,8 +588,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setOptimizedNegative(on);
       setOptSource({ prompt, negative });
       setOptStatus("READY");
-
-      // ✅ igual que video: si optimizas, activa el toggle automáticamente
       setUseOptimizer(true);
 
       return { ok: true, optimizedPrompt: op, optimizedNegative: on };
@@ -606,11 +605,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       finalNegative: canUseOpt ? (optimizedNegative || "") : negative,
       usingOptimized: !!canUseOpt,
     };
-  }
-
   // ---------------------------------------------------------
-  // Cargar profile desde Supabase (plan + jade_balance)
-  // Usa tu helper getAuthHeadersGlobal() y REST /profiles
+  // Cargar profile desde Supabase
   // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) {
@@ -628,7 +624,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           return;
         }
 
-        const authHeaders = await getAuthHeadersGlobal(); // Authorization Bearer user JWT
+        const authHeaders = await getAuthHeadersGlobal();
         const url =
           `${SUPABASE_URL.replace(/\/$/, "")}` +
           `/rest/v1/profiles?id=eq.${user.id}&select=plan,jade_balance`;
@@ -654,20 +650,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user?.id]);
 
-  // ✅ Regla correcta:
-  // - Si plan !== free/none  OR  jade_balance > 0  => NO límite 5
-  // - Si plan === free/none y jade_balance <= 0   => sí límite 5
   const isFreeUser = !profilePlan || profilePlan === "free" || profilePlan === "none";
   const hasPaidAccess = !isFreeUser || profileJades > 0;
 
   // ---------------------------------------------------------
-  // ✅ NUEVO: cargar avatares READY
+  // Cargar avatares desde /api/avatars-list
   // ---------------------------------------------------------
   useEffect(() => {
-    if (!userLoggedIn || !user?.id) {
+    if (!userLoggedIn || !user?.id || isDemo) {
       setAvatars([]);
       setSelectedAvatarId("");
-      setSelectedAvatar(null);
       return;
     }
 
@@ -676,56 +668,48 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         setAvatarsLoading(true);
 
         const authHeaders = await getAuthHeadersGlobal();
-
-        const r = await fetch("/api/avatars-list", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...authHeaders,
-          },
-          body: JSON.stringify({
-            user_id: user.id,
-            only_ready: true,
-          }),
-        });
+        const r = await fetch(
+          `/api/avatars-list?user_id=${encodeURIComponent(user.id)}`,
+          {
+            method: "GET",
+            headers: {
+              ...authHeaders,
+            },
+          }
+        );
 
         const j = await r.json().catch(() => null);
+
         if (!r.ok || !j?.ok) {
           throw new Error(j?.error || "No se pudieron cargar los avatares.");
         }
 
-        const rows = Array.isArray(j.avatars) ? j.avatars : [];
-        setAvatars(rows);
+        const readyAvatars = (Array.isArray(j.avatars) ? j.avatars : []).filter(
+          (a) =>
+            String(a?.status || "").toUpperCase() === "READY" &&
+            String(a?.lora_path || "").trim()
+        );
 
-        if (selectedAvatarId) {
-          const found = rows.find((a) => a.id === selectedAvatarId);
-          if (!found) {
-            setSelectedAvatarId("");
-            setSelectedAvatar(null);
-          } else {
-            setSelectedAvatar(found);
+        setAvatars(readyAvatars);
+
+        setSelectedAvatarId((prev) => {
+          if (prev && readyAvatars.some((a) => String(a.id) === String(prev))) {
+            return prev;
           }
-        }
+          return readyAvatars[0]?.id || "";
+        });
       } catch (e) {
         console.error("Error cargando avatares:", e);
         setAvatars([]);
+        setSelectedAvatarId("");
       } finally {
         setAvatarsLoading(false);
       }
     })();
-  }, [userLoggedIn, user?.id]);
-
-  useEffect(() => {
-    if (!selectedAvatarId) {
-      setSelectedAvatar(null);
-      return;
-    }
-    const found = avatars.find((a) => a.id === selectedAvatarId) || null;
-    setSelectedAvatar(found);
-  }, [selectedAvatarId, avatars]);
+  }, [userLoggedIn, user?.id, isDemo]);
 
   // ---------------------------------------------------------
-  // Contador diario (solo si aplica límite)
+  // Contador diario
   // ---------------------------------------------------------
   useEffect(() => {
     if (!userLoggedIn) {
@@ -803,7 +787,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     setStatusText("Preparando job...");
 
     try {
-      // ✅ Si el optimizador está activo: aseguramos tener prompts optimizados (y no stale)
       let finalPrompt = prompt;
       let finalNegative = negative;
 
@@ -849,13 +832,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           height: Number(height),
           steps: Number(steps),
 
-          // ✅ NUEVO: avatar seleccionado
+          // avatar / lora
           avatar_id: selectedAvatar?.id || null,
           avatar_name: selectedAvatar?.name || null,
           avatar_trigger: selectedAvatar?.trigger || null,
           avatar_lora_path: selectedAvatar?.lora_path || null,
 
-          // opcional: para debug (no rompe backend)
+          // debug UI
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
           _ui_used_optimizer: !!useOptimizer,
@@ -916,16 +899,9 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               width: Number(width),
               height: Number(height),
               steps: Number(steps),
-
               optimizedPrompt: useOptimizer ? (optimizedPrompt || null) : null,
               optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
               usedOptimizer: !!useOptimizer,
-
-              // ✅ NUEVO: guardar trazabilidad del avatar usado
-              avatarId: selectedAvatar?.id || null,
-              avatarName: selectedAvatar?.name || null,
-              avatarTrigger: selectedAvatar?.trigger || null,
-              avatarLoraPath: selectedAvatar?.lora_path || null,
             }).catch((e) => console.error("Error guardando en Supabase:", e));
           }
         } else {
@@ -998,62 +974,34 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         )}
 
         <div className="mt-4 space-y-4 text-sm">
-          {/* ✅ NUEVO: selector de avatar */}
-          {userLoggedIn && (
+          {!isDemo && (
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-white">Avatar LoRA</div>
-                  <div className="text-[11px] text-neutral-400">
-                    Elige un avatar READY para usar su trigger y LoRA al generar.
-                  </div>
-                </div>
-
-                {avatarsLoading && (
-                  <div className="text-[11px] text-neutral-400">Cargando...</div>
-                )}
+              <div className="text-sm font-medium text-white">Avatar LoRA</div>
+              <div className="mt-1 text-[11px] text-neutral-400">
+                Elige un avatar READY para usar su trigger y LoRA al generar.
               </div>
 
-              <div className="mt-3">
-                <select
-                  value={selectedAvatarId}
-                  onChange={(e) => setSelectedAvatarId(e.target.value)}
-                  className="w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
-                >
-                  <option value="">Sin avatar</option>
-                  {avatars.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} {a.trigger ? `· ${a.trigger}` : ""}
-                    </option>
-                  ))}
-                </select>
+              <select
+                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-3 text-sm text-white outline-none ring-1 ring-cyan-400/60 focus:ring-2 focus:ring-cyan-400"
+                value={selectedAvatarId}
+                onChange={(e) => setSelectedAvatarId(e.target.value)}
+                disabled={avatarsLoading}
+              >
+                <option value="">Sin avatar</option>
+                {avatars.map((avatar) => (
+                  <option key={avatar.id} value={avatar.id}>
+                    {avatar.name} · {avatar.trigger}
+                  </option>
+                ))}
+              </select>
+
+              <div className="mt-2 text-[11px] text-neutral-500">
+                {avatarsLoading
+                  ? "Cargando avatares..."
+                  : avatars.length > 0
+                  ? `${avatars.length} avatar(es) READY encontrados`
+                  : "No hay avatares READY con LoRA todavía"}
               </div>
-
-              {selectedAvatar && (
-                <div className="mt-3 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                  {selectedAvatar.thumb_url ? (
-                    <img
-                      src={selectedAvatar.thumb_url}
-                      alt={selectedAvatar.name}
-                      className="h-14 w-14 rounded-xl object-cover"
-                    />
-                  ) : (
-                    <div className="h-14 w-14 rounded-xl bg-white/10" />
-                  )}
-
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-white">
-                      {selectedAvatar.name}
-                    </div>
-                    <div className="truncate text-[11px] text-neutral-400">
-                      Trigger: {selectedAvatar.trigger || "(sin trigger)"}
-                    </div>
-                    <div className="truncate text-[11px] text-neutral-500">
-                      LoRA: {selectedAvatar.lora_path || "(sin lora_path)"}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1075,7 +1023,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             />
           </div>
 
-          {/* ✅ Optimizer UI (IGUAL AL DE VIDEO) */}
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-neutral-300">
@@ -1145,7 +1092,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             )}
 
             {optError && (
-              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
+              <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>
             )}
           </div>
 
@@ -1166,7 +1113,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <input
                 type="number"
                 min={256}
-                max={1024}
+                max={2048}
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={width}
@@ -1178,7 +1125,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <input
                 type="number"
                 min={256}
-                max={1024}
+                max={2048}
                 step={64}
                 className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={height}
@@ -1192,15 +1139,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             <br />
             <span className="text-[11px] text-neutral-400">
               {isDemo ? (
-                <>
-                  Uso: {demoCount} / {DEMO_LIMIT}
-                </>
+                <>Uso: {demoCount} / {DEMO_LIMIT}</>
               ) : hasPaidAccess ? (
                 <>Uso: limitado (por plan o jades)</>
               ) : (
-                <>
-                  Uso: {dailyCount} / {DAILY_LIMIT}
-                </>
+                <>Uso: {dailyCount} / {DAILY_LIMIT}</>
               )}
               <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
               {useOptimizer && <span className="ml-2 opacity-70">(IA: ON)</span>}
@@ -1257,6 +1200,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
     </div>
   );
 }
+ 
 
 // ---------------------------------------------------------
 // Dashboard: pestaña "Suscribirse" (antes estaba en el home)
