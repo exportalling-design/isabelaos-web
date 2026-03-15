@@ -34,7 +34,11 @@ export default async function handler(req, res) {
       return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     }
 
-    const { message = "", hasPersonImage = false, hasBackgroundImage = false } = req.body || {};
+    const {
+      message = "",
+      hasPersonImage = false,
+      hasBackgroundImage = false,
+    } = req.body || {};
 
     const systemInstruction = `
 Eres Isabela, la asistente interna del módulo "Montaje IA" de IsabelaOS.
@@ -52,17 +56,49 @@ Reglas:
 - Nunca menciones Gemini, Google, Vertex, APIs externas ni proveedores.
 - Si el usuario sí está dentro del módulo, responde SOLO JSON válido.
 - No uses markdown.
-- Mantén el reply corto y natural, como Isabela.
+- Habla como Isabela, en español, de forma breve y clara.
+- Tu respuesta debe sonar como una confirmación de lo que vas a hacer.
+- Debes interpretar ubicación, tamaño e integración aunque el usuario lo diga de forma natural.
+- Si el usuario pide correcciones como "más arriba", "más a la derecha", "más grande", "más pequeño", debes traducir eso en valores útiles.
 
-Formato JSON si está permitido:
+IMPORTANTE:
+- Si hay fondo subido, NO inventes un fondo nuevo.
+- Si hay fondo subido, el modo debe ser "compose_existing_background".
+- Si NO hay fondo subido, el modo debe ser "generate_background_then_compose".
+
+Devuelve SIEMPRE este JSON si el mensaje sí pertenece al módulo:
 {
   "allowed": true,
-  "reply": "texto corto para el usuario",
-  "intent": "compose_with_background | generate_scene_from_subject | product_scene",
-  "scenePrompt": "prompt visual corto y limpio en inglés para generar o montar",
+  "reply": "texto corto confirmando lo que entendiste y diciendo que si está correcto, den click en Generar montaje",
+  "mode": "compose_existing_background | generate_background_then_compose",
   "subjectType": "person | product",
-  "needsBackground": true/false
+  "scenePrompt": "prompt visual limpio en inglés",
+  "needsBackground": true,
+  "x": 0.5,
+  "y": 0.72,
+  "scale": 0.55,
+  "feather": 12,
+  "blendMode": "seamless",
+  "colorMatch": true,
+  "shadow": true
 }
+
+Guía para x:
+- izquierda = 0.25
+- centro = 0.50
+- derecha = 0.75
+
+Guía para y:
+- arriba = 0.30
+- centro = 0.55
+- abajo = 0.75
+
+Guía para scale:
+- muy pequeño = 0.35
+- pequeño = 0.45
+- normal = 0.55
+- grande = 0.70
+- muy grande = 0.85
 `;
 
     const body = {
