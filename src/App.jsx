@@ -9,7 +9,7 @@ import VoiceToVideoPanel from "./components/VoiceToVideoPanel";
 import { supabase } from "./lib/supabaseClient";
 import LibraryView from "./components/LibraryView";
 import AvatarStudioPanel from "./components/AvatarStudioPanel";
-import HeadshotProPanel from "./components/HeadshotPhotoPanel";
+import MontajeIAPanel from "./components/MontajeIAPanel";
 
 import {
   saveGenerationInSupabase,
@@ -1514,7 +1514,7 @@ function DashboardView() {
               ["img2video", "Imagen → Video"],
               ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca"],
-              ["headshot", "📸 Headshot Pro"],
+              ["montaje", "🧩 Montaje IA"],
               ["subscribe", "Suscribirse"],
             ].map(([key, label]) => (
               <button
@@ -1542,7 +1542,7 @@ function DashboardView() {
               ["img2video", "Transformación Imagen → Video"],
               ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
               ["library", "Biblioteca de producción"],
-              ["headshot", "📸 Headshot Pro (Premium)"],
+              ["montaje", "🧩 Montaje IA"],
               ["subscribe", "Suscribirse"],
             ].map(([key, label]) => (
               <button
@@ -1572,7 +1572,7 @@ function DashboardView() {
             {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
             {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "headshot" && <HeadshotProPanel userStatus={userStatus} />}
+            {appViewMode === "montaje" && <<MontajeIAPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
           </div>
         </section>
