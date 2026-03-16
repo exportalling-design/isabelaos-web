@@ -10,7 +10,7 @@ import { supabase } from "./lib/supabaseClient";
 import LibraryView from "./components/LibraryView";
 import AvatarStudioPanel from "./components/AvatarStudioPanel";
 import MontajeIAPanel from "./components/MontajeIAPanel";
-import generatepanel from "./components/generatepanel";
+import GeneratePanel from "./components/GeneratePanel";
 
 import {
   saveGenerationInSupabase,
@@ -703,7 +703,9 @@ function DashboardView() {
               <span className="mx-1 h-3 w-px bg-white/10" />
               <span className="text-[11px] text-neutral-300">
                 Jades:{" "}
-                <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+                <span className="font-semibold text-white">
+                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
+                </span>
               </span>
             </div>
 
@@ -728,16 +730,18 @@ function DashboardView() {
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
             <div className="flex items-center justify-between gap-2">
               <span className="text-neutral-400">{userPlanLabel}</span>
-              <span className="font-semibold text-white">Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+              <span className="font-semibold text-white">
+                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
+              </span>
             </div>
           </div>
 
-          <p className="text-[11px] font-semibold text-neutral-300 mb-2">Navegación</p>
+          <p className="mb-2 text-[11px] font-semibold text-neutral-300">Navegación</p>
           <div className="flex flex-wrap gap-2 text-xs">
             {[
               ["generator", "Motor de imagen"],
               ["img2video", "Imagen → Video"],
-              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
+              ["avatars", "🧬 Avatares (LoRA)"],
               ["library", "Biblioteca"],
               ["montaje", "🧩 Montaje IA"],
               ["subscribe", "Suscribirse"],
@@ -760,12 +764,12 @@ function DashboardView() {
 
         <section className="flex gap-6">
           <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
-            <p className="text-[11px] font-semibold text-neutral-300 mb-3">Navegación</p>
+            <p className="mb-3 text-[11px] font-semibold text-neutral-300">Navegación</p>
 
             {[
               ["generator", "Motor de imagen"],
               ["img2video", "Transformación Imagen → Video"],
-              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
+              ["avatars", "🧬 Avatares (LoRA)"],
               ["library", "Biblioteca de producción"],
               ["montaje", "🧩 Montaje IA"],
               ["subscribe", "Suscribirse"],
@@ -793,9 +797,11 @@ function DashboardView() {
               </p>
             </div>
 
-            {appViewMode === "generator" && <generatepanel userStatus={userStatus} />}
-            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
-            {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
+            {appViewMode === "generator" && <GeneratePanel />}
+            {appViewMode === "img2video" && (
+              <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
+            )}
+            {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "montaje" && <MontajeIAPanel userStatus={userStatus} />}
             {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
