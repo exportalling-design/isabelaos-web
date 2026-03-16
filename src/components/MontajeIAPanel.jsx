@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 export default function MontajeIAPanel({ userStatus }) {
   const UI_COST_JADES_DEFAULT = 8;
 
-  const [status, setStatus] = useState("IDLE"); // IDLE | RUNNING | DONE | ERROR
+  const [status, setStatus] = useState("IDLE");
   const [error, setError] = useState("");
   const [jobId, setJobId] = useState("");
 
@@ -18,6 +18,7 @@ export default function MontajeIAPanel({ userStatus }) {
   const [jadesLocal, setJadesLocal] = useState(null);
 
   const [prompt, setPrompt] = useState("");
+  const [chatHistory, setChatHistory] = useState([]);
 
   const [isabelaReply, setIsabelaReply] = useState("");
   const [isabelaPlan, setIsabelaPlan] = useState(null);
@@ -35,18 +36,12 @@ export default function MontajeIAPanel({ userStatus }) {
     setStatus("IDLE");
   }
 
-  function resetInterpretation() {
-    setIsabelaReply("");
-    setIsabelaPlan(null);
-  }
-
   async function handlePersonFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     setPersonFile(f);
     setPersonPreview(URL.createObjectURL(f));
     resetRunUI();
-    resetInterpretation();
   }
 
   async function handleBackgroundFile(e) {
@@ -55,7 +50,6 @@ export default function MontajeIAPanel({ userStatus }) {
     setBackgroundFile(f);
     setBackgroundPreview(URL.createObjectURL(f));
     resetRunUI();
-    resetInterpretation();
   }
 
   async function fileToBase64(file) {
@@ -65,50 +59,12 @@ export default function MontajeIAPanel({ userStatus }) {
     );
   }
 
-  async function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
-
-  async function pollJob(jobIdToPoll, maxSeconds = 140) {
-    const started = Date.now();
-
-    while (true) {
-      if ((Date.now() - started) / 1000 > maxSeconds) {
-        throw new Error("Tiempo de espera agotado esperando resultado del montaje.");
-      }
-
-      const r = await fetch("/api/montaje-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: jobIdToPoll }),
-      });
-
-      const data = await r.json().catch(() => null);
-
-      if (!r.ok || !data) {
-        throw new Error("Error consultando estado del montaje.");
-      }
-
-      if (data.done && data.ok && data.image_data_url) {
-        return data.image_data_url;
-      }
-
-      if (data.done && !data.ok) {
-        throw new Error(data.error || "No se pudo completar el montaje.");
-      }
-
-      await sleep(1500);
-    }
-  }
-
   async function handleAskIsabela() {
     try {
       if (!prompt.trim()) return;
 
       setIsabelaLoading(true);
       setError("");
-      setIsabelaReply("");
-      setIsabelaPlan(null);
 
       const session = await supabase.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -117,6 +73,9 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error("MISSING_AUTH_TOKEN");
       }
 
+      const userMessage = prompt.trim();
+      const nextHistory = [...chatHistory, { role: "user", text: userMessage }];
+
       const resp = await fetch("/api/isabela-montaje-chat", {
         method: "POST",
         headers: {
@@ -124,31 +83,34 @@ export default function MontajeIAPanel({ userStatus }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          message: prompt,
+          message: userMessage,
+          chatHistory,
           hasPersonImage: !!personFile,
           hasBackgroundImage: !!backgroundFile,
+          personImageName: personFile?.name || null,
+          backgroundImageName: backgroundFile?.name || null,
         }),
       });
 
       const json = await resp.json().catch(() => null);
 
       if (!resp.ok || !json?.ok) {
-        throw new Error(json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud.");
-      }
-
-      if (!json.allowed) {
-        setIsabelaReply(
-          json.reply ||
-            "Lo siento, solo puedo ayudarte con funciones relacionadas con este módulo de montaje de imágenes."
+        throw new Error(
+          json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud."
         );
-        setIsabelaPlan(null);
-        return;
       }
 
-      setIsabelaReply(
-        json.reply || "Entendido. Si está correcto, da click en Generar montaje."
-      );
+      const assistantReply =
+        json.reply || "Entendido. Si está correcto, da click en Generar montaje.";
+
+      setChatHistory([
+        ...nextHistory,
+        { role: "assistant", text: assistantReply },
+      ]);
+
+      setIsabelaReply(assistantReply);
       setIsabelaPlan(json);
+      setPrompt("");
     } catch (err) {
       console.error(err);
       setError(
@@ -161,12 +123,12 @@ export default function MontajeIAPanel({ userStatus }) {
 
   async function handleGenerate() {
     if (!personFile) {
-      setError("Debes subir una imagen de persona, modelo o producto.");
+      setError("Debes subir una imagen principal.");
       return;
     }
 
-    if (!prompt.trim()) {
-      setError("Debes escribir una instrucción para Isabela.");
+    if (!isabelaPlan?.final_prompt && !prompt.trim()) {
+      setError("Primero habla con Isabela o escribe una instrucción.");
       return;
     }
 
@@ -186,6 +148,11 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error("MISSING_AUTH_TOKEN");
       }
 
+      const finalPrompt =
+        isabelaPlan?.final_prompt ||
+        isabelaPlan?.raw?.final_prompt ||
+        prompt.trim();
+
       const resp = await fetch("/api/generate-montaje", {
         method: "POST",
         headers: {
@@ -195,7 +162,7 @@ export default function MontajeIAPanel({ userStatus }) {
         body: JSON.stringify({
           person_image: person_b64,
           background_image: bg_b64,
-          prompt,
+          prompt: finalPrompt,
           isabelaPlan,
           ref: `montajeia-${Date.now()}`,
         }),
@@ -207,7 +174,19 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error(json?.error || json?.detail || "ERROR_GENERATION");
       }
 
-      if (json?.jobId) setJobId(json.jobId);
+      // Aquí todavía no estás ejecutando el compositor final.
+      // Por ahora mostramos el plan recibido.
+      setResultUrl("");
+      setStatus("DONE");
+
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text:
+            `Ya preparé el montaje.\nModo: ${json?.mode || "unknown"}\nPrompt final: ${json?.finalPrompt || ""}`,
+        },
+      ]);
 
       if (json?.billed?.amount) {
         setJadesLocal((prev) => {
@@ -220,20 +199,11 @@ export default function MontajeIAPanel({ userStatus }) {
           return Math.max(0, base - json.billed.amount);
         });
       }
-
-      if (json?.image_data_url) {
-        setResultUrl(json.image_data_url);
-        setStatus("DONE");
-        return;
-      }
-
-      const finalImage = await pollJob(json.jobId, 160);
-      setResultUrl(finalImage);
-      setStatus("DONE");
     } catch (err) {
       console.error(err);
       setError(
-        err?.message || "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
+        err?.message ||
+          "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
       );
       setStatus("ERROR");
     }
@@ -317,13 +287,9 @@ export default function MontajeIAPanel({ userStatus }) {
 
           <textarea
             value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              setIsabelaPlan(null);
-              setIsabelaReply("");
-            }}
+            onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handlePromptKeyDown}
-            placeholder="Ej: ponla más a la derecha, un poco más pequeña y con sombra suave..."
+            placeholder="Ej: colócala dentro del escenario que subí, estilo vikingo, un poco más a la derecha..."
             className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-4 text-sm text-white outline-none placeholder:text-neutral-500"
           />
 
@@ -338,17 +304,30 @@ export default function MontajeIAPanel({ userStatus }) {
             </div>
           ) : null}
 
-          {isabelaReply ? (
-            <div className="mt-4 rounded-2xl border border-fuchsia-500/20 bg-black/40 p-4 text-sm text-neutral-200">
-              <p className="mb-2 font-semibold text-white">Isabela</p>
-              <p>{isabelaReply}</p>
+          {chatHistory.length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {chatHistory.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`rounded-2xl border p-4 text-sm ${
+                    msg.role === "assistant"
+                      ? "border-fuchsia-500/20 bg-black/40 text-neutral-200"
+                      : "border-cyan-500/20 bg-black/30 text-white"
+                  }`}
+                >
+                  <p className="mb-2 font-semibold text-white">
+                    {msg.role === "assistant" ? "Isabela" : "Tú"}
+                  </p>
+                  <p className="whitespace-pre-wrap">{msg.text}</p>
+                </div>
+              ))}
             </div>
           ) : null}
 
           <div className="mt-4 flex justify-end">
             <button
               onClick={handleGenerate}
-              disabled={status === "RUNNING" || !prompt.trim() || !personFile}
+              disabled={status === "RUNNING" || !personFile}
               className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
             >
               {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
