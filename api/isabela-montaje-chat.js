@@ -1,6 +1,10 @@
 // api/isabela-montaje-chat.js
-// Chat del montaje para IsabelaOS Studio
-// Cambiado a Vertex global + gemini-2.0-flash-001
+// Chat de montaje de IsabelaOS Studio
+// Adaptado a:
+// - GOOGLE_SERVICE_ACCOUNT_JSON
+// - GOOGLE_PROJECT_ID
+// - GOOGLE_LOCATION
+// - VERTEX_GEMINI_MODEL (opcional)
 
 import {
   vertexFetch,
@@ -39,19 +43,6 @@ function normalizeHistory(chatHistory) {
     .filter(Boolean);
 }
 
-function buildContents({ message, chatHistory }) {
-  const history = normalizeHistory(chatHistory);
-
-  if (typeof message === "string" && message.trim()) {
-    history.push({
-      role: "user",
-      parts: [{ text: message.trim() }],
-    });
-  }
-
-  return history;
-}
-
 function getUserMessage(body) {
   return (
     body?.message ||
@@ -62,7 +53,20 @@ function getUserMessage(body) {
   );
 }
 
-export async function handler(req, res) {
+function buildContents({ message, chatHistory }) {
+  const history = normalizeHistory(chatHistory);
+
+  if (message?.trim()) {
+    history.push({
+      role: "user",
+      parts: [{ text: message.trim() }],
+    });
+  }
+
+  return history;
+}
+
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,
@@ -76,10 +80,10 @@ export async function handler(req, res) {
         ? JSON.parse(req.body || "{}")
         : req.body || {};
 
-    const message = getUserMessage(body);
+    const message = String(getUserMessage(body) || "").trim();
     const chatHistory = body?.chatHistory || body?.history || [];
 
-    if (!message || !String(message).trim()) {
+    if (!message) {
       return res.status(400).json({
         ok: false,
         error: "Falta el mensaje del usuario.",
@@ -87,7 +91,7 @@ export async function handler(req, res) {
     }
 
     const contents = buildContents({
-      message: String(message),
+      message,
       chatHistory,
     });
 
@@ -96,11 +100,12 @@ export async function handler(req, res) {
         {
           text: [
             "Eres Isabela, asistente de montaje de IsabelaOS Studio.",
-            "Tu tarea es conversar con el usuario en español y confirmar claramente lo que entendiste para crear un montaje.",
-            "Debes responder breve, útil y concreta.",
-            "Si faltan detalles, pide solo lo mínimo necesario.",
-            "Cuando el usuario solo salude, responde con un saludo corto y pregunta qué montaje desea.",
-            "No inventes archivos, imágenes ni resultados ya generados.",
+            "Responde siempre en español.",
+            "Tu trabajo es entender la intención del usuario para crear un montaje visual.",
+            "Responde breve, clara y útil.",
+            "Si faltan datos, pide solo los mínimos necesarios.",
+            "Si el usuario solo saluda, responde con saludo corto y pregunta qué montaje desea.",
+            "No inventes imágenes subidas ni resultados existentes.",
             "No uses markdown complejo.",
           ].join("\n"),
         },
@@ -112,8 +117,8 @@ export async function handler(req, res) {
       systemInstruction,
       generationConfig: {
         temperature: 0.4,
-        maxOutputTokens: 350,
         topP: 0.9,
+        maxOutputTokens: 300,
       },
     });
 
@@ -129,7 +134,6 @@ export async function handler(req, res) {
       model: VERTEX_GEMINI_MODEL,
       location: VERTEX_LOCATION,
       projectId: VERTEX_PROJECT_ID,
-      raw: data,
     });
   } catch (error) {
     console.error("ERROR /api/isabela-montaje-chat:", error);
@@ -140,8 +144,8 @@ export async function handler(req, res) {
       details: error?.details || null,
       model: VERTEX_GEMINI_MODEL,
       location: VERTEX_LOCATION,
+      projectId: VERTEX_PROJECT_ID,
+      vertexUrl: error?.vertexUrl || null,
     });
   }
 }
-
-export default handler;
