@@ -14,9 +14,8 @@ const SERVICE_ACCOUNT = safeJsonParse(
   {}
 );
 
-export const VERTEX_PROJECT_ID =
+export const GOOGLE_PROJECT_ID =
   process.env.GOOGLE_PROJECT_ID ||
-  process.env.VERTEX_PROJECT_ID ||
   SERVICE_ACCOUNT.project_id ||
   "";
 
@@ -83,7 +82,7 @@ function createJwt() {
 async function getAccessToken() {
   const now = Date.now();
 
-  if (tokenCache.accessToken && now < tokenCache.expiresAt - 60000) {
+  if (tokenCache.accessToken && now < tokenCache.expiresAt - 60_000) {
     return tokenCache.accessToken;
   }
 
@@ -111,7 +110,7 @@ async function getAccessToken() {
   tokenCache.accessToken = data.access_token;
   tokenCache.expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
 
-  return tokenCache.access_token || data.access_token;
+  return data.access_token;
 }
 
 function buildVertexUrl({ projectId, location, model }) {
@@ -138,7 +137,7 @@ export function extractTextFromVertexResponse(data) {
 export async function vertexFetch({
   model,
   location,
-  projectId = VERTEX_PROJECT_ID,
+  projectId = GOOGLE_PROJECT_ID,
   contents,
   systemInstruction,
   generationConfig,
@@ -148,11 +147,20 @@ export async function vertexFetch({
     throw new Error("Falta GOOGLE_PROJECT_ID.");
   }
 
+  if (!model) {
+    throw new Error("Falta model en vertexFetch().");
+  }
+
+  if (!location) {
+    throw new Error("Falta location en vertexFetch().");
+  }
+
   const accessToken = await getAccessToken();
   const url = buildVertexUrl({ projectId, location, model });
 
-  console.log("[VERTEX] model:", model);
+  console.log("[VERTEX] projectId:", projectId);
   console.log("[VERTEX] location:", location);
+  console.log("[VERTEX] model:", model);
   console.log("[VERTEX] url:", url);
 
   const body = {
