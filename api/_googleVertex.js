@@ -1,9 +1,15 @@
 // api/_googleVertex.js
-// Helper de Vertex AI para Vercel usando:
+// Vertex helper para Vercel usando tus variables actuales:
 // - GOOGLE_SERVICE_ACCOUNT_JSON
 // - GOOGLE_PROJECT_ID
-// - GOOGLE_LOCATION
-// - VERTEX_GEMINI_MODEL (opcional)
+//
+// Para el chat de montaje forzamos:
+// - location = global
+// - model = gemini-2.5-flash
+//
+// Motivo:
+// - global tiene mayor disponibilidad
+// - gemini-2.5-flash está documentado actualmente como modelo vigente
 
 import crypto from "crypto";
 
@@ -26,16 +32,11 @@ export const VERTEX_PROJECT_ID =
   SERVICE_ACCOUNT.project_id ||
   "";
 
-export const VERTEX_LOCATION =
-  process.env.GOOGLE_LOCATION ||
-  process.env.VERTEX_LOCATION ||
-  "global";
+export const VERTEX_LOCATION = "global";
 
-// Puedes cambiar este default si quieres luego.
-// Por ahora lo dejamos estable.
 export const VERTEX_GEMINI_MODEL =
   process.env.VERTEX_GEMINI_MODEL ||
-  "gemini-2.0-flash-001";
+  "gemini-2.5-flash";
 
 const GOOGLE_CLIENT_EMAIL =
   SERVICE_ACCOUNT.client_email ||
