@@ -1,8 +1,9 @@
 // api/generate.js  (NODEJS)
 // Envía job a RunPod Serverless (FLUX) y regresa jobId
 // ✅ Cobra 1 jade usando supabaseAdmin.rpc("spend_jades")
-// ✅ NUEVO: acepta avatar seleccionado (id / trigger / lora_path)
-// ✅ NO rompe tu flujo actual
+// ✅ Acepta avatar seleccionado (id / trigger / lora_path)
+// ✅ Agrega action: "generate" para que el worker de RunPod sepa qué ejecutar
+// ✅ Mantiene compatibilidad con tu flujo actual
 
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
       .end();
   }
 
-  // aplicar headers CORS siempre
+  // Aplicar headers CORS siempre
   Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
 
   if (req.method !== "POST") {
@@ -59,6 +60,7 @@ export default async function handler(req, res) {
     // Auth usuario
     // ---------------------------------------------------------
     const userId = await getUserIdFromAuthHeader(req);
+
     if (!userId) {
       return res.status(401).json({
         ok: false,
@@ -92,9 +94,7 @@ export default async function handler(req, res) {
     const avatarTrigger = normalizeOptional(body?.avatar_trigger);
     const avatarLoraPath = normalizeOptional(body?.avatar_lora_path);
 
-    // Prompt efectivo:
-    // si viene trigger, se lo prependemos al prompt para que el worker
-    // pueda usarlo tal cual o ignorarlo si aún no carga LoRA
+    // Si viene trigger del avatar, lo agregamos al prompt efectivo
     const effectivePrompt = avatarTrigger
       ? `${avatarTrigger}, ${prompt}`
       : prompt;
@@ -102,33 +102,62 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     // Payload a RunPod
     // ---------------------------------------------------------
-    // ✅ mantenemos tus campos actuales
-    // ✅ agregamos info de avatar sin romper compatibilidad
+    // ✅ IMPORTANTE:
+    // action: "generate" era lo que faltaba para que tu worker
+    // no devolviera UNKNOWN_ACTION
     const input = {
+      action: "generate",
+
+      // Prompt original del usuario
       prompt,
+
+      // Prompt efectivo con trigger del avatar, por si el worker lo usa
+      effective_prompt: effectivePrompt,
+
       negative_prompt: negativePrompt,
       width,
       height,
       steps,
       seed,
 
-      // debug / trazabilidad UI
+      // Debug / trazabilidad UI
       _ui_original_prompt: body?._ui_original_prompt,
       _ui_original_negative: body?._ui_original_negative,
       _ui_used_optimizer: body?._ui_used_optimizer,
 
-      // NUEVO: prompt ya combinado con trigger si hay avatar
-      effective_prompt: effectivePrompt,
-
-      // NUEVO: avatar opcional
+      // Avatar opcional
       avatar_id: avatarId,
       avatar_name: avatarName,
       avatar_trigger: avatarTrigger,
       avatar_lora_path: avatarLoraPath,
 
-      // útil para auditoría interna
+      // Auditoría interna
       user_id: userId,
     };
+
+    console.log("[generate] endpointId:", endpointId);
+    console.log("[generate] userId:", userId);
+    console.log("[generate] usedAvatar:", !!avatarId);
+    console.log(
+      "[generate] input preview:",
+      JSON.stringify(
+        {
+          action: input.action,
+          prompt: input.prompt,
+          effective_prompt: input.effective_prompt,
+          negative_prompt: input.negative_prompt,
+          width: input.width,
+          height: input.height,
+          steps: input.steps,
+          avatar_id: input.avatar_id,
+          avatar_name: input.avatar_name,
+          avatar_trigger: input.avatar_trigger,
+          avatar_lora_path: input.avatar_lora_path,
+        },
+        null,
+        2
+      )
+    );
 
     // ---------------------------------------------------------
     // Cobro 1 jade
@@ -145,6 +174,8 @@ export default async function handler(req, res) {
     });
 
     if (spendErr) {
+      console.error("[generate] JADE_CHARGE_FAILED:", spendErr);
+
       return res.status(400).json({
         ok: false,
         error: "JADE_CHARGE_FAILED",
@@ -169,6 +200,8 @@ export default async function handler(req, res) {
     if (!rp.ok) {
       const txt = await rp.text();
 
+      console.error("[generate] RUNPOD_RUN_ERROR:", txt);
+
       return res.status(rp.status).json({
         ok: false,
         error: "RUNPOD_RUN_ERROR",
@@ -177,6 +210,8 @@ export default async function handler(req, res) {
     }
 
     const data = await rp.json().catch(() => null);
+
+    console.log("[generate] RunPod raw response:", JSON.stringify(data, null, 2));
 
     const jobId = data?.id || data?.jobId || data?.requestId || null;
 
@@ -206,7 +241,7 @@ export default async function handler(req, res) {
       raw: data,
     });
   } catch (e) {
-    console.error("[generate]", e);
+    console.error("[generate] SERVER_ERROR:", e);
 
     return res.status(500).json({
       ok: false,
