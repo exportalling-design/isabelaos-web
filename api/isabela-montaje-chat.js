@@ -1,12 +1,7 @@
 // api/isabela-montaje-chat.js
-// Chat de montaje de IsabelaOS Studio
-// Usa global + gemini-2.5-flash
-
 import {
   vertexFetch,
   extractTextFromVertexResponse,
-  VERTEX_GEMINI_MODEL,
-  VERTEX_LOCATION,
   VERTEX_PROJECT_ID,
 } from "./_googleVertex.js";
 
@@ -109,7 +104,13 @@ export default async function handler(req, res) {
       ],
     };
 
+    const model = "gemini-2.5-flash";
+    const location = "global";
+
     const data = await vertexFetch({
+      model,
+      location,
+      projectId: VERTEX_PROJECT_ID,
       contents,
       systemInstruction,
       generationConfig: {
@@ -128,8 +129,8 @@ export default async function handler(req, res) {
       reply,
       message: reply,
       assistant: reply,
-      model: VERTEX_GEMINI_MODEL,
-      location: VERTEX_LOCATION,
+      model,
+      location,
       projectId: VERTEX_PROJECT_ID,
     });
   } catch (error) {
@@ -139,8 +140,8 @@ export default async function handler(req, res) {
       ok: false,
       error: error?.message || "No se pudo procesar la solicitud.",
       details: error?.details || null,
-      model: VERTEX_GEMINI_MODEL,
-      location: VERTEX_LOCATION,
+      model: error?.vertexModel || "gemini-2.5-flash",
+      location: error?.vertexLocation || "global",
       projectId: VERTEX_PROJECT_ID,
       vertexUrl: error?.vertexUrl || null,
     });
