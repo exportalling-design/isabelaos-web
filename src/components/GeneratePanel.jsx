@@ -1,4 +1,15 @@
-function CreatorPanel({ isDemo = false, onAuthRequired }) {
+import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+
+// AJUSTA estas importaciones a las rutas reales donde ya las tengas
+import { getAuthHeadersGlobal } from "../lib/getAuthHeadersGlobal";
+import { getTodayGenerationCount, saveGenerationInSupabase } from "../lib/generations";
+import { readDemoPrompt, clearDemoPrompt } from "../lib/demoPrompt";
+
+const DAILY_LIMIT = 5;
+const DEMO_LIMIT = 3;
+
+export default function GeneratePanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
 
   const userLoggedIn = !isDemo && !!user;
@@ -42,7 +53,6 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         clearDemoPrompt();
       }
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userLoggedIn]);
 
   // ---------------------------------------------------------
@@ -335,13 +345,11 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           height: Number(height),
           steps: Number(steps),
 
-          // avatar / lora
           avatar_id: selectedAvatar?.id || null,
           avatar_name: selectedAvatar?.name || null,
           avatar_trigger: selectedAvatar?.trigger || null,
           avatar_lora_path: selectedAvatar?.lora_path || null,
 
-          // debug UI
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
           _ui_used_optimizer: !!useOptimizer,
