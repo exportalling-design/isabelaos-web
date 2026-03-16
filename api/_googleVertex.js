@@ -1,37 +1,52 @@
 // api/_googleVertex.js
-// Vertex AI helper para Vercel / Node runtime
-// Usa endpoint global + Gemini 2.0 Flash versión explícita.
+// Helper de Vertex AI para Vercel usando:
+// - GOOGLE_SERVICE_ACCOUNT_JSON
+// - GOOGLE_PROJECT_ID
+// - GOOGLE_LOCATION
+// - VERTEX_GEMINI_MODEL (opcional)
 
 import crypto from "crypto";
 
+function safeJsonParse(value, fallback = null) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+const SERVICE_ACCOUNT = safeJsonParse(
+  process.env.GOOGLE_SERVICE_ACCOUNT_JSON || "",
+  {}
+);
+
 export const VERTEX_PROJECT_ID =
-  process.env.VERTEX_PROJECT_ID ||
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  process.env.GCP_PROJECT_ID ||
   process.env.GOOGLE_PROJECT_ID ||
-  "helpful-metric-376223";
+  process.env.VERTEX_PROJECT_ID ||
+  SERVICE_ACCOUNT.project_id ||
+  "";
 
 export const VERTEX_LOCATION =
+  process.env.GOOGLE_LOCATION ||
   process.env.VERTEX_LOCATION ||
   "global";
 
+// Puedes cambiar este default si quieres luego.
+// Por ahora lo dejamos estable.
 export const VERTEX_GEMINI_MODEL =
   process.env.VERTEX_GEMINI_MODEL ||
   "gemini-2.0-flash-001";
 
 const GOOGLE_CLIENT_EMAIL =
+  SERVICE_ACCOUNT.client_email ||
   process.env.GOOGLE_CLIENT_EMAIL ||
-  process.env.GCP_CLIENT_EMAIL ||
-  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
   "";
 
-const GOOGLE_PRIVATE_KEY_RAW =
-  process.env.GOOGLE_PRIVATE_KEY ||
-  process.env.GCP_PRIVATE_KEY ||
-  process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
-  "";
-
-const GOOGLE_PRIVATE_KEY = GOOGLE_PRIVATE_KEY_RAW.replace(/\\n/g, "\n");
+const GOOGLE_PRIVATE_KEY =
+  (SERVICE_ACCOUNT.private_key || process.env.GOOGLE_PRIVATE_KEY || "").replace(
+    /\\n/g,
+    "\n"
+  );
 
 let tokenCache = {
   accessToken: null,
@@ -42,6 +57,7 @@ function base64Url(input) {
   const buffer = Buffer.isBuffer(input)
     ? input
     : Buffer.from(typeof input === "string" ? input : JSON.stringify(input));
+
   return buffer
     .toString("base64")
     .replace(/\+/g, "-")
@@ -52,7 +68,7 @@ function base64Url(input) {
 function createJwt() {
   if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
     throw new Error(
-      "Faltan credenciales de Google. Revisa GOOGLE_CLIENT_EMAIL y GOOGLE_PRIVATE_KEY en Vercel."
+      "Faltan client_email o private_key en GOOGLE_SERVICE_ACCOUNT_JSON."
     );
   }
 
@@ -105,11 +121,11 @@ async function getAccessToken() {
     }),
   });
 
-  const data = await resp.json();
+  const data = await resp.json().catch(() => ({}));
 
   if (!resp.ok) {
     throw new Error(
-      `No se pudo obtener access token de Google: ${resp.status} ${JSON.stringify(data)}`
+      `No se pudo obtener access token: ${resp.status} ${JSON.stringify(data)}`
     );
   }
 
@@ -119,7 +135,7 @@ async function getAccessToken() {
   return tokenCache.accessToken;
 }
 
-function buildVertexUrl({ model, location, projectId }) {
+function buildVertexUrl({ projectId, location, model }) {
   const base =
     location === "global"
       ? "https://aiplatform.googleapis.com"
@@ -131,16 +147,13 @@ function buildVertexUrl({ model, location, projectId }) {
 export function extractTextFromVertexResponse(data) {
   if (!data) return "";
 
-  const candidate = data?.candidates?.[0];
-  const parts = candidate?.content?.parts || [];
+  const parts = data?.candidates?.[0]?.content?.parts || [];
 
-  const text = parts
+  return parts
     .map((p) => (typeof p?.text === "string" ? p.text : ""))
     .filter(Boolean)
     .join("\n")
     .trim();
-
-  return text;
 }
 
 export async function vertexFetch({
@@ -153,11 +166,11 @@ export async function vertexFetch({
   safetySettings,
 }) {
   if (!projectId) {
-    throw new Error("Falta VERTEX_PROJECT_ID / GOOGLE_PROJECT_ID.");
+    throw new Error("Falta GOOGLE_PROJECT_ID.");
   }
 
   const accessToken = await getAccessToken();
-  const url = buildVertexUrl({ model, location, projectId });
+  const url = buildVertexUrl({ projectId, location, model });
 
   const body = {
     contents,
@@ -186,6 +199,7 @@ export async function vertexFetch({
     const err = new Error(msg);
     err.status = resp.status;
     err.details = data;
+    err.vertexUrl = url;
     throw err;
   }
 
