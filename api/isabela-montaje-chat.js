@@ -1,10 +1,6 @@
 // api/isabela-montaje-chat.js
 // Chat de montaje de IsabelaOS Studio
-// Adaptado a:
-// - GOOGLE_SERVICE_ACCOUNT_JSON
-// - GOOGLE_PROJECT_ID
-// - GOOGLE_LOCATION
-// - VERTEX_GEMINI_MODEL (opcional)
+// Usa global + gemini-2.5-flash
 
 import {
   vertexFetch,
@@ -96,6 +92,7 @@ export default async function handler(req, res) {
     });
 
     const systemInstruction = {
+      role: "system",
       parts: [
         {
           text: [
