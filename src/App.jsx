@@ -483,6 +483,9 @@ function VideoCollage() {
   );
 }
 
+  // ---------------------------------------------------------
+  // Imagen
+  // ---------------------------------------------------------
 function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
 
@@ -591,6 +594,35 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
       finalNegative: canUseOpt ? (optimizedNegative || "") : negative,
       usingOptimized: !!canUseOpt,
     };
+  }
+
+    async function getAvatarAnchors(avatarId) {
+    if (!avatarId) return [];
+
+    try {
+      const authHeaders = await getAuthHeadersGlobal();
+
+      const r = await fetch(
+        `/api/avatars-get-anchor-urls?avatar_id=${encodeURIComponent(avatarId)}`,
+        {
+          method: "GET",
+          headers: {
+            ...authHeaders,
+          },
+        }
+      );
+
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || "No se pudieron cargar las anchors del avatar.");
+      }
+
+      return Array.isArray(j.anchors) ? j.anchors : [];
+    } catch (e) {
+      console.error("Error cargando avatar anchors:", e);
+      return [];
+    }
   }
 
   // ---------------------------------------------------------
@@ -803,6 +835,13 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           finalPrompt = eff.finalPrompt;
           finalNegative = eff.finalNegative;
         }
+      }
+
+      let avatarAnchors = [];
+
+      if (selectedAvatar?.id) {
+        setStatusText("Cargando referencias faciales del avatar...");
+        avatarAnchors = await getAvatarAnchors(selectedAvatar.id);
       }
 
       setStatusText("Enviando job a RunPod...");
