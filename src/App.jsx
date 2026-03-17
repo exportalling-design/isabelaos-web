@@ -867,6 +867,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           avatar_trigger: selectedAvatar?.trigger || null,
           avatar_lora_path: selectedAvatar?.lora_path || null,
 
+          // avatar / anchors
+          avatar_anchor_urls: avatarAnchors.map((a) => a.url).filter(Boolean),
+          avatar_anchor_paths: avatarAnchors.map((a) => a.storage_path).filter(Boolean),
+
           // debug UI
           _ui_original_prompt: prompt,
           _ui_original_negative: negative,
