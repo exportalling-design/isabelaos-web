@@ -2,6 +2,7 @@
 // Envía job a RunPod Serverless (FLUX) y regresa jobId
 // ✅ Cobra 1 jade usando supabaseAdmin.rpc("spend_jades")
 // ✅ Acepta avatar seleccionado (id / trigger / lora_path)
+// ✅ Reenvía anchors faciales del avatar al worker
 // ✅ Agrega action: "generate" para que el worker de RunPod sepa qué ejecutar
 // ✅ Mantiene compatibilidad con tu flujo actual
 
@@ -15,6 +16,11 @@ function normalizeText(v) {
 function normalizeOptional(v) {
   const s = String(v || "").trim();
   return s ? s : null;
+}
+
+function normalizeStringArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((v) => String(v || "").trim()).filter(Boolean);
 }
 
 export default async function handler(req, res) {
@@ -93,6 +99,8 @@ export default async function handler(req, res) {
     const avatarName = normalizeOptional(body?.avatar_name);
     const avatarTrigger = normalizeOptional(body?.avatar_trigger);
     const avatarLoraPath = normalizeOptional(body?.avatar_lora_path);
+    const avatarAnchorUrls = normalizeStringArray(body?.avatar_anchor_urls);
+    const avatarAnchorPaths = normalizeStringArray(body?.avatar_anchor_paths);
 
     // Si viene trigger del avatar, lo agregamos al prompt efectivo
     const effectivePrompt = avatarTrigger
@@ -102,16 +110,13 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     // Payload a RunPod
     // ---------------------------------------------------------
-    // ✅ IMPORTANTE:
-    // action: "generate" era lo que faltaba para que tu worker
-    // no devolviera UNKNOWN_ACTION
     const input = {
       action: "generate",
 
       // Prompt original del usuario
       prompt,
 
-      // Prompt efectivo con trigger del avatar, por si el worker lo usa
+      // Prompt efectivo con trigger del avatar
       effective_prompt: effectivePrompt,
 
       negative_prompt: negativePrompt,
@@ -130,6 +135,10 @@ export default async function handler(req, res) {
       avatar_name: avatarName,
       avatar_trigger: avatarTrigger,
       avatar_lora_path: avatarLoraPath,
+
+      // Anchors faciales del avatar
+      avatar_anchor_urls: avatarAnchorUrls,
+      avatar_anchor_paths: avatarAnchorPaths,
 
       // Auditoría interna
       user_id: userId,
@@ -153,6 +162,8 @@ export default async function handler(req, res) {
           avatar_name: input.avatar_name,
           avatar_trigger: input.avatar_trigger,
           avatar_lora_path: input.avatar_lora_path,
+          avatar_anchor_urls: input.avatar_anchor_urls,
+          avatar_anchor_paths: input.avatar_anchor_paths,
         },
         null,
         2
@@ -235,6 +246,8 @@ export default async function handler(req, res) {
             name: avatarName,
             trigger: avatarTrigger,
             lora_path: avatarLoraPath,
+            anchor_urls: avatarAnchorUrls,
+            anchor_paths: avatarAnchorPaths,
           }
         : null,
 
