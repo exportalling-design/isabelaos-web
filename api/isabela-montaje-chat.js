@@ -66,14 +66,13 @@ function buildContents({ message, chatHistory, contextText }) {
   return history;
 }
 
-// 🔥 NUEVO: limpia texto y extrae JSON aunque venga sucio
+// 🔥 limpia JSON aunque venga sucio
 function safeParseJSON(text) {
   if (!text) return null;
 
   try {
     return JSON.parse(text);
   } catch {
-    // intenta extraer solo el JSON dentro del texto
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       try {
@@ -146,18 +145,19 @@ export default async function handler(req, res) {
 
     const rawText = extractTextFromVertexResponse(data);
 
-    // 🔥 FIX REAL
     const parsed = safeParseJSON(rawText);
 
+    // 🔥 FIX REAL AQUÍ (soporta reply o respuesta)
     const reply =
       parsed?.reply ||
+      parsed?.respuesta ||
       (typeof rawText === "string" ? rawText : "") ||
       "Entendido. Si está correcto, genera el montaje.";
 
     return res.status(200).json({
       ok: true,
       allowed: parsed?.allowed !== false,
-      reply: String(reply), // 🔥 SIEMPRE STRING LIMPIO
+      reply: String(reply), // SIEMPRE TEXTO LIMPIO
       need_person_image: !!parsed?.need_person_image,
       need_background_image: !!parsed?.need_background_image,
       scene_mode:
