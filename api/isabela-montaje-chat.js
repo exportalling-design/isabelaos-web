@@ -151,6 +151,9 @@ export default async function handler(req, res) {
     const reply =
       parsed?.reply ||
       parsed?.respuesta ||
+      parsed?.greeting ||
+      parsed?.next_step_instruction ||
+      parsed?.understanding_confirmation ||
       (typeof rawText === "string" ? rawText : "") ||
       "Entendido. Si está correcto, genera el montaje.";
 
