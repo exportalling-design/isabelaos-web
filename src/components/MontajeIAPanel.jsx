@@ -24,7 +24,7 @@ export default function MontajeIAPanel({ userStatus }) {
   const [messages, setMessages] = useState([
     {
       role: "isabela",
-      text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen y te ayudaré a dejar la orden lista antes de generar.",
+      text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen.",
     },
   ]);
 
@@ -38,14 +38,33 @@ export default function MontajeIAPanel({ userStatus }) {
     return text.replace(/```json|```/g, "").trim();
   }
 
+  function handlePersonFile(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setPersonFile(f);
+    setPersonPreview(URL.createObjectURL(f));
+  }
+
+  function handleBackgroundFile(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setBackgroundFile(f);
+    setBackgroundPreview(URL.createObjectURL(f));
+  }
+
+  async function fileToBase64(file) {
+    const buf = await file.arrayBuffer();
+    return btoa(
+      new Uint8Array(buf).reduce((data, byte) => data + String.fromCharCode(byte), "")
+    );
+  }
+
   async function handleAskIsabela() {
     const text = prompt.trim();
     if (!text) return;
 
     try {
       setIsabelaLoading(true);
-      setError("");
-
       setMessages((prev) => [...prev, { role: "user", text }]);
 
       const session = await supabase.auth.getSession();
@@ -64,11 +83,7 @@ export default function MontajeIAPanel({ userStatus }) {
         }),
       });
 
-      const json = await resp.json().catch(() => null);
-
-      if (!resp.ok || !json?.ok) {
-        throw new Error(json?.reply || "Error interpretando");
-      }
+      const json = await resp.json();
 
       const replyText = cleanReply(json?.reply);
 
@@ -77,24 +92,61 @@ export default function MontajeIAPanel({ userStatus }) {
         { role: "isabela", text: replyText },
       ]);
 
-      if (json?.allowed) {
-        setIsabelaPlan(json);
-      } else {
-        setIsabelaPlan(null);
-      }
+      if (json?.allowed) setIsabelaPlan(json);
 
       setPrompt("");
     } catch (err) {
-      setError("Error al procesar mensaje");
+      setError("Error en el chat");
     } finally {
       setIsabelaLoading(false);
     }
   }
 
-  function handlePromptKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleAskIsabela();
+  async function handleGenerate() {
+    if (!personFile) {
+      setError("Sube una imagen principal");
+      return;
+    }
+
+    if (!isabelaPlan) {
+      setError("Primero confirma la orden con Isabela");
+      return;
+    }
+
+    try {
+      setStatus("RUNNING");
+
+      const person_b64 = await fileToBase64(personFile);
+      const bg_b64 = backgroundFile ? await fileToBase64(backgroundFile) : null;
+
+      const session = await supabase.auth.getSession();
+      const token = session?.data?.session?.access_token;
+
+      const resp = await fetch("/api/generate-montaje", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          person_image: person_b64,
+          background_image: bg_b64,
+          prompt: messages
+            .filter((m) => m.role === "user")
+            .map((m) => m.text)
+            .join(" "),
+          isabelaPlan,
+        }),
+      });
+
+      const json = await resp.json();
+
+      if (json?.image_data_url) {
+        setResultUrl(json.image_data_url);
+        setStatus("DONE");
+      }
+    } catch {
+      setError("Error generando imagen");
     }
   }
 
@@ -102,17 +154,8 @@ export default function MontajeIAPanel({ userStatus }) {
     const isUser = role === "user";
     return (
       <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-        <div
-          className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-            isUser
-              ? "bg-cyan-500/10 border border-cyan-400/20 text-white"
-              : "bg-fuchsia-500/10 border border-fuchsia-400/20 text-white"
-          }`}
-        >
-          <p className="mb-1 text-xs opacity-70">
-            {isUser ? "Tú" : "Isabela"}
-          </p>
-          <p>{text}</p>
+        <div className="max-w-[80%] rounded-2xl px-4 py-2 text-sm bg-black/40 border border-white/10 text-white">
+          <b>{isUser ? "Tú" : "Isabela"}:</b> {text}
         </div>
       </div>
     );
@@ -120,46 +163,73 @@ export default function MontajeIAPanel({ userStatus }) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-white">Montaje IA</h1>
 
-      <div className="rounded-3xl border border-white/10 bg-black/40">
-
-        {/* CHAT */}
-        <div className="h-[320px] overflow-y-auto p-4 space-y-3">
-          {messages.map((msg, i) => (
-            <MessageBubble key={i} {...msg} />
-          ))}
-
-          {isabelaLoading && (
-            <div className="text-sm text-neutral-400">
-              Isabela está escribiendo...
-            </div>
+      {/* SUBIDA */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <label className="border p-4 rounded-xl cursor-pointer">
+          {personPreview ? (
+            <img src={personPreview} className="rounded-lg" />
+          ) : (
+            "Subir persona"
           )}
+          <input type="file" hidden onChange={handlePersonFile} />
+        </label>
+
+        <label className="border p-4 rounded-xl cursor-pointer">
+          {backgroundPreview ? (
+            <img src={backgroundPreview} className="rounded-lg" />
+          ) : (
+            "Subir fondo"
+          )}
+          <input type="file" hidden onChange={handleBackgroundFile} />
+        </label>
+      </div>
+
+      {/* CHAT */}
+      <div className="border rounded-xl bg-black/40">
+
+        <div className="h-[300px] overflow-y-auto p-4 space-y-2">
+          {messages.map((m, i) => (
+            <MessageBubble key={i} {...m} />
+          ))}
         </div>
 
-        {/* INPUT + BOTÓN */}
-        <div className="border-t border-white/10 p-3 flex gap-2 items-end">
+        <div className="flex gap-2 p-3 border-t">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={handlePromptKeyDown}
-            placeholder="Ej: colócala en la playa con sombra suave..."
-            className="flex-1 min-h-[60px] rounded-xl bg-black/60 p-3 text-white outline-none"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleAskIsabela();
+              }
+            }}
+            className="flex-1 bg-black/60 text-white p-2 rounded"
           />
 
           <button
             onClick={handleAskIsabela}
-            disabled={isabelaLoading || !prompt.trim()}
-            className="h-[60px] px-5 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-semibold"
+            className="bg-purple-500 px-4 rounded text-white"
           >
             Enviar
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="text-red-400 text-sm">{error}</div>
+      {/* GENERAR */}
+      <button
+        onClick={handleGenerate}
+        className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 rounded text-white"
+      >
+        Generar montaje
+      </button>
+
+      {/* RESULTADO */}
+      {resultUrl && (
+        <img src={resultUrl} className="rounded-xl border" />
       )}
+
+      {error && <p className="text-red-400">{error}</p>}
     </div>
   );
- }
+}
