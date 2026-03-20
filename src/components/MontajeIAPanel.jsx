@@ -24,7 +24,7 @@ export default function MontajeIAPanel({ userStatus }) {
   const [messages, setMessages] = useState([
     {
       role: "isabela",
-      text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen.",
+      text: "Hola. Soy Isabela. Describe cómo quieres el montaje y lo dejo listo para generar.",
     },
   ]);
 
@@ -65,6 +65,8 @@ export default function MontajeIAPanel({ userStatus }) {
 
     try {
       setIsabelaLoading(true);
+      setError("");
+
       setMessages((prev) => [...prev, { role: "user", text }]);
 
       const session = await supabase.auth.getSession();
@@ -85,6 +87,10 @@ export default function MontajeIAPanel({ userStatus }) {
 
       const json = await resp.json();
 
+      if (!resp.ok || !json?.ok) {
+        throw new Error(json?.reply || "Error interpretando");
+      }
+
       const replyText = cleanReply(json?.reply);
 
       setMessages((prev) => [
@@ -96,6 +102,7 @@ export default function MontajeIAPanel({ userStatus }) {
 
       setPrompt("");
     } catch (err) {
+      console.error(err);
       setError("Error en el chat");
     } finally {
       setIsabelaLoading(false);
@@ -145,9 +152,40 @@ export default function MontajeIAPanel({ userStatus }) {
         setResultUrl(json.image_data_url);
         setStatus("DONE");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setError("Error generando imagen");
     }
+  }
+
+  function handlePromptKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAskIsabela();
+    }
+  }
+
+  function UploadCard({ title, subtitle, preview, onChange }) {
+    return (
+      <label className="group relative block cursor-pointer overflow-hidden rounded-3xl border border-cyan-400/20 bg-black/40 p-4 transition hover:border-fuchsia-400/40">
+        <div className="relative z-10">
+          <p className="text-sm font-semibold text-white">{title}</p>
+          <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
+
+          <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/40 p-6 text-center">
+            {!preview ? (
+              <>
+                <p className="text-sm text-white">Sube foto aquí</p>
+              </>
+            ) : (
+              <img src={preview} className="rounded-2xl object-cover" />
+            )}
+          </div>
+        </div>
+
+        <input type="file" accept="image/*" onChange={onChange} className="hidden" />
+      </label>
+    );
   }
 
   function MessageBubble({ role, text }) {
@@ -164,52 +202,45 @@ export default function MontajeIAPanel({ userStatus }) {
   return (
     <div className="space-y-6">
 
-      {/* SUBIDA */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <label className="border p-4 rounded-xl cursor-pointer">
-          {personPreview ? (
-            <img src={personPreview} className="rounded-lg" />
-          ) : (
-            "Subir persona"
-          )}
-          <input type="file" hidden onChange={handlePersonFile} />
-        </label>
+      {/* UPLOADS PRO */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <UploadCard
+          title="Persona / modelo / producto"
+          subtitle="Sube la imagen principal"
+          preview={personPreview}
+          onChange={handlePersonFile}
+        />
 
-        <label className="border p-4 rounded-xl cursor-pointer">
-          {backgroundPreview ? (
-            <img src={backgroundPreview} className="rounded-lg" />
-          ) : (
-            "Subir fondo"
-          )}
-          <input type="file" hidden onChange={handleBackgroundFile} />
-        </label>
+        <UploadCard
+          title="Escenario"
+          subtitle="Opcional"
+          preview={backgroundPreview}
+          onChange={handleBackgroundFile}
+        />
       </div>
 
       {/* CHAT */}
-      <div className="border rounded-xl bg-black/40">
+      <div className="rounded-3xl border border-white/10 bg-black/40">
 
-        <div className="h-[300px] overflow-y-auto p-4 space-y-2">
-          {messages.map((m, i) => (
-            <MessageBubble key={i} {...m} />
+        <div className="h-[320px] overflow-y-auto p-4 space-y-3">
+          {messages.map((msg, i) => (
+            <MessageBubble key={i} {...msg} />
           ))}
         </div>
 
-        <div className="flex gap-2 p-3 border-t">
+        <div className="flex gap-2 p-3 border-t border-white/10">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleAskIsabela();
-              }
-            }}
-            className="flex-1 bg-black/60 text-white p-2 rounded"
+            onKeyDown={handlePromptKeyDown}
+            placeholder="Ej: colócala en la playa con sombra suave..."
+            className="flex-1 bg-black/60 text-white p-3 rounded-xl"
           />
 
           <button
             onClick={handleAskIsabela}
-            className="bg-purple-500 px-4 rounded text-white"
+            disabled={!prompt.trim() || isabelaLoading}
+            className="px-5 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
           >
             Enviar
           </button>
@@ -219,14 +250,15 @@ export default function MontajeIAPanel({ userStatus }) {
       {/* GENERAR */}
       <button
         onClick={handleGenerate}
-        className="bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 rounded text-white"
+        disabled={!personFile || !isabelaPlan}
+        className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-white"
       >
-        Generar montaje
+        Generar montaje (-{UI_COST_JADES_DEFAULT})
       </button>
 
       {/* RESULTADO */}
       {resultUrl && (
-        <img src={resultUrl} className="rounded-xl border" />
+        <img src={resultUrl} className="rounded-2xl border border-white/10" />
       )}
 
       {error && <p className="text-red-400">{error}</p>}
