@@ -18,11 +18,16 @@ export default function MontajeIAPanel({ userStatus }) {
   const [jadesLocal, setJadesLocal] = useState(null);
 
   const [prompt, setPrompt] = useState("");
-  const [chatHistory, setChatHistory] = useState([]);
-
-  const [isabelaReply, setIsabelaReply] = useState("");
   const [isabelaPlan, setIsabelaPlan] = useState(null);
   const [isabelaLoading, setIsabelaLoading] = useState(false);
+
+  // ✅ historial tipo chat
+  const [messages, setMessages] = useState([
+    {
+      role: "isabela",
+      text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen y te ayudaré a dejar la orden lista antes de generar.",
+    },
+  ]);
 
   const jadesShown = useMemo(() => {
     const base = typeof userStatus?.jades === "number" ? userStatus.jades : 0;
@@ -36,12 +41,23 @@ export default function MontajeIAPanel({ userStatus }) {
     setStatus("IDLE");
   }
 
+  function resetInterpretation() {
+    setIsabelaPlan(null);
+    setMessages([
+      {
+        role: "isabela",
+        text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen y te ayudaré a dejar la orden lista antes de generar.",
+      },
+    ]);
+  }
+
   async function handlePersonFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     setPersonFile(f);
     setPersonPreview(URL.createObjectURL(f));
     resetRunUI();
+    resetInterpretation();
   }
 
   async function handleBackgroundFile(e) {
@@ -50,6 +66,7 @@ export default function MontajeIAPanel({ userStatus }) {
     setBackgroundFile(f);
     setBackgroundPreview(URL.createObjectURL(f));
     resetRunUI();
+    resetInterpretation();
   }
 
   async function fileToBase64(file) {
@@ -59,12 +76,52 @@ export default function MontajeIAPanel({ userStatus }) {
     );
   }
 
-  async function handleAskIsabela() {
-    try {
-      if (!prompt.trim()) return;
+  async function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
 
+  async function pollJob(jobIdToPoll, maxSeconds = 140) {
+    const started = Date.now();
+
+    while (true) {
+      if ((Date.now() - started) / 1000 > maxSeconds) {
+        throw new Error("Tiempo de espera agotado esperando resultado del montaje.");
+      }
+
+      const r = await fetch("/api/montaje-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: jobIdToPoll }),
+      });
+
+      const data = await r.json().catch(() => null);
+
+      if (!r.ok || !data) {
+        throw new Error("Error consultando estado del montaje.");
+      }
+
+      if (data.done && data.ok && data.image_data_url) {
+        return data.image_data_url;
+      }
+
+      if (data.done && !data.ok) {
+        throw new Error(data.error || "No se pudo completar el montaje.");
+      }
+
+      await sleep(1500);
+    }
+  }
+
+  async function handleAskIsabela() {
+    const text = prompt.trim();
+    if (!text) return;
+
+    try {
       setIsabelaLoading(true);
       setError("");
+
+      // agrega mensaje del usuario al chat
+      setMessages((prev) => [...prev, { role: "user", text }]);
 
       const session = await supabase.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -73,9 +130,6 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error("MISSING_AUTH_TOKEN");
       }
 
-      const userMessage = prompt.trim();
-      const nextHistory = [...chatHistory, { role: "user", text: userMessage }];
-
       const resp = await fetch("/api/isabela-montaje-chat", {
         method: "POST",
         headers: {
@@ -83,39 +137,41 @@ export default function MontajeIAPanel({ userStatus }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          message: userMessage,
-          chatHistory,
+          message: text,
           hasPersonImage: !!personFile,
           hasBackgroundImage: !!backgroundFile,
-          personImageName: personFile?.name || null,
-          backgroundImageName: backgroundFile?.name || null,
         }),
       });
 
       const json = await resp.json().catch(() => null);
 
       if (!resp.ok || !json?.ok) {
-        throw new Error(
-          json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud."
-        );
+        throw new Error(json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud.");
       }
 
-      const assistantReply =
-        json.reply || "Entendido. Si está correcto, da click en Generar montaje.";
+      const replyText =
+        json?.reply ||
+        "Entendido. Si está correcto, haz click en Generar montaje.";
 
-      setChatHistory([
-        ...nextHistory,
-        { role: "assistant", text: assistantReply },
-      ]);
+      setMessages((prev) => [...prev, { role: "isabela", text: replyText }]);
 
-      setIsabelaReply(assistantReply);
-      setIsabelaPlan(json);
+      if (json?.allowed) {
+        setIsabelaPlan(json);
+      } else {
+        setIsabelaPlan(null);
+      }
+
       setPrompt("");
     } catch (err) {
       console.error(err);
-      setError(
-        err?.message || "Lo siento, no pude interpretar tu instrucción en este momento."
-      );
+      setError(err?.message || "Lo siento, no pude interpretar tu instrucción en este momento.");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "isabela",
+          text: "Lo siento, no pude procesar tu solicitud en este momento.",
+        },
+      ]);
     } finally {
       setIsabelaLoading(false);
     }
@@ -123,12 +179,12 @@ export default function MontajeIAPanel({ userStatus }) {
 
   async function handleGenerate() {
     if (!personFile) {
-      setError("Debes subir una imagen principal.");
+      setError("Debes subir una imagen de persona, modelo o producto.");
       return;
     }
 
-    if (!isabelaPlan?.final_prompt && !prompt.trim()) {
-      setError("Primero habla con Isabela o escribe una instrucción.");
+    if (!isabelaPlan) {
+      setError("Primero habla con Isabela hasta confirmar la orden del montaje.");
       return;
     }
 
@@ -148,11 +204,6 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error("MISSING_AUTH_TOKEN");
       }
 
-      const finalPrompt =
-        isabelaPlan?.final_prompt ||
-        isabelaPlan?.raw?.final_prompt ||
-        prompt.trim();
-
       const resp = await fetch("/api/generate-montaje", {
         method: "POST",
         headers: {
@@ -162,7 +213,10 @@ export default function MontajeIAPanel({ userStatus }) {
         body: JSON.stringify({
           person_image: person_b64,
           background_image: bg_b64,
-          prompt: finalPrompt,
+          prompt: messages
+            .filter((m) => m.role === "user")
+            .map((m) => m.text)
+            .join(" | "),
           isabelaPlan,
           ref: `montajeia-${Date.now()}`,
         }),
@@ -174,19 +228,7 @@ export default function MontajeIAPanel({ userStatus }) {
         throw new Error(json?.error || json?.detail || "ERROR_GENERATION");
       }
 
-      // Aquí todavía no estás ejecutando el compositor final.
-      // Por ahora mostramos el plan recibido.
-      setResultUrl("");
-      setStatus("DONE");
-
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text:
-            `Ya preparé el montaje.\nModo: ${json?.mode || "unknown"}\nPrompt final: ${json?.finalPrompt || ""}`,
-        },
-      ]);
+      if (json?.jobId) setJobId(json.jobId);
 
       if (json?.billed?.amount) {
         setJadesLocal((prev) => {
@@ -199,6 +241,30 @@ export default function MontajeIAPanel({ userStatus }) {
           return Math.max(0, base - json.billed.amount);
         });
       }
+
+      if (json?.image_data_url) {
+        setResultUrl(json.image_data_url);
+        setStatus("DONE");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "isabela",
+            text: "Listo. Ya generé tu montaje.",
+          },
+        ]);
+        return;
+      }
+
+      const finalImage = await pollJob(json.jobId, 160);
+      setResultUrl(finalImage);
+      setStatus("DONE");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "isabela",
+          text: "Listo. Ya generé tu montaje.",
+        },
+      ]);
     } catch (err) {
       console.error(err);
       setError(
@@ -250,6 +316,26 @@ export default function MontajeIAPanel({ userStatus }) {
     );
   }
 
+  function MessageBubble({ role, text }) {
+    const isUser = role === "user";
+    return (
+      <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+        <div
+          className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
+            isUser
+              ? "bg-cyan-500/10 border border-cyan-400/20 text-white"
+              : "bg-fuchsia-500/10 border border-fuchsia-400/20 text-neutral-100"
+          }`}
+        >
+          <p className="mb-1 text-xs font-semibold opacity-80">
+            {isUser ? "Tú" : "Isabela"}
+          </p>
+          <p className="whitespace-pre-wrap">{text}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -277,57 +363,51 @@ export default function MontajeIAPanel({ userStatus }) {
 
       <div className="relative overflow-hidden rounded-3xl border border-cyan-400/25 bg-black/50 p-5 shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_0_24px_rgba(34,211,238,0.08),0_0_42px_rgba(217,70,239,0.06)]">
         <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(217,70,239,0.10),transparent_28%)]" />
+
         <div className="relative z-10 mx-auto max-w-4xl">
           <div className="mb-4 text-center">
             <p className="text-xl font-semibold text-white">Hola, soy Isabela.</p>
             <p className="mt-2 text-sm text-neutral-400">
-              Escríbeme y presiona Enter. Te responderé al instante.
+              Escríbeme cómo quieres montar la imagen. Cuando la orden quede confirmada, haz click en Generar montaje.
             </p>
           </div>
 
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={handlePromptKeyDown}
-            placeholder="Ej: colócala dentro del escenario que subí, estilo vikingo, un poco más a la derecha..."
-            className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-4 text-sm text-white outline-none placeholder:text-neutral-500"
-          />
-
-          <div className="mt-3 text-xs text-neutral-500">
-            Enter = enviar a Isabela · Shift + Enter = salto de línea
-          </div>
-
-          {isabelaLoading ? (
-            <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-black/40 p-4 text-sm text-neutral-300">
-              <p className="font-semibold text-white">Isabela</p>
-              <p className="mt-2">Estoy revisando tu instrucción...</p>
-            </div>
-          ) : null}
-
-          {chatHistory.length > 0 ? (
-            <div className="mt-4 space-y-3">
-              {chatHistory.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`rounded-2xl border p-4 text-sm ${
-                    msg.role === "assistant"
-                      ? "border-fuchsia-500/20 bg-black/40 text-neutral-200"
-                      : "border-cyan-500/20 bg-black/30 text-white"
-                  }`}
-                >
-                  <p className="mb-2 font-semibold text-white">
-                    {msg.role === "assistant" ? "Isabela" : "Tú"}
-                  </p>
-                  <p className="whitespace-pre-wrap">{msg.text}</p>
-                </div>
+          {/* CHAT BOX FIJO */}
+          <div className="rounded-3xl border border-white/10 bg-black/40">
+            <div className="h-[320px] overflow-y-auto p-4 space-y-3">
+              {messages.map((msg, idx) => (
+                <MessageBubble key={idx} role={msg.role} text={msg.text} />
               ))}
+
+              {isabelaLoading ? (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-neutral-100">
+                    <p className="mb-1 text-xs font-semibold opacity-80">Isabela</p>
+                    <p>Estoy revisando tu instrucción...</p>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            {/* INPUT ABAJO, fijo dentro del mismo cuadro */}
+            <div className="border-t border-white/10 p-3">
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={handlePromptKeyDown}
+                placeholder="Ej: colócala en medio de la playa, un poco más pequeña y con sombra suave..."
+                className="min-h-[90px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+              />
+              <div className="mt-2 text-xs text-neutral-500">
+                Enter = enviar · Shift + Enter = salto de línea
+              </div>
+            </div>
+          </div>
 
           <div className="mt-4 flex justify-end">
             <button
               onClick={handleGenerate}
-              disabled={status === "RUNNING" || !personFile}
+              disabled={status === "RUNNING" || !personFile || !isabelaPlan}
               className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
             >
               {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
@@ -346,7 +426,7 @@ export default function MontajeIAPanel({ userStatus }) {
         </div>
 
         <div className="text-sm text-neutral-400">
-          Cuando Isabela confirme lo que entendió, pulsa Generar montaje.
+          Cuando Isabela confirme la orden, podrás generar el montaje.
         </div>
       </div>
 
