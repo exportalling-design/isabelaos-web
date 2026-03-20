@@ -66,7 +66,7 @@ function buildContents({ message, chatHistory, contextText }) {
   return history;
 }
 
-// 🔥 limpia JSON aunque venga sucio
+// 🔥 Limpia JSON aunque venga sucio
 function safeParseJSON(text) {
   if (!text) return null;
 
@@ -83,6 +83,51 @@ function safeParseJSON(text) {
     }
     return null;
   }
+}
+
+// 🔥 ESTA ES LA CLAVE (lo que te faltaba)
+function extractHumanText(obj) {
+  if (!obj || typeof obj !== "object") return "";
+
+  const priorityKeys = [
+    "reply",
+    "respuesta",
+    "message",
+    "mensaje",
+    "greeting",
+    "saludo",
+    "next_step_instruction",
+    "instruccion_siguiente",
+    "understanding_confirmation",
+    "confirmacion_entendimiento",
+    "necesidad_informacion",
+  ];
+
+  // 1. busca claves importantes
+  for (const key of priorityKeys) {
+    if (typeof obj[key] === "string" && obj[key].trim()) {
+      return obj[key].trim();
+    }
+  }
+
+  // 2. busca dentro de objetos anidados
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === "object") {
+      const nested = extractHumanText(value);
+      if (nested) return nested;
+    }
+  }
+
+  // 3. fallback: junta todos los strings
+  const values = Object.values(obj)
+    .filter((v) => typeof v === "string" && v.trim())
+    .map((v) => v.trim());
+
+  if (values.length) {
+    return values.join(" ");
+  }
+
+  return "";
 }
 
 export default async function handler(req, res) {
@@ -144,29 +189,28 @@ export default async function handler(req, res) {
     });
 
     const rawText = extractTextFromVertexResponse(data);
-
     const parsed = safeParseJSON(rawText);
 
-    // 🔥 FIX REAL AQUÍ (soporta reply o respuesta)
+    // 🔥 AQUÍ ESTÁ EL FIX REAL
     const reply =
-      parsed?.reply ||
-      parsed?.respuesta ||
-      parsed?.greeting ||
-      parsed?.next_step_instruction ||
-      parsed?.understanding_confirmation ||
-      (typeof rawText === "string" ? rawText : "") ||
+      extractHumanText(parsed) ||
+      (typeof rawText === "string" ? rawText.trim() : "") ||
       "Entendido. Si está correcto, genera el montaje.";
 
     return res.status(200).json({
       ok: true,
       allowed: parsed?.allowed !== false,
-      reply: String(reply), // SIEMPRE TEXTO LIMPIO
+      reply: String(reply),
       need_person_image: !!parsed?.need_person_image,
       need_background_image: !!parsed?.need_background_image,
       scene_mode:
         parsed?.scene_mode ||
         (hasBackgroundImage ? "uploaded_background" : "generated_scene"),
-      understood_intent: parsed?.understood_intent || message,
+      understood_intent:
+        parsed?.understood_intent ||
+        parsed?.intent ||
+        parsed?.intencion ||
+        message,
       final_prompt: parsed?.final_prompt || message,
     });
   } catch (error) {
