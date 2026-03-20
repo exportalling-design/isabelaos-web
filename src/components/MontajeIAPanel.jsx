@@ -21,7 +21,6 @@ export default function MontajeIAPanel({ userStatus }) {
   const [isabelaPlan, setIsabelaPlan] = useState(null);
   const [isabelaLoading, setIsabelaLoading] = useState(false);
 
-  // ✅ historial tipo chat
   const [messages, setMessages] = useState([
     {
       role: "isabela",
@@ -34,82 +33,9 @@ export default function MontajeIAPanel({ userStatus }) {
     return typeof jadesLocal === "number" ? jadesLocal : base;
   }, [userStatus?.jades, jadesLocal]);
 
-  function resetRunUI() {
-    setError("");
-    setResultUrl("");
-    setJobId("");
-    setStatus("IDLE");
-  }
-
-  function resetInterpretation() {
-    setIsabelaPlan(null);
-    setMessages([
-      {
-        role: "isabela",
-        text: "Hola. Soy Isabela. Cuéntame cómo quieres montar tu imagen y te ayudaré a dejar la orden lista antes de generar.",
-      },
-    ]);
-  }
-
-  async function handlePersonFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setPersonFile(f);
-    setPersonPreview(URL.createObjectURL(f));
-    resetRunUI();
-    resetInterpretation();
-  }
-
-  async function handleBackgroundFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setBackgroundFile(f);
-    setBackgroundPreview(URL.createObjectURL(f));
-    resetRunUI();
-    resetInterpretation();
-  }
-
-  async function fileToBase64(file) {
-    const buf = await file.arrayBuffer();
-    return btoa(
-      new Uint8Array(buf).reduce((data, byte) => data + String.fromCharCode(byte), "")
-    );
-  }
-
-  async function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
-
-  async function pollJob(jobIdToPoll, maxSeconds = 140) {
-    const started = Date.now();
-
-    while (true) {
-      if ((Date.now() - started) / 1000 > maxSeconds) {
-        throw new Error("Tiempo de espera agotado esperando resultado del montaje.");
-      }
-
-      const r = await fetch("/api/montaje-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: jobIdToPoll }),
-      });
-
-      const data = await r.json().catch(() => null);
-
-      if (!r.ok || !data) {
-        throw new Error("Error consultando estado del montaje.");
-      }
-
-      if (data.done && data.ok && data.image_data_url) {
-        return data.image_data_url;
-      }
-
-      if (data.done && !data.ok) {
-        throw new Error(data.error || "No se pudo completar el montaje.");
-      }
-
-      await sleep(1500);
-    }
+  function cleanReply(text) {
+    if (!text) return "";
+    return text.replace(/```json|```/g, "").trim();
   }
 
   async function handleAskIsabela() {
@@ -120,15 +46,10 @@ export default function MontajeIAPanel({ userStatus }) {
       setIsabelaLoading(true);
       setError("");
 
-      // agrega mensaje del usuario al chat
       setMessages((prev) => [...prev, { role: "user", text }]);
 
       const session = await supabase.auth.getSession();
       const token = session?.data?.session?.access_token;
-
-      if (!token) {
-        throw new Error("MISSING_AUTH_TOKEN");
-      }
 
       const resp = await fetch("/api/isabela-montaje-chat", {
         method: "POST",
@@ -146,14 +67,15 @@ export default function MontajeIAPanel({ userStatus }) {
       const json = await resp.json().catch(() => null);
 
       if (!resp.ok || !json?.ok) {
-        throw new Error(json?.reply || json?.error || json?.detail || "No pude interpretar la solicitud.");
+        throw new Error(json?.reply || "Error interpretando");
       }
 
-      const replyText =
-        json?.reply ||
-        "Entendido. Si está correcto, haz click en Generar montaje.";
+      const replyText = cleanReply(json?.reply);
 
-      setMessages((prev) => [...prev, { role: "isabela", text: replyText }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "isabela", text: replyText },
+      ]);
 
       if (json?.allowed) {
         setIsabelaPlan(json);
@@ -163,157 +85,17 @@ export default function MontajeIAPanel({ userStatus }) {
 
       setPrompt("");
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "Lo siento, no pude interpretar tu instrucción en este momento.");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "isabela",
-          text: "Lo siento, no pude procesar tu solicitud en este momento.",
-        },
-      ]);
+      setError("Error al procesar mensaje");
     } finally {
       setIsabelaLoading(false);
-    }
-  }
-
-  async function handleGenerate() {
-    if (!personFile) {
-      setError("Debes subir una imagen de persona, modelo o producto.");
-      return;
-    }
-
-    if (!isabelaPlan) {
-      setError("Primero habla con Isabela hasta confirmar la orden del montaje.");
-      return;
-    }
-
-    try {
-      setStatus("RUNNING");
-      setError("");
-      setResultUrl("");
-      setJobId("");
-
-      const person_b64 = await fileToBase64(personFile);
-      const bg_b64 = backgroundFile ? await fileToBase64(backgroundFile) : null;
-
-      const session = await supabase.auth.getSession();
-      const token = session?.data?.session?.access_token;
-
-      if (!token) {
-        throw new Error("MISSING_AUTH_TOKEN");
-      }
-
-      const resp = await fetch("/api/generate-montaje", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          person_image: person_b64,
-          background_image: bg_b64,
-          prompt: messages
-            .filter((m) => m.role === "user")
-            .map((m) => m.text)
-            .join(" | "),
-          isabelaPlan,
-          ref: `montajeia-${Date.now()}`,
-        }),
-      });
-
-      const json = await resp.json().catch(() => null);
-
-      if (!resp.ok || !json?.ok) {
-        throw new Error(json?.error || json?.detail || "ERROR_GENERATION");
-      }
-
-      if (json?.jobId) setJobId(json.jobId);
-
-      if (json?.billed?.amount) {
-        setJadesLocal((prev) => {
-          const base =
-            typeof prev === "number"
-              ? prev
-              : typeof userStatus?.jades === "number"
-                ? userStatus.jades
-                : 0;
-          return Math.max(0, base - json.billed.amount);
-        });
-      }
-
-      if (json?.image_data_url) {
-        setResultUrl(json.image_data_url);
-        setStatus("DONE");
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "isabela",
-            text: "Listo. Ya generé tu montaje.",
-          },
-        ]);
-        return;
-      }
-
-      const finalImage = await pollJob(json.jobId, 160);
-      setResultUrl(finalImage);
-      setStatus("DONE");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "isabela",
-          text: "Listo. Ya generé tu montaje.",
-        },
-      ]);
-    } catch (err) {
-      console.error(err);
-      setError(
-        err?.message ||
-          "Lo siento, no pude generar el montaje. Intenta cambiar las imágenes o la descripción."
-      );
-      setStatus("ERROR");
     }
   }
 
   function handlePromptKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!isabelaLoading && prompt.trim()) {
-        handleAskIsabela();
-      }
+      handleAskIsabela();
     }
-  }
-
-  function UploadCard({ title, subtitle, preview, onChange }) {
-    return (
-      <label className="group relative block cursor-pointer overflow-hidden rounded-3xl border border-cyan-400/20 bg-black/40 p-4 transition hover:border-fuchsia-400/40">
-        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(217,70,239,0.14),transparent_35%)]" />
-        <div className="relative z-10">
-          <p className="text-sm font-semibold text-white">{title}</p>
-          <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
-
-          <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/40 p-6 text-center">
-            {!preview ? (
-              <>
-                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-2xl">
-                  🖼️
-                </div>
-                <p className="text-sm font-semibold text-white">Sube foto aquí</p>
-                <p className="mt-1 text-xs text-neutral-500">Toca para seleccionar una imagen</p>
-              </>
-            ) : (
-              <img
-                src={preview}
-                alt="preview"
-                className="mx-auto max-h-[260px] w-full rounded-2xl object-cover"
-              />
-            )}
-          </div>
-        </div>
-
-        <input type="file" accept="image/*" onChange={onChange} className="hidden" />
-      </label>
-    );
   }
 
   function MessageBubble({ role, text }) {
@@ -324,13 +106,13 @@ export default function MontajeIAPanel({ userStatus }) {
           className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
             isUser
               ? "bg-cyan-500/10 border border-cyan-400/20 text-white"
-              : "bg-fuchsia-500/10 border border-fuchsia-400/20 text-neutral-100"
+              : "bg-fuchsia-500/10 border border-fuchsia-400/20 text-white"
           }`}
         >
-          <p className="mb-1 text-xs font-semibold opacity-80">
+          <p className="mb-1 text-xs opacity-70">
             {isUser ? "Tú" : "Isabela"}
           </p>
-          <p className="whitespace-pre-wrap">{text}</p>
+          <p>{text}</p>
         </div>
       </div>
     );
@@ -338,125 +120,46 @@ export default function MontajeIAPanel({ userStatus }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white">Montaje IA</h1>
-        <p className="mt-2 text-sm text-neutral-400">
-          Coloca una persona, producto o avatar dentro de cualquier escenario real.
-        </p>
-      </div>
+      <h1 className="text-3xl font-bold text-white">Montaje IA</h1>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <UploadCard
-          title="Persona / modelo / producto"
-          subtitle="Sube la imagen principal que quieres montar."
-          preview={personPreview}
-          onChange={handlePersonFile}
-        />
+      <div className="rounded-3xl border border-white/10 bg-black/40">
 
-        <UploadCard
-          title="Escenario"
-          subtitle="Opcional. Sube un fondo real o deja vacío para que Isabela lo interprete."
-          preview={backgroundPreview}
-          onChange={handleBackgroundFile}
-        />
-      </div>
+        {/* CHAT */}
+        <div className="h-[320px] overflow-y-auto p-4 space-y-3">
+          {messages.map((msg, i) => (
+            <MessageBubble key={i} {...msg} />
+          ))}
 
-      <div className="relative overflow-hidden rounded-3xl border border-cyan-400/25 bg-black/50 p-5 shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_0_24px_rgba(34,211,238,0.08),0_0_42px_rgba(217,70,239,0.06)]">
-        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(217,70,239,0.10),transparent_28%)]" />
-
-        <div className="relative z-10 mx-auto max-w-4xl">
-          <div className="mb-4 text-center">
-            <p className="text-xl font-semibold text-white">Hola, soy Isabela.</p>
-            <p className="mt-2 text-sm text-neutral-400">
-              Escríbeme cómo quieres montar la imagen. Cuando la orden quede confirmada, haz click en Generar montaje.
-            </p>
-          </div>
-
-          {/* CHAT BOX FIJO */}
-          <div className="rounded-3xl border border-white/10 bg-black/40">
-            <div className="h-[320px] overflow-y-auto p-4 space-y-3">
-              {messages.map((msg, idx) => (
-                <MessageBubble key={idx} role={msg.role} text={msg.text} />
-              ))}
-
-              {isabelaLoading ? (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-neutral-100">
-                    <p className="mb-1 text-xs font-semibold opacity-80">Isabela</p>
-                    <p>Estoy revisando tu instrucción...</p>
-                  </div>
-                </div>
-              ) : null}
+          {isabelaLoading && (
+            <div className="text-sm text-neutral-400">
+              Isabela está escribiendo...
             </div>
-
-            {/* INPUT ABAJO, fijo dentro del mismo cuadro */}
-            <div className="border-t border-white/10 p-3">
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={handlePromptKeyDown}
-                placeholder="Ej: colócala en medio de la playa, un poco más pequeña y con sombra suave..."
-                className="min-h-[90px] w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
-              />
-              <div className="mt-2 text-xs text-neutral-500">
-                Enter = enviar · Shift + Enter = salto de línea
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={handleGenerate}
-              disabled={status === "RUNNING" || !personFile || !isabelaPlan}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
-            >
-              {status === "RUNNING" ? "Generando..." : `Generar montaje (-${UI_COST_JADES_DEFAULT})`}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-black/40 p-5 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-sm text-neutral-400">Costo por generación</p>
-          <p className="text-2xl font-bold text-white">{UI_COST_JADES_DEFAULT} jades</p>
-          <p className="mt-1 text-xs text-neutral-500">
-            Jades disponibles: {jadesShown}
-          </p>
+          )}
         </div>
 
-        <div className="text-sm text-neutral-400">
-          Cuando Isabela confirme la orden, podrás generar el montaje.
-        </div>
-      </div>
-
-      {jobId ? (
-        <div className="rounded-2xl border border-white/10 bg-black/40 p-3 text-xs text-neutral-300">
-          Job: <span className="font-semibold text-white">{jobId}</span>
-        </div>
-      ) : null}
-
-      {error ? (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <p className="text-lg font-semibold text-white">Resultado</p>
-
-        {!resultUrl ? (
-          <p className="mt-3 text-sm text-neutral-400">
-            Aquí aparecerá el montaje {status === "RUNNING" ? "(procesando...)" : ""}
-          </p>
-        ) : (
-          <img
-            src={resultUrl}
-            className="mt-4 w-full rounded-2xl border border-white/10"
-            alt="resultado"
+        {/* INPUT + BOTÓN */}
+        <div className="border-t border-white/10 p-3 flex gap-2 items-end">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handlePromptKeyDown}
+            placeholder="Ej: colócala en la playa con sombra suave..."
+            className="flex-1 min-h-[60px] rounded-xl bg-black/60 p-3 text-white outline-none"
           />
-        )}
+
+          <button
+            onClick={handleAskIsabela}
+            disabled={isabelaLoading || !prompt.trim()}
+            className="h-[60px] px-5 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-semibold"
+          >
+            Enviar
+          </button>
+        </div>
       </div>
+
+      {error && (
+        <div className="text-red-400 text-sm">{error}</div>
+      )}
     </div>
   );
-}
+ }
