@@ -1,4 +1,3 @@
-// api/isabela-montaje-chat.js
 import {
   vertexFetch,
   extractTextFromVertexResponse,
@@ -67,6 +66,26 @@ function buildContents({ message, chatHistory, contextText }) {
   return history;
 }
 
+// 🔥 NUEVO: limpia texto y extrae JSON aunque venga sucio
+function safeParseJSON(text) {
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    // intenta extraer solo el JSON dentro del texto
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -104,25 +123,7 @@ export default async function handler(req, res) {
       `- Hay imagen principal subida: ${hasPersonImage ? "sí" : "no"}`,
       `- Hay fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
       "",
-      "Debes responder siempre en JSON válido con este formato:",
-      "{",
-      '  "ok": true,',
-      '  "allowed": true,',
-      '  "reply": "respuesta breve en español para el usuario",',
-      '  "need_person_image": false,',
-      '  "need_background_image": false,',
-      '  "scene_mode": "uploaded_background|generated_scene",',
-      '  "understood_intent": "resumen corto",',
-      '  "final_prompt": "prompt final en inglés para el endpoint"',
-      "}",
-      "",
-      "Reglas:",
-      "- No pidas imagen principal si ya existe.",
-      "- No pidas fondo si el usuario no lo necesita.",
-      "- Si hay fondo subido, usa scene_mode=uploaded_background.",
-      "- Si no hay fondo subido, usa scene_mode=generated_scene.",
-      "- reply debe ser útil y natural.",
-      "- final_prompt debe ser claro y listo para pasar al endpoint de generación.",
+      "Responde SIEMPRE en JSON válido.",
     ].join("\n");
 
     const contents = buildContents({
@@ -145,28 +146,18 @@ export default async function handler(req, res) {
 
     const rawText = extractTextFromVertexResponse(data);
 
-    let parsed;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      parsed = {
-        ok: true,
-        allowed: true,
-        reply: rawText || "Entendido. Si está correcto, genera el montaje.",
-        need_person_image: !hasPersonImage,
-        need_background_image: false,
-        scene_mode: hasBackgroundImage
-          ? "uploaded_background"
-          : "generated_scene",
-        understood_intent: message,
-        final_prompt: message,
-      };
-    }
+    // 🔥 FIX REAL
+    const parsed = safeParseJSON(rawText);
+
+    const reply =
+      parsed?.reply ||
+      (typeof rawText === "string" ? rawText : "") ||
+      "Entendido. Si está correcto, genera el montaje.";
 
     return res.status(200).json({
       ok: true,
       allowed: parsed?.allowed !== false,
-      reply: parsed?.reply || "Entendido. Si está correcto, genera el montaje.",
+      reply: String(reply), // 🔥 SIEMPRE STRING LIMPIO
       need_person_image: !!parsed?.need_person_image,
       need_background_image: !!parsed?.need_background_image,
       scene_mode:
@@ -174,10 +165,6 @@ export default async function handler(req, res) {
         (hasBackgroundImage ? "uploaded_background" : "generated_scene"),
       understood_intent: parsed?.understood_intent || message,
       final_prompt: parsed?.final_prompt || message,
-      raw: parsed,
-      model: MONTAJE_VERTEX_MODEL,
-      location: MONTAJE_VERTEX_LOCATION,
-      projectId: GOOGLE_PROJECT_ID,
     });
   } catch (error) {
     console.error("ERROR /api/isabela-montaje-chat:", error);
@@ -185,11 +172,6 @@ export default async function handler(req, res) {
     return res.status(error?.status || 500).json({
       ok: false,
       error: error?.message || "No se pudo interpretar la solicitud.",
-      details: error?.details || null,
-      model: error?.vertexModel || MONTAJE_VERTEX_MODEL,
-      location: error?.vertexLocation || MONTAJE_VERTEX_LOCATION,
-      vertexUrl: error?.vertexUrl || null,
-      projectId: GOOGLE_PROJECT_ID,
     });
   }
 }
