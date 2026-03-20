@@ -40,6 +40,13 @@ export default function MontajeIAPanel({ userStatus }) {
     setBackgroundPreview(URL.createObjectURL(f));
   }
 
+  async function fileToBase64(file) {
+    const buf = await file.arrayBuffer();
+    return btoa(
+      new Uint8Array(buf).reduce((data, byte) => data + String.fromCharCode(byte), "")
+    );
+  }
+
   async function handleAskIsabela() {
     const text = prompt.trim();
     if (!text) return;
@@ -66,7 +73,15 @@ export default function MontajeIAPanel({ userStatus }) {
 
       const json = await resp.json();
 
-      const reply = cleanReply(json?.reply);
+      // 🔥 FIX REAL: evita que salga el JSON completo
+      let reply = "";
+      if (typeof json === "object") {
+        reply = json?.reply || "";
+      } else {
+        reply = json;
+      }
+
+      reply = cleanReply(reply);
 
       setMessages((prev) => [
         ...prev,
@@ -93,11 +108,45 @@ export default function MontajeIAPanel({ userStatus }) {
     }
   }
 
+  async function handleGenerate() {
+    if (!personFile) {
+      alert("Sube imagen principal");
+      return;
+    }
+
+    try {
+      const person_b64 = await fileToBase64(personFile);
+      const bg_b64 = backgroundFile
+        ? await fileToBase64(backgroundFile)
+        : null;
+
+      const session = await supabase.auth.getSession();
+      const token = session?.data?.session?.access_token;
+
+      const resp = await fetch("/api/generate-montaje", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          person_image: person_b64,
+          background_image: bg_b64,
+          prompt,
+        }),
+      });
+
+      const json = await resp.json();
+
+      console.log("RESULTADO:", json);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   function UploadCard({ title, subtitle, preview, onChange }) {
     return (
       <label className="group relative block cursor-pointer overflow-hidden rounded-3xl border border-cyan-400/20 bg-black/40 p-4 transition hover:border-fuchsia-400/40">
-        
-        {/* Glow estilo original */}
         <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(217,70,239,0.14),transparent_35%)]" />
 
         <div className="relative z-10">
@@ -105,7 +154,6 @@ export default function MontajeIAPanel({ userStatus }) {
           <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
 
           <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/40 p-6 text-center">
-
             {!preview ? (
               <>
                 <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-2xl">
@@ -153,7 +201,6 @@ export default function MontajeIAPanel({ userStatus }) {
   return (
     <div className="space-y-6">
 
-      {/* UPLOAD EXACTO COMO TU UI */}
       <div className="grid gap-6 md:grid-cols-2">
         <UploadCard
           title="Persona / modelo / producto"
@@ -170,9 +217,7 @@ export default function MontajeIAPanel({ userStatus }) {
         />
       </div>
 
-      {/* CHAT */}
       <div className="rounded-3xl border border-white/10 bg-black/40">
-
         <div className="h-[320px] overflow-y-auto p-4 space-y-3">
           {messages.map((m, i) => (
             <MessageBubble key={i} {...m} />
@@ -196,6 +241,15 @@ export default function MontajeIAPanel({ userStatus }) {
           </button>
         </div>
       </div>
+
+      {/* 🔥 BOTÓN QUE TE FALTABA */}
+      <button
+        onClick={handleGenerate}
+        disabled={!personFile}
+        className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-white font-semibold"
+      >
+        Generar montaje (-8 jades)
+      </button>
     </div>
   );
 }
