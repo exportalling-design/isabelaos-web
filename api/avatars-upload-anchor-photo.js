@@ -30,7 +30,11 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    const bucket = process.env.AVATAR_BUCKET || "avatars";
+    const bucket =
+      process.env.SUPABASE_AVATAR_BUCKET ||
+      process.env.AVATAR_BUCKET ||
+      "avatars";
+
     const user_id = await getAuthUserId(req);
 
     if (!user_id) {
@@ -39,7 +43,7 @@ export default async function handler(req, res) {
 
     const { avatar_id, image_b64, anchor_index } = req.body || {};
 
-    if (!avatar_id || !image_b64 || !anchor_index) {
+    if (!avatar_id || !image_b64 || anchor_index == null) {
       return res.status(400).json({
         ok: false,
         error: "Missing avatar_id, image_b64 or anchor_index",
@@ -54,10 +58,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // validar avatar + dueño
     const { data: avatar, error: avErr } = await supabase
       .from("avatars")
-      .select("id,user_id")
+      .select("id,user_id,ref_image_path")
       .eq("id", avatar_id)
       .single();
 
@@ -89,6 +92,36 @@ export default async function handler(req, res) {
 
     if (upErr) throw upErr;
 
+    const { error: dbErr } = await supabase
+      .from("avatar_anchor_photos")
+      .upsert(
+        [{
+          avatar_id,
+          user_id,
+          anchor_index: idx,
+          storage_path,
+        }],
+        { onConflict: "avatar_id,anchor_index" }
+      );
+
+    if (dbErr) throw dbErr;
+
+    const updatePayload = {
+      status: "READY",
+      updated_at: new Date().toISOString(),
+    };
+
+    if (idx === 1 || !avatar.ref_image_path) {
+      updatePayload.ref_image_path = storage_path;
+    }
+
+    const { error: upAvatarErr } = await supabase
+      .from("avatars")
+      .update(updatePayload)
+      .eq("id", avatar_id);
+
+    if (upAvatarErr) throw upAvatarErr;
+
     const { data: signed, error: sErr } = await supabase.storage
       .from(bucket)
       .createSignedUrl(storage_path, 3600);
@@ -104,6 +137,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("[avatars-upload-anchor-photo]", err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({ ok: false, error: err.message || "SERVER_ERROR" });
   }
 }
