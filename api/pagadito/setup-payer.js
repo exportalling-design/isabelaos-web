@@ -28,7 +28,7 @@ export default async function handler(req, res) {
       method: "POST",
       headers: {
         "Content-Type": "application/json;charset=UTF-8",
-        Authorization: `Basic ${auth}`,
+        "Authorization": `Basic ${auth}`,
       },
       body: JSON.stringify({
         card: {
@@ -40,7 +40,18 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = {
+        error: "invalid_pagadito_response",
+        raw: rawText,
+      };
+    }
+
     return res.status(response.status).json(data);
   } catch (error) {
     return res.status(500).json({
