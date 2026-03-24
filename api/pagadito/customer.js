@@ -4,46 +4,40 @@ export default async function handler(req, res) {
   }
 
   try {
-    const uid = process.env.PAGADITO_UID;
-    const wsk = process.env.PAGADITO_WSK;
+    const body = req.body;
 
-    if (!uid || !wsk) {
-      return res.status(500).json({ error: "missing_pagadito_env" });
+    const UID = process.env.PAGADITO_UID;
+    const WSK = process.env.PAGADITO_WSK;
+
+    const auth = Buffer.from(`${UID}:${WSK}`).toString("base64");
+
+    const response = await fetch(
+      "https://sandbox-api.pagadito.com/v1/customer/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    const text = await response.text();
+
+    try {
+      const json = JSON.parse(text);
+      return res.status(response.status).json(json);
+    } catch (e) {
+      return res.status(500).json({
+        error: "invalid_pagadito_response",
+        raw: text,
+      });
     }
-
-    const {
-      card,
-      transaction,
-      browserInfo,
-      consumerAuthenticationInformation,
-    } = req.body || {};
-
-    if (!card || !transaction || !browserInfo || !consumerAuthenticationInformation) {
-      return res.status(400).json({ error: "missing_required_fields" });
-    }
-
-    const auth = Buffer.from(`${uid}:${wsk}`).toString("base64");
-
-    const response = await fetch("https://sandbox-api.pagadito.com/v1/customer/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json;charset=UTF-8",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify({
-        card,
-        transaction,
-        browserInfo,
-        consumerAuthenticationInformation,
-      }),
-    });
-
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (error) {
+  } catch (err) {
     return res.status(500).json({
-      error: "customer_payment_failed",
-      message: error.message,
+      error: "customer_failed",
+      message: err.message,
     });
   }
 }
