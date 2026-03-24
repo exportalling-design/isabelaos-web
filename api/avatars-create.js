@@ -23,7 +23,7 @@ export default async function handler(req, res) {
         {
           user_id,
           name: String(name).trim(),
-          trigger: null,
+          trigger: "anchor",
           status: "DRAFT",
           lora_path: null,
         },
