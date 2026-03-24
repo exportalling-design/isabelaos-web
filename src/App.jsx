@@ -708,9 +708,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         const readyAvatars = (Array.isArray(j.avatars) ? j.avatars : []).filter(
           (a) =>
             String(a?.status || "").toUpperCase() === "READY" &&
-            String(a?.lora_path || "").trim()
+            Number(a?.anchor_count || 0) >= 1
         );
-
         setAvatars(readyAvatars);
 
         setSelectedAvatarId((prev) => {
@@ -864,9 +863,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           // avatar / lora
           avatar_id: selectedAvatar?.id || null,
           avatar_name: selectedAvatar?.name || null,
-          avatar_trigger: selectedAvatar?.trigger || null,
-          avatar_lora_path: selectedAvatar?.lora_path || null,
-
+          
           // avatar / anchors
           avatar_anchor_urls: avatarAnchors.map((a) => a.url).filter(Boolean),
           avatar_anchor_paths: avatarAnchors.map((a) => a.storage_path).filter(Boolean),
@@ -1010,10 +1007,10 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         <div className="mt-4 space-y-4 text-sm">
           {!isDemo && (
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="text-sm font-medium text-white">Avatar LoRA</div>
-              <div className="mt-1 text-[11px] text-neutral-400">
-                Elige un avatar READY para usar su trigger y LoRA al generar.
-              </div>
+            <div className="text-sm font-medium text-white">Anchors faciales</div>
+            <div className="mt-1 text-[11px] text-neutral-400">
+              Elige un anchor guardado para enviar 1 a 3 fotos de referencia al worker.
+            </div>
 
               <select
                 className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-3 text-sm text-white outline-none ring-1 ring-cyan-400/60 focus:ring-2 focus:ring-cyan-400"
@@ -1024,7 +1021,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                 <option value="">Sin avatar</option>
                 {avatars.map((avatar) => (
                   <option key={avatar.id} value={avatar.id}>
-                    {avatar.name} · {avatar.trigger}
+                    {avatar.name}
                   </option>
                 ))}
               </select>
@@ -1034,7 +1031,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
                   ? "Cargando avatares..."
                   : avatars.length > 0
                   ? `${avatars.length} avatar(es) READY encontrados`
-                  : "No hay avatares READY con LoRA todavía"}
+                  : "No hay anchors READY todavía"}
               </div>
             </div>
           )}
