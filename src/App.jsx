@@ -1241,13 +1241,133 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
 // ---------------------------------------------------------
 // Dashboard: pestaña "Suscribirse" (antes estaba en el home)
 // ---------------------------------------------------------
-function SubscribePanel({ userStatus }) {
+function SubscribePanel({ userStatus, onRefresh }) {
+  const { user } = useAuth();
+
+  const [selectedPlan, setSelectedPlan] = useState("basic");
+  const [cardForm, setCardForm] = useState({
+    cardHolderName: "",
+    number: "",
+    expirationDate: "",
+    cvv: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    city: "Guatemala",
+    state: "Guatemala",
+    zip: "",
+    countryId: "320",
+    line1: "",
+  });
+
+  const [paying, setPaying] = useState(false);
+  const [cardError, setCardError] = useState("");
+  const [cardSuccess, setCardSuccess] = useState("");
+  const [challengeData, setChallengeData] = useState(null);
+
+  const selectedPrice = PLANS?.[selectedPlan]?.price_usd ?? 0;
+  const selectedJades = PLANS?.[selectedPlan]?.included_jades ?? 0;
+
+  const paypalPlanId =
+    selectedPlan === "basic" ? PAYPAL_PLAN_ID_BASIC : PAYPAL_PLAN_ID_PRO;
+
+  const paypalCustomId = user?.id ? `uid=${user.id};plan=${selectedPlan}` : null;
+
+  const updateField = (key, value) => {
+    setCardForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  async function handleCardPay(e) {
+    e.preventDefault();
+    setCardError("");
+    setCardSuccess("");
+    setChallengeData(null);
+
+    if (!user?.id) {
+      setCardError("Debes iniciar sesión para suscribirte.");
+      return;
+    }
+
+    if (!cardForm.number || !cardForm.expirationDate || !cardForm.cvv || !cardForm.cardHolderName) {
+      setCardError("Completa los datos de tarjeta.");
+      return;
+    }
+
+    if (!cardForm.firstName || !cardForm.lastName || !cardForm.email || !cardForm.phone) {
+      setCardError("Completa tus datos personales.");
+      return;
+    }
+
+    if (!cardForm.line1 || !cardForm.city || !cardForm.state || !cardForm.countryId) {
+      setCardError("Completa la dirección de facturación.");
+      return;
+    }
+
+    try {
+      setPaying(true);
+
+      const auth = await getAuthHeadersGlobal();
+
+      const r = await fetch("/api/pagadito/subscribe-card", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...auth,
+        },
+        body: JSON.stringify({
+          plan: selectedPlan,
+          card: {
+            number: cardForm.number.trim(),
+            expirationDate: cardForm.expirationDate.trim(),
+            cvv: cardForm.cvv.trim(),
+            cardHolderName: cardForm.cardHolderName.trim(),
+            firstName: cardForm.firstName.trim(),
+            lastName: cardForm.lastName.trim(),
+            billingAddress: {
+              city: cardForm.city.trim(),
+              state: cardForm.state.trim(),
+              zip: cardForm.zip.trim(),
+              countryId: cardForm.countryId.trim(),
+              line1: cardForm.line1.trim(),
+              phone: cardForm.phone.trim(),
+            },
+            email: cardForm.email.trim(),
+          },
+        }),
+      });
+
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j?.ok) {
+        if (j?.challenge_required) {
+          setChallengeData(j.challenge || null);
+          setCardError("El banco solicitó verificación 3D Secure. Completa el challenge.");
+          return;
+        }
+        throw new Error(j?.response_message || j?.error || "No se pudo procesar el pago con tarjeta.");
+      }
+
+      setCardSuccess(
+        `Suscripción ${selectedPlan.toUpperCase()} activada correctamente. Se acreditaron ${selectedJades} jades.`
+      );
+
+      if (typeof onRefresh === "function") {
+        await onRefresh();
+      }
+    } catch (err) {
+      setCardError(err?.message || "Error procesando pago.");
+    } finally {
+      setPaying(false);
+    }
+  }
+
   return (
     <section className="rounded-3xl border border-white/10 bg-black/60 p-6">
       <div className="flex flex-col gap-2">
         <h2 className="text-lg font-semibold text-white">Suscribirse</h2>
         <p className="text-xs text-neutral-400">
-          Suscripción mensual. Al activarse, el sistema acreditará tus jades automáticamente por webhook.
+          Puedes activar tu plan con tarjeta o usar PayPal como alternativa. El plan se ligará a tu cuenta actual.
         </p>
       </div>
 
@@ -1277,71 +1397,260 @@ function SubscribePanel({ userStatus }) {
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+        <button
+          type="button"
+          onClick={() => setSelectedPlan("basic")}
+          className={`rounded-3xl border p-5 text-left transition ${
+            selectedPlan === "basic"
+              ? "border-cyan-400 bg-cyan-500/10"
+              : "border-white/10 bg-black/40 hover:bg-black/50"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold text-white">Basic</h3>
-            <span className="text-sm text-neutral-300">$19/mes</span>
+            <span className="text-sm text-neutral-300">${PLANS?.basic?.price_usd ?? 19}/mes</span>
           </div>
-          <p className="mt-2 text-xs text-neutral-400">Ideal para creators en beta. Incluye jades mensuales.</p>
+          <p className="mt-2 text-xs text-neutral-400">
+            Incluye {PLANS?.basic?.included_jades ?? 100} jades mensuales.
+          </p>
+        </button>
 
-          <div className="mt-4">
-            {!PAYPAL_PLAN_ID_BASIC ? (
-              <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                Falta VITE_PAYPAL_PLAN_ID_BASIC en tu .env
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await startPaypalSubscription("basic");
-                  } catch (e) {
-                    alert(e?.message || "No se pudo iniciar la suscripción.");
-                  }
-                }}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-              >
-                Suscribirme con PayPal
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-black/40 p-5">
+        <button
+          type="button"
+          onClick={() => setSelectedPlan("pro")}
+          className={`rounded-3xl border p-5 text-left transition ${
+            selectedPlan === "pro"
+              ? "border-fuchsia-400 bg-fuchsia-500/10"
+              : "border-white/10 bg-black/40 hover:bg-black/50"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold text-white">Pro</h3>
-            <span className="text-sm text-neutral-300">$39/mes</span>
+            <span className="text-sm text-neutral-300">${PLANS?.pro?.price_usd ?? 39}/mes</span>
           </div>
-          <p className="mt-2 text-xs text-neutral-400">Más jades y potencia para producción constante.</p>
-
-          <div className="mt-4">
-            {!PAYPAL_PLAN_ID_PRO ? (
-              <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
-                Falta VITE_PAYPAL_PLAN_ID_PRO en tu .env
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await startPaypalSubscription("pro");
-                  } catch (e) {
-                    alert(e?.message || "No se pudo iniciar la suscripción.");
-                  }
-                }}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
-              >
-                Suscribirme con PayPal
-              </button>
-            )}
-          </div>
-        </div>
+          <p className="mt-2 text-xs text-neutral-400">
+            Incluye {PLANS?.pro?.included_jades ?? 300} jades mensuales.
+          </p>
+        </button>
       </div>
 
-      <p className="mt-4 text-[10px] text-neutral-500">
-        Nota: si el webhook tarda unos segundos, refresca la página. El crédito de jades se aplica cuando PayPal confirma
-        el evento.
-      </p>
+      <div className="mt-6 rounded-3xl border border-white/10 bg-black/40 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-white">
+              Pagar con tarjeta · {selectedPlan === "basic" ? "Basic" : "Pro"}
+            </h3>
+            <p className="mt-1 text-xs text-neutral-400">
+              Total: ${selectedPrice} / mes · Se acreditan {selectedJades} jades al activarse.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-3 py-2 text-xs text-neutral-300">
+            Plan actual: <span className="font-semibold text-white">{selectedPlan}</span>
+          </div>
+        </div>
+
+        <form onSubmit={handleCardPay} className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="text-xs text-neutral-300">Nombre en tarjeta</label>
+            <input
+              type="text"
+              value={cardForm.cardHolderName}
+              onChange={(e) => updateField("cardHolderName", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="JOHN DOE"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Número de tarjeta</label>
+            <input
+              type="text"
+              value={cardForm.number}
+              onChange={(e) => updateField("number", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="4000000000002503"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Vencimiento (MM/YYYY)</label>
+            <input
+              type="text"
+              value={cardForm.expirationDate}
+              onChange={(e) => updateField("expirationDate", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="01/2027"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">CVV</label>
+            <input
+              type="text"
+              value={cardForm.cvv}
+              onChange={(e) => updateField("cvv", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="123"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Nombre</label>
+            <input
+              type="text"
+              value={cardForm.firstName}
+              onChange={(e) => updateField("firstName", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="John"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Apellido</label>
+            <input
+              type="text"
+              value={cardForm.lastName}
+              onChange={(e) => updateField("lastName", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="Doe"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Correo</label>
+            <input
+              type="email"
+              value={cardForm.email}
+              onChange={(e) => updateField("email", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="tu@email.com"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Teléfono</label>
+            <input
+              type="text"
+              value={cardForm.phone}
+              onChange={(e) => updateField("phone", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="5555-5555"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Ciudad</label>
+            <input
+              type="text"
+              value={cardForm.city}
+              onChange={(e) => updateField("city", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="Guatemala"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Estado / Departamento</label>
+            <input
+              type="text"
+              value={cardForm.state}
+              onChange={(e) => updateField("state", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="Guatemala"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">Código postal</label>
+            <input
+              type="text"
+              value={cardForm.zip}
+              onChange={(e) => updateField("zip", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="01001"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-neutral-300">País (ISO)</label>
+            <input
+              type="text"
+              value={cardForm.countryId}
+              onChange={(e) => updateField("countryId", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="320"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="text-xs text-neutral-300">Dirección</label>
+            <input
+              type="text"
+              value={cardForm.line1}
+              onChange={(e) => updateField("line1", e.target.value)}
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              placeholder="Zona 10, Guatemala"
+            />
+          </div>
+
+          {cardError && (
+            <div className="md:col-span-2 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+              {cardError}
+            </div>
+          )}
+
+          {cardSuccess && (
+            <div className="md:col-span-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
+              {cardSuccess}
+            </div>
+          )}
+
+          {challengeData?.stepUpUrl && (
+            <div className="md:col-span-2 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-xs text-yellow-100">
+              <div className="mb-2 font-semibold text-white">3D Secure requerido</div>
+              <p className="mb-3">
+                El banco pidió validación adicional. En la siguiente fase conectaremos el iframe challenge aquí mismo.
+              </p>
+              <div className="rounded-xl bg-black/50 p-3 text-[11px] break-all">
+                stepUpUrl: {challengeData.stepUpUrl}
+              </div>
+            </div>
+          )}
+
+          <div className="md:col-span-2">
+            <button
+              type="submit"
+              disabled={paying}
+              className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {paying ? "Procesando pago..." : `Pagar ${selectedPlan === "basic" ? "Basic" : "Pro"} con tarjeta`}
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <div className="text-xs text-neutral-400">O si prefieres, paga con PayPal:</div>
+
+          {!paypalPlanId ? (
+            <div className="mt-3 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 px-4 py-3 text-xs text-yellow-100">
+              Falta configurar el Plan ID de PayPal para {selectedPlan}.
+            </div>
+          ) : (
+            <PayPalButton
+              mode="subscription"
+              planId={paypalPlanId}
+              customId={paypalCustomId}
+              containerId={`paypal-subscribe-${selectedPlan}`}
+              onPaid={async () => {
+                setCardSuccess("Suscripción PayPal creada. Esperando confirmación del webhook...");
+                setTimeout(() => {
+                  if (typeof onRefresh === "function") onRefresh();
+                }, 2500);
+              }}
+            />
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1552,7 +1861,9 @@ function DashboardView() {
             {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
             {appViewMode === "library" && <LibraryView />}
             {appViewMode === "montaje" && <MontajeIAPanel userStatus={userStatus} />}
-            {appViewMode === "subscribe" && <SubscribePanel userStatus={userStatus} />}
+            {appViewMode === "subscribe" && (
+              <SubscribePanel userStatus={userStatus} onRefresh={fetchUserStatus} />
+            )}
           </div>
         </section>
       </main>
