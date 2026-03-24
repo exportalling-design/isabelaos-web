@@ -12,34 +12,23 @@ const AVATAR_BUCKET =
 
 function normalizeAvatarStatus(raw) {
   const s = String(raw || "").toUpperCase().trim();
-
   if (!s) return "DRAFT";
   if (["READY", "DONE", "SUCCEEDED", "SUCCESS", "COMPLETED"].includes(s)) return "READY";
   if (["FAILED", "ERROR", "CANCELLED", "CANCELED"].includes(s)) return "FAILED";
-  if (["IN_QUEUE", "QUEUED", "QUEUE", "PENDING"].includes(s)) return "IN_QUEUE";
-  if (["IN_PROGRESS", "RUNNING", "PROCESSING", "TRAINING"].includes(s)) return "IN_PROGRESS";
-  if (["UPLOADING"].includes(s)) return "UPLOADING";
-  if (["DRAFT"].includes(s)) return "DRAFT";
-
+  if (["DRAFT", "UPLOADING"].includes(s)) return s;
   return s;
 }
 
 async function makeSignedThumbUrl(path) {
   if (!path) return "";
-
   try {
     const { data, error } = await supabase.storage
       .from(AVATAR_BUCKET)
-      .createSignedUrl(path, 60 * 60);
+      .createSignedUrl(path, 3600);
 
-    if (error) {
-      console.warn("[avatars-list] signed url error:", error.message);
-      return "";
-    }
-
+    if (error) return "";
     return data?.signedUrl || "";
-  } catch (e) {
-    console.warn("[avatars-list] signed url exception:", e?.message || e);
+  } catch {
     return "";
   }
 }
@@ -59,33 +48,40 @@ export default async function handler(req, res) {
 
     let query = supabase
       .from("avatars")
-      .select("id,name,trigger,status,ref_image_path,lora_path,created_at,updated_at,last_error")
+      .select("id,name,status,ref_image_path,created_at,updated_at,last_error")
       .eq("user_id", user_id)
       .order("created_at", { ascending: false });
 
     if (only_ready) {
-      query = query.in("status", ["READY", "DONE", "SUCCEEDED", "SUCCESS", "COMPLETED"]);
+      query = query.eq("status", "READY");
     }
 
     const { data, error } = await query;
-
     if (error) throw error;
 
     const avatars = await Promise.all(
       (data || []).map(async (row) => {
         const thumb_url = await makeSignedThumbUrl(row.ref_image_path);
 
+        const { count } = await supabase
+          .from("avatar_anchor_photos")
+          .select("*", { count: "exact", head: true })
+          .eq("avatar_id", row.id);
+
         return {
           id: row.id,
-          name: row.name || "Avatar",
-          trigger: row.trigger || "",
+          name: row.name || "Anchor",
           status: normalizeAvatarStatus(row.status),
           ref_image_path: row.ref_image_path || null,
           thumb_url,
-          lora_path: row.lora_path || null,
+          anchor_count: Number(count || 0),
           created_at: row.created_at || null,
           updated_at: row.updated_at || null,
           last_error: row.last_error || null,
+
+          // compatibilidad vieja:
+          trigger: null,
+          lora_path: null,
         };
       })
     );
