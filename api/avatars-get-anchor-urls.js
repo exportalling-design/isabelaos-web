@@ -19,86 +19,65 @@ async function getAuthUserId(req) {
 
 export default async function handler(req, res) {
   try {
-    if (!["GET", "POST"].includes(req.method)) {
+    if (req.method !== "GET") {
       return res.status(405).json({ ok: false, error: "Method not allowed" });
     }
 
-    const bucket = process.env.AVATAR_BUCKET || "avatars";
+    const avatar_id = String(req.query.avatar_id || "").trim();
     const user_id = await getAuthUserId(req);
 
     if (!user_id) {
       return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
     }
 
-    const avatar_id =
-      req.method === "GET"
-        ? String(req.query.avatar_id || "")
-        : String(req.body?.avatar_id || "");
-
-    const expires_in =
-      req.method === "GET"
-        ? Number(req.query.expires_in || 3600)
-        : Number(req.body?.expires_in || 3600);
-
     if (!avatar_id) {
       return res.status(400).json({ ok: false, error: "Missing avatar_id" });
     }
 
-    // validar dueño
-    const { data: avatar, error: avErr } = await supabase
+    const { data: avatar, error: avatarErr } = await supabase
       .from("avatars")
       .select("id,user_id")
       .eq("id", avatar_id)
       .single();
 
-    if (avErr || !avatar) {
+    if (avatarErr || !avatar) {
       return res.status(404).json({ ok: false, error: "Avatar not found" });
     }
 
     if (avatar.user_id !== user_id) {
-      return res.status(403).json({ ok: false, error: "Not your avatar" });
+      return res.status(403).json({ ok: false, error: "Forbidden" });
     }
 
-    // construir paths esperados
-    const possiblePaths = [
-      `${user_id}/${avatar_id}/anchors/anchor_1.jpg`,
-      `${user_id}/${avatar_id}/anchors/anchor_2.jpg`,
-      `${user_id}/${avatar_id}/anchors/anchor_3.jpg`,
-      `${user_id}/${avatar_id}/anchors/anchor_1.png`,
-      `${user_id}/${avatar_id}/anchors/anchor_2.png`,
-      `${user_id}/${avatar_id}/anchors/anchor_3.png`,
-      `${user_id}/${avatar_id}/anchors/anchor_1.jpeg`,
-      `${user_id}/${avatar_id}/anchors/anchor_2.jpeg`,
-      `${user_id}/${avatar_id}/anchors/anchor_3.jpeg`,
-      `${user_id}/${avatar_id}/anchors/anchor_1.webp`,
-      `${user_id}/${avatar_id}/anchors/anchor_2.webp`,
-      `${user_id}/${avatar_id}/anchors/anchor_3.webp`,
-    ];
+    const { data: rows, error } = await supabase
+      .from("avatar_anchor_photos")
+      .select("id,anchor_index,storage_path,created_at")
+      .eq("avatar_id", avatar_id)
+      .order("anchor_index", { ascending: true });
 
-    const results = [];
+    if (error) throw error;
 
-    for (const storage_path of possiblePaths) {
-      const { data: signed, error: sErr } = await supabase.storage
-        .from(bucket)
-        .createSignedUrl(storage_path, expires_in);
+    const anchors = await Promise.all(
+      (rows || []).map(async (row) => {
+        const { data: signed, error: sErr } = await supabase.storage
+          .from(process.env.SUPABASE_AVATAR_BUCKET || process.env.AVATAR_BUCKET || "avatars")
+          .createSignedUrl(row.storage_path, 3600);
 
-      if (!sErr && signed?.signedUrl) {
-        results.push({
-          storage_path,
-          url: signed.signedUrl,
-        });
-      }
-    }
+        return {
+          id: row.id,
+          anchor_index: row.anchor_index,
+          storage_path: row.storage_path,
+          url: sErr ? "" : signed?.signedUrl || "",
+          created_at: row.created_at || null,
+        };
+      })
+    );
 
     return res.json({
       ok: true,
-      avatar_id,
-      expires_in,
-      anchors: results,
-      count: results.length,
+      anchors,
     });
   } catch (err) {
     console.error("[avatars-get-anchor-urls]", err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({ ok: false, error: err.message || "SERVER_ERROR" });
   }
 }
