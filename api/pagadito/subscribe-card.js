@@ -1,5 +1,5 @@
 import { requireUser } from "../_auth.js";
-import { PLANS } from "../../lib/pricing";
+import { PLANS } from "../../src/lib/pricing.js";
 
 function getClientIp(req) {
   const xfwd = req.headers["x-forwarded-for"];
