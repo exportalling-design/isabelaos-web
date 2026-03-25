@@ -69,6 +69,7 @@ export default async function handler(req, res) {
     const avatarName = normalizeOptional(body?.avatar_name);
     const avatarAnchorUrls = normalizeStringArray(body?.avatar_anchor_urls);
     const avatarAnchorPaths = normalizeStringArray(body?.avatar_anchor_paths);
+    const skinMode = normalizeOptional(body?.skin_mode) || "standard";
 
     const input = {
       action: "generate",
@@ -88,6 +89,7 @@ export default async function handler(req, res) {
       avatar_name: avatarName,
       avatar_anchor_urls: avatarAnchorUrls,
       avatar_anchor_paths: avatarAnchorPaths,
+      skin_mode: skinMode,
 
       user_id: userId,
     };
@@ -149,6 +151,7 @@ export default async function handler(req, res) {
       ok: true,
       jobId,
       usedAvatar: !!avatarId,
+      skinMode,
       avatar: avatarId
         ? {
             id: avatarId,
