@@ -496,6 +496,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const [width, setWidth] = useState(1080);
   const [height, setHeight] = useState(1920);
   const [steps, setSteps] = useState(22);
+  const [skinMode, setSkinMode] = useState("standard");
 
   const [status, setStatus] = useState("IDLE");
   const [statusText, setStatusText] = useState("Listo para ejecutar el motor.");
@@ -859,6 +860,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
           width: Number(width),
           height: Number(height),
           steps: Number(steps),
+          skin_mode: skinMode,
 
           // avatar / lora
           avatar_id: selectedAvatar?.id || null,
@@ -1168,6 +1170,23 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
             </div>
           </div>
 
+          <div className="mt-3">
+            <label className="text-neutral-300">Piel</label>
+
+            <select
+              className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+              value={skinMode}
+              onChange={(e) => setSkinMode(e.target.value)}
+            >
+              <option value="standard">Standard</option>
+              <option value="natural">Skin natural</option>
+            </select>
+
+            <div className="mt-1 text-[11px] text-neutral-500">
+              Skin natural reduce el embellecimiento automático.
+            </div>
+          </div>
+          
           <div className="mt-2 rounded-2xl bg-black/50 px-4 py-2 text-xs text-neutral-300">
             Estado actual: {statusText || "Listo para ejecutar el motor."}
             <br />
@@ -1184,6 +1203,7 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {selectedAvatar && (
                 <span className="ml-2 opacity-70">(avatar: {selectedAvatar.name})</span>
               )}
+                <span className="ml-2 opacity-70">(piel: {skinMode})</span>
             </span>
           </div>
 
