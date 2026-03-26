@@ -2394,9 +2394,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   );
 }
 
-// ---------------------------------------------------------
-// Sobre nosotros / presentación
-// ---------------------------------------------------------
 function AboutView({ onBackHome }) {
   const videoRef = useRef(null);
   const [soundOn, setSoundOn] = useState(false);
@@ -2583,20 +2580,13 @@ function AboutView({ onBackHome }) {
       </footer>
     </div>
   );
-}       
+}
 
-// ---------------------------------------------------------
-// Root App
-// ---------------------------------------------------------
 export default function App() {
   const { user, signInWithGoogle } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
-
-  // ✅ NUEVO: navegación simple en landing
-  const [landingPage, setLandingPage] = useState("home"); // "home" | "contact" | "about"
-
-  // ✅ NUEVO: modal Google-only para el demo
+  const [landingPage, setLandingPage] = useState("home");
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
 
   if (user) return <DashboardView />;
@@ -2605,7 +2595,6 @@ export default function App() {
     <>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
 
-      {/* ✅ NUEVO: modal dedicado */}
       <GoogleOnlyModal
         open={googleModalOpen}
         onClose={() => setGoogleModalOpen(false)}
@@ -2643,7 +2632,7 @@ export default function App() {
           {landingPage === "home" && (
             <LandingView
               onOpenAuth={() => setAuthOpen(true)}
-              onStartDemo={() => setGoogleModalOpen(true)} // ✅ CAMBIO: ahora el demo de landing abre Google-only
+              onStartDemo={() => setGoogleModalOpen(true)}
               onOpenContact={() => setLandingPage("contact")}
               onOpenAbout={() => setLandingPage("about")}
             />
