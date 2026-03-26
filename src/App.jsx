@@ -570,7 +570,8 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
            skinMode === "natural" && !!selectedAvatarId
            ? "realistic_vision"
            : "flux",
-        }),
+    }),
+  });
 
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) {
