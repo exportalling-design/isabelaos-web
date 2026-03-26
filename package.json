@@ -10,14 +10,15 @@
     "preview": "vite preview --host"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.4.0",
     "@supabase/supabase-js": "^2.86.0",
     "framer-motion": "^12.23.24",
+    "google-auth-library": "^9.15.0",
     "lucide-react": "^0.545.0",
+    "raw-body": "^2.5.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "stripe": "^16.0.0",
-    "raw-body": "^2.5.2",
-    "google-auth-library": "^9.15.0"
+    "stripe": "^16.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
