@@ -2096,7 +2096,7 @@ function PricingSection({ onOpenAuth }) {
   );
 }
 
-        // ---------------------------------------------------------
+// ---------------------------------------------------------
 // Landing (no sesión) + home premium
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
@@ -2394,95 +2394,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   );
 }
 
-        {/* ---------------------------------------------------------
-            Videos en Home (entre texto y planes) ✅ collage 5
-           --------------------------------------------------------- */}
-        <section className="mt-12">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-                Demo real · Generado desde el motor
-              </p>
-              <h3 className="mt-1 text-xl font-semibold text-white">
-                Videos de prueba (pipeline actual)
-              </h3>
-              <p className="mt-1 max-w-2xl text-xs text-neutral-400">
-                Estos clips están generados por el sistema. La prioridad ahora es estabilizar el flujo, mejorar
-                velocidad y pulir la calidad final del render.
-              </p>
-            </div>
-
-            <div className="mt-3 sm:mt-0">
-              <button
-                onClick={() => scrollToId("demo-box")}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
-              >
-                Probar el motor ahora
-              </button>
-            </div>
-          </div>
-
-          {/* ✅ Wrapper para que se vea un poco más compacto visualmente */}
-          <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-4">
-            {/* TODO (si no hace autoplay): en VideoCollage asegúrate que cada <video> tenga:
-                autoPlay muted loop playsInline preload="metadata"
-            */}
-            <VideoCollage />
-          </div>
-        </section>
-
-        {/* ---------------------------------------------------------
-            NUEVO: Opiniones (testimonios)
-           --------------------------------------------------------- */}
-               <section className="mt-12">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-                Opiniones
-              </p>
-              <h3 className="mt-1 text-xl font-semibold text-white">
-                Lo que dicen los primeros usuarios
-              </h3>
-              <p className="mt-1 max-w-2xl text-xs text-neutral-400">
-                A medida que escalamos, iremos agregando más feedback real de testers y creadores.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[
-              {
-                name: "Early Tester",
-                text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo.",
-              },
-              {
-                name: "Creador (beta)",
-                text: "Lo mejor es tener todo en un solo lugar: prompt → render → biblioteca. Eso ahorra tiempo.",
-              },
-              {
-                name: "Equipo creativo",
-                text: "La idea de voz a video y avatares es justo lo que necesitamos para escalar contenido.",
-              },
-            ].map((t, idx) => (
-              <div key={idx} className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
-                <div className="text-sm font-semibold text-white/90">{t.name}</div>
-                <div className="mt-2 text-sm text-white/70 leading-relaxed">{t.text}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <PricingSection onOpenAuth={onOpenAuth} />
-      </main>
-
-      <footer className="border-t border-white/10 bg-black/30">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
-          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
-        </div>
-      </footer>
-    </div>
-  );
-}
 // ---------------------------------------------------------
 // Sobre nosotros / presentación
 // ---------------------------------------------------------
@@ -2672,7 +2583,7 @@ function AboutView({ onBackHome }) {
       </footer>
     </div>
   );
-}
+}       
 
 // ---------------------------------------------------------
 // Root App
