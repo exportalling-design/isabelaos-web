@@ -1,3 +1,4 @@
+import { fal } from "@fal-ai/client";
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 import { generateVeoVideo } from "../src/lib/veo.js";
@@ -8,6 +9,8 @@ const RUNPOD_API_KEY =
   process.env.VIDEO_RUNPOD_API_KEY ||
   null;
 
+const FAL_KEY = process.env.FAL_KEY || null;
+
 function pickI2VEndpointId() {
   return (
     process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
@@ -15,6 +18,10 @@ function pickI2VEndpointId() {
     process.env.VIDEO_RUNPOD_ENDPOINT ||
     null
   );
+}
+
+if (FAL_KEY) {
+  fal.config({ credentials: FAL_KEY });
 }
 
 async function runpodRun({ endpointId, input }) {
@@ -42,6 +49,18 @@ async function runpodRun({ endpointId, input }) {
   return data;
 }
 
+async function falQueueSubmit({ input }) {
+  if (!FAL_KEY) throw new Error("Missing FAL_KEY");
+
+  fal.config({ credentials: FAL_KEY });
+
+  const result = await fal.queue.submit("wan/v2.6/image-to-video/flash", {
+    input,
+  });
+
+  return result;
+}
+
 function pickFinalPrompts(body) {
   const b = body || {};
 
@@ -61,20 +80,104 @@ function pickFinalPrompts(body) {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isNum = (x) => Number.isFinite(Number(x));
 
-function normalizeDuration(raw) {
-  const n = Number(raw);
-  if (n === 5) return 5;
-  return 8;
+function inferImageMimeType(body) {
+  const explicit =
+    String(body?.image_mime_type || body?.mimeType || body?.imageMimeType || "").trim();
+
+  if (explicit) return explicit;
+
+  const dataUrl = String(body?.image_data_url || "").trim();
+  if (dataUrl.startsWith("data:image/jpeg")) return "image/jpeg";
+  if (dataUrl.startsWith("data:image/jpg")) return "image/jpeg";
+  if (dataUrl.startsWith("data:image/webp")) return "image/webp";
+  if (dataUrl.startsWith("data:image/png")) return "image/png";
+
+  return "image/png";
 }
 
-function getJadeCost({ isFastMode, duration }) {
-  if (isFastMode) {
-    if (duration === 5) return 12;
-    return 15;
+function resolveGenerationMode(body) {
+  const raw = String(body?.generation_mode || body?.mode_name || "").trim().toLowerCase();
+
+  if (raw === "express" || raw === "standard" || raw === "studio") {
+    return raw;
   }
 
-  if (duration === 5) return 11;
-  return 12;
+  // backward compatibility
+  if (typeof body?.is_fast_mode === "boolean") {
+    return body.is_fast_mode ? "express" : "studio";
+  }
+
+  return "express";
+}
+
+function normalizeDurationByMode(mode, raw) {
+  const n = Number(raw);
+
+  if (mode === "express") {
+    return 8;
+  }
+
+  if (mode === "studio") {
+    return 5;
+  }
+
+  // standard (fal)
+  if (n === 15) return 15;
+  if (n === 10) return 10;
+  if (n === 8) return 10; // compatibility: Standard does not support exact 8s
+  if (n === 5) return 5;
+
+  return 10;
+}
+
+function getModeProvider(mode) {
+  if (mode === "express") return "google_veo";
+  if (mode === "standard") return "fal_wan_flash";
+  return "runpod";
+}
+
+function getSpendReason(mode, hasAudioLayer) {
+  if (mode === "express") return "i2v_generate_express";
+  if (mode === "standard") {
+    return hasAudioLayer ? "i2v_generate_standard_audio" : "i2v_generate_standard";
+  }
+  return "i2v_generate_studio";
+}
+
+function getJadeCost({ mode, duration, hasAudioLayer }) {
+  let base = 0;
+
+  if (mode === "express") {
+    base = 18; // fixed 8s
+  } else if (mode === "standard") {
+    if (duration === 15) base = 24;
+    else if (duration === 10) base = 17;
+    else base = 12; // 5s fallback
+  } else {
+    base = 11; // studio 5s
+  }
+
+  if (mode === "standard" && hasAudioLayer) {
+    base += 4;
+  }
+
+  return base;
+}
+
+function toFalImageUrl({ image_b64, image_url, imageMimeType }) {
+  if (image_url) return image_url;
+  if (!image_b64) return null;
+  return `data:${imageMimeType};base64,${image_b64}`;
+}
+
+function getResolutionForMode({ mode, width, height }) {
+  if (mode !== "standard") return null;
+
+  const w = Number(width) || 0;
+  const h = Number(height) || 0;
+  const maxSide = Math.max(w, h);
+
+  return maxSide >= 1000 ? "1080p" : "720p";
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -99,21 +202,6 @@ async function refundJadesSafe({ userId, amount, ref, reason }) {
   } catch (e) {
     console.error("[generate-img2video] refund_jades exception:", e?.message || e);
   }
-}
-
-function inferImageMimeType(body) {
-  const explicit =
-    String(body?.image_mime_type || body?.mimeType || body?.imageMimeType || "").trim();
-
-  if (explicit) return explicit;
-
-  const dataUrl = String(body?.image_data_url || "").trim();
-  if (dataUrl.startsWith("data:image/jpeg")) return "image/jpeg";
-  if (dataUrl.startsWith("data:image/jpg")) return "image/jpeg";
-  if (dataUrl.startsWith("data:image/webp")) return "image/webp";
-  if (dataUrl.startsWith("data:image/png")) return "image/png";
-
-  return "image/png";
 }
 
 export default async function handler(req, res) {
@@ -149,12 +237,14 @@ export default async function handler(req, res) {
     }
 
     const imageMimeType = inferImageMimeType(body);
-
-    const isFastMode = !!body?.is_fast_mode;
-    const provider = isFastMode ? "google_veo" : "runpod";
+    const generationMode = resolveGenerationMode(body);
+    const provider = getModeProvider(generationMode);
 
     const aspect_ratio = String(body?.aspect_ratio || "").trim() || "9:16";
-    const duration_s = normalizeDuration(body?.duration_s ?? body?.seconds ?? 8);
+    const duration_s = normalizeDurationByMode(
+      generationMode,
+      body?.duration_s ?? body?.seconds ?? 8
+    );
 
     const fps = Number(body?.fps ?? 16);
     const num_frames = Number(body?.num_frames ?? body?.frames ?? 48);
@@ -185,12 +275,20 @@ export default async function handler(req, res) {
           ? 1024
           : 480;
 
-    jadeCost = getJadeCost({ isFastMode, duration: duration_s });
+    const audio_url = String(body?.audio_url || "").trim();
+    const include_audio = !!body?.include_audio && !!audio_url;
+    const resolution = getResolutionForMode({ mode: generationMode, width, height });
+
+    jadeCost = getJadeCost({
+      mode: generationMode,
+      duration: duration_s,
+      hasAudioLayer: include_audio,
+    });
 
     console.error("[generate-img2video] START", {
       userId,
       provider,
-      isFastMode,
+      generationMode,
       duration_s,
       aspect_ratio,
       has_image_b64: !!image_b64,
@@ -203,6 +301,8 @@ export default async function handler(req, res) {
       denoise,
       seed,
       motion_strength,
+      include_audio,
+      resolution,
       jadeCost,
     });
 
@@ -213,7 +313,7 @@ export default async function handler(req, res) {
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount: jadeCost,
-      p_reason: isFastMode ? "i2v_generate_fast" : "i2v_generate_pro",
+      p_reason: getSpendReason(generationMode, include_audio),
       p_ref: ref,
     });
 
@@ -250,7 +350,14 @@ export default async function handler(req, res) {
       num_frames,
       steps,
       guidance_scale,
-      payload: body || null,
+      payload: {
+        ...(body || {}),
+        generation_mode: generationMode,
+        include_audio,
+        audio_url: audio_url || null,
+        resolved_duration_s: duration_s,
+        resolved_resolution: resolution,
+      },
       provider,
     };
 
@@ -275,13 +382,14 @@ export default async function handler(req, res) {
     console.error("[generate-img2video] video_jobs insert ok", {
       jobId,
       provider,
+      generationMode,
     });
 
     let providerRequestId = null;
     let startedAtIso = null;
 
-    if (isFastMode) {
-      console.error("[generate-img2video] FAST MODE START", {
+    if (generationMode === "express") {
+      console.error("[generate-img2video] EXPRESS MODE START", {
         userId,
         jobId,
         has_image_b64: !!image_b64,
@@ -292,17 +400,8 @@ export default async function handler(req, res) {
       });
 
       if (!image_b64) {
-        throw new Error(
-          "Fast mode requires image_b64. Do not send only image_url for Veo."
-        );
+        throw new Error("Express mode requires image_b64. Do not send only image_url for Veo.");
       }
-
-      console.error("[generate-img2video] calling generateVeoVideo...", {
-        has_image_b64: !!image_b64,
-        imageMimeType,
-        aspect_ratio,
-        duration_s,
-      });
 
       const veoResult = await generateVeoVideo({
         prompt: finalPrompt,
@@ -341,12 +440,6 @@ export default async function handler(req, res) {
         throw new Error(`video_jobs update failed after Veo submit: ${updErr.message}`);
       }
 
-      console.error("[generate-img2video] FAST MODE SUCCESS", {
-        jobId,
-        providerRequestId,
-        startedAtIso,
-      });
-
       return res.status(200).json({
         ok: true,
         job_id: jobId,
@@ -354,13 +447,90 @@ export default async function handler(req, res) {
         provider_request_id: providerRequestId,
         started_at: startedAtIso,
         jade_spent: jadeCost,
-        mode: "FAST",
+        generation_mode: "express",
+      });
+    }
+
+    if (generationMode === "standard") {
+      console.error("[generate-img2video] STANDARD MODE START", {
+        jobId,
+        duration_s,
+        aspect_ratio,
+        resolution,
+        include_audio,
+      });
+
+      const falImageUrl = toFalImageUrl({
+        image_b64,
+        image_url,
+        imageMimeType,
+      });
+
+      if (!falImageUrl) {
+        throw new Error("Standard mode requires image_url or image_b64");
+      }
+
+      const falInput = {
+        prompt: finalPrompt,
+        image_url: falImageUrl,
+        negative_prompt: finalNegative || "",
+        resolution: resolution || "1080p",
+        duration: String(duration_s),
+        enable_prompt_expansion: true,
+        multi_shots: false,
+        enable_safety_checker: true,
+        seed,
+      };
+
+      if (include_audio) {
+        falInput.audio_url = audio_url;
+      }
+
+      const falResp = await falQueueSubmit({ input: falInput });
+
+      console.error("[generate-img2video] fal response:", JSON.stringify(falResp));
+
+      providerRequestId =
+        falResp?.request_id ||
+        falResp?.requestId ||
+        falResp?.id ||
+        null;
+
+      if (!providerRequestId) {
+        throw new Error("fal did not return a request id");
+      }
+
+      startedAtIso = new Date().toISOString();
+
+      const { error: updErr } = await supabaseAdmin
+        .from("video_jobs")
+        .update({
+          provider_request_id: String(providerRequestId),
+          provider_status: "submitted",
+          provider_raw: falResp,
+          status: "IN_PROGRESS",
+          started_at: startedAtIso,
+        })
+        .eq("id", jobId);
+
+      if (updErr) {
+        throw new Error(`video_jobs update failed after fal submit: ${updErr.message}`);
+      }
+
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        provider: "fal_wan_flash",
+        provider_request_id: providerRequestId,
+        started_at: startedAtIso,
+        jade_spent: jadeCost,
+        generation_mode: "standard",
       });
     }
 
     const endpointId = pickI2VEndpointId();
 
-    console.error("[generate-img2video] PRO MODE START", {
+    console.error("[generate-img2video] STUDIO MODE START", {
       endpointId,
       jobId,
       duration_s,
@@ -415,12 +585,6 @@ export default async function handler(req, res) {
       throw new Error(`video_jobs update failed after RunPod submit: ${updErr.message}`);
     }
 
-    console.error("[generate-img2video] PRO MODE SUCCESS", {
-      jobId,
-      providerRequestId,
-      startedAtIso,
-    });
-
     return res.status(200).json({
       ok: true,
       job_id: jobId,
@@ -428,7 +592,7 @@ export default async function handler(req, res) {
       provider_request_id: providerRequestId,
       started_at: startedAtIso,
       jade_spent: jadeCost,
-      mode: "PRO",
+      generation_mode: "studio",
     });
   } catch (e) {
     console.error("[generate-img2video] ERROR:", {
@@ -481,4 +645,4 @@ export default async function handler(req, res) {
       error: e?.message || "Server error",
     });
   }
- }
+}
