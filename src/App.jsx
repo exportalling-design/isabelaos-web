@@ -2472,7 +2472,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
           </div>
         </section>
 
-        //planes
+        
         <PricingSection onOpenAuth={onOpenAuth} />
       </main>
 
