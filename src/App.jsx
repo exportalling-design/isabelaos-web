@@ -2438,3 +2438,260 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
     </div>
   );
 }
+
+function AboutView({ onBackHome }) {
+  const videoRef = useRef(null);
+  const [soundOn, setSoundOn] = useState(false);
+
+  const enableSound = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.muted = false;
+      v.volume = 1;
+      await v.play();
+      setSoundOn(true);
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+  return (
+    <div
+      className="min-h-screen w-full text-white"
+      style={{
+        background:
+          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
+      }}
+    >
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
+              io
+            </div>
+            <div>
+              <div className="text-sm font-semibold leading-tight">
+                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
+              </div>
+              <div className="text-[10px] text-neutral-500">Presentación del sistema</div>
+            </div>
+          </div>
+
+          <button
+            onClick={onBackHome}
+            className="rounded-xl border border-white/20 bg-white/5 px-4 py-1.5 text-xs text-white hover:bg-white/10"
+          >
+            Volver a la página principal
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
+          <div className="pointer-events-none absolute -inset-16 -z-10 bg-gradient-to-br from-cyan-500/12 via-transparent to-fuchsia-500/14 blur-3xl" />
+
+          <div className="mb-4">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+              Presentación
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
+              Qué es IsabelaOS
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm text-neutral-300">
+              Una plataforma para crear y operar modelos virtuales con inteligencia artificial.
+            </p>
+          </div>
+
+          <div className="relative">
+            <video
+              ref={videoRef}
+              className="h-[360px] w-full rounded-[24px] border border-white/10 bg-black/40 object-cover md:h-[500px]"
+              src="/gallery/video10.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              controls={soundOn}
+            />
+
+            {!soundOn && (
+              <button
+                onClick={enableSound}
+                className="absolute bottom-4 left-4 rounded-2xl border border-white/15 bg-black/60 px-4 py-2 text-xs text-white hover:bg-black/70"
+              >
+                🔊 Activar audio
+              </button>
+            )}
+
+            {!soundOn && (
+              <div className="absolute bottom-4 right-4 hidden rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-[10px] text-white/60 sm:block">
+                El audio se activa al tocar el botón
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                Plataforma
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">
+                Diseñado para construir modelos virtuales, no solo renders aislados
+              </h2>
+
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                IsabelaOS Studio organiza el proceso completo de producción visual:
+                idea, generación, biblioteca, consistencia estética y control del flujo creativo.
+              </p>
+
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                No se trata solo de hacer una imagen o un video, sino de operar un sistema
+                donde el contenido pueda escalar con más orden, más velocidad y más coherencia visual.
+              </p>
+            </div>
+
+            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                Infraestructura
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">
+                Pipeline propio ejecutado en GPU
+              </h2>
+
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                IsabelaOS se apoya en infraestructura, workers y render conectados como sistema.
+                El objetivo es tener una plataforma sólida de producción visual y no depender de una simple capa superficial.
+              </p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
+                  <div className="text-xs font-semibold text-white">Consistencia</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Más control del estilo y del resultado visual.
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
+                  <div className="text-xs font-semibold text-white">Escalabilidad</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Pensado para crecer con más módulos y más producción.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-5 md:grid-cols-3">
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Qué resuelve</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Centraliza generación, visuales, biblioteca y flujo creativo dentro de un mismo producto.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Para quién es</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Creadores, equipos, marcas y estudios que quieren operar personajes o modelos virtuales con más orden.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Dirección</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Mejorar calidad, velocidad, estabilidad y profundidad del ecosistema visual.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <button
+              onClick={onBackHome}
+              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+            >
+              Regresar a la página principal
+            </button>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-white/10 bg-black/30">
+        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
+          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+export default function App() {
+  const { user, signInWithGoogle } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
+  const [landingPage, setLandingPage] = useState("home");
+  const [googleModalOpen, setGoogleModalOpen] = useState(false);
+
+  if (user) return <DashboardView />;
+
+  return (
+    <>
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
+      <GoogleOnlyModal
+        open={googleModalOpen}
+        onClose={() => setGoogleModalOpen(false)}
+        onGoogle={async () => {
+          try {
+            await signInWithGoogle();
+            setGoogleModalOpen(false);
+          } catch (e) {
+            alert(e?.message || "No se pudo iniciar con Google.");
+          }
+        }}
+      />
+
+      {demoMode ? (
+        <div className="min-h-screen bg-neutral-950 text-white">
+          <div className="mx-auto max-w-6xl px-4 py-8">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">IsabelaOS Studio</p>
+                <p className="text-[11px] text-neutral-400">Demo del motor</p>
+              </div>
+              <button
+                onClick={() => setDemoMode(false)}
+                className="rounded-2xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
+              >
+                Volver
+              </button>
+            </div>
+
+            <CreatorPanel isDemo={true} onAuthRequired={() => setAuthOpen(true)} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {landingPage === "home" && (
+            <LandingView
+              onOpenAuth={() => setAuthOpen(true)}
+              onStartDemo={() => setGoogleModalOpen(true)}
+              onOpenContact={() => setLandingPage("contact")}
+              onOpenAbout={() => setLandingPage("about")}
+            />
+          )}
+
+          {landingPage === "contact" && (
+            <ContactView onBack={() => setLandingPage("home")} />
+          )}
+
+          {landingPage === "about" && (
+            <AboutView onBackHome={() => setLandingPage("home")} />
+          )}
+        </>
+      )}
+    </>
+  );
+}
