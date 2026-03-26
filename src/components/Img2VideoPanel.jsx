@@ -1,5 +1,3 @@
-// src/components/Img2VideoPanel.jsx
-
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
@@ -24,9 +22,12 @@ export function Img2VideoPanel({ userStatus }) {
   const [seedMode, setSeedMode] = useState("RANDOM");
   const [seedFixed, setSeedFixed] = useState(12345);
 
-  const [isFastMode, setIsFastMode] = useState(true);
+  const [generationMode, setGenerationMode] = useState("express");
   const [useNineSixteen, setUseNineSixteen] = useState(true);
   const [durationSec, setDurationSec] = useState(8);
+
+  const [includeAudio, setIncludeAudio] = useState(false);
+  const [audioUrl, setAudioUrl] = useState("");
 
   const fps = 16;
 
@@ -53,6 +54,7 @@ export function Img2VideoPanel({ userStatus }) {
     numFrames: 129,
     durationSec: 8,
     fps: 16,
+    generationMode: "express",
   });
 
   const [useOptimized, setUseOptimized] = useState(false);
@@ -67,29 +69,82 @@ export function Img2VideoPanel({ userStatus }) {
     setOptError("");
   }, [prompt, negative]);
 
-  function getCurrentPrice() {
-    if (isFastMode) {
-      return Number(durationSec) === 5 ? 12 : 15;
+  useEffect(() => {
+    if (generationMode === "express") {
+      setDurationSec(8);
+      setIncludeAudio(false);
+      setAudioUrl("");
+    } else if (generationMode === "standard") {
+      if (![10, 15].includes(Number(durationSec))) {
+        setDurationSec(10);
+      }
+    } else {
+      setDurationSec(5);
+      setIncludeAudio(false);
+      setAudioUrl("");
     }
-    return Number(durationSec) === 5 ? 11 : 12;
+  }, [generationMode]);
+
+  function getDurationOptions() {
+    if (generationMode === "express") return [8];
+    if (generationMode === "standard") return [10, 15];
+    return [5];
+  }
+
+  function getCurrentPrice() {
+    let base = 0;
+
+    if (generationMode === "express") {
+      base = 18;
+    } else if (generationMode === "standard") {
+      base = Number(durationSec) === 15 ? 24 : 17;
+    } else {
+      base = 11;
+    }
+
+    if (generationMode === "standard" && includeAudio && audioUrl.trim()) {
+      base += 4;
+    }
+
+    return base;
   }
 
   const COST_I2V = getCurrentPrice();
   const hasEnough = currentJades >= COST_I2V;
 
   function getPriceText() {
-    if (isFastMode) {
-      return Number(durationSec) === 5
-        ? "Fast • 5s = 12 jades"
-        : "Fast • 8s = 15 jades";
+    if (generationMode === "express") {
+      return "Express • 8s = 18 jades";
     }
-    return Number(durationSec) === 5
-      ? "Pro • 5s = 11 jades"
-      : "Pro • 8s = 12 jades";
+
+    if (generationMode === "standard") {
+      const baseText =
+        Number(durationSec) === 15
+          ? "Standard • 15s = 24 jades"
+          : "Standard • 10s = 17 jades";
+
+      if (includeAudio && audioUrl.trim()) {
+        return `${baseText} • Audio layer +4 jades`;
+      }
+
+      return baseText;
+    }
+
+    return "Studio • 5s = 11 jades";
   }
 
   function getAllPricesText() {
-    return "Prices: Fast 5s = 12 jades • Fast 8s = 15 jades • Pro 5s = 11 jades • Pro 8s = 12 jades";
+    return "Prices: Express 8s = 18 jades • Standard 10s = 17 jades • Standard 15s = 24 jades • Standard audio layer +4 jades • Studio 5s = 11 jades";
+  }
+
+  function getModeDescription() {
+    if (generationMode === "express") {
+      return "Fast premium mode for short videos.";
+    }
+    if (generationMode === "standard") {
+      return "Balanced mode for longer clips.";
+    }
+    return "Local extended mode with higher wait time.";
   }
 
   async function getAuthHeaders() {
@@ -185,7 +240,8 @@ export function Img2VideoPanel({ userStatus }) {
       img.onerror = () => reject(new Error("Could not load image for compression"));
       img.src = originalDataUrl;
     });
-}
+  }
+
   function estimateBase64Bytes(b64) {
     const len = String(b64 || "").length;
     return Math.ceil((len * 3) / 4);
@@ -283,11 +339,15 @@ export function Img2VideoPanel({ userStatus }) {
     const s = Number(p.steps || 18);
     const f = Number(p.numFrames || 129);
     const dur = Number(p.durationSec || 8);
+    const mode = String(p.generationMode || "express");
 
-    const base = dur <= 5
-      ? (isFastMode ? 180 : 720)
-      : (isFastMode ? 240 : 1080);
+    const baseByMode = {
+      express: 220,
+      standard: dur >= 15 ? 480 : 360,
+      studio: 1080,
+    };
 
+    const base = baseByMode[mode] || 300;
     const stepAdj = Math.max(0, (s - 18) * 8);
     const frameAdj = Math.max(0, (f - 129) * 2);
 
@@ -320,15 +380,17 @@ export function Img2VideoPanel({ userStatus }) {
   }
 
   function getEtaText() {
-    if (isFastMode) {
-      return Number(durationSec) === 5
-        ? "Estimated wait: 1-3 min"
-        : "Estimated wait: 2-4 min";
+    if (generationMode === "express") {
+      return "Estimated wait: 2-4 min";
     }
 
-    return Number(durationSec) === 5
-      ? "Estimated wait: 12-18 min"
-      : "Estimated wait: 15-25 min";
+    if (generationMode === "standard") {
+      return Number(durationSec) === 15
+        ? "Estimated wait: 4-8 min"
+        : "Estimated wait: 3-6 min";
+    }
+
+    return "Estimated wait: 15-25 min";
   }
 
   function stopPolling() {
@@ -349,6 +411,7 @@ export function Img2VideoPanel({ userStatus }) {
       // ignore
     }
   }
+
   function hardResetPanel() {
     stopPolling();
 
@@ -386,6 +449,7 @@ export function Img2VideoPanel({ userStatus }) {
           stData?.video_url ||
           stData?.output?.video_url ||
           stData?.output?.videoUrl ||
+          stData?.output?.video?.url ||
           null;
 
         if (url) {
@@ -572,7 +636,12 @@ export function Img2VideoPanel({ userStatus }) {
             if (["DONE", "COMPLETED", "SUCCESS", "FINISHED"].includes(st)) {
               setStatus("DONE");
               setStatusText("Video ready.");
-              setVideoUrl(stData?.video_url || stData?.output?.video_url || null);
+              setVideoUrl(
+                stData?.video_url ||
+                stData?.output?.video_url ||
+                stData?.output?.video?.url ||
+                null
+              );
               setProgress(100);
               stopPolling();
               try {
@@ -644,6 +713,10 @@ export function Img2VideoPanel({ userStatus }) {
       if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades for this video.`);
       if (!pureB64 && !imageUrl) return setErrorState("Upload an image or paste an image URL.");
 
+      if (generationMode === "standard" && includeAudio && !audioUrl.trim()) {
+        return setErrorState("Paste an audio URL to use the audio layer.");
+      }
+
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
         if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
         await handleOptimize();
@@ -671,11 +744,13 @@ export function Img2VideoPanel({ userStatus }) {
         numFrames,
         durationSec: Number(durationSec),
         fps: Number(fps),
+        generationMode,
       };
 
       const payload = {
         mode: "i2v",
-        is_fast_mode: isFastMode,
+        generation_mode: generationMode,
+        is_fast_mode: generationMode === "express", // backward compatibility
         prompt: finalPrompt || "",
         negative_prompt: finalNegative || "",
         ...(aspect_ratio ? { aspect_ratio } : {}),
@@ -690,6 +765,8 @@ export function Img2VideoPanel({ userStatus }) {
         seed,
         image_b64: pureB64 || null,
         image_url: imageUrl || null,
+        include_audio: generationMode === "standard" && includeAudio && !!audioUrl.trim(),
+        audio_url: generationMode === "standard" && includeAudio ? audioUrl.trim() : null,
       };
 
       const controller = new AbortController();
@@ -743,6 +820,7 @@ export function Img2VideoPanel({ userStatus }) {
       lockRef.current = false;
     }
   }
+
   const handleDownload = () => {
     if (!videoUrl) return;
     const link = document.createElement("a");
@@ -838,22 +916,42 @@ export function Img2VideoPanel({ userStatus }) {
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Mode</div>
 
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                id="i2v_fast"
-                type="checkbox"
-                checked={isFastMode}
-                onChange={(e) => setIsFastMode(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_fast" className="text-[12px] text-neutral-200">
-                Fast
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                <input
+                  type="radio"
+                  name="i2v_mode"
+                  checked={generationMode === "express"}
+                  onChange={() => setGenerationMode("express")}
+                  className="h-4 w-4"
+                />
+                Express
+              </label>
+
+              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                <input
+                  type="radio"
+                  name="i2v_mode"
+                  checked={generationMode === "standard"}
+                  onChange={() => setGenerationMode("standard")}
+                  className="h-4 w-4"
+                />
+                Standard
+              </label>
+
+              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                <input
+                  type="radio"
+                  name="i2v_mode"
+                  checked={generationMode === "studio"}
+                  onChange={() => setGenerationMode("studio")}
+                  className="h-4 w-4"
+                />
+                Studio
               </label>
             </div>
 
-            <div className="mt-2 text-[10px] text-neutral-500">
-              {isFastMode ? "Faster generation" : "Higher-latency mode"}
-            </div>
+            <div className="mt-2 text-[10px] text-neutral-500">{getModeDescription()}</div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
@@ -880,30 +978,19 @@ export function Img2VideoPanel({ userStatus }) {
           <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
             <div className="text-xs text-neutral-300">Duration</div>
 
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                id="i2v_5s"
-                type="checkbox"
-                checked={durationSec === 5}
-                onChange={(e) => e.target.checked && setDurationSec(5)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_5s" className="text-[12px] text-neutral-200">
-                5 seconds
-              </label>
-            </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="i2v_8s"
-                type="checkbox"
-                checked={durationSec === 8}
-                onChange={(e) => e.target.checked && setDurationSec(8)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_8s" className="text-[12px] text-neutral-200">
-                8 seconds
-              </label>
+            <div className="mt-3 space-y-2">
+              {getDurationOptions().map((sec) => (
+                <label key={sec} className="flex items-center gap-2 text-[12px] text-neutral-200">
+                  <input
+                    type="radio"
+                    name="i2v_duration"
+                    checked={Number(durationSec) === sec}
+                    onChange={() => setDurationSec(sec)}
+                    className="h-4 w-4"
+                  />
+                  {sec} seconds
+                </label>
+              ))}
             </div>
 
             <div className="mt-2 text-[10px] text-neutral-500">
@@ -1007,7 +1094,41 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
 
             {optError && (
-              <div className="mt-2 text-[11px] text-red-400 whitespace-pre-line">{optError}</div>
+              <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+            <div className="text-xs text-neutral-300">Audio layer</div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id="i2v_audio"
+                type="checkbox"
+                checked={includeAudio}
+                disabled={generationMode !== "standard"}
+                onChange={(e) => setIncludeAudio(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">
+                Add audio track by URL (+4 jades, Standard mode only)
+              </label>
+            </div>
+
+            {generationMode !== "standard" && (
+              <div className="mt-2 text-[10px] text-neutral-500">
+                Audio layer is available only in Standard mode.
+              </div>
+            )}
+
+            {generationMode === "standard" && includeAudio && (
+              <input
+                type="text"
+                value={audioUrl}
+                onChange={(e) => setAudioUrl(e.target.value)}
+                placeholder="https://.../voice.mp3"
+                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10"
+              />
             )}
           </div>
 
@@ -1126,17 +1247,19 @@ export function Img2VideoPanel({ userStatus }) {
                 ? "Generating..."
                 : !hasEnough
                   ? "Not enough jades"
-                  : isFastMode
-                    ? "Generate Fast Video"
-                    : "Generate Video"}
+                  : generationMode === "express"
+                    ? "Generate Express Video"
+                    : generationMode === "standard"
+                      ? "Generate Standard Video"
+                      : "Generate Studio Video"}
             </button>
           </div>
 
-          {error && <p className="text-xs text-red-400 whitespace-pre-line">{error}</p>}
+          {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
         </div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6 flex flex-col">
+      <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Result</h2>
 
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
