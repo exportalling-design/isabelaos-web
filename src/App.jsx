@@ -1679,7 +1679,7 @@ function SubscribePanel({ userStatus, onRefresh }) {
   );
 }
 // ---------------------------------------------------------
-// Dashboard (logueado)
+// Dashboard (logueado) · versión premium / workspace
 // ---------------------------------------------------------
 function DashboardView() {
   const { user, isAdmin, signOut } = useAuth();
@@ -1758,30 +1758,43 @@ function DashboardView() {
     window.location.href = `mailto:contacto@isabelaos.com?subject=${subject}&body=${body}`;
   };
 
+  const tabs = [
+    { key: "generator", label: "Imagen" },
+    { key: "img2video", label: "Imagen → Video" },
+    { key: "avatars", label: "Avatares" },
+    { key: "library", label: "Biblioteca" },
+    { key: "montaje", label: "Montaje IA" },
+    { key: "subscribe", label: "Plan" },
+  ];
+
   return (
     <div
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B",
+          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.10),transparent_50%),radial-gradient(900px_500px_at_50%_120%,rgba(168,85,247,0.12),transparent_55%),#06070B",
       }}
     >
-      <header className="border-b border-white/10 bg-black/60 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      {/* ---------------------------------------------------------
+          Header superior
+         --------------------------------------------------------- */}
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-[0_0_25px_rgba(34,211,238,0.35)]">
               io
             </div>
+
             <div>
               <div className="text-sm font-semibold leading-tight">
                 isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
-              <div className="text-[10px] text-neutral-500">Panel del creador · Beta</div>
+              <div className="text-[10px] text-neutral-500">Workspace del creador</div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs">
-            <span className="hidden sm:inline text-neutral-300">
+          <div className="flex items-center gap-2 md:gap-3 text-xs">
+            <span className="hidden lg:inline text-neutral-300">
               {user?.email} {isAdmin ? "· admin" : ""}
             </span>
 
@@ -1790,7 +1803,9 @@ function DashboardView() {
               <span className="mx-1 h-3 w-px bg-white/10" />
               <span className="text-[11px] text-neutral-300">
                 Jades:{" "}
-                <span className="font-semibold text-white">{userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+                <span className="font-semibold text-white">
+                  {userStatus.loading ? "..." : userStatus.jades ?? 0}
+                </span>
               </span>
             </div>
 
@@ -1800,6 +1815,7 @@ function DashboardView() {
             >
               Contacto
             </button>
+
             <button
               onClick={signOut}
               className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -1810,85 +1826,93 @@ function DashboardView() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <div className="mb-4 md:hidden">
-          <div className="mb-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-[11px] text-neutral-300">
-            <div className="flex items-center justify-between gap-2">
+      {/* ---------------------------------------------------------
+          Contenido principal
+         --------------------------------------------------------- */}
+      <main className="mx-auto max-w-7xl px-4 pb-16 pt-8">
+        {/* Estado móvil */}
+        <div className="mb-5 md:hidden">
+          <div className="rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-[11px] text-neutral-300">
+            <div className="flex flex-col gap-2">
               <span className="text-neutral-400">{userPlanLabel}</span>
-              <span className="font-semibold text-white">Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}</span>
+              <span className="font-semibold text-white">
+                Jades: {userStatus.loading ? "..." : userStatus.jades ?? 0}
+              </span>
             </div>
-          </div>
-
-          <p className="text-[11px] font-semibold text-neutral-300 mb-2">Navegación</p>
-          <div className="flex flex-wrap gap-2 text-xs">
-            {[
-              ["generator", "Motor de imagen"],
-              ["img2video", "Imagen → Video"],
-              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
-              ["library", "Biblioteca"],
-              ["montaje", "🧩 Montaje IA"],
-              ["subscribe", "Suscribirse"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setAppViewMode(key)}
-                className={`rounded-2xl px-3 py-1.5 ${
-                  appViewMode === key
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
           </div>
         </div>
 
-        <section className="flex gap-6">
-          <aside className="hidden md:flex w-56 flex-col rounded-3xl border border-white/10 bg-black/60 p-4 text-xs">
-            <p className="text-[11px] font-semibold text-neutral-300 mb-3">Navegación</p>
+        {/* Encabezado del panel */}
+        <section className="mb-6">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+            Workspace
+          </p>
 
-            {[
-              ["generator", "Motor de imagen (render)"],
-              ["img2video", "Transformación Imagen → Video"],
-              ["avatars", "🧬 Avatares (LoRA)"], // ✅ NUEVO
-              ["library", "Biblioteca de producción"],
-              ["montaje", "🧩 Montaje IA"],
-              ["subscribe", "Suscribirse"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setAppViewMode(key)}
-                className={`mb-2 w-full rounded-2xl px-3 py-2 text-left ${
-                  appViewMode === key
-                    ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                    : "bg-white/5 text-neutral-200 hover:bg-white/10"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </aside>
-
-          <div className="flex-1 space-y-6">
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-xl font-semibold text-white">Panel del creador</h1>
-              <p className="mt-1 text-xs text-neutral-400">
+              <h1 className="text-2xl font-semibold text-white md:text-3xl">
+                Panel del creador
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
                 Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.
               </p>
             </div>
 
-            {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
-            {appViewMode === "img2video" && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />}
-            {appViewMode === "avatars" && <AvatarStudioPanel userStatus={userStatus} />} {/* ✅ NUEVO */}
-            {appViewMode === "library" && <LibraryView />}
-            {appViewMode === "montaje" && <MontajeIAPanel userStatus={userStatus} />}
-            {appViewMode === "subscribe" && (
-              <SubscribePanel userStatus={userStatus} onRefresh={fetchUserStatus} />
-            )}
+            <div className="hidden lg:flex items-center gap-2 rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-xs text-neutral-300">
+              <span className="text-neutral-400">Estado:</span>
+              <span className="font-medium text-white">Sistema activo</span>
+            </div>
           </div>
+        </section>
+
+        {/* Tabs superiores */}
+        <section className="mb-6">
+          <div className="no-scrollbar flex gap-2 overflow-x-auto rounded-[24px] border border-white/10 bg-black/35 p-2">
+            {tabs.map((item) => {
+              const active = appViewMode === item.key;
+
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setAppViewMode(item.key)}
+                  className={[
+                    "whitespace-nowrap rounded-2xl px-4 py-3 text-sm font-medium transition-all",
+                    active
+                      ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white shadow-[0_0_30px_rgba(34,211,238,0.22)]"
+                      : "bg-white/5 text-white/75 hover:bg-white/10 hover:text-white",
+                  ].join(" ")}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Contenedor principal del módulo activo */}
+        <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/35 p-4 md:p-6">
+          <div className="pointer-events-none absolute -inset-16 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.10),transparent_25%),radial-gradient(circle_at_top_right,rgba(236,72,153,0.10),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.10),transparent_35%)]" />
+
+          {appViewMode === "generator" && <CreatorPanel isDemo={false} />}
+
+          {appViewMode === "img2video" && (
+            <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />
+          )}
+
+          {appViewMode === "avatars" && (
+            <AvatarStudioPanel userStatus={userStatus} />
+          )}
+
+          {appViewMode === "library" && <LibraryView />}
+
+          {appViewMode === "montaje" && (
+            <MontajeIAPanel userStatus={userStatus} />
+          )}
+
+          {appViewMode === "subscribe" && (
+            <SubscribePanel userStatus={userStatus} onRefresh={fetchUserStatus} />
+          )}
         </section>
       </main>
     </div>
@@ -1896,24 +1920,24 @@ function DashboardView() {
 }
 
 // ---------------------------------------------------------
-// Landing: sección de planes
+// Landing: sección de planes (versión premium)
 // ---------------------------------------------------------
 function PricingSection({ onOpenAuth }) {
   const features = useMemo(
     () => ({
       basic: [
-        "Acceso al motor en la web",
+        "Acceso al sistema desde la web",
         `Incluye ${PLANS?.basic?.included_jades ?? 100} jades / mes`,
-        "Biblioteca personal (historial y descargas)",
-        "Actualizaciones del motor (beta)",
+        "Biblioteca personal con historial y descargas",
+        "Motor visual en actualización continua",
         "Soporte básico por contacto",
       ],
       pro: [
-        "Todo lo de Basic",
+        "Todo lo incluido en Basic",
         `Incluye ${PLANS?.pro?.included_jades ?? 300} jades / mes`,
-        "Más capacidad de generación (prioridad)",
-        "Acceso anticipado a nuevas funciones",
-        "Soporte prioritario (beta)",
+        "Mayor capacidad de generación y prioridad",
+        "Acceso anticipado a funciones nuevas",
+        "Soporte prioritario",
       ],
     }),
     []
@@ -1935,13 +1959,21 @@ function PricingSection({ onOpenAuth }) {
   const estPro = estimate(PLANS?.pro?.included_jades ?? 300);
 
   return (
-    <section id="planes" className="mt-16">
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+    <section id="planes" className="mt-20">
+      <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/40 p-6 md:p-8">
+        <div className="pointer-events-none absolute -inset-24 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(236,72,153,0.16),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.18),transparent_35%)]" />
+
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-white">Planes</h3>
-            <p className="mt-1 text-xs text-neutral-400">
-              Suscripción mensual. Cancela cuando quieras. (Los jades se cargan mensualmente.)
+            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+              Acceso al sistema
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Planes para producción continua
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+              Suscripción mensual. Cancela cuando quieras. Los jades se cargan cada mes y se usan
+              dentro del motor para imágenes y video.
             </p>
           </div>
 
@@ -1953,116 +1985,108 @@ function PricingSection({ onOpenAuth }) {
           </button>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/40 p-6">
-            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-fuchsia-500/10 blur-2xl" />
+        <div className="mt-8 grid gap-5 lg:grid-cols-2">
+          <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-black/50 p-6">
+            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-fuchsia-500/10 blur-3xl" />
 
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-white">Plan Basic</p>
-                <p className="mt-1 text-[11px] text-neutral-400">
-                  Para creadores que quieren entrar al motor y producir de forma constante.
+                <p className="text-xl font-semibold text-white">Plan Basic</p>
+                <p className="mt-2 text-sm text-neutral-400">
+                  Para entrar al sistema, producir de forma constante y empezar a construir tu flujo.
                 </p>
               </div>
 
-              <div className="text-right">
-                <p className="text-2xl font-semibold text-white">
+              <div className="text-right shrink-0">
+                <p className="text-4xl font-semibold text-white leading-none">
                   ${PLANS?.basic?.price_usd ?? 19}
-                  <span className="text-xs text-neutral-400">/mes</span>
+                  <span className="ml-1 text-sm text-neutral-400">/mes</span>
                 </p>
-                <p className="text-[10px] text-neutral-500">{PLANS?.basic?.included_jades ?? 100} jades incluidos</p>
+                <p className="mt-2 text-[11px] text-neutral-500">
+                  {PLANS?.basic?.included_jades ?? 100} jades incluidos
+                </p>
               </div>
             </div>
 
-            <ul className="mt-4 space-y-2 text-[12px] text-neutral-200">
+            <ul className="mt-6 space-y-3 text-sm text-neutral-200">
               {features.basic.map((t) => (
-                <li key={t} className="flex gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                <li key={t} className="flex gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-cyan-300" />
                   <span className="text-neutral-300">{t}</span>
                 </li>
               ))}
             </ul>
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
+            <div className="mt-6 rounded-[22px] border border-white/10 bg-black/60 px-4 py-4 text-sm text-neutral-300">
               <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
-              <div className="mt-1">
-                • <span className="text-white font-semibold">{estBasic.images}</span> imágenes
-              </div>
-              <div>
-                • <span className="text-white font-semibold">{estBasic.videosPrompt}</span> videos (desde prompt)
-              </div>
-              <div>
-                • <span className="text-white font-semibold">{estBasic.videosImg2Vid}</span> videos (imagen → video)
-              </div>
+              <div className="mt-2">• <span className="font-semibold text-white">{estBasic.images}</span> imágenes</div>
+              <div>• <span className="font-semibold text-white">{estBasic.videosPrompt}</span> videos (desde prompt)</div>
+              <div>• <span className="font-semibold text-white">{estBasic.videosImg2Vid}</span> videos (imagen → video)</div>
             </div>
 
-            <div className="mt-5">
+            <div className="mt-6">
               <button
                 onClick={onOpenAuth}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white shadow-[0_0_30px_rgba(34,211,238,0.25)]"
               >
                 Inicia sesión para suscribirte
               </button>
-              <p className="mt-2 text-[10px] text-neutral-500 text-center">
-                (El pago solo se realiza dentro de tu cuenta para poder asignar plan y jades al usuario.)
+              <p className="mt-2 text-center text-[10px] text-neutral-500">
+                El pago se realiza dentro de tu cuenta para asignar plan y jades.
               </p>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-3xl border border-fuchsia-400/25 bg-black/40 p-6">
-            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-fuchsia-500/18 via-transparent to-violet-500/18 blur-2xl" />
+          <div className="relative overflow-hidden rounded-[28px] border border-fuchsia-400/25 bg-black/50 p-6">
+            <div className="pointer-events-none absolute -inset-10 -z-10 bg-gradient-to-br from-fuchsia-500/16 via-transparent to-violet-500/18 blur-3xl" />
 
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-semibold text-fuchsia-200">
                   Recomendado
                 </div>
-                <p className="mt-2 text-sm font-semibold text-white">Plan Pro</p>
-                <p className="mt-1 text-[11px] text-neutral-400">
-                  Para usuarios que quieren más jades, más potencia y prioridad en generación.
+                <p className="mt-3 text-xl font-semibold text-white">Plan Pro</p>
+                <p className="mt-2 text-sm text-neutral-400">
+                  Para usuarios que quieren más potencia, más capacidad y prioridad dentro del sistema.
                 </p>
               </div>
 
-              <div className="text-right">
-                <p className="text-2xl font-semibold text-white">
+              <div className="text-right shrink-0">
+                <p className="text-4xl font-semibold text-white leading-none">
                   ${PLANS?.pro?.price_usd ?? 39}
-                  <span className="text-xs text-neutral-400">/mes</span>
+                  <span className="ml-1 text-sm text-neutral-400">/mes</span>
                 </p>
-                <p className="text-[10px] text-neutral-500">{PLANS?.pro?.included_jades ?? 300} jades incluidos</p>
+                <p className="mt-2 text-[11px] text-neutral-500">
+                  {PLANS?.pro?.included_jades ?? 300} jades incluidos
+                </p>
               </div>
             </div>
 
-            <ul className="mt-4 space-y-2 text-[12px] text-neutral-200">
+            <ul className="mt-6 space-y-3 text-sm text-neutral-200">
               {features.pro.map((t) => (
-                <li key={t} className="flex gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
+                <li key={t} className="flex gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-fuchsia-300" />
                   <span className="text-neutral-300">{t}</span>
                 </li>
               ))}
             </ul>
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-[11px] text-neutral-300">
+            <div className="mt-6 rounded-[22px] border border-white/10 bg-black/60 px-4 py-4 text-sm text-neutral-300">
               <div className="text-neutral-400">Con los jades incluidos puedes generar aprox:</div>
-              <div className="mt-1">
-                • <span className="text-white font-semibold">{estPro.images}</span> imágenes
-              </div>
-              <div>
-                • <span className="text-white font-semibold">{estPro.videosPrompt}</span> videos (desde prompt)
-              </div>
-              <div>
-                • <span className="text-white font-semibold">{estPro.videosImg2Vid}</span> videos (imagen → video)
-              </div>
+              <div className="mt-2">• <span className="font-semibold text-white">{estPro.images}</span> imágenes</div>
+              <div>• <span className="font-semibold text-white">{estPro.videosPrompt}</span> videos (desde prompt)</div>
+              <div>• <span className="font-semibold text-white">{estPro.videosImg2Vid}</span> videos (imagen → video)</div>
             </div>
 
-            <div className="mt-5">
+            <div className="mt-6">
               <button
                 onClick={onOpenAuth}
-                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white"
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white shadow-[0_0_30px_rgba(236,72,153,0.25)]"
               >
                 Inicia sesión para suscribirte
               </button>
-              <p className="mt-2 text-[10px] text-neutral-500 text-center">
-                (El pago solo se realiza dentro de tu cuenta para poder asignar plan y jades al usuario.)
+              <p className="mt-2 text-center text-[10px] text-neutral-500">
+                El pago se realiza dentro de tu cuenta para asignar plan y jades.
               </p>
             </div>
           </div>
@@ -2073,31 +2097,34 @@ function PricingSection({ onOpenAuth }) {
 }
 
 // ---------------------------------------------------------
-// Landing (no sesión) + demo
+// Landing (no sesión) + home premium
 // ---------------------------------------------------------
 function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
-  // ✅ NUEVO: demo prompt en landing (y forzar Google modal)
-  const [demoPrompt, setDemoPrompt] = useState("Cinematic portrait, ultra detailed, soft light, 8k");
+  const [demoPrompt, setDemoPrompt] = useState(
+    "Modelo virtual elegante para redes sociales, rostro consistente, luz cinematográfica, formato vertical"
+  );
 
   return (
     <div
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
+          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.45),transparent_60%),#05060A",
       }}
     >
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
               io
             </div>
             <div>
               <div className="text-sm font-semibold leading-tight">
                 isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
-              <div className="text-[10px] text-neutral-500">Motor de producción visual</div>
+              <div className="text-[10px] text-neutral-500">
+                Plataforma de modelos virtuales
+              </div>
             </div>
           </div>
 
@@ -2109,7 +2136,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
               Planes
             </button>
 
-            {/* ✅ NUEVO */}
             <button
               onClick={onOpenAbout}
               className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -2117,7 +2143,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
               Sobre nosotros
             </button>
 
-            {/* ✅ Antes hacía scroll a #contacto. Ahora abre "página" (vista) Contacto */}
             <button
               onClick={onOpenContact}
               className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10"
@@ -2136,72 +2161,71 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="grid gap-10 lg:grid-cols-[1.35fr_1fr]">
+        <section className="grid gap-12 lg:grid-cols-[1.2fr_1fr] lg:items-center">
           <div>
-            {/* ✅ ELIMINADO: BETA PRIVADA */}
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[11px] text-white/80">
+              Ecosistema visual con IA
+            </div>
 
-            <h1 className="mt-3 text-4xl font-semibold leading-tight md:text-5xl">
-              Produce contenido visual con IA{" "}
-              <span className="block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                como un sistema, no como un experimento.
+            <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-6xl">
+              Crea modelos virtuales con IA
+              <span className="mt-2 block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+                listos para publicar, vender y escalar.
               </span>
             </h1>
 
-            <div className="mt-3 h-[2px] w-40 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
+            <div className="mt-5 h-[2px] w-44 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
 
-            {/* ✅ Texto más corto en Home (lo largo se movió a Sobre nosotros) */}
-            <p className="mt-4 max-w-xl text-sm text-neutral-300">
-              Motor de producción visual con IA para creadores y equipos que necesitan, consistencia y control creativo.
+            <p className="mt-5 max-w-2xl text-base text-neutral-300">
+              Plataforma para crear, controlar y escalar modelos virtuales:
+              rostro, contenido, estilo y producción visual desde un solo sistema.
             </p>
 
-            {/* ✅ Próximamente */}
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-5 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                Próximamente: Voz a video
+                Producción en GPU
               </span>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
-                <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
-                Próximamente: Creación de avatares
+                Consistencia de rostro
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                Imagen → Video
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                Biblioteca integrada
               </span>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center gap-4">
+            <div className="mt-8 flex flex-wrap items-center gap-4">
               <button
-                onClick={() => {
-                  // ✅ ahora “probar el motor” abre el demo de prompt (y fuerza Google al generar)
-                  scrollToId("demo-box");
-                }}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
+                onClick={() => scrollToId("demo-box")}
+                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.55)] transition-shadow"
               >
-                Probar el motor (demo)
+                Crear mi modelo virtual
               </button>
 
               <button
                 onClick={onOpenAbout}
                 className="rounded-2xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10"
               >
-                Ver sobre nosotros
+                Ver presentación
               </button>
-
-              <p className="max-w-xs text-[11px] text-neutral-400">
-                Escribe tu prompt y ejecuta el demo. Al generar, te pedirá registrarte con Google.
-              </p>
             </div>
+
+            <p className="mt-4 max-w-md text-[12px] text-neutral-400">
+              Empieza escribiendo una idea. Cuando des el siguiente paso, te pediremos crear tu cuenta para entrar al panel.
+            </p>
           </div>
 
-          {/* ✅ Cuadro demo más grande + fondo menos difuminado */}
-          <div id="demo-box" className="relative order-first lg:order-last">
+          <div id="demo-box" className="relative">
             <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
 
-            {/* Neon rays */}
             <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
               <div className="absolute -top-24 left-1/3 h-96 w-[2px] rotate-12 bg-gradient-to-b from-cyan-400/0 via-cyan-300/60 to-fuchsia-400/0 blur-[0.5px]" />
               <div className="absolute -top-10 left-[65%] h-80 w-[2px] -rotate-12 bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-300/55 to-yellow-300/0 blur-[0.5px]" />
               <div className="absolute bottom-0 left-[15%] h-72 w-[2px] rotate-[18deg] bg-gradient-to-b from-yellow-300/0 via-yellow-200/45 to-cyan-300/0 blur-[0.5px]" />
             </div>
 
-            {/* Blurred gallery images behind (menos blur, un poco más visibles) */}
             <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
               {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
                 <div
@@ -2216,39 +2240,72 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
                     backgroundImage: `url(/gallery/${p}?v=2)`,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
-                    filter: "blur(7px)", // ✅ antes 10px
-                    opacity: 0.55, // ✅ más visible
+                    filter: "blur(7px)",
+                    opacity: 0.55,
                   }}
                 />
               ))}
             </div>
 
-            <h2 className="text-sm font-semibold text-white mb-3">Demo · Genera una imagen (prompt positivo)</h2>
+            <div className="mb-3">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                Inicio rápido
+              </p>
+              <h2 className="mt-2 text-lg font-semibold text-white">
+                Empieza con tu primer modelo virtual
+              </h2>
+            </div>
 
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/45 p-6 backdrop-blur-md shadow-xl">
+            <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/45 p-6 backdrop-blur-md shadow-xl">
               <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/16 via-transparent to-fuchsia-500/16 blur-3xl" />
 
+              <div className="mb-4 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-xs text-white">
+                  Imagen
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
+                  Imagen → Video
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
+                  Avatar / Biblioteca
+                </div>
+              </div>
+
               <textarea
-                className="mt-1 h-36 w-full resize-none rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 h-40 w-full resize-none rounded-2xl bg-black/60 px-4 py-4 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={demoPrompt}
                 onChange={(e) => setDemoPrompt(e.target.value)}
-                placeholder="Escribe tu prompt positivo..."
+                placeholder="Ej: modelo virtual elegante para redes sociales, rostro consistente, iluminación cinematográfica, formato vertical"
               />
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Enfoque</div>
+                  <div className="mt-1 text-sm text-white">Modelo virtual</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Salida</div>
+                  <div className="mt-1 text-sm text-white">Imagen vertical</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Flujo</div>
+                  <div className="mt-1 text-sm text-white">Cuenta → panel</div>
+                </div>
+              </div>
 
               <button
                 onClick={() => {
                   saveDemoPrompt(demoPrompt);
-                  onStartDemo(); // ✅ ahora onStartDemo abre modal Google (definido en Root App)
+                  onStartDemo();
                 }}
                 disabled={!demoPrompt.trim()}
-                className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white disabled:opacity-60"
+                className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white disabled:opacity-60"
               >
-                Generar imagen (demo)
+                Crear modelo
               </button>
 
               <div className="mt-3 text-[11px] text-neutral-400">
-                Al generar te pedirá registrarte con Google y entrarás directo al panel con{" "}
-                <span className="text-white font-semibold">10 jades gratis</span>.
+                Al continuar, crearás tu cuenta y entrarás al panel de creación con acceso inicial.
               </div>
             </div>
 
@@ -2257,6 +2314,85 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             </p>
           </div>
         </section>
+
+        <section className="mt-16">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                Generado con el sistema
+              </p>
+              <h3 className="mt-1 text-2xl font-semibold text-white">
+                Contenido generado con IsabelaOS
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+                Resultados creados desde el motor actual. La prioridad ahora es seguir refinando velocidad, estabilidad y calidad final.
+              </p>
+            </div>
+
+            <div className="mt-3 sm:mt-0">
+              <button
+                onClick={() => scrollToId("demo-box")}
+                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
+              >
+                Empezar ahora
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-[30px] border border-white/10 bg-white/5 p-4">
+            <VideoCollage />
+          </div>
+        </section>
+
+        <section className="mt-16">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                Señales tempranas
+              </p>
+              <h3 className="mt-1 text-2xl font-semibold text-white">
+                Primeros resultados del sistema
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+                A medida que escalamos, iremos agregando más feedback real de testers, equipos y creadores.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            {[
+              {
+                name: "Early Tester",
+                text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo.",
+              },
+              {
+                name: "Creador (beta)",
+                text: "Lo mejor es tener todo en un solo lugar: prompt → render → biblioteca. Eso ahorra tiempo.",
+              },
+              {
+                name: "Equipo creativo",
+                text: "La plataforma ya se siente como producto, no como una simple demo de generación.",
+              },
+            ].map((t, idx) => (
+              <div key={idx} className="rounded-[28px] border border-white/10 bg-black/35 p-5 backdrop-blur-md">
+                <div className="text-sm font-semibold text-white/90">{t.name}</div>
+                <div className="mt-2 text-sm leading-relaxed text-white/70">{t.text}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <PricingSection onOpenAuth={onOpenAuth} />
+      </main>
+
+      <footer className="border-t border-white/10 bg-black/30">
+        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
+          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
+        </div>
+      </footer>
+    </div>
+  );
+}
 
         {/* ---------------------------------------------------------
             Videos en Home (entre texto y planes) ✅ collage 5
@@ -2351,7 +2487,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
 
 
 // ---------------------------------------------------------
-// Sobre Nosotros (vista)
+// Sobre nosotros / presentación
 // ---------------------------------------------------------
 function AboutView({ onBackHome }) {
   const videoRef = useRef(null);
@@ -2367,7 +2503,6 @@ function AboutView({ onBackHome }) {
       setSoundOn(true);
     } catch (e) {
       console.log(e);
-      // Si el navegador bloquea, al menos el usuario puede darle play manual
     }
   };
 
@@ -2389,7 +2524,7 @@ function AboutView({ onBackHome }) {
               <div className="text-sm font-semibold leading-tight">
                 isabelaOs <span className="text-xs text-neutral-400">Studio</span>
               </div>
-              <div className="text-[10px] text-neutral-500">Sobre nosotros</div>
+              <div className="text-[10px] text-neutral-500">Presentación del sistema</div>
             </div>
           </div>
 
@@ -2403,71 +2538,122 @@ function AboutView({ onBackHome }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {/* ✅ Video arriba de todo */}
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
-          {/* ✅ Subirlo a: public/gallery/video10.mp4 */}
+        <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
+          <div className="pointer-events-none absolute -inset-16 -z-10 bg-gradient-to-br from-cyan-500/12 via-transparent to-fuchsia-500/14 blur-3xl" />
+
+          <div className="mb-4">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+              Presentación
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
+              Qué es IsabelaOS
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm text-neutral-300">
+              Una plataforma para crear y operar modelos virtuales con inteligencia artificial.
+            </p>
+          </div>
+
           <div className="relative">
             <video
               ref={videoRef}
-              className="w-full h-[360px] md:h-[460px] object-cover rounded-2xl border border-white/10 bg-black/40"
+              className="h-[360px] w-full rounded-[24px] border border-white/10 bg-black/40 object-cover md:h-[500px]"
               src="/gallery/video10.mp4"
               autoPlay
               muted
               loop
               playsInline
               preload="metadata"
-              controls={soundOn} // opcional: muestra controles después de activar audio
+              controls={soundOn}
             />
 
-            {/* Botón overlay para activar audio (los navegadores requieren interacción) */}
             {!soundOn && (
               <button
                 onClick={enableSound}
-                className="absolute bottom-4 left-4 rounded-2xl bg-black/60 border border-white/15 px-4 py-2 text-xs text-white hover:bg-black/70"
+                className="absolute bottom-4 left-4 rounded-2xl border border-white/15 bg-black/60 px-4 py-2 text-xs text-white hover:bg-black/70"
               >
                 🔊 Activar audio
               </button>
             )}
 
-            {/* Mini nota opcional */}
             {!soundOn && (
-              <div className="absolute bottom-4 right-4 hidden sm:block text-[10px] text-white/60 bg-black/50 border border-white/10 rounded-xl px-3 py-2">
+              <div className="absolute bottom-4 right-4 hidden rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-[10px] text-white/60 sm:block">
                 El audio se activa al tocar el botón
               </div>
             )}
           </div>
         </section>
 
-        {/* ✅ Info completa aquí */}
-        <section className="mt-8">
-          <h1 className="text-3xl font-semibold text-white">Sobre nosotros</h1>
+        <section className="mt-10">
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                Plataforma
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">
+                Diseñado para construir modelos virtuales, no solo renders aislados
+              </h2>
 
-          <p className="mt-4 max-w-3xl text-sm text-neutral-300">
-            IsabelaOS Studio es un <strong>motor de producción visual con IA</strong> desarrollado en Guatemala,
-            diseñado para creadores, estudios y equipos que necesitan velocidad, consistencia y control creativo.
-          </p>
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                IsabelaOS Studio organiza el proceso completo de producción visual:
+                idea, generación, biblioteca, consistencia estética y control del flujo creativo.
+              </p>
 
-          <p className="mt-3 max-w-3xl text-sm text-neutral-300">
-            No se trata solo de generar imágenes o videos, sino de construir resultados repetibles dentro de un flujo
-            de producción visual. <strong>Pipeline propio</strong> (infraestructura + workers + render) ejecutado
-            directamente en GPU: <strong>no dependemos de “apikeys” de otros generadores</strong>.
-          </p>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
-              <div className="text-sm font-semibold text-white/90">Estamos escalando</div>
-              <p className="mt-2 text-sm text-white/70 leading-relaxed">
-                Estamos en etapa de crecimiento: mejorando velocidad, estabilidad del render y preparando nuevos módulos
-                para creadores que necesitan resultados consistentes y un flujo de trabajo real.
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                No se trata solo de hacer una imagen o un video, sino de operar un sistema
+                donde el contenido pueda escalar con más orden, más velocidad y más coherencia visual.
               </p>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-black/35 p-5 backdrop-blur-md">
-              <div className="text-sm font-semibold text-white/90">Lo que viene</div>
-              <ul className="mt-2 text-sm text-white/70 leading-relaxed list-disc pl-5">
-                <li>Voz a Video (próximamente)</li>
-                <li>Creación de Avatares (próximamente)</li>
-              </ul>
+            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                Infraestructura
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">
+                Pipeline propio ejecutado en GPU
+              </h2>
+
+              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
+                IsabelaOS se apoya en infraestructura, workers y render conectados como sistema.
+                El objetivo es tener una plataforma sólida de producción visual y no depender de una simple capa superficial.
+              </p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
+                  <div className="text-xs font-semibold text-white">Consistencia</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Más control del estilo y del resultado visual.
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
+                  <div className="text-xs font-semibold text-white">Escalabilidad</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Pensado para crecer con más módulos y más producción.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-5 md:grid-cols-3">
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Qué resuelve</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Centraliza generación, visuales, biblioteca y flujo creativo dentro de un mismo producto.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Para quién es</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Creadores, equipos, marcas y estudios que quieren operar personajes o modelos virtuales con más orden.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
+              <div className="text-sm font-semibold text-white">Dirección</div>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Mejorar calidad, velocidad, estabilidad y profundidad del ecosistema visual.
+              </p>
             </div>
           </div>
 
