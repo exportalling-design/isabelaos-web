@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
@@ -28,7 +27,6 @@ export function Img2VideoPanel({ userStatus }) {
   const [durationSec, setDurationSec] = useState(8);
 
   const [includeAudio, setIncludeAudio] = useState(false);
-  const [audioUrl, setAudioUrl] = useState("");
 
   const fps = 16;
 
@@ -73,8 +71,6 @@ export function Img2VideoPanel({ userStatus }) {
   useEffect(() => {
     if (generationMode === "express") {
       setDurationSec(8);
-      setIncludeAudio(false);
-      setAudioUrl("");
     } else if (generationMode === "standard") {
       if (![10, 15].includes(Number(durationSec))) {
         setDurationSec(10);
@@ -82,9 +78,8 @@ export function Img2VideoPanel({ userStatus }) {
     } else {
       setDurationSec(5);
       setIncludeAudio(false);
-      setAudioUrl("");
     }
-  }, [generationMode]);
+  }, [generationMode, durationSec]);
 
   function getDurationOptions() {
     if (generationMode === "express") return [8];
@@ -103,7 +98,7 @@ export function Img2VideoPanel({ userStatus }) {
       base = 11;
     }
 
-    if (generationMode === "standard" && includeAudio && audioUrl.trim()) {
+    if ((generationMode === "express" || generationMode === "standard") && includeAudio) {
       base += 4;
     }
 
@@ -115,7 +110,9 @@ export function Img2VideoPanel({ userStatus }) {
 
   function getPriceText() {
     if (generationMode === "express") {
-      return "Express • 8s = 18 jades";
+      return includeAudio
+        ? "Express • 8s = 18 jades • Audio layer +4 jades"
+        : "Express • 8s = 18 jades";
     }
 
     if (generationMode === "standard") {
@@ -124,18 +121,14 @@ export function Img2VideoPanel({ userStatus }) {
           ? "Standard • 15s = 24 jades"
           : "Standard • 10s = 17 jades";
 
-      if (includeAudio && audioUrl.trim()) {
-        return `${baseText} • Audio layer +4 jades`;
-      }
-
-      return baseText;
+      return includeAudio ? `${baseText} • Audio layer +4 jades` : baseText;
     }
 
     return "Studio • 5s = 11 jades";
   }
 
   function getAllPricesText() {
-    return "Prices: Express 8s = 18 jades • Standard 10s = 17 jades • Standard 15s = 24 jades • Standard audio layer +4 jades • Studio 5s = 11 jades";
+    return "Prices: Express 8s = 18 jades • Express audio layer +4 jades • Standard 10s = 17 jades • Standard 15s = 24 jades • Standard audio layer +4 jades • Studio 5s = 11 jades";
   }
 
   function getModeDescription() {
@@ -146,6 +139,22 @@ export function Img2VideoPanel({ userStatus }) {
       return "Balanced mode for longer clips.";
     }
     return "Local extended mode with higher wait time.";
+  }
+
+  function getAudioHelpText() {
+    if (generationMode === "express") {
+      return includeAudio
+        ? "Audio layer ON: the model may return voice or sound if you describe it in the prompt."
+        : "Audio layer OFF: even if you write dialogue in the prompt, the backend will force a silent result.";
+    }
+
+    if (generationMode === "standard") {
+      return includeAudio
+        ? "Audio layer ON: test voice or sound directly from the prompt."
+        : "Audio layer OFF: the backend will force a silent result.";
+    }
+
+    return "Studio does not support audio.";
   }
 
   async function getAuthHeaders() {
@@ -478,10 +487,7 @@ export function Img2VideoPanel({ userStatus }) {
       setStatus("IN_PROGRESS");
       setStatusText(`Status: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`);
 
-      const startedAt =
-        stData?.job?.started_at ||
-        lastKnownJob?.started_at ||
-        null;
+      const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
 
       if (startedAt) {
         setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
@@ -653,10 +659,7 @@ export function Img2VideoPanel({ userStatus }) {
               return;
             }
 
-            const startedAt =
-              stData?.job?.started_at ||
-              saved?.lastKnownJob?.started_at ||
-              null;
+            const startedAt = stData?.job?.started_at || saved?.lastKnownJob?.started_at || null;
 
             if (startedAt) {
               setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
@@ -677,8 +680,6 @@ export function Img2VideoPanel({ userStatus }) {
         // ignore
       }
     }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   useEffect(() => {
@@ -690,7 +691,6 @@ export function Img2VideoPanel({ userStatus }) {
 
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
   useEffect(() => {
@@ -713,10 +713,6 @@ export function Img2VideoPanel({ userStatus }) {
       if (!user) return setErrorState("You must be logged in to use Image → Video.");
       if (!hasEnough) return setErrorState(`You need ${COST_I2V} jades for this video.`);
       if (!pureB64 && !imageUrl) return setErrorState("Upload an image or paste an image URL.");
-
-      if (generationMode === "standard" && includeAudio && !audioUrl.trim()) {
-        return setErrorState("Paste an audio URL to use the audio layer.");
-      }
 
       if (useOptimized && (!optimizedPrompt || optimizedPrompt.trim().length === 0)) {
         if (!prompt?.trim()) return setErrorState("Type a prompt or disable optimized prompt.");
@@ -751,7 +747,7 @@ export function Img2VideoPanel({ userStatus }) {
       const payload = {
         mode: "i2v",
         generation_mode: generationMode,
-        is_fast_mode: generationMode === "express", // backward compatibility
+        is_fast_mode: generationMode === "express",
         prompt: finalPrompt || "",
         negative_prompt: finalNegative || "",
         ...(aspect_ratio ? { aspect_ratio } : {}),
@@ -766,8 +762,7 @@ export function Img2VideoPanel({ userStatus }) {
         seed,
         image_b64: pureB64 || null,
         image_url: imageUrl || null,
-        include_audio: generationMode === "standard" && includeAudio && !!audioUrl.trim(),
-        audio_url: generationMode === "standard" && includeAudio ? audioUrl.trim() : null,
+        include_audio: (generationMode === "express" || generationMode === "standard") && includeAudio,
       };
 
       const controller = new AbortController();
@@ -1043,7 +1038,7 @@ export function Img2VideoPanel({ userStatus }) {
               className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe movement, camera, mood..."
+              placeholder="Describe movement, camera, mood. If Audio Layer is ON, write what the character should say here."
             />
           </div>
 
@@ -1107,29 +1102,29 @@ export function Img2VideoPanel({ userStatus }) {
                 id="i2v_audio"
                 type="checkbox"
                 checked={includeAudio}
-                disabled={generationMode !== "standard"}
+                disabled={generationMode === "studio"}
                 onChange={(e) => setIncludeAudio(e.target.checked)}
                 className="h-4 w-4"
               />
               <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">
-                Add audio track by URL (+4 jades, Standard mode only)
+                {generationMode === "studio"
+                  ? "Studio mode does not support audio"
+                  : "Enable audio or voice from the prompt (+4 jades)"}
               </label>
             </div>
 
-            {generationMode !== "standard" && (
-              <div className="mt-2 text-[10px] text-neutral-500">
-                Audio layer is available only in Standard mode.
+            <div className="mt-2 text-[10px] text-neutral-500">{getAudioHelpText()}</div>
+
+            {generationMode === "express" && (
+              <div className="mt-2 text-[10px] text-cyan-200/80">
+                Tip: if Audio Layer is OFF, even dialogue written in the prompt should return silent.
               </div>
             )}
 
-            {generationMode === "standard" && includeAudio && (
-              <input
-                type="text"
-                value={audioUrl}
-                onChange={(e) => setAudioUrl(e.target.value)}
-                placeholder="https://.../voice.mp3"
-                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10"
-              />
+            {generationMode === "standard" && (
+              <div className="mt-2 text-[10px] text-cyan-200/80">
+                Tip: with Audio Layer ON, write dialogue or sound cues directly in the prompt to test Wan voice/audio.
+              </div>
             )}
           </div>
 
