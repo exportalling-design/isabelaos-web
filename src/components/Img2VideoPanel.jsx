@@ -28,6 +28,8 @@ export function Img2VideoPanel({ userStatus }) {
 
   const [includeAudio, setIncludeAudio] = useState(false);
 
+  const [showModuleInfo, setShowModuleInfo] = useState(false);
+
   const fps = 16;
 
   const [status, setStatus] = useState("IDLE");
@@ -840,445 +842,520 @@ export function Img2VideoPanel({ userStatus }) {
   }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Imagen → Video</h2>
+    <>
+      <div className="grid gap-8 lg:grid-cols-2">
+        <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">Imagen → Video</h2>
 
-        <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[12px] text-cyan-100">
-          <span className="font-semibold text-white">Aviso:</span> la mejor calidad de video está en el modo <span className="font-semibold text-cyan-300">Express</span>.
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Estado: {statusText || "Listo."}</span>
-            <span>
-              Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
-            </span>
-          </div>
-
-          <div className="mt-1 text-[11px] text-neutral-400">
-            Costo actual: <span className="font-semibold text-red-400">{COST_I2V}</span> <span className="text-red-400">jades</span>
-          </div>
-
-          <div className="mt-1 text-[11px] font-semibold text-red-400">{getPriceText()}</div>
-          <div className="mt-1 text-[10px] text-red-400">{getAllPricesText()}</div>
-
-          {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
-
-          {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-[10px] text-neutral-400">
-                <span>Progreso</span>
-                <span>{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
-              </div>
-
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all"
-                  style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }}
-                />
-              </div>
-
-              <div className="mt-2 text-[11px] text-neutral-300">{getEtaText()}</div>
-
-              {needsManualRefresh && (
-                <div className="mt-2 text-[11px] text-yellow-200">
-                  Conexión perdida. Haz clic en <span className="font-semibold">"Actualizar estado"</span>.
-                </div>
-              )}
-            </div>
-          )}
-
-          {(jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh)) && (
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={handleUpdateStatus}
-                className="w-full rounded-xl border border-white/20 px-3 py-2 text-[11px] text-white hover:bg-white/10"
-              >
-                Actualizar estado
-              </button>
-            </div>
-          )}
-
-          <div className="mt-3">
             <button
               type="button"
-              onClick={hardResetPanel}
-              className="w-full rounded-xl border border-red-400/30 px-3 py-2 text-[11px] text-red-300 hover:bg-red-500/10"
+              onClick={() => setShowModuleInfo(true)}
+              className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/15"
             >
-              Reiniciar panel
+              Sobre este módulo
             </button>
           </div>
-        </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="text-xs text-neutral-300">Modo</div>
-
-            <div className="mt-3 space-y-2">
-              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
-                <input
-                  type="radio"
-                  name="i2v_mode"
-                  checked={generationMode === "express"}
-                  onChange={() => setGenerationMode("express")}
-                  className="h-4 w-4"
-                />
-                Express
-              </label>
-
-              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
-                <input
-                  type="radio"
-                  name="i2v_mode"
-                  checked={generationMode === "standard"}
-                  onChange={() => setGenerationMode("standard")}
-                  className="h-4 w-4"
-                />
-                Standard
-              </label>
-
-              <label className="flex items-center gap-2 text-[12px] text-neutral-200">
-                <input
-                  type="radio"
-                  name="i2v_mode"
-                  checked={generationMode === "studio"}
-                  onChange={() => setGenerationMode("studio")}
-                  className="h-4 w-4"
-                />
-                Studio
-              </label>
-            </div>
-
-            <div className="mt-2 text-[10px] text-neutral-500">{getModeDescription()}</div>
+          <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[12px] text-cyan-100">
+            <span className="font-semibold text-white">Recomendación:</span> si buscas la mejor calidad de video y la voz más natural, utiliza el modo <span className="font-semibold text-cyan-300">Express</span>.
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="text-xs text-neutral-300">Formato / tamaño</div>
-
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                id="i2v_916"
-                type="checkbox"
-                checked={useNineSixteen}
-                onChange={(e) => setUseNineSixteen(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_916" className="text-[12px] text-neutral-200">
-                Vertical 9:16
-              </label>
-            </div>
-
-            <div className="mt-2 text-[10px] text-neutral-500">
-              {useNineSixteen ? "Formato vertical seleccionado" : "Formato por defecto seleccionado"}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="text-xs text-neutral-300">Duración</div>
-
-            <div className="mt-3 space-y-2">
-              {getDurationOptions().map((sec) => (
-                <label key={sec} className="flex items-center gap-2 text-[12px] text-neutral-200">
-                  <input
-                    type="radio"
-                    name="i2v_duration"
-                    checked={Number(durationSec) === sec}
-                    onChange={() => setDurationSec(sec)}
-                    className="h-4 w-4"
-                  />
-                  {sec} segundos
-                </label>
-              ))}
-            </div>
-
-            <div className="mt-2 text-[10px] text-neutral-500">
-              fps: {fps} • frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-4 text-sm">
-          <div>
-            <p className="text-xs text-neutral-300">1. Sube una imagen</p>
-            <button
-              type="button"
-              onClick={handlePickFile}
-              className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/50 text-sm text-neutral-300 hover:bg-white/5"
-            >
-              {dataUrl ? "Cambiar imagen" : "Haz clic para subir una imagen"}
-            </button>
-
-            <input
-              id={fileInputId}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-
-            {dataUrl && (
-              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                <img src={dataUrl} alt="Base input" className="w-full object-cover" />
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs text-neutral-300">o pega una URL de imagen</p>
-            <input
-              type="text"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://..."
-              className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10"
-            />
-          </div>
-
-          <div>
-            <label className="text-neutral-300">Prompt (opcional)</label>
-            <textarea
-              className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe movimiento, cámara, ambiente. Si Audio Layer está activado, escribe aquí lo que debe decir el personaje."
-            />
-          </div>
-
-          <div>
-            <label className="text-neutral-300">Negativo (opcional)</label>
-            <textarea
-              className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-              placeholder="borroso, baja calidad, deformado..."
-            />
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-neutral-300">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-neutral-300">
-                Optimización de prompt (OpenAI)
-                {optimizedPrompt ? (
-                  <span className="ml-2 text-[10px] text-emerald-300">Listo ✓</span>
-                ) : (
-                  <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleOptimize}
-                disabled={isOptimizing || !prompt?.trim()}
-                className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-50"
-              >
-                {isOptimizing ? "Optimizando..." : "Optimizar con IA"}
-              </button>
-            </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="useOptI2V"
-                type="checkbox"
-                checked={useOptimized}
-                onChange={(e) => setUseOptimized(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="useOptI2V" className="text-[11px] text-neutral-300">
-                Usar prompt optimizado para generar
-              </label>
-              <span className="ml-auto text-[10px] text-neutral-500">
-                {useOptimized && optimizedPrompt ? "Activo" : ""}
+              <span>Estado: {statusText || "Listo."}</span>
+              <span>
+                Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span>
               </span>
             </div>
 
-            {optError && (
-              <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="text-xs text-neutral-300">Audio Layer</div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="i2v_audio"
-                type="checkbox"
-                checked={includeAudio}
-                disabled={generationMode === "studio"}
-                onChange={(e) => setIncludeAudio(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">
-                {generationMode === "studio"
-                  ? "El modo Studio no soporta audio"
-                  : "Activar audio o voz desde el prompt (+4 jades)"}
-              </label>
+            <div className="mt-1 text-[11px] text-neutral-400">
+              Costo actual: <span className="font-semibold text-red-400">{COST_I2V}</span> <span className="text-red-400">jades</span>
             </div>
 
-            <div className="mt-2 text-[10px] text-neutral-500">{getAudioHelpText()}</div>
+            <div className="mt-1 text-[11px] font-semibold text-red-400">{getPriceText()}</div>
+            <div className="mt-1 text-[10px] text-red-400">{getAllPricesText()}</div>
 
-            {generationMode === "express" && (
-              <div className="mt-2 text-[10px] text-cyan-200/80">
-                Consejo: en Express, activa Audio Layer si quieres que el video devuelva voz o sonido.
+            {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
+
+            {(status === "IN_PROGRESS" || status === "STARTING" || status === "DONE") && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[10px] text-neutral-400">
+                  <span>Progreso</span>
+                  <span>{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
+                </div>
+
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all"
+                    style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }}
+                  />
+                </div>
+
+                <div className="mt-2 text-[11px] text-neutral-300">{getEtaText()}</div>
+
+                {needsManualRefresh && (
+                  <div className="mt-2 text-[11px] text-yellow-200">
+                    Conexión perdida. Haz clic en <span className="font-semibold">"Actualizar estado"</span>.
+                  </div>
+                )}
               </div>
             )}
 
-            {generationMode === "standard" && (
-              <div className="mt-2 text-[10px] text-cyan-200/80">
-                Consejo: en Standard, con Audio Layer activado, escribe el diálogo o sonidos directamente en el prompt.
+            {(jobId && (status === "IN_PROGRESS" || status === "ERROR" || needsManualRefresh)) && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={handleUpdateStatus}
+                  className="w-full rounded-xl border border-white/20 px-3 py-2 text-[11px] text-white hover:bg-white/10"
+                >
+                  Actualizar estado
+                </button>
               </div>
             )}
+
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={hardResetPanel}
+                className="w-full rounded-xl border border-red-400/30 px-3 py-2 text-[11px] text-red-300 hover:bg-red-500/10"
+              >
+                Reiniciar panel
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="text-xs text-neutral-300">Modo</div>
+
+              <div className="mt-3 space-y-2">
+                <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                  <input
+                    type="radio"
+                    name="i2v_mode"
+                    checked={generationMode === "express"}
+                    onChange={() => setGenerationMode("express")}
+                    className="h-4 w-4"
+                  />
+                  Express
+                </label>
+
+                <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                  <input
+                    type="radio"
+                    name="i2v_mode"
+                    checked={generationMode === "standard"}
+                    onChange={() => setGenerationMode("standard")}
+                    className="h-4 w-4"
+                  />
+                  Standard
+                </label>
+
+                <label className="flex items-center gap-2 text-[12px] text-neutral-200">
+                  <input
+                    type="radio"
+                    name="i2v_mode"
+                    checked={generationMode === "studio"}
+                    onChange={() => setGenerationMode("studio")}
+                    className="h-4 w-4"
+                  />
+                  Studio
+                </label>
+              </div>
+
+              <div className="mt-2 text-[10px] text-neutral-500">{getModeDescription()}</div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="text-xs text-neutral-300">Formato / tamaño</div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  id="i2v_916"
+                  type="checkbox"
+                  checked={useNineSixteen}
+                  onChange={(e) => setUseNineSixteen(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="i2v_916" className="text-[12px] text-neutral-200">
+                  Vertical 9:16
+                </label>
+              </div>
+
+              <div className="mt-2 text-[10px] text-neutral-500">
+                {useNineSixteen ? "Formato vertical seleccionado" : "Formato por defecto seleccionado"}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="text-xs text-neutral-300">Duración</div>
+
+              <div className="mt-3 space-y-2">
+                {getDurationOptions().map((sec) => (
+                  <label key={sec} className="flex items-center gap-2 text-[12px] text-neutral-200">
+                    <input
+                      type="radio"
+                      name="i2v_duration"
+                      checked={Number(durationSec) === sec}
+                      onChange={() => setDurationSec(sec)}
+                      className="h-4 w-4"
+                    />
+                    {sec} segundos
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-2 text-[10px] text-neutral-500">
+                fps: {fps} • frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-4 text-sm">
             <div>
-              <label className="text-neutral-300">Steps</label>
+              <p className="text-xs text-neutral-300">1. Sube una imagen</p>
+              <button
+                type="button"
+                onClick={handlePickFile}
+                className="mt-2 flex h-40 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/50 text-sm text-neutral-300 hover:bg-white/5"
+              >
+                {dataUrl ? "Cambiar imagen" : "Haz clic para subir una imagen"}
+              </button>
+
               <input
-                type="number"
-                min={1}
-                max={80}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                value={steps}
-                onChange={(e) => setSteps(Number(e.target.value))}
+                id={fileInputId}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {dataUrl && (
+                <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+                  <img src={dataUrl} alt="Base input" className="w-full object-cover" />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs text-neutral-300">o pega una URL de imagen</p>
+              <input
+                type="text"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://..."
+                className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10"
               />
             </div>
 
             <div>
-              <label className="text-neutral-300">Guidance (CFG)</label>
-              <input
-                type="number"
-                step="0.5"
-                min={1}
-                max={10}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                value={guidanceScale}
-                onChange={(e) => setGuidanceScale(Number(e.target.value))}
+              <label className="text-neutral-300">Prompt (opcional)</label>
+              <textarea
+                className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Describe movimiento, cámara, ambiente. Si Audio Layer está activado, escribe aquí lo que debe decir el personaje."
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <label className="text-neutral-300">Strength (denoise)</label>
-              <input
-                type="number"
-                step="0.05"
-                min={0.1}
-                max={1.0}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                value={strength}
-                onChange={(e) => setStrength(Number(e.target.value))}
-              />
-              <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.60–0.70</div>
             </div>
 
             <div>
-              <label className="text-neutral-300">Fuerza de movimiento</label>
-              <input
-                type="number"
-                step="0.05"
-                min={0.1}
-                max={2.0}
-                className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                value={motionStrength}
-                onChange={(e) => setMotionStrength(Number(e.target.value))}
+              <label className="text-neutral-300">Negativo (opcional)</label>
+              <textarea
+                className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                value={negative}
+                onChange={(e) => setNegative(e.target.value)}
+                placeholder="borroso, baja calidad, deformado..."
               />
-              <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.9–1.1</div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-            <div className="text-xs text-neutral-300">Seed</div>
-
-            <div className="mt-2 flex items-center gap-3">
-              <input
-                id="i2v_seed_random"
-                type="checkbox"
-                checked={seedMode === "RANDOM"}
-                onChange={(e) => e.target.checked && setSeedMode("RANDOM")}
-                className="h-4 w-4"
-              />
-              <label htmlFor="i2v_seed_random" className="text-[12px] text-neutral-200">
-                Aleatorio (recomendado)
-              </label>
-
-              <input
-                id="i2v_seed_fixed"
-                type="checkbox"
-                checked={seedMode === "FIXED"}
-                onChange={(e) => e.target.checked && setSeedMode("FIXED")}
-                className="ml-4 h-4 w-4"
-              />
-              <label htmlFor="i2v_seed_fixed" className="text-[12px] text-neutral-200">
-                Fijo
-              </label>
             </div>
 
-            {seedMode === "FIXED" && (
-              <input
-                type="number"
-                min={0}
-                max={2147483647}
-                value={seedFixed}
-                onChange={(e) => setSeedFixed(Number(e.target.value))}
-                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-              />
-            )}
-          </div>
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-neutral-300">
+                  Optimización de prompt (OpenAI)
+                  {optimizedPrompt ? (
+                    <span className="ml-2 text-[10px] text-emerald-300">Listo ✓</span>
+                  ) : (
+                    <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>
+                  )}
+                </div>
 
-          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[11px] text-cyan-100">
-            <div className="font-semibold text-white">Información de precios del video</div>
-            <div className="mt-2 text-red-400">{getAllPricesText()}</div>
-            <div className="mt-1 text-cyan-200/80">
-              Selección actual: <span className="font-semibold text-red-400">{getPriceText()}</span>
+                <button
+                  type="button"
+                  onClick={handleOptimize}
+                  disabled={isOptimizing || !prompt?.trim()}
+                  className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-50"
+                >
+                  {isOptimizing ? "Optimizando..." : "Optimizar con IA"}
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  id="useOptI2V"
+                  type="checkbox"
+                  checked={useOptimized}
+                  onChange={(e) => setUseOptimized(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="useOptI2V" className="text-[11px] text-neutral-300">
+                  Usar prompt optimizado para generar
+                </label>
+                <span className="ml-auto text-[10px] text-neutral-500">
+                  {useOptimized && optimizedPrompt ? "Activo" : ""}
+                </span>
+              </div>
+
+              {optError && (
+                <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>
+              )}
             </div>
-          </div>
 
-          <div>
-            <button
-              type="button"
-              onClick={handleGenerate}
-              disabled={status === "STARTING" || status === "IN_PROGRESS" || !hasEnough}
-              className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {status === "STARTING" || status === "IN_PROGRESS"
-                ? "Generando..."
-                : !hasEnough
-                  ? "No tienes suficientes jades"
-                  : generationMode === "express"
-                    ? "Generar video Express"
-                    : generationMode === "standard"
-                      ? "Generar video Standard"
-                      : "Generar video Studio"}
-            </button>
-          </div>
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="text-xs text-neutral-300">Audio Layer</div>
 
-          {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  id="i2v_audio"
+                  type="checkbox"
+                  checked={includeAudio}
+                  disabled={generationMode === "studio"}
+                  onChange={(e) => setIncludeAudio(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">
+                  {generationMode === "studio"
+                    ? "El modo Studio no soporta audio"
+                    : "Activar audio o voz desde el prompt (+4 jades)"}
+                </label>
+              </div>
+
+              <div className="mt-2 text-[10px] text-neutral-500">{getAudioHelpText()}</div>
+
+              {generationMode === "express" && (
+                <div className="mt-2 text-[10px] text-cyan-200/80">
+                  Consejo: en Express, activa Audio Layer si quieres que el video devuelva voz o sonido.
+                </div>
+              )}
+
+              {generationMode === "standard" && (
+                <div className="mt-2 text-[10px] text-cyan-200/80">
+                  Consejo: en Standard, con Audio Layer activado, escribe el diálogo o sonidos directamente en el prompt.
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-neutral-300">Steps</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={80}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                  value={steps}
+                  onChange={(e) => setSteps(Number(e.target.value))}
+                />
+              </div>
+
+              <div>
+                <label className="text-neutral-300">Guidance (CFG)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min={1}
+                  max={10}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                  value={guidanceScale}
+                  onChange={(e) => setGuidanceScale(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-neutral-300">Strength (denoise)</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min={0.1}
+                  max={1.0}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                  value={strength}
+                  onChange={(e) => setStrength(Number(e.target.value))}
+                />
+                <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.60–0.70</div>
+              </div>
+
+              <div>
+                <label className="text-neutral-300">Fuerza de movimiento</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min={0.1}
+                  max={2.0}
+                  className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                  value={motionStrength}
+                  onChange={(e) => setMotionStrength(Number(e.target.value))}
+                />
+                <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.9–1.1</div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+              <div className="text-xs text-neutral-300">Seed</div>
+
+              <div className="mt-2 flex items-center gap-3">
+                <input
+                  id="i2v_seed_random"
+                  type="checkbox"
+                  checked={seedMode === "RANDOM"}
+                  onChange={(e) => e.target.checked && setSeedMode("RANDOM")}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="i2v_seed_random" className="text-[12px] text-neutral-200">
+                  Aleatorio (recomendado)
+                </label>
+
+                <input
+                  id="i2v_seed_fixed"
+                  type="checkbox"
+                  checked={seedMode === "FIXED"}
+                  onChange={(e) => e.target.checked && setSeedMode("FIXED")}
+                  className="ml-4 h-4 w-4"
+                />
+                <label htmlFor="i2v_seed_fixed" className="text-[12px] text-neutral-200">
+                  Fijo
+                </label>
+              </div>
+
+              {seedMode === "FIXED" && (
+                <input
+                  type="number"
+                  min={0}
+                  max={2147483647}
+                  value={seedFixed}
+                  onChange={(e) => setSeedFixed(Number(e.target.value))}
+                  className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                />
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[11px] text-cyan-100">
+              <div className="font-semibold text-white">Información de precios del video</div>
+              <div className="mt-2 text-red-400">{getAllPricesText()}</div>
+              <div className="mt-1 text-cyan-200/80">
+                Selección actual: <span className="font-semibold text-red-400">{getPriceText()}</span>
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={status === "STARTING" || status === "IN_PROGRESS" || !hasEnough}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {status === "STARTING" || status === "IN_PROGRESS"
+                  ? "Generando..."
+                  : !hasEnough
+                    ? "No tienes suficientes jades"
+                    : generationMode === "express"
+                      ? "Generar video Express"
+                      : generationMode === "standard"
+                        ? "Generar video Standard"
+                        : "Generar video Studio"}
+              </button>
+            </div>
+
+            {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
+          </div>
         </div>
-      </div>
 
-      <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Resultado</h2>
+        <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
+          <h2 className="text-lg font-semibold text-white">Resultado</h2>
 
-        <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
-          {videoUrl ? (
-            <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
-          ) : (
-            <p>Aquí verás el video cuando termine.</p>
+          <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
+            {videoUrl ? (
+              <video src={videoUrl} controls className="h-full w-full rounded-2xl object-contain" />
+            ) : (
+              <p>Aquí verás el video cuando termine.</p>
+            )}
+          </div>
+
+          {videoUrl && (
+            <button
+              onClick={handleDownload}
+              className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
+            >
+              Descargar video
+            </button>
           )}
         </div>
-
-        {videoUrl && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10"
-          >
-            Descargar video
-          </button>
-        )}
       </div>
-    </div>
+
+      {showModuleInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="relative w-full max-w-4xl rounded-3xl border border-white/10 bg-[#05070d] p-5 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowModuleInfo(false)}
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10"
+            >
+              ✕
+            </button>
+
+            <div className="pr-12">
+              <h3 className="text-xl font-semibold text-white">Sobre este módulo</h3>
+              <p className="mt-1 text-sm text-neutral-300">
+                Este módulo convierte una imagen en video usando distintos motores según el modo que elijas.
+              </p>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black">
+              <video
+                src="/videoinstruvideo.mp4"
+                controls
+                className="h-full max-h-[420px] w-full object-contain"
+              />
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-neutral-300">
+              <div className="font-semibold text-white">Cómo usar Imagen → Video</div>
+
+              <div className="mt-3 space-y-2">
+                <p>
+                  <span className="font-semibold text-white">1.</span> Sube una imagen o pega una URL de imagen.
+                </p>
+                <p>
+                  <span className="font-semibold text-white">2.</span> Escribe un prompt describiendo movimiento, cámara, ambiente o diálogo.
+                </p>
+                <p>
+                  <span className="font-semibold text-white">3.</span> Elige el modo:
+                </p>
+                <div className="ml-4 space-y-1 text-[13px] text-neutral-300">
+                  <p><span className="font-semibold text-cyan-300">Express:</span> mejor calidad de video y voz más natural.</p>
+                  <p><span className="font-semibold text-cyan-300">Standard:</span> más económico y permite clips más largos.</p>
+                  <p><span className="font-semibold text-cyan-300">Studio:</span> modo local, más lento y sin audio.</p>
+                </div>
+                <p>
+                  <span className="font-semibold text-white">4.</span> Si quieres voz o sonido, activa <span className="font-semibold text-white">Audio Layer</span>.
+                </p>
+                <p>
+                  <span className="font-semibold text-white">5.</span> Ajusta duración, formato y parámetros si quieres más control.
+                </p>
+                <p>
+                  <span className="font-semibold text-white">6.</span> Haz clic en <span className="font-semibold text-white">Generar video</span> y espera el resultado.
+                </p>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[12px] text-cyan-100">
+                Recomendación: si buscas la mejor calidad de video y la voz más natural, utiliza <span className="font-semibold text-cyan-300">Express</span>.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
