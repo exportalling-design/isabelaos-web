@@ -1,4 +1,3 @@
-
 import { fal } from "@fal-ai/client";
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
@@ -103,7 +102,6 @@ function resolveGenerationMode(body) {
     return raw;
   }
 
-  // backward compatibility
   if (typeof body?.is_fast_mode === "boolean") {
     return body.is_fast_mode ? "express" : "studio";
   }
@@ -122,10 +120,9 @@ function normalizeDurationByMode(mode, raw) {
     return 5;
   }
 
-  // standard (fal)
   if (n === 15) return 15;
   if (n === 10) return 10;
-  if (n === 8) return 10; // compatibility: Standard does not support exact 8s
+  if (n === 8) return 10;
   if (n === 5) return 5;
 
   return 10;
@@ -138,7 +135,9 @@ function getModeProvider(mode) {
 }
 
 function getSpendReason(mode, hasAudioLayer) {
-  if (mode === "express") return "i2v_generate_express";
+  if (mode === "express") {
+    return hasAudioLayer ? "i2v_generate_express_audio" : "i2v_generate_express";
+  }
   if (mode === "standard") {
     return hasAudioLayer ? "i2v_generate_standard_audio" : "i2v_generate_standard";
   }
@@ -149,16 +148,16 @@ function getJadeCost({ mode, duration, hasAudioLayer }) {
   let base = 0;
 
   if (mode === "express") {
-    base = 18; // fixed 8s
+    base = 18;
   } else if (mode === "standard") {
     if (duration === 15) base = 24;
     else if (duration === 10) base = 17;
-    else base = 12; // 5s fallback
+    else base = 12;
   } else {
-    base = 11; // studio 5s
+    base = 11;
   }
 
-  if (mode === "standard" && hasAudioLayer) {
+  if ((mode === "express" || mode === "standard") && hasAudioLayer) {
     base += 4;
   }
 
@@ -179,6 +178,51 @@ function getResolutionForMode({ mode, width, height }) {
   const maxSide = Math.max(w, h);
 
   return maxSide >= 1000 ? "1080p" : "720p";
+}
+
+function mergeNegativePrompts(baseNegative, extraNegative) {
+  const a = String(baseNegative || "").trim();
+  const b = String(extraNegative || "").trim();
+
+  if (a && b) return `${a}, ${b}`;
+  return a || b || "";
+}
+
+function applyAudioPolicy({ mode, prompt, negativePrompt, audioLayerEnabled }) {
+  const cleanPrompt = String(prompt || "").trim();
+  const cleanNegative = String(negativePrompt || "").trim();
+
+  if (mode === "studio") {
+    const silentInstruction =
+      "silent video, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no music";
+    return {
+      finalPrompt: cleanPrompt ? `${cleanPrompt}. ${silentInstruction}.` : silentInstruction,
+      finalNegative: mergeNegativePrompts(
+        cleanNegative,
+        "audio, voice, speech, dialogue, talking, singing, soundtrack, music, lip sync"
+      ),
+      resolvedIncludeAudio: false,
+    };
+  }
+
+  if (!audioLayerEnabled) {
+    const silentInstruction =
+      "silent video only, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no ambient sound, no music";
+    return {
+      finalPrompt: cleanPrompt ? `${cleanPrompt}. ${silentInstruction}.` : silentInstruction,
+      finalNegative: mergeNegativePrompts(
+        cleanNegative,
+        "audio, voice, speech, dialogue, talking, singing, soundtrack, music, ambient sound, lip sync"
+      ),
+      resolvedIncludeAudio: false,
+    };
+  }
+
+  return {
+    finalPrompt: cleanPrompt,
+    finalNegative: cleanNegative,
+    resolvedIncludeAudio: true,
+  };
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
@@ -276,8 +320,19 @@ export default async function handler(req, res) {
           ? 1024
           : 480;
 
-    const audio_url = String(body?.audio_url || "").trim();
-    const include_audio = !!body?.include_audio && !!audio_url;
+    const requestedAudioLayer = !!body?.include_audio && generationMode !== "studio";
+
+    const audioPolicy = applyAudioPolicy({
+      mode: generationMode,
+      prompt: finalPrompt,
+      negativePrompt: finalNegative,
+      audioLayerEnabled: requestedAudioLayer,
+    });
+
+    const resolvedPrompt = audioPolicy.finalPrompt;
+    const resolvedNegative = audioPolicy.finalNegative;
+    const include_audio = audioPolicy.resolvedIncludeAudio;
+
     const resolution = getResolutionForMode({ mode: generationMode, width, height });
 
     jadeCost = getJadeCost({
@@ -302,6 +357,7 @@ export default async function handler(req, res) {
       denoise,
       seed,
       motion_strength,
+      requestedAudioLayer,
       include_audio,
       resolution,
       jadeCost,
@@ -343,8 +399,8 @@ export default async function handler(req, res) {
       user_id: userId,
       status: "QUEUED",
       mode: "i2v",
-      prompt: finalPrompt,
-      negative_prompt: finalNegative || "",
+      prompt: resolvedPrompt,
+      negative_prompt: resolvedNegative || "",
       width,
       height,
       fps,
@@ -355,7 +411,7 @@ export default async function handler(req, res) {
         ...(body || {}),
         generation_mode: generationMode,
         include_audio,
-        audio_url: audio_url || null,
+        requested_audio_layer: requestedAudioLayer,
         resolved_duration_s: duration_s,
         resolved_resolution: resolution,
       },
@@ -398,6 +454,7 @@ export default async function handler(req, res) {
         imageMimeType,
         aspect_ratio,
         duration_s,
+        include_audio,
       });
 
       if (!image_b64) {
@@ -405,7 +462,7 @@ export default async function handler(req, res) {
       }
 
       const veoResult = await generateVeoVideo({
-        prompt: finalPrompt,
+        prompt: resolvedPrompt,
         imageB64: image_b64,
         imageMimeType,
         aspectRatio: aspect_ratio,
@@ -449,6 +506,7 @@ export default async function handler(req, res) {
         started_at: startedAtIso,
         jade_spent: jadeCost,
         generation_mode: "express",
+        include_audio,
       });
     }
 
@@ -472,9 +530,9 @@ export default async function handler(req, res) {
       }
 
       const falInput = {
-        prompt: finalPrompt,
+        prompt: resolvedPrompt,
         image_url: falImageUrl,
-        negative_prompt: finalNegative || "",
+        negative_prompt: resolvedNegative || "",
         resolution: resolution || "1080p",
         duration: String(duration_s),
         enable_prompt_expansion: true,
@@ -482,10 +540,6 @@ export default async function handler(req, res) {
         enable_safety_checker: true,
         seed,
       };
-
-      if (include_audio) {
-        falInput.audio_url = audio_url;
-      }
 
       const falResp = await falQueueSubmit({ input: falInput });
 
@@ -526,6 +580,7 @@ export default async function handler(req, res) {
         started_at: startedAtIso,
         jade_spent: jadeCost,
         generation_mode: "standard",
+        include_audio,
       });
     }
 
@@ -536,14 +591,15 @@ export default async function handler(req, res) {
       jobId,
       duration_s,
       aspect_ratio,
+      include_audio,
     });
 
     const rpInput = {
       mode: "i2v",
       job_id: jobId,
       user_id: userId,
-      prompt: finalPrompt,
-      negative_prompt: finalNegative || "",
+      prompt: resolvedPrompt,
+      negative_prompt: resolvedNegative || "",
       fps,
       num_frames,
       steps,
@@ -594,6 +650,7 @@ export default async function handler(req, res) {
       started_at: startedAtIso,
       jade_spent: jadeCost,
       generation_mode: "studio",
+      include_audio: false,
     });
   } catch (e) {
     console.error("[generate-img2video] ERROR:", {
