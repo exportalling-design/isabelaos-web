@@ -2,8 +2,9 @@
 // api/video-status.js
 // -----------------------------------------------------
 // Estado de jobs de video para:
-// 1) Google Veo (modo Fast)
-// 2) RunPod (modo Pro)
+// 1) Google Veo (Express)
+// 2) fal.ai WAN 2.6 Flash (Standard)
+// 3) RunPod (Studio)
 // -----------------------------------------------------
 // Qué hace:
 // - autentica al usuario por Bearer token
@@ -11,9 +12,13 @@
 // - si ya hay video_url, la devuelve
 // - si es Veo:
 //    * consulta la operación
-//    * si Veo devuelve gcsUri, descarga el mp4 desde GCS
+//    * si devuelve gcsUri, descarga el mp4 desde GCS
 //    * lo sube a Supabase Storage
 //    * guarda video_url final para el frontend
+// - si es fal:
+//    * consulta status de cola
+//    * cuando termina, obtiene resultado
+//    * descarga/sube o guarda URL final
 // - si es RunPod:
 //    * soporta URL directa o base64
 // - si algo falla:
@@ -23,6 +28,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { GoogleAuth } from "google-auth-library";
+import { fal } from "@fal-ai/client";
 import { fetchVeoOperation } from "../src/lib/veo.js";
 
 // =====================================================
@@ -46,11 +52,17 @@ const RUNPOD_ENDPOINT_ID =
   process.env.VIDEO_RUNPOD_ENDPOINT ||
   null;
 
+const FAL_KEY = process.env.FAL_KEY || null;
+
 const VIDEO_BUCKET = process.env.SUPABASE_VIDEO_BUCKET || "videos";
 const BUCKET_PUBLIC =
   String(process.env.SUPABASE_VIDEO_BUCKET_PUBLIC ?? "true").toLowerCase() === "true";
 
 const PENDING_PLACEHOLDER = "[PENDING_EXPORT_FROM_B64]";
+
+if (FAL_KEY) {
+  fal.config({ credentials: FAL_KEY });
+}
 
 // =====================================================
 // 2) Helpers básicos
@@ -140,6 +152,16 @@ function safeExtFromMime(mime) {
   return "mp4";
 }
 
+async function fetchUrlToBuffer(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Failed to fetch remote video: ${resp.status} ${txt}`);
+  }
+  const ab = await resp.arrayBuffer();
+  return Buffer.from(ab);
+}
+
 // =====================================================
 // 6) Subida de video final a Supabase Storage
 // =====================================================
@@ -177,24 +199,28 @@ async function uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime = "
 // 7) Refund de jades
 // =====================================================
 
-function getDurationForRefund(job) {
-  const payload = job?.payload || {};
-  const raw = payload?.duration_s ?? payload?.seconds ?? 8;
-  const n = Number(raw);
-  return n === 5 ? 5 : 8;
-}
-
 function getRefundAmount(job) {
   const provider = String(job?.provider || "").toLowerCase();
-  const duration = getDurationForRefund(job);
+  const payload = job?.payload || {};
+  const mode = String(payload?.generation_mode || "").toLowerCase();
+  const duration = Number(payload?.resolved_duration_s ?? payload?.duration_s ?? payload?.seconds ?? 8);
+  const includeAudio = !!payload?.include_audio;
 
-  // FAST (Veo)
-  if (provider === "google_veo") {
-    return duration === 5 ? 12 : 15;
+  if (provider === "google_veo" || mode === "express") {
+    return 18;
   }
 
-  // PRO (RunPod)
-  return duration === 5 ? 11 : 12;
+  if (provider === "fal_wan_flash" || mode === "standard") {
+    let amount = 17;
+    if (duration === 15) amount = 24;
+    else if (duration === 10) amount = 17;
+    else if (duration === 5) amount = 12;
+
+    if (includeAudio) amount += 4;
+    return amount;
+  }
+
+  return 11; // studio / runpod
 }
 
 async function refundJadesSafe({ admin, job, reason }) {
@@ -269,7 +295,7 @@ function parseGsUri(gsUri) {
   const raw = String(gsUri || "").trim();
   if (!raw.startsWith("gs://")) return null;
 
-  const without = raw.slice(5); // quita gs://
+  const without = raw.slice(5);
   const slash = without.indexOf("/");
 
   if (slash === -1) {
@@ -421,7 +447,55 @@ function extractVeoVideoPayload(op) {
 }
 
 // =====================================================
-// 12) Handler principal
+// 12) Helpers fal
+// =====================================================
+
+function normalizeFalStatus(status) {
+  const s = String(status || "").toUpperCase();
+
+  if (["COMPLETED", "DONE", "SUCCESS", "FINISHED"].includes(s)) return "COMPLETED";
+  if (["FAILED", "ERROR", "CANCELLED", "CANCELED"].includes(s)) return "FAILED";
+  if (["IN_PROGRESS", "IN_QUEUE", "QUEUED", "RUNNING"].includes(s)) return "IN_PROGRESS";
+
+  return s || "IN_PROGRESS";
+}
+
+function extractFalVideoInfo(result) {
+  const root = result?.data || result || {};
+
+  const possibleUrl =
+    root?.video?.url ||
+    root?.video_url ||
+    root?.videoUrl ||
+    root?.output?.video?.url ||
+    root?.output?.video_url ||
+    root?.output?.videoUrl ||
+    null;
+
+  const possibleMime =
+    root?.video?.content_type ||
+    root?.video?.mime_type ||
+    root?.mime ||
+    root?.mime_type ||
+    "video/mp4";
+
+  const possibleB64 =
+    root?.video_b64 ||
+    root?.videoBase64 ||
+    root?.output?.video_b64 ||
+    root?.output?.videoBase64 ||
+    null;
+
+  return {
+    url: possibleUrl ? String(possibleUrl) : null,
+    mime: possibleMime ? String(possibleMime) : "video/mp4",
+    b64: possibleB64 ? String(possibleB64) : null,
+    raw: root,
+  };
+}
+
+// =====================================================
+// 13) Handler principal
 // =====================================================
 
 export default async function handler(req, res) {
@@ -431,7 +505,7 @@ export default async function handler(req, res) {
 
   try {
     // -------------------------------------------------
-    // 12.1) Auth y validaciones
+    // 13.1) Auth y validaciones
     // -------------------------------------------------
     const userId = await getUserIdFromRequest(req);
     if (!userId) return json(res, 401, { ok: false, error: "Unauthorized" });
@@ -451,7 +525,7 @@ export default async function handler(req, res) {
     });
 
     // -------------------------------------------------
-    // 12.2) Buscar job en video_jobs
+    // 13.2) Buscar job en video_jobs
     // -------------------------------------------------
     const { data: job, error: jobErr } = await admin
       .from("video_jobs")
@@ -465,7 +539,7 @@ export default async function handler(req, res) {
     }
 
     // -------------------------------------------------
-    // 12.3) Si ya hay video_url final, devolverlo
+    // 13.3) Si ya hay video_url final, devolverlo
     // -------------------------------------------------
     if (job.video_url && job.video_url !== PENDING_PLACEHOLDER) {
       return json(res, 200, {
@@ -477,14 +551,14 @@ export default async function handler(req, res) {
     }
 
     // -------------------------------------------------
-    // 12.4) Si aún no hay provider_request_id
+    // 13.4) Si aún no hay provider_request_id
     // -------------------------------------------------
     if (!job.provider_request_id) {
       return json(res, 200, { ok: true, status: job.status, job });
     }
 
     // =================================================
-    // 13) GOOGLE VEO
+    // 14) GOOGLE VEO
     // =================================================
     if (job.provider === "google_veo") {
       const op = await fetchVeoOperation(job.provider_request_id);
@@ -501,9 +575,6 @@ export default async function handler(req, res) {
         operationName: job.provider_request_id,
       });
 
-      // -----------------------------------------------
-      // 13.1) Error real de Veo
-      // -----------------------------------------------
       if (opError) {
         await admin
           .from("video_jobs")
@@ -531,9 +602,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // -----------------------------------------------
-      // 13.2) Todavía en progreso
-      // -----------------------------------------------
       if (!done) {
         await admin
           .from("video_jobs")
@@ -553,9 +621,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // -----------------------------------------------
-      // 13.3) Intentar extraer payload de salida
-      // -----------------------------------------------
       const extracted = extractVeoVideoPayload(op);
 
       console.error("[video-status] VEO done summary", {
@@ -566,9 +631,6 @@ export default async function handler(req, res) {
         mimeType: extracted.mimeType,
       });
 
-      // -----------------------------------------------
-      // 13.4) Caso A: Veo devolvió video en base64
-      // -----------------------------------------------
       if (extracted.directB64) {
         try {
           const buf = decodeB64ToBuffer(extracted.directB64);
@@ -631,10 +693,6 @@ export default async function handler(req, res) {
         }
       }
 
-    // -----------------------------------------------
-      // 13.5) Caso B: Veo devolvió gcsUri
-      //         -> descargar de GCS y subir a Supabase
-      // -----------------------------------------------
       if (extracted.gcsUri) {
         try {
           const gcsBuffer = await downloadGcsObjectToBuffer(extracted.gcsUri);
@@ -699,9 +757,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // -----------------------------------------------
-      // 13.6) Terminó pero no encontramos video
-      // -----------------------------------------------
       await admin
         .from("video_jobs")
         .update({
@@ -736,7 +791,297 @@ export default async function handler(req, res) {
     }
 
     // =================================================
-    // 14) RUNPOD
+    // 15) FAL WAN FLASH
+    // =================================================
+    if (job.provider === "fal_wan_flash") {
+      if (!FAL_KEY) {
+        return json(res, 500, {
+          ok: false,
+          error: "Missing FAL_KEY",
+        });
+      }
+
+      try {
+        fal.config({ credentials: FAL_KEY });
+
+        const queueStatus = await fal.queue.status("wan/v2.6/image-to-video/flash", {
+          requestId: String(job.provider_request_id),
+          logs: true,
+        });
+
+        const normalizedStatus = normalizeFalStatus(
+          queueStatus?.status || queueStatus?.state || queueStatus?.status_code
+        );
+
+        console.error("[video-status] FAL status:", {
+          jobId,
+          requestId: job.provider_request_id,
+          status: normalizedStatus,
+          raw: queueStatus,
+        });
+
+        if (normalizedStatus === "FAILED") {
+          const falErr =
+            queueStatus?.error?.message ||
+            queueStatus?.message ||
+            "fal job failed";
+
+          await admin
+            .from("video_jobs")
+            .update({
+              status: "FAILED",
+              provider_status: "FAILED",
+              error: falErr,
+              provider_error: safeStringify(queueStatus),
+              provider_reply: queueStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobId);
+
+          await refundJadesSafe({
+            admin,
+            job,
+            reason: "i2v_generation_failed",
+          });
+
+          return json(res, 200, {
+            ok: true,
+            status: "FAILED",
+            error: falErr,
+            job,
+          });
+        }
+
+        if (normalizedStatus !== "COMPLETED") {
+          await admin
+            .from("video_jobs")
+            .update({
+              status: "IN_PROGRESS",
+              provider_status: normalizedStatus || "IN_PROGRESS",
+              provider_reply: queueStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobId);
+
+          return json(res, 200, {
+            ok: true,
+            status: "IN_PROGRESS",
+            rp_status: normalizedStatus,
+            job: { ...job, provider_reply: queueStatus },
+          });
+        }
+
+        const falResult = await fal.queue.result("wan/v2.6/image-to-video/flash", {
+          requestId: String(job.provider_request_id),
+        });
+
+        const extracted = extractFalVideoInfo(falResult);
+
+        console.error("[video-status] FAL result extracted:", {
+          jobId,
+          hasUrl: !!extracted.url,
+          hasB64: !!extracted.b64,
+          mime: extracted.mime,
+        });
+
+        if (extracted.url) {
+          try {
+            const remoteBuf = await fetchUrlToBuffer(extracted.url);
+
+            const { finalUrl } = await uploadVideoBufferToSupabase({
+              admin,
+              userId,
+              jobId,
+              buf: remoteBuf,
+              mime: extracted.mime || "video/mp4",
+            });
+
+            await admin
+              .from("video_jobs")
+              .update({
+                status: "DONE",
+                provider_status: "COMPLETED",
+                video_url: finalUrl,
+                result_url: extracted.url,
+                provider_reply: falResult,
+                error: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobId);
+
+            return json(res, 200, {
+              ok: true,
+              status: "DONE",
+              video_url: finalUrl,
+              remote_video_url: extracted.url,
+              job,
+            });
+          } catch (e) {
+            await admin
+              .from("video_jobs")
+              .update({
+                status: "FAILED",
+                provider_status: "FAILED",
+                error: e?.message || "fal remote video download/upload failed",
+                provider_error: safeStringify(falResult),
+                provider_reply: falResult,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobId);
+
+            await refundJadesSafe({
+              admin,
+              job,
+              reason: "i2v_generation_failed",
+            });
+
+            return json(res, 200, {
+              ok: true,
+              status: "FAILED",
+              error: e?.message || "fal remote video download/upload failed",
+              job,
+            });
+          }
+        }
+
+        if (extracted.b64) {
+          const buf = decodeB64ToBuffer(extracted.b64);
+
+          if (!buf || !buf.length) {
+            await admin
+              .from("video_jobs")
+              .update({
+                status: "FAILED",
+                provider_status: "FAILED",
+                error: "fal COMPLETED but video base64 could not be decoded",
+                provider_error: safeStringify(falResult),
+                provider_reply: falResult,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobId);
+
+            await refundJadesSafe({
+              admin,
+              job,
+              reason: "i2v_generation_failed",
+            });
+
+            return json(res, 200, {
+              ok: true,
+              status: "FAILED",
+              error: "fal video base64 decode failed",
+              job,
+            });
+          }
+
+          try {
+            const { finalUrl } = await uploadVideoBufferToSupabase({
+              admin,
+              userId,
+              jobId,
+              buf,
+              mime: extracted.mime || "video/mp4",
+            });
+
+            await admin
+              .from("video_jobs")
+              .update({
+                status: "DONE",
+                provider_status: "COMPLETED",
+                video_url: finalUrl,
+                provider_reply: falResult,
+                error: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobId);
+
+            return json(res, 200, {
+              ok: true,
+              status: "DONE",
+              video_url: finalUrl,
+              job,
+            });
+          } catch (e) {
+            await admin
+              .from("video_jobs")
+              .update({
+                status: "FAILED",
+                provider_status: "FAILED",
+                error: e?.message || "fal storage upload failed",
+                provider_error: safeStringify(falResult),
+                provider_reply: falResult,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobId);
+
+            await refundJadesSafe({
+              admin,
+              job,
+              reason: "i2v_generation_failed",
+            });
+
+            return json(res, 200, {
+              ok: true,
+              status: "FAILED",
+              error: e?.message || "fal storage upload failed",
+              job,
+            });
+          }
+        }
+
+        await admin
+          .from("video_jobs")
+          .update({
+            status: "FAILED",
+            provider_status: "FAILED",
+            provider_reply: falResult,
+            provider_error: safeStringify(falResult),
+            error: "fal finished but no video payload was found",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+
+        await refundJadesSafe({
+          admin,
+          job,
+          reason: "i2v_generation_failed",
+        });
+
+        return json(res, 200, {
+          ok: true,
+          status: "FAILED",
+          error: "fal finished but no video payload was found",
+          job,
+        });
+      } catch (e) {
+        await admin
+          .from("video_jobs")
+          .update({
+            status: "FAILED",
+            provider_status: "FAILED",
+            error: e?.message || "fal status failed",
+            provider_error: safeStringify({ message: e?.message || String(e) }),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+
+        await refundJadesSafe({
+          admin,
+          job,
+          reason: "i2v_generation_failed",
+        });
+
+        return json(res, 200, {
+          ok: true,
+          status: "FAILED",
+          error: e?.message || "fal status failed",
+          job,
+        });
+      }
+    }
+
+    // =================================================
+    // 16) RUNPOD
     // =================================================
 
     if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
@@ -769,9 +1114,6 @@ export default async function handler(req, res) {
     const rpStatus = rpJson?.status || null;
     const output = rpJson?.output || null;
 
-    // -----------------------------------------------
-    // 14.1) URL directa
-    // -----------------------------------------------
     const directUrl = output?.video_url || output?.videoUrl || null;
     if (rpStatus === "COMPLETED" && directUrl) {
       await admin
@@ -793,9 +1135,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // -----------------------------------------------
-    // 14.2) Base64
-    // -----------------------------------------------
     const videoB64 = output?.video_b64 || output?.videoB64 || null;
     if (rpStatus === "COMPLETED" && videoB64) {
       const mime = output?.mime || output?.content_type || "video/mp4";
@@ -881,9 +1220,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // -----------------------------------------------
-    // 14.3) RunPod falló
-    // -----------------------------------------------
     if (rpStatus === "FAILED") {
       const workerError =
         output?.error ||
@@ -918,9 +1254,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // -----------------------------------------------
-    // 14.4) Sigue en progreso
-    // -----------------------------------------------
     await admin
       .from("video_jobs")
       .update({
