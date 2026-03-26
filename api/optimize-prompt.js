@@ -1,25 +1,6 @@
 // /api/optimize-prompt.js
-// Optimización de prompts para IsabelaOS
-// Soporta:
-// - IMAGE:
-//    1) Flux normal
-//    2) Flux + avatar/anchor + skin standard
-//    3) Realistic Vision + avatar/anchor + skin natural
-// - VIDEO:
-//    1) WAN local/open-source
-//    2) VEO 3 fast
-//    3) WAN fast por API (futuro)
-//
-// Mantiene compatibilidad con el frontend actual:
-// body: { prompt, negative_prompt }
-// y permite mejoras futuras con:
-// body: {
-//   mode: "image" | "video",
-//   skin_mode: "standard" | "natural",
-//   has_anchor: true | false,
-//   image_model: "flux" | "realistic_vision",
-//   video_model: "wan" | "veo3_fast" | "wan_fast_api"
-// }
+// IsabelaOS prompt optimizer
+// Siempre devuelve prompts finales en INGLÉS
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -122,13 +103,27 @@ function getRoute(body) {
 }
 
 function getTemperatureForRoute(route) {
-  if (route.startsWith("image_")) return 0.4;
+  if (route.startsWith("image_")) return 0.45;
   return 0.5;
 }
 
 function getMaxTokensForRoute(route) {
-  if (route.startsWith("image_")) return 700;
-  return 900;
+  if (route.startsWith("image_")) return 900;
+  return 1000;
+}
+
+// -----------------------------
+// System prompt base
+// -----------------------------
+function getEnglishOutputRule() {
+  return `
+CRITICAL LANGUAGE RULES:
+- Always output the final optimizedPrompt in ENGLISH.
+- Always output the final optimizedNegative in ENGLISH.
+- Even if the user writes in Spanish or another language, translate and optimize into ENGLISH.
+- Never return the final prompt in Spanish.
+- Never explain the translation. Just return the JSON.
+  `.trim();
 }
 
 // -----------------------------
@@ -146,7 +141,9 @@ TARGET ENGINE:
 - General image generation
 
 GOAL:
-Transform the user's idea into a concise, visually strong, image-generation prompt for FLUX.
+Transform the user's idea into a concise, visually strong AI image prompt in ENGLISH for FLUX.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for IMAGE only, never for video.
@@ -154,10 +151,12 @@ IMPORTANT RULES:
 - Do NOT invent a second subject.
 - Keep the prompt faithful to the user's intent.
 - Prioritize: subject, pose, clothing, environment, lighting, composition, realism/stylization.
-- Keep prompts compact and useful, not poetic.
-- Negative prompt should remove common generation problems only.
+- Make the final prompt stronger and more professional than the user's original wording.
+- Keep prompts compact and useful, not poetic or verbose.
+- If appropriate, use professional image prompt wording like: cinematic lighting, realistic skin texture, detailed composition, high detail, natural shadows, depth of field.
+- Negative prompt should remove common image generation problems only.
 - If the user did not request camera/lens language, keep it minimal.
-- Do not add NSFW content unless explicitly present in the user prompt.
+- Do not add NSFW content unless explicitly present in the user's prompt.
 
 OUTPUT STYLE:
 Return strict JSON only:
@@ -175,20 +174,23 @@ TARGET ENGINE:
 - FLUX text-to-image
 - Avatar anchor present
 - Skin mode: STANDARD
-- Pipeline will preserve identity using anchor tools, so prompt must not fight identity
+- Pipeline preserves identity using anchor tools
 
 GOAL:
-Create a prompt that helps FLUX compose the scene correctly while staying compatible with anchored identity and a light SDXL quality refine later.
+Create a stronger, cleaner AI image prompt in ENGLISH for FLUX, focused on composition and scene quality while staying compatible with anchored identity.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for IMAGE only, never for video.
 - Do NOT add motion, temporal, blinking, frame, or camera movement language.
-- Do NOT over-describe face details; identity is handled by anchor tools.
-- Focus on pose, wardrobe, body framing, environment, lighting, mood, composition.
-- Avoid excessive face adjectives that can conflict with anchor identity.
-- Keep the subject singular: one person only unless the user explicitly asked otherwise.
-- Negative prompt should include duplicate person / extra limbs / bad anatomy issues.
-- Keep output compact and production-friendly.
+- Do NOT over-describe the face identity. Identity is preserved by anchor tools.
+- Focus on pose, wardrobe, body framing, environment, lighting, mood, and composition.
+- Keep the subject singular: one person only unless the user explicitly asks otherwise.
+- Make the prompt more professional and visually rich than the user's original text.
+- Use strong but practical visual wording.
+- Negative prompt must include common defects like duplicate face, extra face, extra limbs, bad anatomy, deformed hands when relevant.
+- Keep the result compact and production-friendly.
 
 OUTPUT STYLE:
 Return strict JSON only:
@@ -206,22 +208,25 @@ TARGET ENGINE:
 - Realistic Vision
 - Avatar anchor present
 - Skin mode: NATURAL
-- This route aims for realistic skin and natural texture
+- This route aims for realistic skin, better texture, and natural-looking composition
 
 GOAL:
-Create a prompt that helps Realistic Vision generate a single subject with realistic skin, stable anatomy, and clean composition, while staying compatible with anchor identity preservation.
+Create a strong ENGLISH AI image prompt optimized for realistic single-subject generation with natural skin texture and stable anatomy.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for IMAGE only, never for video.
 - Do NOT add motion, temporal, blinking, frame, or camera movement language.
 - Do NOT add cinematic video wording.
 - The prompt must strongly favor a single person only.
-- Prefer realistic portrait / single-subject composition.
-- Avoid overly complex scene choreography.
-- Favor natural skin texture, subtle imperfections, pores, realistic complexion, analog realism when relevant.
-- Do NOT over-specify the face identity because anchor tools preserve identity.
-- Negative prompt must strongly block duplicate person / extra faces / merged body / stacked bodies / clone artifacts.
-- Keep it compact and usable.
+- Avoid overly complex choreography or multi-subject composition.
+- Favor realistic portrait/full-body composition depending on the user's request.
+- Favor natural skin texture, visible pores, subtle imperfections, realistic complexion, analog realism when relevant.
+- Do NOT over-specify face identity because anchor tools preserve it.
+- Make the final prompt clearly better, more visual, and more model-friendly than the user's original text.
+- Negative prompt must strongly block duplicate person, extra faces, merged body, stacked bodies, clone artifacts, warped anatomy.
+- Keep it compact but high quality.
 
 OUTPUT STYLE:
 Return strict JSON only:
@@ -239,7 +244,9 @@ TARGET ENGINE:
 - WAN local / open-source video model
 
 GOAL:
-Turn the user's idea into a practical prompt for WAN video generation.
+Transform the user's idea into a practical, strong VIDEO prompt in ENGLISH.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for VIDEO, so motion language is allowed.
@@ -247,7 +254,8 @@ IMPORTANT RULES:
 - Prioritize: subject, action, environment, lighting, framing, camera motion.
 - Avoid overloading with too many simultaneous actions.
 - Keep scenes stable and achievable.
-- If the user didn't ask for camera movement, keep camera mostly stable.
+- If the user did not request camera movement, keep the camera mostly stable.
+- Make the final prompt stronger and cleaner than the user's original text.
 - Negative prompt should remove flicker, jitter, extra limbs, duplicate faces, warped anatomy, unstable motion.
 - Output should be concise and production-ready.
 
@@ -267,17 +275,20 @@ TARGET ENGINE:
 - VEO 3 Fast API
 
 GOAL:
-Create a premium, clear, cinematic prompt optimized for a high-end API video model.
+Create a premium, clear, cinematic VIDEO prompt in ENGLISH optimized for a high-end API video model.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for VIDEO, so motion language is allowed.
 - Keep the prompt visually strong but not bloated.
 - Prioritize: subject, key action, scene, lighting, mood, camera movement if requested, realism.
 - Avoid contradictory instructions.
-- Keep action readable and stable.
-- Negative prompt should be clean and practical.
+- Keep the action readable and stable.
+- Negative prompt should be practical and clean.
 - Do not add unnecessary pseudo-technical jargon.
 - If the user asks for a specific movement, make it explicit and readable.
+- Make the result feel premium and production-ready.
 
 OUTPUT STYLE:
 Return strict JSON only:
@@ -295,7 +306,9 @@ TARGET ENGINE:
 - WAN Fast API
 
 GOAL:
-Create a short, efficient prompt optimized for a fast video model where clarity matters more than excessive detail.
+Create a short, efficient VIDEO prompt in ENGLISH optimized for a fast model where clarity matters more than prompt bloat.
+
+${getEnglishOutputRule()}
 
 IMPORTANT RULES:
 - This is for VIDEO, so motion language is allowed.
@@ -303,7 +316,7 @@ IMPORTANT RULES:
 - Prioritize one subject, one main action, one environment, one camera behavior.
 - Avoid prompt bloat.
 - Negative prompt should focus on stability, anatomy, duplicate faces, flicker, jitter, warped motion.
-- If the user asks for realism, emphasize realistic movement and believable lighting.
+- If the user asks for realism, emphasize believable movement and lighting.
 
 OUTPUT STYLE:
 Return strict JSON only:
@@ -316,7 +329,10 @@ Return strict JSON only:
     default:
       return `
 You are a prompt optimizer for IsabelaOS.
-Return strict JSON:
+
+${getEnglishOutputRule()}
+
+Return strict JSON only:
 {
   "optimizedPrompt": "...",
   "optimizedNegative": "..."
@@ -331,8 +347,8 @@ Return strict JSON:
 function buildUserPrompt(route, prompt, negativePrompt, body) {
   const base = {
     route,
-    prompt,
-    negative_prompt: negativePrompt,
+    original_user_prompt: prompt,
+    original_negative_prompt: negativePrompt,
     skin_mode: cleanText(body.skin_mode || ""),
     has_anchor: !!body.has_anchor,
     image_model: cleanText(body.image_model || ""),
@@ -354,8 +370,14 @@ function normalizeOutput(route, optimizedPrompt, optimizedNegative) {
     on = stripBadImageTerms(on);
   }
 
+  if (route === "image_flux_normal") {
+    if (!/single person|one person|single woman|one woman/i.test(op)) {
+      op = compactText(`${op}, single person`);
+    }
+  }
+
   if (route === "image_flux_anchor_standard") {
-    if (!/single person|one person|one woman|solo/i.test(op)) {
+    if (!/single person|one person|single woman|one woman/i.test(op)) {
       op = compactText(`${op}, single person`);
     }
 
@@ -381,8 +403,8 @@ function normalizeOutput(route, optimizedPrompt, optimizedNegative) {
 
     const addPos = [
       "natural skin texture",
-      "subtle skin imperfections",
       "visible pores",
+      "subtle skin imperfections",
     ];
 
     for (const term of addPos) {
@@ -415,7 +437,7 @@ function normalizeOutput(route, optimizedPrompt, optimizedNegative) {
 }
 
 // -----------------------------
-// Parse de respuesta OpenAI
+// Parse de respuesta
 // -----------------------------
 function safeJsonParse(text) {
   try {
@@ -433,8 +455,7 @@ function extractJsonObject(text) {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start >= 0 && end > start) {
-    const sliced = raw.slice(start, end + 1);
-    return safeJsonParse(sliced);
+    return safeJsonParse(raw.slice(start, end + 1));
   }
 
   return null;
@@ -482,15 +503,10 @@ export default async function handler(req, res) {
         model: "gpt-4o-mini",
         temperature: getTemperatureForRoute(route),
         max_tokens: getMaxTokensForRoute(route),
+        response_format: { type: "json_object" },
         messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
         ],
       }),
     });
@@ -500,10 +516,7 @@ export default async function handler(req, res) {
     if (!openaiRes.ok) {
       return res.status(openaiRes.status).json({
         ok: false,
-        error:
-          raw?.error?.message ||
-          raw?.error ||
-          "OpenAI request failed",
+        error: raw?.error?.message || raw?.error || "OpenAI request failed",
         route,
       });
     }
