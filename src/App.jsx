@@ -2105,11 +2105,11 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   );
 
   const topVisuals = [
-    { type: "image", src: "/gallery/img1.png?v=2", label: "Retrato premium", span: "lg:col-span-2 lg:row-span-2" },
-    { type: "image", src: "/gallery/img2.png?v=2", label: "Campaña visual", span: "" },
-    { type: "image", src: "/gallery/img3.png?v=2", label: "Escena IA", span: "" },
-    { type: "image", src: "/gallery/img4.png?v=2", label: "Modelo avatar", span: "" },
-    { type: "image", src: "/gallery/img1.png?v=2", label: "Contenido vertical", span: "" },
+    { src: "/gallery/img1.png?v=2", label: "Retrato premium", big: true },
+    { src: "/gallery/img2.png?v=2", label: "Campaña visual", big: false },
+    { src: "/gallery/img3.png?v=2", label: "Escena IA", big: false },
+    { src: "/gallery/img4.png?v=2", label: "Avatar", big: false },
+    { src: "/gallery/img1.png?v=2", label: "Contenido", big: false },
   ];
 
   return (
@@ -2117,7 +2117,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_100%_-10%,rgba(250,204,21,0.14),transparent_55%),radial-gradient(900px_700px_at_-10%_0%,rgba(34,211,238,0.16),transparent_50%),radial-gradient(900px_700px_at_50%_120%,rgba(168,85,247,0.12),transparent_55%),#05060A",
+          "radial-gradient(1200px_800px_at_100%_-10%,rgba(250,204,21,0.14),transparent_55%),radial-gradient(900px_700px_at_-10%_0%,rgba(34,211,238,0.16),transparent_50%),radial-gradient(900px_700px_at_50%_120%,rgba(168,85,247,0.10),transparent_55%),#05060A",
       }}
     >
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/45 backdrop-blur-md">
@@ -2169,7 +2169,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-16 pt-10">
-        <section className="grid gap-8 xl:grid-cols-[0.86fr_1.08fr_0.78fr]">
+        <section className="grid gap-8 xl:grid-cols-[0.84fr_1.1fr_0.8fr]">
           <div className="xl:pt-10">
             <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/20 bg-yellow-400/10 px-4 py-1.5 text-[11px] text-yellow-200">
               Estudio visual con IA
@@ -2204,7 +2204,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("demo-box")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-6 py-3 text-sm font-semibold text-black shadow-[0_0_35px_rgba(250,204,21,0.20)] hover:shadow-[0_0_40px_rgba(34,211,238,0.25)] transition-shadow"
+                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-6 py-3 text-sm font-semibold text-black shadow-[0_0_35px_rgba(250,204,21,0.20)]"
               >
                 Crear mi modelo virtual
               </button>
@@ -2242,13 +2242,13 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             </div>
 
             <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
-              <div className="pointer-events-none absolute -inset-20 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(250,204,21,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.12),transparent_35%)]" />
+              <div className="pointer-events-none absolute -inset-20 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(250,204,21,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.10),transparent_35%)]" />
 
               <div className="grid auto-rows-[180px] grid-cols-2 gap-4 lg:grid-cols-3 lg:auto-rows-[170px]">
                 {topVisuals.map((item, idx) => (
                   <div
                     key={`${item.src}-${idx}`}
-                    className={`group relative overflow-hidden rounded-[26px] border border-white/10 bg-black/40 ${item.span}`}
+                    className={`group relative overflow-hidden rounded-[26px] border border-white/10 bg-black/40 ${item.big ? "lg:col-span-2 lg:row-span-2" : ""}`}
                   >
                     <div
                       className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
@@ -2263,7 +2263,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
               </div>
 
               <p className="mt-4 text-[11px] text-neutral-500">
-                Vista visual de referencia. Si luego me das los nombres exactos de tus mp4, esta misma cuadrícula te la dejo con videos cuadrados reales.
+                Vista visual de referencia. Luego se puede conectar con tus archivos reales para mostrar previews uniformes.
               </p>
             </div>
           </div>
