@@ -561,10 +561,16 @@ function CreatorPanel({ isDemo = false, onAuthRequired }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt,
-          negative_prompt: negative,
+         prompt,
+         negative_prompt: negative,
+         mode: "image",
+         skin_mode: skinMode || "standard",
+         has_anchor: !!selectedAvatarId,
+         image_model:
+           skinMode === "natural" && !!selectedAvatarId
+           ? "realistic_vision"
+           : "flux",
         }),
-      });
 
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) {
