@@ -2104,18 +2104,26 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
     "Modelo virtual elegante para redes sociales, rostro consistente, luz cinematográfica, formato vertical"
   );
 
+  const topVisuals = [
+    { type: "image", src: "/gallery/img1.png?v=2", label: "Retrato premium", span: "lg:col-span-2 lg:row-span-2" },
+    { type: "image", src: "/gallery/img2.png?v=2", label: "Campaña visual", span: "" },
+    { type: "image", src: "/gallery/img3.png?v=2", label: "Escena IA", span: "" },
+    { type: "image", src: "/gallery/img4.png?v=2", label: "Modelo avatar", span: "" },
+    { type: "image", src: "/gallery/img1.png?v=2", label: "Contenido vertical", span: "" },
+  ];
+
   return (
     <div
       className="min-h-screen w-full text-white"
       style={{
         background:
-          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.45),transparent_60%),#05060A",
+          "radial-gradient(1200px_800px_at_100%_-10%,rgba(250,204,21,0.14),transparent_55%),radial-gradient(900px_700px_at_-10%_0%,rgba(34,211,238,0.16),transparent_50%),radial-gradient(900px_700px_at_50%_120%,rgba(168,85,247,0.12),transparent_55%),#05060A",
       }}
     >
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/45 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-yellow-400 text-xs font-bold text-black shadow-[0_0_30px_rgba(250,204,21,0.22)]">
               io
             </div>
             <div>
@@ -2160,32 +2168,29 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="grid gap-12 lg:grid-cols-[1.2fr_1fr] lg:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[11px] text-white/80">
-              Ecosistema visual con IA
+      <main className="mx-auto max-w-7xl px-4 pb-16 pt-10">
+        <section className="grid gap-8 xl:grid-cols-[0.86fr_1.08fr_0.78fr]">
+          <div className="xl:pt-10">
+            <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/20 bg-yellow-400/10 px-4 py-1.5 text-[11px] text-yellow-200">
+              Estudio visual con IA
             </div>
 
-            <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-6xl">
-              Crea modelos virtuales con IA
-              <span className="mt-2 block bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
-                listos para publicar, vender y escalar.
+            <h1 className="mt-5 text-4xl font-semibold leading-[0.98] md:text-6xl">
+              Tu estudio de
+              <span className="mt-2 block bg-gradient-to-r from-cyan-300 via-sky-300 to-yellow-300 bg-clip-text text-transparent">
+                modelos virtuales
               </span>
             </h1>
 
-            <div className="mt-5 h-[2px] w-44 rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-transparent shadow-[0_0_20px_rgba(168,85,247,0.7)]" />
-
-            <p className="mt-5 max-w-2xl text-base text-neutral-300">
-              Plataforma para crear, controlar y escalar modelos virtuales:
-              rostro, contenido, estilo y producción visual desde un solo sistema.
+            <p className="mt-5 max-w-xl text-base text-neutral-300">
+              Crea, organiza y escala contenido visual para personajes y modelos virtuales desde un solo sistema.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+              <span className="inline-flex items-center gap-2 rounded-full border border-yellow-400/20 bg-yellow-400/10 px-3 py-1 text-[11px] text-yellow-100">
                 Producción en GPU
               </span>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] text-cyan-100">
                 Consistencia de rostro
               </span>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">
@@ -2199,7 +2204,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <button
                 onClick={() => scrollToId("demo-box")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.55)] transition-shadow"
+                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-6 py-3 text-sm font-semibold text-black shadow-[0_0_35px_rgba(250,204,21,0.20)] hover:shadow-[0_0_40px_rgba(34,211,238,0.25)] transition-shadow"
               >
                 Crear mi modelo virtual
               </button>
@@ -2213,66 +2218,83 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             </div>
 
             <p className="mt-4 max-w-md text-[12px] text-neutral-400">
-              Empieza escribiendo una idea. Cuando des el siguiente paso, te pediremos crear tu cuenta para entrar al panel.
+              Empieza con una idea, entra al panel y organiza tu flujo creativo en una sola plataforma.
             </p>
           </div>
 
-          <div id="demo-box" className="relative">
-            <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[32px] bg-gradient-to-br from-cyan-500/18 via-transparent to-fuchsia-500/25 blur-3xl" />
+          <div className="order-3 xl:order-2">
+            <div className="mb-4 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
+                  Visuales del sistema
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">
+                  Contenido generado con IsabelaOS
+                </h2>
+              </div>
 
-            <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
-              <div className="absolute -top-24 left-1/3 h-96 w-[2px] rotate-12 bg-gradient-to-b from-cyan-400/0 via-cyan-300/60 to-fuchsia-400/0 blur-[0.5px]" />
-              <div className="absolute -top-10 left-[65%] h-80 w-[2px] -rotate-12 bg-gradient-to-b from-fuchsia-400/0 via-fuchsia-300/55 to-yellow-300/0 blur-[0.5px]" />
-              <div className="absolute bottom-0 left-[15%] h-72 w-[2px] rotate-[18deg] bg-gradient-to-b from-yellow-300/0 via-yellow-200/45 to-cyan-300/0 blur-[0.5px]" />
+              <button
+                onClick={() => scrollToId("demo-box")}
+                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
+              >
+                Empezar ahora
+              </button>
             </div>
 
-            <div className="pointer-events-none absolute inset-0 -z-10 opacity-70">
-              {["img1.png", "img2.png", "img3.png", "img4.png"].map((p, i) => (
-                <div
-                  key={p}
-                  className="absolute rounded-3xl border border-white/10"
-                  style={{
-                    width: i % 2 === 0 ? 360 : 420,
-                    height: i % 2 === 0 ? 240 : 260,
-                    left: i === 0 ? "-35px" : i === 1 ? "50%" : i === 2 ? "6%" : "56%",
-                    top: i === 0 ? "16%" : i === 1 ? "6%" : i === 2 ? "64%" : "54%",
-                    transform: `rotate(${i === 0 ? -10 : i === 1 ? 8 : i === 2 ? 10 : -6}deg)`,
-                    backgroundImage: `url(/gallery/${p}?v=2)`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                    filter: "blur(7px)",
-                    opacity: 0.55,
-                  }}
-                />
-              ))}
-            </div>
+            <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
+              <div className="pointer-events-none absolute -inset-20 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(250,204,21,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.12),transparent_35%)]" />
 
-            <div className="mb-3">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-                Inicio rápido
+              <div className="grid auto-rows-[180px] grid-cols-2 gap-4 lg:grid-cols-3 lg:auto-rows-[170px]">
+                {topVisuals.map((item, idx) => (
+                  <div
+                    key={`${item.src}-${idx}`}
+                    className={`group relative overflow-hidden rounded-[26px] border border-white/10 bg-black/40 ${item.span}`}
+                  >
+                    <div
+                      className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                      style={{ backgroundImage: `url(${item.src})` }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    <div className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[10px] text-white/80 backdrop-blur-sm">
+                      {item.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-4 text-[11px] text-neutral-500">
+                Vista visual de referencia. Si luego me das los nombres exactos de tus mp4, esta misma cuadrícula te la dejo con videos cuadrados reales.
               </p>
-              <h2 className="mt-2 text-lg font-semibold text-white">
-                Empieza con tu primer modelo virtual
-              </h2>
             </div>
+          </div>
 
+          <div id="demo-box" className="order-2 xl:order-3 xl:pt-14">
             <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/45 p-6 backdrop-blur-md shadow-xl">
-              <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/16 via-transparent to-fuchsia-500/16 blur-3xl" />
+              <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/14 via-transparent to-yellow-400/14 blur-3xl" />
+
+              <div className="mb-3">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+                  Inicio rápido
+                </p>
+                <h2 className="mt-2 text-xl font-semibold text-white">
+                  Empieza con tu primer modelo virtual
+                </h2>
+              </div>
 
               <div className="mb-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-xs text-white">
+                <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-xs text-cyan-100">
                   Imagen
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
                   Imagen → Video
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
+                <div className="rounded-2xl border border-yellow-400/15 bg-yellow-400/10 px-4 py-3 text-xs text-yellow-100">
                   Avatar / Biblioteca
                 </div>
               </div>
 
               <textarea
-                className="mt-1 h-40 w-full resize-none rounded-2xl bg-black/60 px-4 py-4 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+                className="mt-1 h-44 w-full resize-none rounded-2xl bg-black/60 px-4 py-4 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-yellow-300"
                 value={demoPrompt}
                 onChange={(e) => setDemoPrompt(e.target.value)}
                 placeholder="Ej: modelo virtual elegante para redes sociales, rostro consistente, iluminación cinematográfica, formato vertical"
@@ -2299,7 +2321,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
                   onStartDemo();
                 }}
                 disabled={!demoPrompt.trim()}
-                className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white disabled:opacity-60"
+                className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 py-3.5 text-sm font-semibold text-black disabled:opacity-60"
               >
                 Crear modelo
               </button>
@@ -2308,39 +2330,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
                 Al continuar, crearás tu cuenta y entrarás al panel de creación con acceso inicial.
               </div>
             </div>
-
-            <p className="mt-3 text-[10px] text-neutral-500">
-              IsabelaOS Studio · pipeline propio · ejecución directa en GPU · desarrollado en Guatemala.
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-16">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-                Generado con el sistema
-              </p>
-              <h3 className="mt-1 text-2xl font-semibold text-white">
-                Contenido generado con IsabelaOS
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-                Resultados creados desde el motor actual. La prioridad ahora es seguir refinando velocidad, estabilidad y calidad final.
-              </p>
-            </div>
-
-            <div className="mt-3 sm:mt-0">
-              <button
-                onClick={() => scrollToId("demo-box")}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10"
-              >
-                Empezar ahora
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-[30px] border border-white/10 bg-white/5 p-4">
-            <VideoCollage />
           </div>
         </section>
 
@@ -2391,262 +2380,5 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
         </div>
       </footer>
     </div>
-  );
-}
-
-function AboutView({ onBackHome }) {
-  const videoRef = useRef(null);
-  const [soundOn, setSoundOn] = useState(false);
-
-  const enableSound = async () => {
-    const v = videoRef.current;
-    if (!v) return;
-    try {
-      v.muted = false;
-      v.volume = 1;
-      await v.play();
-      setSoundOn(true);
-    } catch (e) {
-      console.log(e);
-    }
-  };
-
-  return (
-    <div
-      className="min-h-screen w-full text-white"
-      style={{
-        background:
-          "radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.22),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.22),transparent_55%),radial-gradient(700px_700px_at_50%_120%,rgba(140,90,255,0.5),transparent_60%),#05060A",
-      }}
-    >
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-lg shadow-cyan-500/40">
-              io
-            </div>
-            <div>
-              <div className="text-sm font-semibold leading-tight">
-                isabelaOs <span className="text-xs text-neutral-400">Studio</span>
-              </div>
-              <div className="text-[10px] text-neutral-500">Presentación del sistema</div>
-            </div>
-          </div>
-
-          <button
-            onClick={onBackHome}
-            className="rounded-xl border border-white/20 bg-white/5 px-4 py-1.5 text-xs text-white hover:bg-white/10"
-          >
-            Volver a la página principal
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
-          <div className="pointer-events-none absolute -inset-16 -z-10 bg-gradient-to-br from-cyan-500/12 via-transparent to-fuchsia-500/14 blur-3xl" />
-
-          <div className="mb-4">
-            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-              Presentación
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
-              Qué es IsabelaOS
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm text-neutral-300">
-              Una plataforma para crear y operar modelos virtuales con inteligencia artificial.
-            </p>
-          </div>
-
-          <div className="relative">
-            <video
-              ref={videoRef}
-              className="h-[360px] w-full rounded-[24px] border border-white/10 bg-black/40 object-cover md:h-[500px]"
-              src="/gallery/video10.mp4"
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="metadata"
-              controls={soundOn}
-            />
-
-            {!soundOn && (
-              <button
-                onClick={enableSound}
-                className="absolute bottom-4 left-4 rounded-2xl border border-white/15 bg-black/60 px-4 py-2 text-xs text-white hover:bg-black/70"
-              >
-                🔊 Activar audio
-              </button>
-            )}
-
-            {!soundOn && (
-              <div className="absolute bottom-4 right-4 hidden rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-[10px] text-white/60 sm:block">
-                El audio se activa al tocar el botón
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="mt-10">
-          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
-                Plataforma
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">
-                Diseñado para construir modelos virtuales, no solo renders aislados
-              </h2>
-
-              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
-                IsabelaOS Studio organiza el proceso completo de producción visual:
-                idea, generación, biblioteca, consistencia estética y control del flujo creativo.
-              </p>
-
-              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
-                No se trata solo de hacer una imagen o un video, sino de operar un sistema
-                donde el contenido pueda escalar con más orden, más velocidad y más coherencia visual.
-              </p>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-black/35 p-6">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400">
-                Infraestructura
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">
-                Pipeline propio ejecutado en GPU
-              </h2>
-
-              <p className="mt-4 text-sm leading-relaxed text-neutral-300">
-                IsabelaOS se apoya en infraestructura, workers y render conectados como sistema.
-                El objetivo es tener una plataforma sólida de producción visual y no depender de una simple capa superficial.
-              </p>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
-                  <div className="text-xs font-semibold text-white">Consistencia</div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    Más control del estilo y del resultado visual.
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-4">
-                  <div className="text-xs font-semibold text-white">Escalabilidad</div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    Pensado para crecer con más módulos y más producción.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-5 md:grid-cols-3">
-            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
-              <div className="text-sm font-semibold text-white">Qué resuelve</div>
-              <p className="mt-2 text-sm leading-relaxed text-white/70">
-                Centraliza generación, visuales, biblioteca y flujo creativo dentro de un mismo producto.
-              </p>
-            </div>
-
-            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
-              <div className="text-sm font-semibold text-white">Para quién es</div>
-              <p className="mt-2 text-sm leading-relaxed text-white/70">
-                Creadores, equipos, marcas y estudios que quieren operar personajes o modelos virtuales con más orden.
-              </p>
-            </div>
-
-            <div className="rounded-[24px] border border-white/10 bg-black/35 p-5">
-              <div className="text-sm font-semibold text-white">Dirección</div>
-              <p className="mt-2 text-sm leading-relaxed text-white/70">
-                Mejorar calidad, velocidad, estabilidad y profundidad del ecosistema visual.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <button
-              onClick={onBackHome}
-              className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_0_35px_rgba(34,211,238,0.45)] hover:shadow-[0_0_40px_rgba(236,72,153,0.6)] transition-shadow"
-            >
-              Regresar a la página principal
-            </button>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-white/10 bg-black/30">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
-          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-export default function App() {
-  const { user, signInWithGoogle } = useAuth();
-  const [authOpen, setAuthOpen] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
-  const [landingPage, setLandingPage] = useState("home");
-  const [googleModalOpen, setGoogleModalOpen] = useState(false);
-
-  if (user) return <DashboardView />;
-
-  return (
-    <>
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
-
-      <GoogleOnlyModal
-        open={googleModalOpen}
-        onClose={() => setGoogleModalOpen(false)}
-        onGoogle={async () => {
-          try {
-            await signInWithGoogle();
-            setGoogleModalOpen(false);
-          } catch (e) {
-            alert(e?.message || "No se pudo iniciar con Google.");
-          }
-        }}
-      />
-
-      {demoMode ? (
-        <div className="min-h-screen bg-neutral-950 text-white">
-          <div className="mx-auto max-w-6xl px-4 py-8">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">IsabelaOS Studio</p>
-                <p className="text-[11px] text-neutral-400">Demo del motor</p>
-              </div>
-              <button
-                onClick={() => setDemoMode(false)}
-                className="rounded-2xl border border-white/20 px-4 py-2 text-xs hover:bg-white/10"
-              >
-                Volver
-              </button>
-            </div>
-
-            <CreatorPanel isDemo={true} onAuthRequired={() => setAuthOpen(true)} />
-          </div>
-        </div>
-      ) : (
-        <>
-          {landingPage === "home" && (
-            <LandingView
-              onOpenAuth={() => setAuthOpen(true)}
-              onStartDemo={() => setGoogleModalOpen(true)}
-              onOpenContact={() => setLandingPage("contact")}
-              onOpenAbout={() => setLandingPage("about")}
-            />
-          )}
-
-          {landingPage === "contact" && (
-            <ContactView onBack={() => setLandingPage("home")} />
-          )}
-
-          {landingPage === "about" && (
-            <AboutView onBackHome={() => setLandingPage("home")} />
-          )}
-        </>
-      )}
-    </>
   );
 }
