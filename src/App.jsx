@@ -2360,7 +2360,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[
               {
                 name: "Early Tester",
                 text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo.",
