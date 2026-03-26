@@ -2434,7 +2434,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
         {/* ---------------------------------------------------------
             NUEVO: Opiniones (testimonios)
            --------------------------------------------------------- */}
-        <section className="mt-12">
+               <section className="mt-12">
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
@@ -2472,7 +2472,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
           </div>
         </section>
 
-        
         <PricingSection onOpenAuth={onOpenAuth} />
       </main>
 
@@ -2484,8 +2483,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
     </div>
   );
 }
-
-
 // ---------------------------------------------------------
 // Sobre nosotros / presentación
 // ---------------------------------------------------------
