@@ -27,6 +27,58 @@ function bytesLabel(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function FaceGuideExample() {
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3">
+      <div className="mb-2 text-[11px] font-semibold text-white">
+        Ejemplo visual recomendado
+      </div>
+
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="flex flex-col items-center">
+          <div className="relative h-36 w-28 overflow-hidden rounded-xl border border-cyan-400/30 bg-gradient-to-b from-neutral-100 to-neutral-200">
+            <div className="absolute left-1/2 top-3 h-16 w-16 -translate-x-1/2 rounded-full border-2 border-cyan-500/70 bg-neutral-300" />
+            <div className="absolute left-1/2 top-[4.9rem] h-20 w-20 -translate-x-1/2 rounded-t-[999px] border-2 border-cyan-500/40 border-b-0 bg-neutral-300" />
+
+            <div className="absolute left-1/2 top-8 h-1.5 w-1.5 -translate-x-[18px] rounded-full bg-neutral-600" />
+            <div className="absolute left-1/2 top-8 h-1.5 w-1.5 translate-x-[16px] rounded-full bg-neutral-600" />
+            <div className="absolute left-1/2 top-[2.75rem] h-5 w-[2px] -translate-x-1/2 rounded-full bg-neutral-500" />
+            <div className="absolute left-1/2 top-[3.8rem] h-[2px] w-6 -translate-x-1/2 rounded-full bg-neutral-500" />
+
+            <div className="absolute inset-x-2 top-2 rounded-lg border border-cyan-500/40" style={{ bottom: "0.6rem" }} />
+
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[9px] font-medium text-cyan-200">
+              rostro centrado
+            </div>
+          </div>
+
+          <div className="mt-2 text-[10px] text-cyan-200">Correcto</div>
+        </div>
+
+        <div className="flex-1 min-w-[180px]">
+          <div className="grid gap-2">
+            <div className="rounded-lg border border-green-500/20 bg-green-500/10 p-2 text-[11px] text-green-100">
+              ✅ Fondo limpio o blanco
+            </div>
+            <div className="rounded-lg border border-green-500/20 bg-green-500/10 p-2 text-[11px] text-green-100">
+              ✅ Cara de frente y bien iluminada
+            </div>
+            <div className="rounded-lg border border-green-500/20 bg-green-500/10 p-2 text-[11px] text-green-100">
+              ✅ El rostro llena casi toda la imagen
+            </div>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-[11px] text-red-100">
+              ❌ No subir cuerpo completo, selfies lejanas o fotos oscuras
+            </div>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-[11px] text-red-100">
+              ❌ No lentes, manos, cabello o objetos tapando la cara
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AvatarStudioPanel() {
   const { session } = useAuth();
   const token = session?.access_token || null;
@@ -387,6 +439,46 @@ export default function AvatarStudioPanel() {
               <div className="text-sm font-semibold text-white">Fotos anchor</div>
               <div className="mt-1 text-xs text-neutral-400">
                 Agrega de 1 a 3 fotos, una por una. La primera subida puede usarse como miniatura.
+              </div>
+
+              <div className="mt-2 rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs text-yellow-100">
+                <div className="mb-1 font-semibold text-yellow-200">
+                  📸 Requisitos de las fotos (MUY IMPORTANTE)
+                </div>
+
+                <ul className="space-y-1">
+                  <li>• Rostro centrado (tipo foto carnet / pasaporte)</li>
+                  <li>• Fondo limpio (preferible blanco o neutro)</li>
+                  <li>• Sin lentes, sin manos, sin objetos tapando la cara</li>
+                  <li>• Expresión neutra o ligera sonrisa</li>
+                  <li>• Buena iluminación (sin sombras fuertes)</li>
+                  <li>• El rostro debe ocupar mínimo el 70% de la imagen</li>
+                  <li>• Evitar cabello cubriendo la cara</li>
+                </ul>
+
+                <div className="mt-2 text-[11px] text-yellow-200">
+                  Tamaño recomendado:
+                </div>
+                <div className="text-[11px]">
+                  • 512x512 (mínimo)
+                  <br />
+                  • 768x768 (ideal)
+                  <br />
+                  • Formato: JPG o PNG
+                </div>
+
+                <div className="mt-2 text-[11px] text-yellow-300">
+                  ⚠️ Ejemplo correcto:
+                </div>
+                <div className="text-[11px]">
+                  Cara de frente, fondo blanco, sin distracciones, tipo documento.
+                </div>
+
+                <div className="mt-3 text-[11px] text-yellow-100/90">
+                  💡 Tip: Usa siempre el mismo tipo de foto para mejores resultados.
+                </div>
+
+                <FaceGuideExample />
               </div>
             </div>
 
