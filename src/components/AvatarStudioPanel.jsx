@@ -44,7 +44,7 @@ function FaceGuideExample() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <div className="mx-auto w-full max-w-[220px]">
           <div className="overflow-hidden rounded-2xl border border-cyan-300/25 bg-black/30 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
             <img
@@ -91,18 +91,25 @@ function FaceGuideExample() {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-300">
               Tamaño ideal del archivo
             </div>
+
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-center">
                 <div className="text-sm font-semibold text-white">512 × 512</div>
                 <div className="text-[11px] text-neutral-400">mínimo</div>
               </div>
+
               <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/10 p-2 text-center">
-                <div className="text-sm font-semibold text-cyan-200">768 × 768</div>
+                <div className="text-sm font-semibold text-cyan-200">
+                  768 × 768
+                </div>
                 <div className="text-[11px] text-cyan-100">recomendado</div>
               </div>
+
               <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-center">
                 <div className="text-sm font-semibold text-white">JPG / PNG</div>
-                <div className="text-[11px] text-neutral-400">formatos válidos</div>
+                <div className="text-[11px] text-neutral-400">
+                  formatos válidos
+                </div>
               </div>
             </div>
           </div>
@@ -236,6 +243,7 @@ export default function AvatarStudioPanel() {
         out?.signed_url ||
         out?.signedUrl ||
         "";
+
       setThumbUrl(url || "");
     } catch {
       setThumbUrl("");
@@ -441,75 +449,87 @@ export default function AvatarStudioPanel() {
         </div>
       )}
 
-      <div className="mt-4 grid gap-4">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Nombre del anchor"
-          disabled={!canUse || loading}
-          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
-        />
-
-        {avatar?.id && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-xs text-neutral-300">
-              Anchor:{" "}
-              <span className="font-semibold text-white">
-                {avatar?.name || name}
-              </span>
-            </div>
-
-            {thumbUrl ? (
-              <img
-                src={thumbUrl}
-                alt="thumb"
-                className="h-12 w-12 rounded-xl border border-white/10 object-cover"
-              />
-            ) : (
-              <div className="grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/5 text-[10px] text-neutral-400">
-                —
-              </div>
-            )}
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="rounded-2xl border border-yellow-400/20 bg-yellow-400/10 p-4">
+          <div className="text-sm font-semibold text-yellow-200">
+            Requisitos de las fotos
           </div>
-        )}
 
-        <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-white">
-                Fotos anchor
-              </div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Agrega de 1 a 3 fotos, una por una. La primera subida puede
-                usarse como miniatura.
+          <div className="mt-2 text-[12px] text-yellow-50/90">
+            Para que Instaface y FaceSwap detecten bien el rostro y lo respeten
+            mejor al generar imágenes, sube fotos con estas características:
+          </div>
+
+          <ul className="mt-3 grid gap-1.5 text-[12px] text-yellow-50/95 sm:grid-cols-2">
+            <li>• Rostro centrado</li>
+            <li>• Fondo limpio o blanco</li>
+            <li>• Sin lentes ni manos tapando</li>
+            <li>• Sin cabello cubriendo la cara</li>
+            <li>• Buena iluminación</li>
+            <li>• Expresión neutra o ligera sonrisa</li>
+            <li>• Rostro ocupando ~70% de la imagen</li>
+            <li>• Evita fotos lejanas o de cuerpo completo</li>
+          </ul>
+
+          <FaceGuideExample />
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="text-sm font-semibold text-white">
+            Crear y guardar anchor
+          </div>
+          <div className="mt-1 text-xs text-neutral-400">
+            Aquí colocas el nombre, subes las fotos y guardas el anchor.
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block text-xs font-medium text-neutral-300">
+              Nombre del anchor
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ej. Isabela rostro 1"
+              disabled={!canUse || loading}
+              className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
+            />
+          </div>
+
+          {avatar?.id && (
+            <div className="mt-4 flex items-center gap-3 flex-wrap rounded-xl border border-white/10 bg-black/30 p-3">
+              <div className="text-xs text-neutral-300">
+                Anchor:
+                {" "}
+                <span className="font-semibold text-white">
+                  {avatar?.name || name}
+                </span>
               </div>
 
-              <div className="mt-3 rounded-2xl border border-yellow-400/20 bg-yellow-400/10 p-4 text-xs text-yellow-100">
-                <div className="mb-1 text-sm font-semibold text-yellow-200">
-                  Requisitos de las fotos
+              {thumbUrl ? (
+                <img
+                  src={thumbUrl}
+                  alt="thumb"
+                  className="h-12 w-12 rounded-xl border border-white/10 object-cover"
+                />
+              ) : (
+                <div className="grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/5 text-[10px] text-neutral-400">
+                  —
                 </div>
-                <div className="text-[12px] text-yellow-50/90">
-                  Para que Instaface y FaceSwap detecten bien el rostro y lo
-                  respeten mejor al generar imágenes, sube fotos con estas
-                  características:
-                </div>
-
-                <ul className="mt-3 grid gap-1.5 text-[12px] text-yellow-50/95 sm:grid-cols-2">
-                  <li>• Rostro centrado</li>
-                  <li>• Fondo limpio o blanco</li>
-                  <li>• Sin lentes ni manos tapando</li>
-                  <li>• Sin cabello cubriendo la cara</li>
-                  <li>• Buena iluminación</li>
-                  <li>• Expresión neutra o ligera sonrisa</li>
-                  <li>• Rostro ocupando ~70% de la imagen</li>
-                  <li>• Evita fotos lejanas o de cuerpo completo</li>
-                </ul>
-
-                <FaceGuideExample />
-              </div>
+              )}
             </div>
+          )}
 
-            <div className="w-full max-w-[320px] shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  Fotos anchor
+                </div>
+                <div className="mt-1 text-xs text-neutral-400">
+                  Sube de 1 a 3 fotos. La primera puede usarse como miniatura.
+                </div>
+              </div>
+
               <div className="text-xs text-neutral-300">
                 Guardadas:{" "}
                 <span className="font-semibold text-white">{uploadedCount}</span>
@@ -517,16 +537,18 @@ export default function AvatarStudioPanel() {
                 Pendientes:{" "}
                 <span className="font-semibold text-white">{pendingCount}</span>
               </div>
+            </div>
 
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={onPickOne}
-                  className="hidden"
-                />
+            <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-4">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={onPickOne}
+                className="hidden"
+              />
 
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
@@ -555,83 +577,100 @@ export default function AvatarStudioPanel() {
                 </span>
               </div>
 
-              <div className="mt-3 text-[11px] text-neutral-500">
+              <div className="mt-1 text-[11px] text-neutral-500">
                 Formatos recomendados: JPG o PNG
               </div>
             </div>
-          </div>
 
-          {pendingCount > 0 && (
-            <div className="mt-4 grid gap-2">
-              {pending.map((f, idx) => (
-                <div
-                  key={`${f.name}-${idx}`}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-xs text-neutral-200">
-                      {f.name}
-                    </div>
-                    <div className="text-[11px] text-neutral-400">
-                      {bytesLabel(f.size)}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => removePending(idx)}
-                    disabled={!canUse || loading}
-                    className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-40"
-                  >
-                    Quitar
-                  </button>
+            {pendingCount > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 text-xs font-medium text-neutral-300">
+                  Pendientes por subir
                 </div>
-              ))}
-            </div>
-          )}
 
-          {uploadedCount > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-              {uploaded.map((p, idx) => {
-                const url = p?.url || "";
-                return (
-                  <div
-                    key={p?.id || p?.storage_path || idx}
-                    className="overflow-hidden rounded-xl border border-white/10 bg-black/40"
-                  >
-                    {url ? (
-                      <img
-                        src={url}
-                        alt={`anchor-${idx}`}
-                        className="h-24 w-full object-cover"
-                      />
-                    ) : (
-                      <div className="grid h-24 place-items-center text-xs text-neutral-500">
-                        Sin preview
+                <div className="grid gap-2">
+                  {pending.map((f, idx) => (
+                    <div
+                      key={`${f.name}-${idx}`}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-xs text-neutral-200">
+                          {f.name}
+                        </div>
+                        <div className="text-[11px] text-neutral-400">
+                          {bytesLabel(f.size)}
+                        </div>
                       </div>
-                    )}
-                    <div className="p-2 text-[10px] text-neutral-400">
-                      {idx === 0 ? "anchor 1 / miniatura" : `anchor ${idx + 1}`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
 
-        <button
-          type="button"
-          onClick={onCreateOrSave}
-          disabled={!canCreateOrSave || loading}
-          className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-40"
-        >
-          {loading && busyLabel
-            ? busyLabel
-            : avatar?.id
-            ? "Guardar cambios"
-            : "Crear anchor"}
-        </button>
+                      <button
+                        type="button"
+                        onClick={() => removePending(idx)}
+                        disabled={!canUse || loading}
+                        className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-40"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {uploadedCount > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 text-xs font-medium text-neutral-300">
+                  Fotos guardadas
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {uploaded.map((p, idx) => {
+                    const url = p?.url || "";
+                    return (
+                      <div
+                        key={p?.id || p?.storage_path || idx}
+                        className="overflow-hidden rounded-xl border border-white/10 bg-black/40"
+                      >
+                        {url ? (
+                          <img
+                            src={url}
+                            alt={`anchor-${idx}`}
+                            className="h-28 w-full object-cover"
+                          />
+                        ) : (
+                          <div className="grid h-28 place-items-center text-xs text-neutral-500">
+                            Sin preview
+                          </div>
+                        )}
+
+                        <div className="p-2 text-[10px] text-neutral-400">
+                          {idx === 0
+                            ? "anchor 1 / miniatura"
+                            : `anchor ${idx + 1}`}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={onCreateOrSave}
+                disabled={!canCreateOrSave || loading}
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-40"
+              >
+                {loading && busyLabel
+                  ? busyLabel
+                  : avatar?.id
+                  ? "Guardar cambios"
+                  : "Crear anchor"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
