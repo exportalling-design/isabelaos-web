@@ -39,39 +39,22 @@ function FaceGuideExample() {
             Ejemplo visual recomendado
           </div>
           <div className="text-[11px] text-neutral-300">
-            Así debe verse una foto ideal para que el anchor funcione mejor
+            Usa una foto similar a esta para mejores resultados con el anchor
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[190px_minmax(0,1fr)]">
-        <div className="mx-auto w-full max-w-[190px]">
-          <div className="relative overflow-hidden rounded-[22px] border border-cyan-300/25 bg-gradient-to-b from-neutral-100 via-neutral-200 to-neutral-300 shadow-[0_0_30px_rgba(34,211,238,0.10)]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.65),transparent_45%)]" />
-
-            <div className="relative mx-auto mt-3 h-[230px] w-[150px]">
-              <div className="absolute inset-[8px] rounded-[18px] border border-cyan-400/45 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.08)]" />
-
-              <div className="absolute left-1/2 top-[16px] h-[82px] w-[82px] -translate-x-1/2 rounded-full border-[3px] border-cyan-500/65 bg-gradient-to-b from-neutral-400 to-neutral-500 shadow-inner" />
-
-              <div className="absolute left-1/2 top-[88px] h-[112px] w-[108px] -translate-x-1/2 rounded-t-[999px] rounded-b-[30px] border-[3px] border-cyan-500/30 border-b-0 bg-gradient-to-b from-neutral-400 to-neutral-500" />
-
-              <div className="absolute left-1/2 top-[43px] h-[4px] w-[4px] -translate-x-[18px] rounded-full bg-neutral-700" />
-              <div className="absolute left-1/2 top-[43px] h-[4px] w-[4px] translate-x-[14px] rounded-full bg-neutral-700" />
-              <div className="absolute left-1/2 top-[53px] h-[18px] w-[2px] -translate-x-1/2 rounded-full bg-neutral-600" />
-              <div className="absolute left-1/2 top-[76px] h-[2px] w-[26px] -translate-x-1/2 rounded-full bg-neutral-600" />
-
-              <div className="absolute left-1/2 top-[12px] h-[194px] w-[124px] -translate-x-1/2 rounded-[16px] border border-cyan-400/35" />
-              <div className="absolute left-1/2 top-[28px] h-[144px] w-[96px] -translate-x-1/2 rounded-[80px] border border-cyan-500/20" />
-
-              <div className="absolute left-1/2 top-[8px] -translate-x-1/2 rounded-full bg-cyan-500/15 px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-cyan-200">
-                área ideal
-              </div>
-
-              <div className="absolute bottom-[12px] left-1/2 -translate-x-1/2 rounded-lg bg-cyan-500/15 px-2 py-1 text-[9px] font-medium text-cyan-100 backdrop-blur-sm">
-                rostro centrado
-              </div>
-            </div>
+      <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="mx-auto w-full max-w-[220px]">
+          <div className="overflow-hidden rounded-2xl border border-cyan-300/25 bg-black/30 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
+            <img
+              src="/gallery/img17.png"
+              alt="Ejemplo foto anchor"
+              className="h-[260px] w-full object-cover"
+            />
+          </div>
+          <div className="mt-2 text-center text-[11px] text-cyan-200">
+            Ejemplo correcto
           </div>
         </div>
 
@@ -491,7 +474,7 @@ export default function AvatarStudioPanel() {
         )}
 
         <div className="rounded-2xl border border-white/10 bg-black/40 p-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-white">
                 Fotos anchor
@@ -526,54 +509,60 @@ export default function AvatarStudioPanel() {
               </div>
             </div>
 
-            <div className="text-xs text-neutral-300">
-              Guardadas:{" "}
-              <span className="font-semibold text-white">{uploadedCount}</span>
-              {" · "}
-              Pendientes:{" "}
-              <span className="font-semibold text-white">{pendingCount}</span>
+            <div className="w-full max-w-[320px] shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="text-xs text-neutral-300">
+                Guardadas:{" "}
+                <span className="font-semibold text-white">{uploadedCount}</span>
+                {" · "}
+                Pendientes:{" "}
+                <span className="font-semibold text-white">{pendingCount}</span>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={onPickOne}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={!canUse || loading || totalCount >= 3}
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
+                >
+                  Agregar 1 foto
+                </button>
+
+                {pendingCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearPending}
+                    disabled={!canUse || loading}
+                    className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
+                  >
+                    Limpiar pendientes
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3 text-xs text-neutral-400">
+                Total (guardadas + pendientes):{" "}
+                <span className="font-semibold text-neutral-200">
+                  {totalCount}
+                </span>
+              </div>
+
+              <div className="mt-3 text-[11px] text-neutral-500">
+                Formatos recomendados: JPG o PNG
+              </div>
             </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              onChange={onPickOne}
-              className="hidden"
-            />
-
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={!canUse || loading || totalCount >= 3}
-              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
-            >
-              Agregar 1 foto
-            </button>
-
-            <div className="text-xs text-neutral-400">
-              Total (guardadas + pendientes):{" "}
-              <span className="font-semibold text-neutral-200">
-                {totalCount}
-              </span>
-            </div>
-
-            {pendingCount > 0 && (
-              <button
-                type="button"
-                onClick={clearPending}
-                disabled={!canUse || loading}
-                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
-              >
-                Limpiar pendientes
-              </button>
-            )}
           </div>
 
           {pendingCount > 0 && (
-            <div className="mt-3 grid gap-2">
+            <div className="mt-4 grid gap-2">
               {pending.map((f, idx) => (
                 <div
                   key={`${f.name}-${idx}`}
@@ -602,7 +591,7 @@ export default function AvatarStudioPanel() {
           )}
 
           {uploadedCount > 0 && (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {uploaded.map((p, idx) => {
                 const url = p?.url || "";
                 return (
