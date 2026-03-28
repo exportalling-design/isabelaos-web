@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
-import { saveGenerationInSupabase, getTodayGenerationCount } from "../lib/generations";
+import { saveGenerationInSupabase, getTodayGenerationCount, uploadImageToStorage } from "../lib/generations";
 
 // ── Helpers de localStorage para demo prompt ──────────────────
 const DEMO_PROMPT_KEY = "isabela_demo_prompt_text2img";
@@ -239,13 +239,21 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
         avatarAnchors = await getAvatarAnchors(selectedAvatar.id);
       }
       setStatusText("Enviando job a RunPod...");
+
+      // Fix cara fantasmal: Realistic Vision necesita 512x768 para generar
+      // un solo rostro bien integrado. A resoluciones mayores genera personas
+      // duplicadas o rostros pequeños que el FaceSwap no puede pegar bien.
+      const isNaturalWithAvatar = skinMode === "natural" && !!selectedAvatar;
+      const finalWidth  = isNaturalWithAvatar ? 512  : Number(width);
+      const finalHeight = isNaturalWithAvatar ? 768  : Number(height);
+
       const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
           prompt: finalPrompt, negative_prompt: finalNegative,
-          width: Number(width), height: Number(height), steps: Number(steps),
+          width: finalWidth, height: finalHeight, steps: Number(steps),
           skin_mode: skinMode,
           avatar_id:           selectedAvatar?.id || null,
           avatar_name:         selectedAvatar?.name || null,
@@ -281,14 +289,21 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
             localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
             if (!hasPaidAccess) setDailyCount((p) => p + 1);
-            saveGenerationInSupabase({
-              userId: user.id, imageUrl: `data:image/png;base64,${b64}`,
-              prompt, negativePrompt: negative,
-              width: Number(width), height: Number(height), steps: Number(steps),
-              optimizedPrompt:         useOptimizer ? (optimizedPrompt || null) : null,
-              optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
-              usedOptimizer: !!useOptimizer,
-            }).catch((e) => console.error("Error guardando en Supabase:", e));
+            // Subir imagen a Storage y guardar URL en DB
+            (async () => {
+              try {
+                const publicUrl = await uploadImageToStorage(user.id, b64, "image/png");
+                await saveGenerationInSupabase({
+                  userId: user.id,
+                  imageUrl: publicUrl || `data:image/png;base64,${b64}`,
+                  prompt, negativePrompt: negative,
+                  width: Number(width), height: Number(height), steps: Number(steps),
+                  optimizedPrompt:         useOptimizer ? (optimizedPrompt || null) : null,
+                  optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
+                  usedOptimizer: !!useOptimizer,
+                });
+              } catch (e) { console.error("Error guardando en Supabase:", e); }
+            })();
           }
         } else {
           throw new Error("Job terminado pero sin imagen en la salida.");
