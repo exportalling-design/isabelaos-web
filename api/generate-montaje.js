@@ -35,7 +35,11 @@ const JADE_COSTS = {
 // imagen generada directamente en base64
 async function callGeminiWithImageOutput({ prompt, personImageBase64, personMimeType, backgroundImageBase64, backgroundMimeType }) {
   const accessToken = await getGoogleAccessToken();
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`;
+  // Para location=global la URL base cambia a aiplatform.googleapis.com (sin prefijo regional)
+  const baseHost = LOCATION === "global"
+    ? "https://aiplatform.googleapis.com"
+    : `https://${LOCATION}-aiplatform.googleapis.com`;
+  const url = `${baseHost}/v1/projects/${GOOGLE_PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`;
 
   // Construir partes de la imagen
   const imageParts = [
@@ -153,7 +157,7 @@ function extractTextFromGeminiResponse(data) {
 }
 
 const MODEL    = "gemini-2.5-flash-image-preview";
-const LOCATION = "us-central1";
+const LOCATION = "global";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
@@ -266,3 +270,4 @@ export default async function handler(req, res) {
 }
 
 export const config = { runtime: "nodejs" };
+
