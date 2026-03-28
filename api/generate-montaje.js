@@ -1,481 +1,218 @@
-// src/components/MontajeIAPanel.jsx
+// api/generate-montaje.js
 // ─────────────────────────────────────────────────────────────
-// Panel de Montaje IA
+// Generación de montaje IA con Gemini 2.5 Flash Image.
+//
+// Usa GOOGLE_API_KEY (Google AI Studio) directamente.
+// NO usa Vertex AI para no interferir con Veo3/GOOGLE_LOCATION.
 //
 // FLUJO A — gemini_edit (ACTIVO):
-//   Sube foto → conversa con Isabela → genera edición con Gemini
-//   Ejemplos: cartoonizar, estilo studio, agregar a Messi, mejorar, etc.
+//   Edita imagen con Gemini 2.5 Flash Image.
+//   Soporta: cartoonizar, estilo studio, agregar personas,
+//   cambiar fondo con IA, mejorar foto, etc.
+//   Devuelve imagen base64 en la respuesta JSON.
 //
-// FLUJO B — compose_scene (EN MANTENIMIENTO):
-//   Sube persona + fondo → composición profesional con rembg
-//   Se activa cuando RunPod builder esté disponible
-//
-// Costos: gemini_edit = 5J | compose_scene = 8J
+// FLUJO B — compose_scene (PENDIENTE RunPod):
+//   Recorta con rembg y monta sobre fondo real.
+//   Activar cuando rp_handler.py esté deployado.
 // ─────────────────────────────────────────────────────────────
-import { useState, useRef, useEffect } from "react";
-import { supabase } from "../lib/supabaseClient";
-
-async function getAuthHeaders() {
-  try {
-    const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
-    if (!token) return {};
-    return { Authorization: `Bearer ${token}` };
-  } catch { return {}; }
+import { requireUser } from "./_auth.js";
+import { createClient } from "@supabase/supabase-js";
+ 
+// ── Modelo para edición de imágenes ──────────────────────────
+// Usa Google AI Studio API (generativelanguage.googleapis.com)
+// NO usa Vertex AI — eso es solo para Veo3
+const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
+ 
+// ── Supabase admin ────────────────────────────────────────────
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("MISSING_SUPABASE_ENV");
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
-
-async function fileToBase64(file) {
-  const buf = await file.arrayBuffer();
-  return btoa(new Uint8Array(buf).reduce((d, b) => d + String.fromCharCode(b), ""));
-}
-
-async function compressImage(file, maxWidth = 1024, quality = 0.85) {
-  const url = URL.createObjectURL(file);
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale  = Math.min(1, maxWidth / img.width);
-      const canvas = document.createElement("canvas");
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        URL.revokeObjectURL(url);
-        if (blob) resolve(blob);
-        else reject(new Error("No se pudo comprimir la imagen."));
-      }, "image/jpeg", quality);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("No se pudo cargar la imagen.")); };
-    img.src = url;
+ 
+// ── Costos en Jades ───────────────────────────────────────────
+const JADE_COSTS = {
+  gemini_edit:   5,
+  compose_scene: 8,
+};
+ 
+// ── Llamada a Gemini con imagen de salida ─────────────────────
+async function callGeminiImageEdit({ prompt, personImageBase64, personMimeType, backgroundImageBase64, backgroundMimeType }) {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY — agrega GEMINI_API_KEY en Vercel");
+ 
+  const url = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
+ 
+  // Construir partes — primero imagen(s), luego el texto
+  const parts = [];
+ 
+  parts.push({
+    inline_data: {
+      mime_type: personMimeType || "image/jpeg",
+      data:      personImageBase64,
+    },
   });
-}
-
-// ── Componente de upload de imagen ───────────────────────────
-function UploadCard({ title, subtitle, preview, onChange, badge }) {
-  return (
-    <label className="group relative block cursor-pointer overflow-hidden rounded-3xl border border-white/10 bg-black/40 p-4 transition hover:border-cyan-400/30">
-      <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.08),transparent_40%),radial-gradient(circle_at_bottom_right,rgba(217,70,239,0.08),transparent_40%)]" />
-      <div className="relative z-10">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-white">{title}</p>
-          {badge && (
-            <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-300">{badge}</span>
-          )}
-        </div>
-        <p className="mt-1 text-xs text-neutral-400">{subtitle}</p>
-        <div className="mt-3 rounded-2xl border border-dashed border-white/15 bg-black/40 p-4 text-center">
-          {!preview ? (
-            <div className="py-4">
-              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-xl">🖼️</div>
-              <p className="text-xs text-neutral-400">Toca para seleccionar</p>
-            </div>
-          ) : (
-            <img src={preview} className="mx-auto max-h-[200px] w-full rounded-xl object-contain" alt="preview" />
-          )}
-        </div>
-      </div>
-      <input type="file" accept="image/*" onChange={onChange} className="hidden" />
-    </label>
-  );
-}
-
-// ── Burbuja de mensaje ────────────────────────────────────────
-function MessageBubble({ role, text, imageB64, mimeType }) {
-  const isUser = role === "user";
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-        isUser
-          ? "border border-cyan-400/20 bg-cyan-500/10 text-white"
-          : "border border-fuchsia-400/20 bg-fuchsia-500/10 text-white"
-      }`}>
-        <p className="mb-1 text-[10px] opacity-60">{isUser ? "Tú" : "Isabela"}</p>
-        {text && <p className="whitespace-pre-wrap">{text}</p>}
-        {imageB64 && (
-          <div className="mt-3">
-            <img src={`data:${mimeType || "image/jpeg"};base64,${imageB64}`}
-              alt="Resultado del montaje"
-              className="w-full rounded-xl object-contain max-h-[400px]" />
-            <p className="mt-1 text-[10px] text-emerald-300">✅ Imagen generada</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export default function MontajeIAPanel({ userStatus }) {
-  // ── Imágenes ──────────────────────────────────────────────
-  const [personFile,    setPersonFile]    = useState(null);
-  const [personPreview, setPersonPreview] = useState("");
-  const [bgFile,        setBgFile]        = useState(null);
-  const [bgPreview,     setBgPreview]     = useState("");
-
-  // ── Chat ──────────────────────────────────────────────────
-  const [messages,       setMessages]       = useState([
-    { role: "isabela", text: "Hola, soy Isabela 👋 Sube tu imagen y cuéntame qué quieres hacer con ella. Puedo cartoonizarla, darle estilo studio, agregar a alguien famoso, cambiar el fondo con IA, y más." },
-  ]);
-  const [prompt,         setPrompt]         = useState("");
-  const [chatHistory,    setChatHistory]    = useState([]);
-  const [isabelaLoading, setIsabelaLoading] = useState(false);
-
-  // ── Plan de Isabela ───────────────────────────────────────
-  const [currentPlan,      setCurrentPlan]      = useState(null);
-  const [readyToGenerate,  setReadyToGenerate]  = useState(false);
-
-  // ── Generación ────────────────────────────────────────────
-  const [generating, setGenerating] = useState(false);
-  const [resultB64,  setResultB64]  = useState(null);
-  const [resultMime, setResultMime] = useState("image/jpeg");
-  const [genError,   setGenError]   = useState("");
-
-  const chatEndRef = useRef(null);
-  const currentJades = userStatus?.jades ?? 0;
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // ── Handlers de imagen ────────────────────────────────────
-  async function handlePersonFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setPersonFile(f);
-    setPersonPreview(URL.createObjectURL(f));
-    setResultB64(null);
+ 
+  if (backgroundImageBase64) {
+    parts.push({
+      inline_data: {
+        mime_type: backgroundMimeType || "image/jpeg",
+        data:      backgroundImageBase64,
+      },
+    });
   }
-
-  async function handleBgFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setBgFile(f);
-    setBgPreview(URL.createObjectURL(f));
+ 
+  parts.push({ text: prompt });
+ 
+  const body = {
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"],
+      temperature:        0.4,
+      topP:               0.9,
+    },
+  };
+ 
+  console.log(`[generate-montaje] llamando Gemini Image API con modelo ${GEMINI_IMAGE_MODEL}`);
+ 
+  const r = await fetch(url, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(body),
+  });
+ 
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`Gemini API error ${r.status}: ${txt.slice(0, 400)}`);
   }
-
-  // ── Enviar mensaje a Isabela ──────────────────────────────
-  async function handleSendMessage() {
-    const text = prompt.trim();
-    if (!text || isabelaLoading) return;
-
-    const userMsg = { role: "user", text };
-    setMessages((p) => [...p, userMsg]);
-    setPrompt("");
-    setIsabelaLoading(true);
-    setReadyToGenerate(false);
-
-    try {
-      const auth = await getAuthHeaders();
-      const r    = await fetch("/api/isabela-montaje-chat", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", ...auth },
-        body:    JSON.stringify({
-          message:            text,
-          chatHistory,
-          hasPersonImage:     !!personFile,
-          hasBackgroundImage: !!bgFile,
-        }),
-      });
-      const j = await r.json().catch(() => null);
-
-      if (!r.ok || !j?.ok) throw new Error(j?.error || "Error al responder.");
-
-      const isabelaReply = String(j.reply || "").replace(/```json|```/g, "").trim();
-
-      // Actualizar historial para contexto continuo
-      setChatHistory((prev) => [
-        ...prev,
-        { role: "user",  text },
-        { role: "model", text: isabelaReply },
-      ]);
-
-      setMessages((p) => [...p, { role: "isabela", text: isabelaReply }]);
-
-      // Guardar plan si Isabela lo propone
-      if (j.final_prompt) {
-        setCurrentPlan({
-          edit_type:    j.edit_type    || "gemini_edit",
-          final_prompt: j.final_prompt || text,
-          edit_plan:    j.edit_plan    || "",
+ 
+  return r.json();
+}
+ 
+// ── Extraer imagen de la respuesta ────────────────────────────
+function extractImageFromResponse(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  for (const part of parts) {
+    if (part?.inlineData?.data || part?.inline_data?.data) {
+      const pd = part.inlineData || part.inline_data;
+      return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
+    }
+  }
+  return null;
+}
+ 
+function extractTextFromResponse(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  return parts.filter((p) => p?.text).map((p) => p.text).join("\n").trim();
+}
+ 
+// ── Handler principal ─────────────────────────────────────────
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+ 
+  try {
+    // Auth
+    const auth = await requireUser(req);
+    if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    const user = auth.user;
+ 
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+ 
+    const editType              = String(body?.edit_type || "gemini_edit");
+    const prompt                = String(body?.final_prompt || body?.prompt || "").trim();
+    const personImageBase64     = body?.person_image || null;
+    const personMimeType        = body?.person_mime_type || "image/jpeg";
+    const backgroundImageBase64 = body?.background_image || null;
+    const backgroundMimeType    = body?.background_mime_type || "image/jpeg";
+ 
+    if (!prompt)            return res.status(400).json({ ok: false, error: "MISSING_PROMPT" });
+    if (!personImageBase64) return res.status(400).json({ ok: false, error: "MISSING_PERSON_IMAGE" });
+ 
+    // Descontar Jades
+    const jadeCost = JADE_COSTS[editType] || JADE_COSTS.gemini_edit;
+    const sb       = getSupabaseAdmin();
+    const ref      = `montaje-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+ 
+    const { error: spendErr } = await sb.rpc("spend_jades", {
+      p_user_id: user.id,
+      p_amount:  jadeCost,
+      p_reason:  `montaje_${editType}`,
+      p_ref:     ref,
+    });
+ 
+    if (spendErr) {
+      if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
+        return res.status(402).json({
+          ok: false, error: "INSUFFICIENT_JADES",
+          detail: `Necesitas ${jadeCost} jades para este montaje.`,
+          required: jadeCost,
         });
       }
-
-      // Isabela dice que está listo para generar
-      // También activar si tiene plan y hay imagen subida
-      if (j.ready_to_generate || (j.final_prompt && personFile)) {
-        setReadyToGenerate(true);
-      }
-
-      // Isabela pide imagen si no hay
-      if (j.need_person_image && !personFile) {
-        setMessages((p) => [...p, { role: "isabela", text: "⚠️ Necesito que subas la imagen principal primero." }]);
-      }
-
-    } catch (e) {
-      setMessages((p) => [...p, { role: "isabela", text: `Error: ${e?.message || "No se pudo responder."}` }]);
-    } finally {
-      setIsabelaLoading(false);
+      return res.status(400).json({ ok: false, error: "JADE_CHARGE_FAILED", detail: spendErr.message });
     }
-  }
-
-  function handleKey(e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
-  }
-
-  // ── Generar montaje ───────────────────────────────────────
-  async function handleGenerate() {
-    if (!personFile) {
-      setMessages((p) => [...p, { role: "isabela", text: "⚠️ Primero sube la imagen principal." }]);
-      return;
-    }
-    if (!currentPlan?.final_prompt && !prompt.trim()) {
-      setMessages((p) => [...p, { role: "isabela", text: "⚠️ Cuéntame qué quieres hacer con la imagen." }]);
-      return;
-    }
-
-    const editType = currentPlan?.edit_type || "gemini_edit";
-
-    // compose_scene está en mantenimiento
-    if (editType === "compose_scene" || bgFile) {
-      setMessages((p) => [...p, {
-        role: "isabela",
-        text: "🔧 La composición profesional con fondo está en mantenimiento. Mientras tanto puedo editar tu imagen con IA — prueba pidiéndome que cambie el fondo describiendo la escena.",
-      }]);
-      return;
-    }
-
-    const jadeCost = 5;
-    if (currentJades < jadeCost) {
-      setGenError(`Necesitas ${jadeCost} Jades para generar. Tienes ${currentJades}.`);
-      return;
-    }
-
-    setGenerating(true);
-    setGenError("");
-    setResultB64(null);
-
-    // No mostrar mensaje en el chat al generar — el usuario ya sabe que hizo click
-
-    try {
-      // Comprimir y convertir imagen
-      const compressedBlob = await compressImage(personFile);
-      const compressedFile = new File([compressedBlob], "person.jpg", { type: "image/jpeg" });
-      const personB64      = await fileToBase64(compressedFile);
-
-      const finalPrompt = currentPlan?.final_prompt || prompt.trim();
-
-      const auth = await getAuthHeaders();
-      const r    = await fetch("/api/generate-montaje", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", ...auth },
-        body:    JSON.stringify({
-          edit_type:       "gemini_edit",
-          final_prompt:    finalPrompt,
-          person_image:    personB64,
-          person_mime_type: "image/jpeg",
-        }),
+ 
+    console.log(`[generate-montaje] user=${user.id} type=${editType} cost=${jadeCost}J`);
+ 
+    // ── FLUJO A: Gemini edit ──────────────────────────────────
+    if (editType === "gemini_edit") {
+      const enrichedPrompt = [
+        "You are a professional photo editor.",
+        "Edit the provided image according to these instructions:",
+        prompt,
+        "",
+        "Requirements:",
+        "- Maintain photorealistic quality",
+        "- Keep natural lighting and shadows",
+        "- Return ONLY the edited image",
+      ].join("\n");
+ 
+      const geminiData  = await callGeminiImageEdit({
+        prompt: enrichedPrompt,
+        personImageBase64, personMimeType,
+        backgroundImageBase64, backgroundMimeType,
       });
-
-      const j = await r.json().catch(() => null);
-
-      if (!r.ok || !j?.ok) {
-        if (j?.error === "GEMINI_NO_IMAGE_OUTPUT") {
-          setMessages((p) => [...p, {
-            role: "isabela",
-            text: "No pude generar una imagen con esa instrucción. Intenta ser más específico — por ejemplo: 'Conviértela en estilo cartoon pixar' o 'Ponla con fondo de playa soleada'.",
-          }]);
-          return;
-        }
-        // Error genérico — no exponer detalles técnicos
-        throw new Error("Error al procesar la imagen.");
+ 
+      const imageResult = extractImageFromResponse(geminiData);
+      const textResult  = extractTextFromResponse(geminiData);
+ 
+      console.log(`[generate-montaje] hasImage=${!!imageResult} text=${textResult?.slice(0, 80)}`);
+ 
+      if (!imageResult) {
+        return res.status(422).json({
+          ok:    false,
+          error: "GEMINI_NO_IMAGE_OUTPUT",
+          detail: "Gemini no generó una imagen. Intenta ser más específico.",
+          gemini_text: textResult || "",
+        });
       }
-
-      setResultB64(j.image_b64);
-      setResultMime(j.mime_type || "image/jpeg");
-      setReadyToGenerate(false);
-      setCurrentPlan(null);
-
-      setMessages((p) => [...p, {
-        role: "isabela",
-        text: "✅ ¡Lista! Puedes ver tu imagen editada en la sección de resultados.",
-      }]);
-
-    } catch (e) {
-      // No mostrar errores técnicos de Gemini al usuario
-      const userMsg = "Ocurrió un problema al generar. Por favor intenta de nuevo.";
-      setGenError(userMsg);
-      setMessages((p) => [...p, { role: "isabela", text: "Lo siento, tuve un problema al procesar tu imagen. ¿Lo intentamos de nuevo?" }]);
-      console.error("[montaje] error:", e?.message || e);
-    } finally {
-      setGenerating(false);
+ 
+      return res.status(200).json({
+        ok:        true,
+        mode:      "gemini_edit",
+        image_b64: imageResult.base64,
+        mime_type: imageResult.mimeType,
+        jade_cost: jadeCost,
+        ref,
+      });
     }
+ 
+    // ── FLUJO B: compose_scene (pendiente RunPod) ─────────────
+    if (editType === "compose_scene") {
+      return res.status(503).json({
+        ok:    false,
+        error: "COMPOSE_SCENE_UNAVAILABLE",
+        detail: "La composición profesional está en mantenimiento.",
+      });
+    }
+ 
+    return res.status(400).json({ ok: false, error: "INVALID_EDIT_TYPE" });
+ 
+  } catch (e) {
+    console.error("[generate-montaje] SERVER_ERROR:", e?.message || e);
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e?.message || e) });
   }
-
-  // ── Descargar resultado ───────────────────────────────────
-  function handleDownload() {
-    if (!resultB64) return;
-    const link    = document.createElement("a");
-    link.href     = `data:${resultMime};base64,${resultB64}`;
-    link.download = "isabelaos-montaje.jpg";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
-  return (
-    <div className="space-y-6">
-
-      {/* ── Título ── */}
-      <div>
-        <h2 className="text-lg font-semibold text-white">Montaje IA</h2>
-        <p className="mt-1 text-sm text-neutral-400">
-          Edita y monta imágenes con inteligencia artificial. Conversa con Isabela para describir lo que necesitas.
-        </p>
-      </div>
-
-      {/* ── Info de costos ── */}
-      <div className="grid grid-cols-2 gap-3 text-[11px]">
-        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-3">
-          <div className="font-semibold text-cyan-300">Edición con IA · 5 Jades</div>
-          <div className="mt-1 text-neutral-400">Cartoon, studio, cambiar fondo, mejorar foto, etc.</div>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
-          <div className="font-semibold text-neutral-400">Composición profesional · 8 Jades</div>
-          <div className="mt-1 text-neutral-500">🔧 En mantenimiento — disponible pronto</div>
-        </div>
-      </div>
-
-      {/* ── Upload de imágenes ── */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <UploadCard
-          title="Imagen principal"
-          subtitle="Persona, producto o lo que quieras editar."
-          preview={personPreview}
-          onChange={handlePersonFile}
-          badge="Requerida" />
-
-        <div className="relative">
-          <UploadCard
-            title="Fondo (opcional)"
-            subtitle="Sube un fondo real para montaje profesional."
-            preview={bgPreview}
-            onChange={handleBgFile}
-            badge="En mantenimiento" />
-          {/* Overlay de mantenimiento */}
-          <div className="absolute inset-0 rounded-3xl bg-black/60 flex items-center justify-center">
-            <div className="text-center px-4">
-              <div className="text-2xl mb-2">🔧</div>
-              <p className="text-xs text-neutral-300 font-semibold">Composición profesional</p>
-              <p className="text-[10px] text-neutral-500 mt-1">En mantenimiento · Disponible pronto</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Ejemplos de prompts ── */}
-      {!readyToGenerate && (
-        <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
-          <p className="text-[11px] text-neutral-400 font-semibold mb-2">Ejemplos de lo que puedes pedir:</p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              "Conviértela en estilo cartoon Pixar",
-              "Ponla con fondo de playa soleada",
-              "Hazla con estilo de foto de estudio profesional",
-              "Agrégale a Messi a la par",
-              "Mejora la iluminación y nitidez",
-              "Cámbiala a estilo anime",
-            ].map((ex) => (
-              <button key={ex} type="button" onClick={() => setPrompt(ex)}
-                className="rounded-xl border border-white/10 bg-black/40 px-3 py-1.5 text-[11px] text-neutral-300 hover:bg-white/10 hover:text-white transition-all">
-                {ex}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Banner listo para generar (Isabela confirmó el plan) ── */}
-      {readyToGenerate && currentPlan && (
-        <div className="rounded-2xl border-2 border-cyan-400/50 bg-cyan-500/10 px-4 py-4 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold text-cyan-300">✅ Plan acordado — listo para generar</p>
-            <p className="mt-1 text-xs text-neutral-300">{currentPlan.edit_plan || currentPlan.final_prompt}</p>
-          </div>
-          <span className="text-[11px] text-cyan-400 whitespace-nowrap">Da click en Generar →</span>
-        </div>
-      )}
-
-      {/* ── Plan actual de Isabela (mientras conversa) ── */}
-      {currentPlan && !readyToGenerate && (
-        <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
-          <p className="text-[11px] font-semibold text-neutral-300">Plan en progreso:</p>
-          <p className="mt-1 text-xs text-neutral-400">{currentPlan.edit_plan || currentPlan.final_prompt}</p>
-        </div>
-      )}
-
-      {/* ── Chat con Isabela ── */}
-      <div className="rounded-3xl border border-white/10 bg-black/40">
-        <div className="h-[300px] overflow-y-auto p-4 space-y-3">
-          {messages.map((m, i) => (
-            <MessageBubble key={i} {...m} />
-          ))}
-          {isabelaLoading && (
-            <div className="flex justify-start">
-              <div className="rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-neutral-400">
-                Isabela está pensando...
-              </div>
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        <div className="border-t border-white/10 p-3 flex gap-2">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Ej: conviértela en estilo cartoon, pon fondo de playa..."
-            rows={2}
-            className="flex-1 resize-none rounded-2xl bg-black/60 px-4 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400"
-          />
-          <button onClick={handleSendMessage} disabled={isabelaLoading || !prompt.trim()}
-            className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 text-sm font-semibold text-white disabled:opacity-50">
-            Enviar
-          </button>
-        </div>
-      </div>
-
-      {genError && (
-        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-          Ocurrió un problema. Por favor intenta de nuevo.
-        </div>
-      )}
-
-      {/* ── Botón generar ── */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <button onClick={handleGenerate} disabled={generating || !personFile}
-          className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-50">
-          {generating ? "Generando..." : "Generar edición · 5 Jades"}
-        </button>
-
-        <button disabled
-          className="w-full rounded-2xl border border-white/10 bg-black/30 py-3 text-sm text-neutral-500 cursor-not-allowed">
-          🔧 Composición profesional · Pronto
-        </button>
-      </div>
-
-      {/* ── Resultado descargable ── */}
-      {resultB64 && (
-        <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/5 p-4">
-          <p className="text-sm font-semibold text-emerald-300 mb-3">Resultado</p>
-          <img src={`data:${resultMime};base64,${resultB64}`}
-            alt="Resultado del montaje"
-            className="w-full rounded-2xl object-contain max-h-[500px]" />
-          <button onClick={handleDownload}
-            className="mt-3 w-full rounded-2xl border border-emerald-400/30 py-2 text-xs text-emerald-200 hover:bg-emerald-500/10">
-            Descargar imagen
-          </button>
-        </div>
-      )}
-    </div>
-  );
 }
+ 
+export const config = { runtime: "nodejs" };
