@@ -521,72 +521,77 @@ function DashboardView() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// LANDING — sección de precios actualizada
+// PRICING SECTION — premium rediseñada
 // ══════════════════════════════════════════════════════════════
 function PricingSection({ onOpenAuth }) {
   return (
-    <section id="planes" className="mt-20">
-      <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/40 p-6 md:p-8">
-        <div className="pointer-events-none absolute -inset-24 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(236,72,153,0.16),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.18),transparent_35%)]" />
+    <section id="planes" className="mt-24">
+      <div className="text-center mb-10">
+        <p className="text-[11px] uppercase tracking-[0.28em] text-cyan-400/70">Sin suscripción</p>
+        <h3 className="mt-3 text-3xl md:text-4xl font-semibold text-white">Paga solo lo que usas</h3>
+        <p className="mt-3 text-sm text-neutral-400 max-w-xl mx-auto">
+          Compra Jades y genera cuando quieras. Sin mensualidad, sin contratos. 1 Jade = $0.10 USD.
+        </p>
+      </div>
 
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Créditos de generación</p>
-            <h3 className="mt-2 text-2xl font-semibold text-white">Compra Jades y genera cuando quieras</h3>
-            <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-              Sin suscripción mensual. Compra el pack que necesitas, los Jades no expiran.
-              1 Jade = $0.10 USD.
-            </p>
-          </div>
-          <button onClick={onOpenAuth}
-            className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10">
-            Ya tengo cuenta → Iniciar sesión
-          </button>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Object.entries(JADE_PACKS).map(([key, p], i) => {
+          const isPopular = key === "popular";
+          return (
+            <div key={key} className={`relative overflow-hidden rounded-[28px] border p-6 transition-all hover:-translate-y-1 ${
+              isPopular
+                ? "border-cyan-400/60 bg-gradient-to-b from-cyan-500/15 to-black/60 shadow-[0_0_40px_rgba(34,211,238,0.15)]"
+                : "border-white/10 bg-black/40 hover:border-white/20"
+            }`}>
+              {isPopular && (
+                <div className="absolute top-4 right-4 rounded-full bg-cyan-400 px-2.5 py-0.5 text-[10px] font-bold text-black">Popular</div>
+              )}
+              <div className="text-xs text-neutral-400 uppercase tracking-widest">{p.label}</div>
+              <div className="mt-3 flex items-end gap-1">
+                <span className="text-4xl font-bold text-white">${p.price_usd}</span>
+                <span className="mb-1 text-xs text-neutral-400">USD</span>
+              </div>
+              <div className="mt-1 text-lg font-semibold text-cyan-300">{p.jades} Jades</div>
 
-        {/* Grid de packs */}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Object.entries(JADE_PACKS).map(([key, p]) => (
-            <div key={key} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-black/50 p-5">
-              <div className="text-lg font-semibold text-white">{p.label}</div>
-              <div className="mt-2 text-4xl font-bold text-cyan-300">{p.jades}J</div>
-              <div className="mt-1 text-sm text-neutral-400">${p.price_usd} USD</div>
-
-              {/* Equivalencias */}
-              <div className="mt-4 space-y-1 text-[11px] text-neutral-400">
-                <div>· {p.jades} imágenes sin avatar</div>
-                <div>· {Math.floor(p.jades / 2)} imágenes con avatar</div>
-                <div>· {Math.floor(p.jades / COSTS.vid_express_8s)} videos Express 8s</div>
-                <div>· {Math.floor(p.jades / COSTS.vid_standard_10s)} videos Standard 10s</div>
+              <div className="mt-5 space-y-2 text-[11px] text-neutral-300">
+                <div className="flex items-center gap-2"><span className="text-cyan-400">✓</span> {p.jades} imágenes sin avatar</div>
+                <div className="flex items-center gap-2"><span className="text-cyan-400">✓</span> {Math.floor(p.jades / 2)} imágenes con avatar</div>
+                <div className="flex items-center gap-2"><span className="text-fuchsia-400">✓</span> {Math.floor(p.jades / COSTS.vid_express_8s)} videos Express 8s</div>
+                <div className="flex items-center gap-2"><span className="text-yellow-400">✓</span> Jades sin vencimiento</div>
               </div>
 
               <button onClick={onOpenAuth}
-                className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2.5 text-xs font-semibold text-white">
-                Comprar
+                className={`mt-6 w-full rounded-2xl py-2.5 text-xs font-semibold transition-all ${
+                  isPopular
+                    ? "bg-gradient-to-r from-cyan-400 to-fuchsia-500 text-white shadow-[0_0_20px_rgba(34,211,238,0.25)]"
+                    : "border border-white/20 text-white hover:bg-white/10"
+                }`}>
+                Comprar {p.label}
               </button>
             </div>
-          ))}
-        </div>
+          );
+        })}
+      </div>
 
-        {/* Tabla de costos por generación */}
-        <div className="mt-8 rounded-[24px] border border-white/10 bg-black/40 p-5">
-          <div className="text-sm font-semibold text-white">Costo por generación</div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-[11px] text-neutral-300">
-            {[
-              { label: "Imagen sin avatar",     cost: COSTS.img_prompt,        color: "text-cyan-300"    },
-              { label: "Imagen con avatar",      cost: COSTS.img_anchor,        color: "text-cyan-300"    },
-              { label: "Video Express 8s",       cost: COSTS.vid_express_8s,    color: "text-fuchsia-300" },
-              { label: "+ Audio Layer",          cost: COSTS.vid_express_audio, color: "text-fuchsia-300" },
-              { label: "Video Standard 10s",     cost: COSTS.vid_standard_10s,  color: "text-yellow-300"  },
-              { label: "Video Standard 15s",     cost: COSTS.vid_standard_15s,  color: "text-yellow-300"  },
-              { label: "+ Audio Layer Standard", cost: COSTS.vid_standard_audio,color: "text-yellow-300"  },
-            ].map(({ label, cost, color }) => (
-              <div key={label} className="flex items-center justify-between rounded-xl border border-white/5 bg-black/40 px-3 py-2">
-                <span>{label}</span>
-                <span className={`font-semibold ${color}`}>{cost}J</span>
-              </div>
-            ))}
-          </div>
+      {/* Tabla de costos */}
+      <div className="mt-8 rounded-[28px] border border-white/10 bg-black/40 p-6">
+        <div className="text-sm font-semibold text-white mb-4">Costo por generación</div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-[11px]">
+          {[
+            { label: "Imagen sin avatar",  cost: COSTS.img_prompt,        icon: "🖼️", color: "text-cyan-300"    },
+            { label: "Imagen con avatar",   cost: COSTS.img_anchor,        icon: "👤", color: "text-cyan-300"    },
+            { label: "Video Express 8s",    cost: COSTS.vid_express_8s,    icon: "🎬", color: "text-fuchsia-300" },
+            { label: "Video Standard 10s",  cost: COSTS.vid_standard_10s,  icon: "🎥", color: "text-yellow-300"  },
+            { label: "Video Standard 15s",  cost: COSTS.vid_standard_15s,  icon: "🎥", color: "text-yellow-300"  },
+            { label: "Audio Express",       cost: COSTS.vid_express_audio, icon: "🔊", color: "text-fuchsia-300" },
+            { label: "Audio Standard",      cost: COSTS.vid_standard_audio,icon: "🔊", color: "text-yellow-300"  },
+            { label: "Montaje IA",          cost: 5,                       icon: "✨", color: "text-emerald-300" },
+          ].map(({ label, cost, icon, color }) => (
+            <div key={label} className="flex items-center justify-between rounded-2xl border border-white/5 bg-black/40 px-4 py-3">
+              <span className="flex items-center gap-2 text-neutral-300">{icon} {label}</span>
+              <span className={`font-bold ${color}`}>{cost}J</span>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -594,31 +599,57 @@ function PricingSection({ onOpenAuth }) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// LANDING VIEW
-// Banner flotante sticky con "Crear modelo"
+// LANDING VIEW — rediseñada más visual y premium
 // ══════════════════════════════════════════════════════════════
+function StatCounter({ value, label, suffix = "" }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let start = 0;
+    const end = parseInt(value);
+    if (start === end) return;
+    const dur = 1800;
+    const step = Math.ceil(end / (dur / 16));
+    const timer = setInterval(() => {
+      start = Math.min(start + step, end);
+      setCount(start);
+      if (start >= end) clearInterval(timer);
+    }, 16);
+    return () => clearInterval(timer);
+  }, [value]);
+  return (
+    <div className="text-center">
+      <div className="text-3xl md:text-4xl font-bold text-white">{count.toLocaleString()}{suffix}</div>
+      <div className="mt-1 text-[11px] text-neutral-400 uppercase tracking-wider">{label}</div>
+    </div>
+  );
+}
+
 function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
   const [demoPrompt, setDemoPrompt] = useState(
     "Modelo virtual elegante para redes sociales, rostro consistente, luz cinematográfica, formato vertical"
   );
-  // Control del banner sticky — visible siempre
-  const [bannerVisible, setBannerVisible] = useState(true);
 
   const topVisuals = [
-    { type: "video",  src: "/gallery/video1.mp4", label: "Demo principal", big: true  },
-    { type: "image",  src: "/gallery/img2.png?v=2", label: "Campaña visual", big: false },
-    { type: "image",  src: "/gallery/img3.png?v=2", label: "Escena IA",      big: false },
-    { type: "image",  src: "/gallery/img4.png?v=2", label: "Avatar",         big: false },
-    { type: "image",  src: "/gallery/img1.png?v=2", label: "Contenido",      big: false },
-    { type: "image",  src: "/gallery/img5.png?v=2", label: "Preview",        big: false },
+    { type: "video",  src: "/gallery/video1.mp4",   label: "Demo principal", big: true  },
+    { type: "image",  src: "/gallery/img2.png?v=2",  label: "Campaña visual", big: false },
+    { type: "image",  src: "/gallery/img3.png?v=2",  label: "Escena IA",      big: false },
+    { type: "image",  src: "/gallery/img4.png?v=2",  label: "Avatar",         big: false },
+    { type: "image",  src: "/gallery/img1.png?v=2",  label: "Contenido",      big: false },
+    { type: "image",  src: "/gallery/img5.png?v=2",  label: "Preview",        big: false },
+  ];
+
+  const steps = [
+    { num: "01", title: "Describe tu visión", desc: "Escribe el prompt de tu modelo virtual o campaña. Puedes usar el optimizador IA para mejorarlo.", icon: "✍️" },
+    { num: "02", title: "Motor GPU genera",   desc: "Nuestro worker conectado a GPU procesa tu solicitud con FLUX o Realistic Vision en segundos.",    icon: "⚡" },
+    { num: "03", title: "Edita y exporta",    desc: "Convierte a video, monta en escenas con Montaje IA, descarga y organiza en tu biblioteca.",        icon: "🎬" },
   ];
 
   return (
-    <div className="min-h-screen w-full text-white"
-      style={{ background: "radial-gradient(1200px_800px_at_100%_-10%,rgba(250,204,21,0.16),transparent_55%),radial-gradient(900px_700px_at_-10%_0%,rgba(34,211,238,0.18),transparent_50%),radial-gradient(900px_700px_at_50%_120%,rgba(168,85,247,0.08),transparent_55%),#05060A" }}>
+    <div className="min-h-screen w-full text-white overflow-x-hidden"
+      style={{ background: "radial-gradient(1200px_800px_at_100%_-10%,rgba(250,204,21,0.14),transparent_55%),radial-gradient(900px_700px_at_-10%_0%,rgba(34,211,238,0.16),transparent_50%),radial-gradient(900px_700px_at_50%_120%,rgba(168,85,247,0.08),transparent_55%),#05060A" }}>
 
-      {/* Navbar */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/45 backdrop-blur-md">
+      {/* ── Navbar ── */}
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-yellow-400 text-xs font-bold text-black shadow-[0_0_30px_rgba(250,204,21,0.22)]">io</div>
@@ -627,157 +658,276 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
               <div className="text-[10px] text-neutral-500">Plataforma de modelos virtuales</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={() => scrollToId("planes")}
-              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10">Planes</button>
-            <button onClick={onOpenAbout}
-              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10">Sobre nosotros</button>
-            <button onClick={onOpenContact}
-              className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10">Contacto</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => scrollToId("planes")} className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10 transition-all">Planes</button>
+            <button onClick={onOpenAbout}               className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10 transition-all">Sobre nosotros</button>
+            <button onClick={onOpenContact}             className="hidden sm:inline rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10 transition-all">Contacto</button>
             <button onClick={onOpenAuth}
-              className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10">
+              className="rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-all">
               Iniciar sesión / Registrarse
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 pb-16 pt-10">
-        {/* Hero grid */}
-        <section className="grid gap-8 xl:grid-cols-[0.84fr_1.1fr_0.82fr]">
-          {/* Columna izquierda */}
-          <div className="xl:pt-10">
-            <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/20 bg-yellow-400/10 px-4 py-1.5 text-[11px] text-yellow-200">
-              Estudio visual con IA
+      <main className="mx-auto max-w-7xl px-4 pb-20 pt-10">
+
+        {/* ── HERO ── */}
+        <section className="grid gap-10 xl:grid-cols-[1fr_1.2fr_0.85fr]">
+
+          {/* Izquierda */}
+          <div className="xl:pt-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/30 bg-yellow-400/10 px-4 py-1.5 text-[11px] text-yellow-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-yellow-400 animate-pulse" />
+              Estudio visual con IA · GPU en vivo
             </div>
-            <h1 className="mt-5 text-4xl font-semibold leading-[0.98] md:text-6xl">
+            <h1 className="mt-6 text-5xl font-bold leading-[0.95] md:text-6xl lg:text-7xl tracking-tight">
               Tu estudio de
-              <span className="mt-2 block bg-gradient-to-r from-cyan-300 via-sky-300 to-yellow-300 bg-clip-text text-transparent">
-                modelos virtuales
+              <span className="block bg-gradient-to-r from-cyan-300 via-sky-300 to-yellow-300 bg-clip-text text-transparent mt-1">
+                modelos<br />virtuales
               </span>
             </h1>
-            <p className="mt-5 max-w-xl text-base text-neutral-300">
-              Crea, organiza y escala contenido visual para personajes y modelos virtuales desde un solo sistema.
+            <p className="mt-6 max-w-md text-base text-neutral-300 leading-relaxed">
+              Crea, organiza y escala contenido visual para personajes y modelos virtuales desde un solo sistema conectado a GPU.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              {["Producción en GPU","Consistencia de rostro","Imagen → Video","Biblioteca integrada"].map((t) => (
-                <span key={t} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/80">{t}</span>
+              {["Producción en GPU","Consistencia de rostro","Imagen → Video","Montaje IA"].map((t) => (
+                <span key={t} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/70">
+                  <span className="h-1 w-1 rounded-full bg-cyan-400" />{t}
+                </span>
               ))}
             </div>
-            <div className="mt-8 flex flex-wrap items-center gap-4">
+            <div className="mt-8 flex flex-wrap items-center gap-3">
               <button onClick={() => scrollToId("demo-box")}
-                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-6 py-3 text-sm font-semibold text-black shadow-[0_0_35px_rgba(250,204,21,0.20)] hover:shadow-[0_0_40px_rgba(34,211,238,0.22)] transition-shadow">
+                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-7 py-3.5 text-sm font-bold text-black shadow-[0_0_40px_rgba(250,204,21,0.22)] hover:shadow-[0_0_50px_rgba(34,211,238,0.30)] transition-all">
                 Crear mi modelo virtual
               </button>
               <button onClick={onOpenAbout}
-                className="rounded-2xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">
+                className="rounded-2xl border border-white/20 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white hover:bg-white/10 transition-all">
                 Ver presentación
               </button>
             </div>
+
+            {/* Mini stats */}
+            <div className="mt-10 grid grid-cols-3 gap-4 border-t border-white/10 pt-8">
+              <StatCounter value={1240} suffix="+" label="Modelos creados" />
+              <StatCounter value={3}    suffix="s"  label="Tiempo promedio" />
+              <StatCounter value={98}   suffix="%"  label="Satisfacción" />
+            </div>
           </div>
 
-          {/* Columna central — galería */}
+          {/* Centro — galería */}
           <div className="order-3 xl:order-2">
-            <div className="mb-4 flex items-end justify-between gap-4">
+            <div className="mb-5 flex items-end justify-between">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Visuales del sistema</p>
-                <h2 className="mt-2 text-2xl font-semibold text-white">Contenido generado con IsabelaOS</h2>
+                <h2 className="mt-1 text-xl font-semibold text-white">Generado con IsabelaOS</h2>
               </div>
               <button onClick={() => scrollToId("demo-box")}
-                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10">
-                Empezar ahora
+                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-white hover:bg-white/10 transition-all">
+                Empezar →
               </button>
             </div>
-            <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
-              <div className="pointer-events-none absolute -inset-20 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_25%),radial-gradient(circle_at_top_right,rgba(250,204,21,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(168,85,247,0.08),transparent_35%)]" />
-              <div className="grid auto-rows-[180px] grid-cols-2 gap-4 lg:grid-cols-3 lg:auto-rows-[170px]">
+            <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/3 p-3">
+              <div className="pointer-events-none absolute -inset-20 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(250,204,21,0.12),transparent_30%)]" />
+              <div className="grid auto-rows-[200px] grid-cols-2 gap-3 lg:grid-cols-3 lg:auto-rows-[185px]">
                 {topVisuals.map((item, idx) => (
-                  <div key={idx} className={`group relative overflow-hidden rounded-[26px] border border-white/10 bg-black/40 ${item.big ? "lg:col-span-2 lg:row-span-2" : ""}`}>
+                  <div key={idx}
+                    className={`group relative overflow-hidden rounded-[22px] border border-white/10 bg-black/40 ${item.big ? "lg:col-span-2 lg:row-span-2" : ""}`}>
                     {item.type === "video"
-                      ? <video className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          src={item.src} autoPlay muted loop playsInline preload="metadata" />
-                      : <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
-                          style={{ backgroundImage: `url(${item.src})` }} />}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                    <div className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[10px] text-white/80 backdrop-blur-sm">{item.label}</div>
+                      ? <video className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-108"
+                          src={item.src} autoPlay muted loop playsInline preload="metadata" style={{transform:"scale(1.01)"}} />
+                      : <div className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-[1.08]"
+                          style={{ backgroundImage: `url(${item.src})`, transform:"scale(1.01)" }} />}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                    <div className="absolute left-3 top-3 rounded-full border border-white/15 bg-black/50 px-3 py-1 text-[10px] text-white/80 backdrop-blur-sm">{item.label}</div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* Columna derecha — banner flotante sticky */}
-          <div className="order-2 xl:order-3 xl:pt-14">
-            {/* Banner sticky que acompaña el scroll */}
+          {/* Derecha — demo box sticky */}
+          <div className="order-2 xl:order-3 xl:pt-10">
             <div className="sticky top-24">
               <div id="demo-box"
-                className="relative overflow-hidden rounded-[30px] border-2 border-yellow-400/35 bg-black/55 p-6 backdrop-blur-md shadow-[0_0_40px_rgba(250,204,21,0.12)]">
-                <div className="pointer-events-none absolute inset-0 rounded-[30px] ring-1 ring-cyan-400/20" />
-                <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/18 via-transparent to-yellow-400/18 blur-3xl" />
+                className="relative overflow-hidden rounded-[30px] border-2 border-yellow-400/35 bg-black/60 p-6 backdrop-blur-md shadow-[0_0_60px_rgba(250,204,21,0.10)]">
+                <div className="pointer-events-none absolute inset-0 rounded-[30px] ring-1 ring-cyan-400/15" />
+                <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-yellow-400/15 blur-3xl" />
 
-                <div className="mb-3">
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-yellow-200/80">Inicio rápido</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Empieza con tu primer modelo virtual</h2>
-                </div>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-yellow-200/80">Inicio rápido</p>
+                <h2 className="mt-2 text-xl font-bold text-white">Empieza con tu primer modelo virtual</h2>
 
-                <div className="mb-4 grid gap-2 grid-cols-3">
-                  <div className="rounded-2xl border border-cyan-400/25 bg-cyan-400/12 px-3 py-2 text-[11px] text-cyan-100">Imagen</div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/70">Imagen → Video</div>
-                  <div className="rounded-2xl border border-yellow-400/25 bg-yellow-400/12 px-3 py-2 text-[11px] text-yellow-100">Avatar</div>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  {["Imagen","Imagen → Video","Avatar"].map((t, i) => (
+                    <div key={t} className={`rounded-2xl px-3 py-2 text-[11px] text-center border ${
+                      i === 0 ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-100"
+                      : i === 2 ? "border-yellow-400/30 bg-yellow-400/10 text-yellow-100"
+                      : "border-white/10 bg-white/5 text-white/70"}`}>{t}</div>
+                  ))}
                 </div>
 
                 <textarea
-                  className="mt-1 h-32 w-full resize-none rounded-2xl border border-yellow-400/20 bg-black/65 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-yellow-300"
+                  className="mt-4 h-28 w-full resize-none rounded-2xl border border-yellow-400/20 bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-yellow-300 transition-all"
                   value={demoPrompt} onChange={(e) => setDemoPrompt(e.target.value)}
                   placeholder="Ej: modelo virtual elegante para redes sociales..." />
 
-                <div className="mt-3 grid gap-2 grid-cols-3 text-[10px]">
-                  <div className="rounded-xl border border-white/10 bg-black/50 px-2 py-2 text-center text-neutral-400">Modelo virtual</div>
-                  <div className="rounded-xl border border-white/10 bg-black/50 px-2 py-2 text-center text-neutral-400">Imagen vertical</div>
-                  <div className="rounded-xl border border-white/10 bg-black/50 px-2 py-2 text-center text-neutral-400">Cuenta → panel</div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
+                  {["Modelo virtual","Imagen vertical","Cuenta → panel"].map(t => (
+                    <div key={t} className="rounded-xl border border-white/10 bg-black/50 px-2 py-2 text-center text-neutral-400">{t}</div>
+                  ))}
                 </div>
 
                 <button
                   onClick={() => { saveDemoPrompt(demoPrompt); onStartDemo(); }}
                   disabled={!demoPrompt.trim()}
-                  className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 py-3 text-sm font-semibold text-black disabled:opacity-60">
-                  Crear modelo
+                  className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 py-3.5 text-sm font-bold text-black shadow-[0_0_30px_rgba(250,204,21,0.20)] disabled:opacity-60 hover:shadow-[0_0_40px_rgba(34,211,238,0.25)] transition-all">
+                  Crear modelo →
                 </button>
-
-                <div className="mt-2 text-[10px] text-neutral-400">
-                  Al continuar, crearás tu cuenta y entrarás al panel con acceso inicial.
-                </div>
+                <p className="mt-2 text-[10px] text-neutral-400 text-center">Sin tarjeta · Gratis para empezar</p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Testimonios */}
-        <section className="mt-16">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Señales tempranas</p>
-            <h3 className="mt-1 text-2xl font-semibold text-white">Primeros resultados del sistema</h3>
+        {/* ── CÓMO FUNCIONA ── */}
+        <section className="mt-24">
+          <div className="text-center mb-10">
+            <p className="text-[11px] uppercase tracking-[0.28em] text-neutral-400">Flujo de trabajo</p>
+            <h3 className="mt-3 text-3xl font-bold text-white">Cómo funciona</h3>
+            <p className="mt-3 text-sm text-neutral-400 max-w-lg mx-auto">De la idea al resultado visual en tres pasos simples.</p>
           </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[
-              { name: "Early Tester",    text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo." },
-              { name: "Creador (beta)",  text: "Lo mejor es tener todo en un solo lugar: prompt → render → biblioteca. Eso ahorra tiempo." },
-              { name: "Equipo creativo", text: "La plataforma ya se siente como producto, no como una simple demo de generación." },
-            ].map((t, idx) => (
-              <div key={idx} className="rounded-[28px] border border-white/10 bg-black/35 p-5 backdrop-blur-md">
-                <div className="text-sm font-semibold text-white/90">{t.name}</div>
-                <div className="mt-2 text-sm leading-relaxed text-white/70">{t.text}</div>
+          <div className="grid gap-5 md:grid-cols-3">
+            {steps.map((s, i) => (
+              <div key={i} className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-black/40 p-7 hover:border-cyan-400/30 hover:bg-black/50 transition-all">
+                <div className="pointer-events-none absolute -right-6 -top-6 text-[80px] opacity-5 group-hover:opacity-10 transition-opacity">{s.icon}</div>
+                <div className="text-[11px] font-bold text-neutral-500 tracking-widest">{s.num}</div>
+                <div className="mt-3 text-4xl">{s.icon}</div>
+                <h4 className="mt-4 text-lg font-semibold text-white">{s.title}</h4>
+                <p className="mt-2 text-sm text-neutral-400 leading-relaxed">{s.desc}</p>
+                {i < steps.length - 1 && (
+                  <div className="hidden md:block absolute -right-3 top-1/2 -translate-y-1/2 z-10 text-neutral-600 text-xl">→</div>
+                )}
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* ── GALERÍA GRANDE ── */}
+        <section className="mt-24">
+          <div className="flex items-end justify-between mb-8">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.28em] text-neutral-400">Capacidades</p>
+              <h3 className="mt-2 text-3xl font-bold text-white">Lo que puedes crear</h3>
+            </div>
+            <button onClick={onOpenAuth}
+              className="rounded-2xl border border-white/20 px-5 py-2.5 text-xs text-white hover:bg-white/10 transition-all">
+              Empezar ahora →
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[220px]">
+            {[
+              { src:"/gallery/img1.png?v=2", label:"Modelo virtual",   span:"md:col-span-2 md:row-span-2" },
+              { src:"/gallery/img2.png?v=2", label:"Campaña visual",   span:"" },
+              { src:"/gallery/img3.png?v=2", label:"Escena con IA",    span:"" },
+              { src:"/gallery/img4.png?v=2", label:"Avatar facial",    span:"" },
+              { src:"/gallery/img5.png?v=2", label:"Contenido social", span:"" },
+            ].map((item, i) => (
+              <div key={i} className={`group relative overflow-hidden rounded-[24px] border border-white/10 bg-black/60 ${item.span}`}>
+                <div className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-[1.06]"
+                  style={{ backgroundImage: `url(${item.src})` }} />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                <div className="absolute bottom-4 left-4 text-sm font-semibold text-white">{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── TESTIMONIOS ── */}
+        <section className="mt-24">
+          <div className="text-center mb-10">
+            <p className="text-[11px] uppercase tracking-[0.28em] text-neutral-400">Primeros resultados</p>
+            <h3 className="mt-3 text-3xl font-bold text-white">Lo que dicen los usuarios</h3>
+          </div>
+          <div className="grid gap-5 md:grid-cols-3">
+            {[
+              { name: "Early Tester",    role: "Creador de contenido", text: "El flujo se siente como una herramienta real, no como un juguete. Me gustó la consistencia del estilo.", rating: 5 },
+              { name: "Creador (beta)",  role: "Influencer virtual",   text: "Lo mejor es tener todo en un solo lugar: prompt → render → biblioteca. Eso ahorra tiempo.", rating: 5 },
+              { name: "Equipo creativo", role: "Agencia digital",      text: "La plataforma ya se siente como producto terminado. La usamos para campañas de clientes.", rating: 5 },
+            ].map((t, i) => (
+              <div key={i} className="rounded-[28px] border border-white/10 bg-black/40 p-6 hover:border-white/20 transition-all">
+                <div className="flex items-center gap-1 mb-4">
+                  {Array(t.rating).fill(0).map((_, j) => <span key={j} className="text-yellow-400 text-sm">★</span>)}
+                </div>
+                <p className="text-sm text-neutral-200 leading-relaxed italic">"{t.text}"</p>
+                <div className="mt-5 border-t border-white/10 pt-4">
+                  <div className="text-sm font-semibold text-white">{t.name}</div>
+                  <div className="text-xs text-neutral-400">{t.role}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── CTA CENTRAL ── */}
+        <section className="mt-24">
+          <div className="relative overflow-hidden rounded-[36px] border border-cyan-400/20 bg-black/50 p-12 text-center">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(34,211,238,0.08),transparent_70%)]" />
+            <p className="text-[11px] uppercase tracking-[0.28em] text-cyan-400/70">Empieza hoy</p>
+            <h3 className="mt-4 text-4xl md:text-5xl font-bold text-white">Crea tu primer modelo virtual</h3>
+            <p className="mt-4 text-neutral-400 max-w-lg mx-auto">Sin tarjeta de crédito. Sin suscripción. Empieza gratis y compra Jades cuando los necesites.</p>
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+              <button onClick={onStartDemo}
+                className="rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-yellow-400 px-8 py-4 text-base font-bold text-black shadow-[0_0_50px_rgba(34,211,238,0.25)] hover:shadow-[0_0_60px_rgba(250,204,21,0.30)] transition-all">
+                Crear mi modelo gratis →
+              </button>
+              <button onClick={() => scrollToId("planes")}
+                className="rounded-2xl border border-white/20 px-8 py-4 text-base text-white hover:bg-white/10 transition-all">
+                Ver precios
+              </button>
+            </div>
           </div>
         </section>
 
         <PricingSection onOpenAuth={onOpenAuth} />
       </main>
 
-      <footer className="border-t border-white/10 bg-black/30">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
-          IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
+      {/* ── FOOTER ── */}
+      <footer className="border-t border-white/10 bg-black/40 mt-8">
+        <div className="mx-auto max-w-7xl px-4 py-10">
+          <div className="grid gap-8 md:grid-cols-3">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-yellow-400 text-xs font-bold text-black">io</div>
+                <div>
+                  <div className="text-sm font-semibold text-white">isabelaOs Studio</div>
+                  <div className="text-[10px] text-neutral-400">Plataforma de modelos virtuales</div>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-neutral-400 max-w-xs leading-relaxed">
+                Creado por Stalling Technologic, Cobán, Alta Verapaz, Guatemala.
+              </p>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Plataforma</div>
+              <div className="space-y-2 text-xs text-neutral-400">
+                <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenAuth}>Crear cuenta</div>
+                <div className="hover:text-white cursor-pointer transition-colors" onClick={() => scrollToId("planes")}>Precios</div>
+                <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenAbout}>Sobre nosotros</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Soporte</div>
+              <div className="space-y-2 text-xs text-neutral-400">
+                <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenContact}>Contacto</div>
+                <div className="text-neutral-500">contacto@isabelaos.com</div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-8 border-t border-white/10 pt-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="text-[11px] text-neutral-500">© 2025 IsabelaOS · Todos los derechos reservados</div>
+            <div className="text-[11px] text-neutral-500">Hecho con IA · GPU Power · Cobán GT</div>
+          </div>
         </div>
       </footer>
     </div>
