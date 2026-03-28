@@ -1,224 +1,125 @@
-import {
-  vertexFetch,
-  extractTextFromVertexResponse,
-  GOOGLE_PROJECT_ID,
-} from "./_googleVertex.js";
-
-const MONTAJE_VERTEX_MODEL = "gemini-2.5-flash";
-const MONTAJE_VERTEX_LOCATION = "global";
-
+// api/isabela-montaje-chat.js
+// ─────────────────────────────────────────────────────────────
+// Chat conversacional con Gemini para el módulo Montaje IA.
+// Detecta intención del usuario y propone un plan antes de generar.
+// Flujos soportados:
+//   A) Solo imagen → edición con Gemini (cartoon, studio, agregar persona, etc.)
+//   B) Imagen + fondo → composición profesional (requiere RunPod — pendiente)
+// ─────────────────────────────────────────────────────────────
+import { vertexFetch, extractTextFromVertexResponse, GOOGLE_PROJECT_ID } from "./_googleVertex.js";
+ 
+const MODEL    = "gemini-2.5-flash";
+const LOCATION = "global";
+ 
 function normalizeHistory(chatHistory) {
   if (!Array.isArray(chatHistory)) return [];
-
-  return chatHistory
-    .map((item) => {
-      const role =
-        item?.role === "assistant" || item?.role === "model"
-          ? "model"
-          : "user";
-
-      const text =
-        typeof item?.text === "string"
-          ? item.text
-          : typeof item?.content === "string"
-          ? item.content
-          : typeof item?.message === "string"
-          ? item.message
-          : "";
-
-      if (!text.trim()) return null;
-
-      return {
-        role,
-        parts: [{ text: text.trim() }],
-      };
-    })
-    .filter(Boolean);
+  return chatHistory.map((item) => {
+    const role = item?.role === "assistant" || item?.role === "model" ? "model" : "user";
+    const text = typeof item?.text === "string" ? item.text
+      : typeof item?.content === "string" ? item.content
+      : typeof item?.message === "string" ? item.message : "";
+    if (!text.trim()) return null;
+    return { role, parts: [{ text: text.trim() }] };
+  }).filter(Boolean);
 }
-
-function getUserMessage(body) {
-  return (
-    body?.message ||
-    body?.prompt ||
-    body?.userMessage ||
-    body?.text ||
-    ""
-  );
-}
-
-function buildContents({ message, chatHistory, contextText }) {
-  const history = normalizeHistory(chatHistory);
-
-  if (contextText) {
-    history.unshift({
-      role: "user",
-      parts: [{ text: contextText }],
-    });
-  }
-
-  if (message?.trim()) {
-    history.push({
-      role: "user",
-      parts: [{ text: message.trim() }],
-    });
-  }
-
-  return history;
-}
-
-// 🔥 Limpia JSON aunque venga sucio
+ 
 function safeParseJSON(text) {
   if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
+  try { return JSON.parse(text); } catch {
     const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch {
-        return null;
-      }
-    }
+    if (match) { try { return JSON.parse(match[0]); } catch {} }
     return null;
   }
 }
-
-// 🔥 ESTA ES LA CLAVE (lo que te faltaba)
-function extractHumanText(obj) {
+ 
+function extractReply(obj) {
   if (!obj || typeof obj !== "object") return "";
-
-  const priorityKeys = [
-    "reply",
-    "respuesta",
-    "message",
-    "mensaje",
-    "greeting",
-    "saludo",
-    "next_step_instruction",
-    "instruccion_siguiente",
-    "understanding_confirmation",
-    "confirmacion_entendimiento",
-    "necesidad_informacion",
-  ];
-
-  // 1. busca claves importantes
-  for (const key of priorityKeys) {
-    if (typeof obj[key] === "string" && obj[key].trim()) {
-      return obj[key].trim();
-    }
+  const keys = ["reply","respuesta","message","mensaje","greeting","saludo","next_step_instruction"];
+  for (const key of keys) {
+    if (typeof obj[key] === "string" && obj[key].trim()) return obj[key].trim();
   }
-
-  // 2. busca dentro de objetos anidados
   for (const value of Object.values(obj)) {
     if (value && typeof value === "object") {
-      const nested = extractHumanText(value);
+      const nested = extractReply(value);
       if (nested) return nested;
     }
   }
-
-  // 3. fallback: junta todos los strings
-  const values = Object.values(obj)
-    .filter((v) => typeof v === "string" && v.trim())
-    .map((v) => v.trim());
-
-  if (values.length) {
-    return values.join(" ");
-  }
-
-  return "";
+  const values = Object.values(obj).filter((v) => typeof v === "string" && v.trim());
+  return values.join(" ") || "";
 }
-
+ 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({
-      ok: false,
-      error: "Method not allowed",
-    });
-  }
-
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+ 
   try {
-    const body =
-      typeof req.body === "string"
-        ? JSON.parse(req.body || "{}")
-        : req.body || {};
-
-    const message = String(getUserMessage(body) || "").trim();
-    const chatHistory = body?.chatHistory || [];
-
-    if (!message) {
-      return res.status(400).json({
-        ok: false,
-        error: "Falta el mensaje del usuario.",
-      });
-    }
-
-    const hasPersonImage = !!body?.hasPersonImage;
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const message          = String(body?.message || body?.prompt || "").trim();
+    const chatHistory      = body?.chatHistory || [];
+    const hasPersonImage   = !!body?.hasPersonImage;
     const hasBackgroundImage = !!body?.hasBackgroundImage;
-
-    const contextText = [
-      "CONTEXTO DEL MÓDULO:",
-      "- Este módulo es para montaje visual.",
-      "- Si hay imagen principal, el sujeto ya fue subido.",
-      "- Si hay imagen de fondo, el montaje debe colocarse sobre ese fondo exacto.",
-      "- Si no hay fondo, la escena se debe inferir desde el texto del usuario.",
-      "- Tu trabajo es conversar, confirmar lo entendido y proponer un final_prompt útil para el endpoint.",
-      `- Hay imagen principal subida: ${hasPersonImage ? "sí" : "no"}`,
-      `- Hay fondo subido: ${hasBackgroundImage ? "sí" : "no"}`,
+ 
+    if (!message) return res.status(400).json({ ok: false, error: "Falta el mensaje." });
+ 
+    // Detectar el tipo de edición que quiere el usuario
+    const systemContext = [
+      "Eres Isabela, asistente de montaje visual de IsabelaOS Studio.",
+      "Tu trabajo es entender qué quiere hacer el usuario con su imagen y proponer un plan claro.",
       "",
-      "Responde SIEMPRE en JSON válido.",
+      "TIPOS DE EDICIÓN DISPONIBLES:",
+      "- gemini_edit: Edición directa con IA (cartoonizar, estilo studio, agregar personas famosas, cambiar fondo con IA, mejorar foto, etc.)",
+      "- compose_scene: Montar persona/producto sobre fondo real subido por el usuario (requiere imagen de fondo)",
+      "",
+      `Estado actual:`,
+      `- Imagen principal subida: ${hasPersonImage ? "SÍ" : "NO"}`,
+      `- Imagen de fondo subida: ${hasBackgroundImage ? "SÍ" : "NO"}`,
+      "",
+      "INSTRUCCIONES:",
+      "1. Conversa naturalmente para entender la intención.",
+      "2. Cuando tengas suficiente info, propón el plan y pregunta si está listo para generar.",
+      "3. Si el usuario dice 'sí', 'listo', 'genera', 'hazlo' → marca ready_to_generate: true",
+      "4. Siempre responde en JSON válido con esta estructura:",
+      "{",
+      '  "reply": "tu respuesta conversacional aquí",',
+      '  "edit_type": "gemini_edit|compose_scene|unknown",',
+      '  "edit_plan": "descripción corta del plan de edición",',
+      '  "final_prompt": "prompt en inglés listo para generar",',
+      '  "ready_to_generate": false,',
+      '  "need_person_image": false,',
+      '  "need_background_image": false',
+      "}",
     ].join("\n");
-
-    const contents = buildContents({
-      message,
-      chatHistory,
-      contextText,
-    });
-
-    const data = await vertexFetch({
-      model: MONTAJE_VERTEX_MODEL,
-      location: MONTAJE_VERTEX_LOCATION,
-      projectId: GOOGLE_PROJECT_ID,
-      contents,
-      generationConfig: {
-        temperature: 0.35,
-        topP: 0.9,
-        maxOutputTokens: 900,
-      },
-    });
-
+ 
+    const history = normalizeHistory(chatHistory);
+ 
+    // Insertar contexto del sistema al inicio
+    const contents = [
+      { role: "user",  parts: [{ text: systemContext }] },
+      { role: "model", parts: [{ text: '{"reply": "Entendido, estoy listo para ayudarte.", "edit_type": "unknown", "ready_to_generate": false}' }] },
+      ...history,
+      { role: "user",  parts: [{ text: message }] },
+    ];
+ 
+    const data    = await vertexFetch({ model: MODEL, location: LOCATION, projectId: GOOGLE_PROJECT_ID,
+      contents, generationConfig: { temperature: 0.35, topP: 0.9, maxOutputTokens: 900 } });
     const rawText = extractTextFromVertexResponse(data);
-    const parsed = safeParseJSON(rawText);
-
-    // 🔥 AQUÍ ESTÁ EL FIX REAL
-    const reply =
-      extractHumanText(parsed) ||
-      (typeof rawText === "string" ? rawText.trim() : "") ||
-      "Entendido. Si está correcto, genera el montaje.";
-
+    const parsed  = safeParseJSON(rawText);
+ 
+    const reply = extractReply(parsed) || (typeof rawText === "string" ? rawText.trim() : "") ||
+      "Entendido. ¿Estás listo para generar el montaje?";
+ 
     return res.status(200).json({
-      ok: true,
-      allowed: parsed?.allowed !== false,
-      reply: String(reply),
-      need_person_image: !!parsed?.need_person_image,
+      ok:                    true,
+      reply:                 String(reply).replace(/```json|```/g, "").trim(),
+      edit_type:             parsed?.edit_type             || "unknown",
+      edit_plan:             parsed?.edit_plan             || "",
+      final_prompt:          parsed?.final_prompt          || message,
+      ready_to_generate:     !!parsed?.ready_to_generate,
+      need_person_image:     !!parsed?.need_person_image,
       need_background_image: !!parsed?.need_background_image,
-      scene_mode:
-        parsed?.scene_mode ||
-        (hasBackgroundImage ? "uploaded_background" : "generated_scene"),
-      understood_intent:
-        parsed?.understood_intent ||
-        parsed?.intent ||
-        parsed?.intencion ||
-        message,
-      final_prompt: parsed?.final_prompt || message,
     });
-  } catch (error) {
-    console.error("ERROR /api/isabela-montaje-chat:", error);
-
-    return res.status(error?.status || 500).json({
-      ok: false,
-      error: error?.message || "No se pudo interpretar la solicitud.",
-    });
+ 
+  } catch (e) {
+    console.error("[isabela-montaje-chat] ERROR:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Error interno." });
   }
 }
