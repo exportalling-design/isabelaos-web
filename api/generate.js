@@ -1,175 +1,184 @@
-import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
+// api/generate.js
+// ─────────────────────────────────────────────────────────────
+// Endpoint de generación de imágenes con RunPod
+// COBRO: 1 Jade sin avatar | 2 Jades con avatar/anchor
+// ─────────────────────────────────────────────────────────────
+import { supabaseAdmin }          from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
-
-function normalizeText(v) {
-  return String(v || "").trim();
-}
-
-function normalizeOptional(v) {
-  const s = String(v || "").trim();
-  return s ? s : null;
-}
-
+ 
+function normalizeText(v)  { return String(v || "").trim(); }
+function normalizeOptional(v) { const s = String(v || "").trim(); return s ? s : null; }
 function normalizeStringArray(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map((v) => String(v || "").trim()).filter(Boolean);
 }
-
+ 
 export default async function handler(req, res) {
   const cors = {
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin":  "*",
     "access-control-allow-methods": "POST, OPTIONS",
     "access-control-allow-headers": "content-type, authorization",
-    "content-type": "application/json; charset=utf-8",
+    "content-type":                 "application/json; charset=utf-8",
   };
-
+ 
   if (req.method === "OPTIONS") {
     return res.status(204).setHeader("access-control-allow-origin", "*").end();
   }
-
+ 
   Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
-
+ 
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
-
+ 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-
+ 
     const endpointId = process.env.RUNPOD_ENDPOINT_ID || process.env.RP_ENDPOINT;
-    const apiKey = process.env.RP_API_KEY;
-
+    const apiKey     = process.env.RP_API_KEY;
+ 
     if (!apiKey || !endpointId) {
-      return res.status(500).json({
-        ok: false,
-        error: "MISSING_RP_ENV",
-        detail: "Falta RP_API_KEY o RUNPOD_ENDPOINT_ID/RP_ENDPOINT",
-      });
+      return res.status(500).json({ ok: false, error: "MISSING_RP_ENV",
+        detail: "Falta RP_API_KEY o RUNPOD_ENDPOINT_ID/RP_ENDPOINT" });
     }
-
+ 
     const userId = await getUserIdFromAuthHeader(req);
-
     if (!userId) {
       return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
     }
-
-    const prompt = normalizeText(body?.prompt);
+ 
+    // ── Normalizar campos ─────────────────────────────────────
+    const prompt         = normalizeText(body?.prompt);
     const negativePrompt = normalizeText(body?.negative_prompt);
-
-    const width = Number(body?.width || 512);
-    const height = Number(body?.height || 512);
-    const steps = Number(body?.steps || 22);
-    const seed = body?.seed ?? null;
-
+    const width          = Number(body?.width  || 512);
+    const height         = Number(body?.height || 512);
+    const steps          = Number(body?.steps  || 22);
+    const seed           = body?.seed ?? null;
+ 
     if (!prompt) {
       return res.status(400).json({ ok: false, error: "MISSING_PROMPT" });
     }
-
-    const avatarId = normalizeOptional(body?.avatar_id);
-    const avatarName = normalizeOptional(body?.avatar_name);
-    const avatarAnchorUrls = normalizeStringArray(body?.avatar_anchor_urls);
+ 
+    const avatarId          = normalizeOptional(body?.avatar_id);
+    const avatarName        = normalizeOptional(body?.avatar_name);
+    const avatarAnchorUrls  = normalizeStringArray(body?.avatar_anchor_urls);
     const avatarAnchorPaths = normalizeStringArray(body?.avatar_anchor_paths);
-    const skinMode = normalizeOptional(body?.skin_mode) || "standard";
-
-    const input = {
-      action: "generate",
-      prompt,
-      effective_prompt: prompt,
-      negative_prompt: negativePrompt,
-      width,
-      height,
-      steps,
-      seed,
-
-      _ui_original_prompt: body?._ui_original_prompt,
-      _ui_original_negative: body?._ui_original_negative,
-      _ui_used_optimizer: body?._ui_used_optimizer,
-
-      avatar_id: avatarId,
-      avatar_name: avatarName,
-      avatar_anchor_urls: avatarAnchorUrls,
-      avatar_anchor_paths: avatarAnchorPaths,
-      skin_mode: skinMode,
-
-      user_id: userId,
-    };
-
+    const skinMode          = normalizeOptional(body?.skin_mode) || "standard";
+ 
+    // ── Calcular costo en Jades ───────────────────────────────
+    // Con avatar/anchor = 2 Jades | solo texto = 1 Jade
+    const hasAvatar = !!(avatarId && avatarAnchorUrls.length > 0);
+    const jadeCost  = hasAvatar ? 2 : 1;
+ 
+    // ── Descontar Jades ANTES de enviar a RunPod ──────────────
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
-
+ 
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
-      p_amount: 1,
-      p_reason: avatarId ? "image_generate_anchor" : "image_generate",
-      p_ref: ref,
+      p_amount:  jadeCost,
+      p_reason:  hasAvatar ? "image_generate_anchor" : "image_generate",
+      p_ref:     ref,
     });
-
+ 
     if (spendErr) {
       console.error("[generate] JADE_CHARGE_FAILED:", spendErr);
+ 
+      // Si es saldo insuficiente, devolver mensaje claro al frontend
+      if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
+        return res.status(402).json({
+          ok:    false,
+          error: "INSUFFICIENT_JADES",
+          detail: `Necesitas ${jadeCost} jade${jadeCost > 1 ? "s" : ""} para esta generación.`,
+          required: jadeCost,
+        });
+      }
+ 
       return res.status(400).json({
-        ok: false,
+        ok:    false,
         error: "JADE_CHARGE_FAILED",
         details: spendErr.message,
       });
     }
-
+ 
+    // ── Construir input para RunPod ───────────────────────────
+    const input = {
+      action:           "generate",
+      prompt,
+      effective_prompt: prompt,
+      negative_prompt:  negativePrompt,
+      width,
+      height,
+      steps,
+      seed,
+ 
+      // Debug UI
+      _ui_original_prompt:   body?._ui_original_prompt,
+      _ui_original_negative: body?._ui_original_negative,
+      _ui_used_optimizer:    body?._ui_used_optimizer,
+ 
+      // Avatar / anchors
+      avatar_id:           avatarId,
+      avatar_name:         avatarName,
+      avatar_anchor_urls:  avatarAnchorUrls,
+      avatar_anchor_paths: avatarAnchorPaths,
+      skin_mode:           skinMode,
+ 
+      user_id: userId,
+    };
+ 
+    // ── Enviar job a RunPod ───────────────────────────────────
     const runUrl = `https://api.runpod.ai/v2/${endpointId}/run`;
-
+ 
     const rp = await fetch(runUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization:  `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ input }),
     });
-
+ 
     if (!rp.ok) {
       const txt = await rp.text();
       console.error("[generate] RUNPOD_RUN_ERROR:", txt);
-
+ 
+      // Si RunPod falla DESPUÉS de descontar jades, devolver error claro
+      // Los jades ya se descontaron — el usuario debería contactar soporte
+      // En una versión futura se puede implementar reembolso automático
       return res.status(rp.status).json({
-        ok: false,
+        ok:    false,
         error: "RUNPOD_RUN_ERROR",
         details: txt,
+        note: "Los jades fueron descontados. Si el error persiste, contacta soporte.",
       });
     }
-
-    const data = await rp.json().catch(() => null);
+ 
+    const data  = await rp.json().catch(() => null);
     const jobId = data?.id || data?.jobId || data?.requestId || null;
-
+ 
     if (!jobId) {
-      return res.status(500).json({
-        ok: false,
-        error: "NO_JOB_ID_RETURNED",
-        raw: data,
-      });
+      return res.status(500).json({ ok: false, error: "NO_JOB_ID_RETURNED", raw: data });
     }
-
+ 
+    // ── Respuesta exitosa ─────────────────────────────────────
     return res.status(200).json({
-      ok: true,
+      ok:         true,
       jobId,
-      usedAvatar: !!avatarId,
+      usedAvatar: hasAvatar,
+      jadeCost,
       skinMode,
-      avatar: avatarId
-        ? {
-            id: avatarId,
-            name: avatarName,
-            anchor_urls: avatarAnchorUrls,
-            anchor_paths: avatarAnchorPaths,
-          }
+      avatar: hasAvatar
+        ? { id: avatarId, name: avatarName, anchor_urls: avatarAnchorUrls, anchor_paths: avatarAnchorPaths }
         : null,
       raw: data,
     });
+ 
   } catch (e) {
     console.error("[generate] SERVER_ERROR:", e);
-    return res.status(500).json({
-      ok: false,
-      error: "SERVER_ERROR",
-      details: String(e),
-    });
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR", details: String(e) });
   }
 }
-
+ 
 export const config = { runtime: "nodejs" };
