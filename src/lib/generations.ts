@@ -7,6 +7,37 @@ const VIDEO_BUCKET  = "videos";
 const VIDEO_BUCKET_PUBLIC = true;
 const IMAGE_BUCKET_PUBLIC = true;
  
+// ── Subir imagen base64 a Storage y devolver URL pública ──────
+export async function uploadImageToStorage(
+  userId: string,
+  base64: string,
+  mimeType: string = 'image/jpeg'
+): Promise<string | null> {
+  try {
+    // Convertir base64 a Uint8Array
+    const byteString = atob(base64.replace(/^data:[^;]+;base64,/, ''));
+    const bytes = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+ 
+    const ext      = mimeType.includes('png') ? 'png' : 'jpg';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const path     = `${userId}/${filename}`;
+ 
+    const { error } = await supabase.storage
+      .from('generations')
+      .upload(path, bytes, { contentType: mimeType, upsert: false });
+ 
+    if (error) { console.error('[uploadImageToStorage]', error); return null; }
+ 
+    const { data } = supabase.storage.from('generations').getPublicUrl(path);
+    return data?.publicUrl || null;
+  } catch (e) {
+    console.error('[uploadImageToStorage] exception:', e);
+    return null;
+  }
+}
+ 
+ 
 // ── Límites por usuario ───────────────────────────────────────
 export const LIBRARY_LIMITS = {
   images: 20,
