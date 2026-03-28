@@ -21,7 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 // ── Modelo para edición de imágenes ──────────────────────────
 // Usa Google AI Studio API (generativelanguage.googleapis.com)
 // NO usa Vertex AI — eso es solo para Veo3
-const GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview";
+const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
  
 // ── Supabase admin ────────────────────────────────────────────
@@ -43,7 +43,7 @@ async function callGeminiImageEdit({ prompt, personImageBase64, personMimeType, 
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY — agrega GEMINI_API_KEY en Vercel");
  
-  const url = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent`;
+  const url = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
  
   // Construir partes — primero imagen(s), luego el texto
   const parts = [];
@@ -79,7 +79,7 @@ async function callGeminiImageEdit({ prompt, personImageBase64, personMimeType, 
  
   const r = await fetch(url, {
     method:  "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(body),
   });
  
