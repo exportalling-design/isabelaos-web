@@ -188,6 +188,41 @@ export default async function handler(req, res) {
         });
       }
  
+      // Subir imagen a Storage y guardar URL en biblioteca del usuario
+      try {
+        const sb2    = getSupabaseAdmin();
+        const mime   = imageResult.mimeType || "image/jpeg";
+        const ext    = mime.includes("png") ? "png" : "jpg";
+        const fname  = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const path   = `${user.id}/${fname}`;
+ 
+        // Convertir base64 a Buffer
+        const imgBuffer = Buffer.from(imageResult.base64, "base64");
+ 
+        const { error: upErr } = await sb2.storage
+          .from("generations")
+          .upload(path, imgBuffer, { contentType: mime, upsert: false });
+ 
+        let imageUrl = `data:${mime};base64,${imageResult.base64}`; // fallback
+        if (!upErr) {
+          const { data: pub } = sb2.storage.from("generations").getPublicUrl(path);
+          if (pub?.publicUrl) imageUrl = pub.publicUrl;
+        }
+ 
+        await sb2.from("generations").insert({
+          user_id:         user.id,
+          image_url:       imageUrl,
+          prompt:          prompt,
+          negative_prompt: "",
+          width:           0,
+          height:          0,
+          steps:           0,
+        });
+        console.log("[generate-montaje] imagen guardada en biblioteca:", imageUrl.slice(0, 60));
+      } catch (saveErr) {
+        console.error("[generate-montaje] error guardando en biblioteca:", saveErr?.message);
+      }
+ 
       return res.status(200).json({
         ok:        true,
         mode:      "gemini_edit",
