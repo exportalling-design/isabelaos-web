@@ -1,3 +1,4 @@
+
 // api/generate-montaje.js
 // ─────────────────────────────────────────────────────────────
 // Generación de montaje IA.
