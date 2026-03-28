@@ -22,6 +22,7 @@ import LibraryView              from "./components/LibraryView";
 import AvatarStudioPanel        from "./components/AvatarStudioPanel";
 import MontajeIAPanel           from "./components/MontajeIAPanel";
 import CreatorPanel             from "./components/CreatorPanel";
+import ComercialPanel           from "./components/ComercialPanel";
 
 import { startPaypalSubscription } from "./lib/PaypalCheckout";
 
@@ -374,6 +375,7 @@ function DashboardView() {
     { key: "avatars",   label: "Avatares"       },
     { key: "library",   label: "Biblioteca"     },
     { key: "montaje",   label: "Montaje IA"     },
+    { key: "comercial", label: "🎬 Comercial IA" },
   ];
 
   return (
@@ -468,6 +470,7 @@ function DashboardView() {
             {activeModule === "avatars"   && <AvatarStudioPanel userStatus={userStatus} />}
             {activeModule === "library"   && <LibraryView />}
             {activeModule === "montaje"   && <MontajeIAPanel userStatus={userStatus} />}
+            {activeModule === "comercial" && <ComercialPanel userStatus={userStatus} />}
           </section>
         )}
 
@@ -484,6 +487,7 @@ function DashboardView() {
                   {item.key === "avatars"   && "Crea y administra tus modelos virtuales"}
                   {item.key === "library"   && "Revisa y descarga todas tus generaciones"}
                   {item.key === "montaje"   && "Monta personas o productos en fondos personalizados"}
+                  {item.key === "comercial" && "Genera comerciales profesionales con video, voz y narración IA"}
                 </div>
                 <div className="mt-4 text-[11px] text-cyan-400/60 group-hover:text-cyan-400 transition-colors">
                   Abrir módulo →
