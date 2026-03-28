@@ -200,7 +200,8 @@ export default function MontajeIAPanel({ userStatus }) {
       }
 
       // Isabela dice que está listo para generar
-      if (j.ready_to_generate) {
+      // También activar si tiene plan y hay imagen subida
+      if (j.ready_to_generate || (j.final_prompt && personFile)) {
         setReadyToGenerate(true);
       }
 
@@ -284,7 +285,8 @@ export default function MontajeIAPanel({ userStatus }) {
           }]);
           return;
         }
-        throw new Error(j?.detail || j?.error || "Error al generar.");
+        // Error genérico — no exponer detalles técnicos
+        throw new Error("Error al procesar la imagen.");
       }
 
       setResultB64(j.image_b64);
@@ -293,15 +295,16 @@ export default function MontajeIAPanel({ userStatus }) {
       setCurrentPlan(null);
 
       setMessages((p) => [...p, {
-        role:     "isabela",
-        text:     "✅ ¡Listo! Aquí está tu imagen editada.",
-        imageB64: j.image_b64,
-        mimeType: j.mime_type || "image/jpeg",
+        role: "isabela",
+        text: "✅ ¡Lista! Puedes ver tu imagen editada en la sección de resultados.",
       }]);
 
     } catch (e) {
-      setGenError(e?.message || "Error al generar.");
-      setMessages((p) => [...p, { role: "isabela", text: `❌ Error: ${e?.message || "No se pudo generar."}` }]);
+      // No mostrar errores técnicos de Gemini al usuario
+      const userMsg = "Ocurrió un problema al generar. Por favor intenta de nuevo.";
+      setGenError(userMsg);
+      setMessages((p) => [...p, { role: "isabela", text: "Lo siento, tuve un problema al procesar tu imagen. ¿Lo intentamos de nuevo?" }]);
+      console.error("[montaje] error:", e?.message || e);
     } finally {
       setGenerating(false);
     }
@@ -443,7 +446,7 @@ export default function MontajeIAPanel({ userStatus }) {
 
       {genError && (
         <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-          {genError}
+          Ocurrió un problema. Por favor intenta de nuevo.
         </div>
       )}
 
