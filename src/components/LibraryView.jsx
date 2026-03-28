@@ -181,7 +181,7 @@ export default function LibraryView() {
                       <img src={item.src} alt="Generación"
                         className="h-24 w-full object-cover"
                         loading="lazy"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        onError={(e) => { e.target.style.display = "none"; }} />
                     </div>
                   )}
 
@@ -219,7 +219,7 @@ export default function LibraryView() {
                 <img src={selected.src} alt="Seleccionada"
                   className="h-full w-full rounded-2xl object-contain cursor-zoom-in"
                   onClick={() => setModal(selected)}
-                  onError={(e) => { (e.target as HTMLImageElement).alt = "No se pudo cargar"; }} />
+                  onError={(e) => { e.target.alt = "No se pudo cargar"; }} />
               )
             ) : (
               <p>Selecciona un resultado para verlo.</p>
