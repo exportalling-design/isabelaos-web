@@ -252,7 +252,7 @@ export default function MontajeIAPanel({ userStatus }) {
     setGenError("");
     setResultB64(null);
 
-    setMessages((p) => [...p, { role: "isabela", text: "⏳ Generando tu montaje con IA... esto puede tomar unos segundos." }]);
+    // No mostrar mensaje en el chat al generar — el usuario ya sabe que hizo click
 
     try {
       // Comprimir y convertir imagen
@@ -390,11 +390,22 @@ export default function MontajeIAPanel({ userStatus }) {
         </div>
       )}
 
-      {/* ── Plan actual de Isabela ── */}
-      {currentPlan && (
-        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3">
-          <p className="text-[11px] font-semibold text-emerald-300">Plan de edición acordado:</p>
-          <p className="mt-1 text-xs text-neutral-300">{currentPlan.edit_plan || currentPlan.final_prompt}</p>
+      {/* ── Banner listo para generar (Isabela confirmó el plan) ── */}
+      {readyToGenerate && currentPlan && (
+        <div className="rounded-2xl border-2 border-cyan-400/50 bg-cyan-500/10 px-4 py-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-cyan-300">✅ Plan acordado — listo para generar</p>
+            <p className="mt-1 text-xs text-neutral-300">{currentPlan.edit_plan || currentPlan.final_prompt}</p>
+          </div>
+          <span className="text-[11px] text-cyan-400 whitespace-nowrap">Da click en Generar →</span>
+        </div>
+      )}
+
+      {/* ── Plan actual de Isabela (mientras conversa) ── */}
+      {currentPlan && !readyToGenerate && (
+        <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3">
+          <p className="text-[11px] font-semibold text-neutral-300">Plan en progreso:</p>
+          <p className="mt-1 text-xs text-neutral-400">{currentPlan.edit_plan || currentPlan.final_prompt}</p>
         </div>
       )}
 
