@@ -1,4 +1,3 @@
-
 // api/generate-montaje.js
 // ─────────────────────────────────────────────────────────────
 // Generación de montaje IA.
@@ -153,7 +152,7 @@ function extractTextFromGeminiResponse(data) {
   return parts.filter((p) => p?.text).map((p) => p.text).join("\n").trim();
 }
  
-const MODEL    = "gemini-2.0-flash-exp";
+const MODEL    = "gemini-2.0-flash-001";
 const LOCATION = "us-central1";
  
 export default async function handler(req, res) {
