@@ -136,18 +136,20 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   };
 
   const generateVariation = async (variationIndex) => {
-    // Obtener token de sesión de Supabase (igual que otros módulos)
-    let authHeaders = {};
+    // Obtener token igual que CreatorPanel y demás módulos
+    let token = null;
     try {
-      const { supabase } = await import("../lib/supabaseClient");
+      const { supabase } = await import("../lib/supabaseClient.js");
       const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token;
-      if (token) authHeaders = { Authorization: `Bearer ${token}` };
+      token = data?.session?.access_token || null;
     } catch {}
 
     const response = await fetch("/api/product-photoshoot", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
+      headers: {
+        "Content-Type":  "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         imageBase64:        uploadedImageBase64,
         imageMimeType:      uploadedMimeType,
@@ -160,7 +162,11 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
 
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Error generando imagen");
+      // Mensaje amigable para saldo insuficiente
+      if (data.error === "INSUFFICIENT_JADES") {
+        throw new Error(`Jades insuficientes. Necesitas ${data.required} Jades.`);
+      }
+      throw new Error(data.detail || data.error || "Error generando imagen");
     }
     return data.imageUrl;
   };
