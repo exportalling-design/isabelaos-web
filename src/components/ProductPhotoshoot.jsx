@@ -419,17 +419,21 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
                     alt={`Variación ${i + 1}`}
                     style={styles.resultImg}
                   />
-                  <div style={styles.resultOverlay}>
-                    <a
-                      href={imgUrl}
-                      download={`photoshoot-${i + 1}.jpg`}
-                      style={styles.downloadBtn}
-                    >
-                      ↓ Descargar
-                    </a>
+                  {/* Botón de descarga siempre visible — esquina superior derecha */}
+                  <a
+                    href={imgUrl}
+                    download={`photoshoot-${selectedTemplate}-${i + 1}.jpg`}
+                    style={styles.downloadBadge}
+                    title="Descargar imagen"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ↓
+                  </a>
+                  {/* Número de variación — esquina inferior izquierda */}
+                  <div style={styles.varBadge}>
+                    {i + 1}
                   </div>
                 </div>
-                <p style={styles.resultLabel}>Variación {i + 1}</p>
               </div>
             ))}
           </div>
@@ -914,24 +918,41 @@ const styles = {
     objectFit: "cover",
     display: "block",
   },
-  resultOverlay: {
+  // Badge de descarga — siempre visible, esquina superior derecha
+  downloadBadge: {
     position: "absolute",
-    inset: 0,
-    background: "rgba(0,0,0,0.5)",
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    background: "#7cffd4",
+    color: "#0a0a0f",
+    fontSize: 15,
+    fontWeight: 900,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    opacity: 0,
-    transition: "opacity 0.2s",
-  },
-  downloadBtn: {
-    padding: "8px 16px",
-    background: "#7cffd4",
-    color: "#0a0a0f",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 700,
     textDecoration: "none",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+    zIndex: 2,
+    transition: "transform 0.15s, box-shadow 0.15s",
+    cursor: "pointer",
+  },
+  // Número de variación — esquina inferior izquierda
+  varBadge: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    background: "rgba(0,0,0,0.55)",
+    backdropFilter: "blur(4px)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 6,
+    padding: "2px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "rgba(255,255,255,0.7)",
+    zIndex: 2,
   },
   resultLabel: {
     margin: 0,
