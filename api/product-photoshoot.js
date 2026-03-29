@@ -1,305 +1,212 @@
+// api/product-photoshoot.js
 // ─────────────────────────────────────────────────────────────
-// Endpoint Vercel Serverless para generar fotos de producto
-// con Gemini 2.5 Flash Image (mismo modelo que usa Pomelli)
-// Formato idéntico a jades-buy.js y demás endpoints del proyecto
+// Endpoint de generación de fotos de producto con Gemini
+// COBRO: 5 Jades por imagen (sesión de 4 = 20 Jades total)
+// Patrón idéntico a generate.js
 // ─────────────────────────────────────────────────────────────
-import { createClient } from "@supabase/supabase-js";
-import { requireUser }  from "./_auth.js";
- 
-// ── Constantes ────────────────────────────────────────────────
-const JADES_PER_IMAGE   = 5;
-const IMAGES_PER_SESSION = 4;
-const TOTAL_JADES       = JADES_PER_IMAGE * IMAGES_PER_SESSION; // 20
- 
-// ── Ángulos de variación (1 por cada una de las 4 imágenes) ──
+import { supabaseAdmin }           from "../src/lib/supabaseAdmin.js";
+import { getUserIdFromAuthHeader }  from "../src/lib/getUserIdFromAuth.js";
+
+const JADES_PER_IMAGE = 5;
+
 const VARIATION_ANGLES = [
   "front view, perfectly centered composition",
   "three-quarter angle, slightly elevated perspective",
   "side profile view, horizontal composition",
   "overhead flat lay, top-down bird's eye view",
 ];
- 
-// ── Supabase admin ────────────────────────────────────────────
-function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("MISSING_SUPABASE_ENV");
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
- 
-// ── Prompts por template ──────────────────────────────────────
+
 function buildPrompt(template, productDescription, season, variationIndex) {
   const angle      = VARIATION_ANGLES[variationIndex] || VARIATION_ANGLES[0];
   const productCtx = productDescription
     ? `The product is: ${productDescription}.`
     : "Use the exact product shown in the reference image.";
- 
+
   const prompts = {
- 
     studio: `
       Professional e-commerce product photography, ${angle}.
       ${productCtx}
       Background: Pure white or very light grey seamless studio backdrop.
       Lighting: Soft three-point studio lighting — key light, fill light, and rim light.
-      The product must look pristine, sharp, and commercially ready.
-      No distractions, no props. Clean minimal composition.
       Style: High-end retail catalog photography, 4K quality, photorealistic.
       CRITICAL: The product must be IDENTICAL to the reference — same shape, colors, design, packaging. Only the background and lighting change.
     `,
- 
     lifestyle: `
       Lifestyle product photography, ${angle}.
       ${productCtx}
       Setting: Natural, aspirational Latin American home or outdoor environment.
-      Use warm tones and natural materials — wood surfaces, tropical plants, ceramic, linen textures.
-      The scene feels authentic and lived-in, not overly staged.
-      Lighting: Natural light through a window or soft golden hour outdoor light.
-      The product is the hero but surrounded by complementary lifestyle props.
+      Warm tones, natural materials — wood, tropical plants, ceramic, linen.
+      Lighting: Natural window light or golden hour outdoor light.
       Style: Magazine editorial lifestyle photography, warm color grading, 4K quality, photorealistic.
       CRITICAL: The product must be IDENTICAL to the reference — same shape, colors, design, packaging.
     `,
- 
     inuse: `
       Lifestyle product photography featuring a person using the product, ${angle}.
       ${productCtx}
-      Model: A Latin American person (brown skin tone, dark hair), 25-35 years old,
-      well-dressed in casual modern style, naturally interacting with or holding the product.
-      The model's expression is genuine and happy, not overly posed.
+      Model: Latin American person (brown skin tone, dark hair), 25-35 years old,
+      casually dressed, naturally interacting with or holding the product.
       Setting: Modern warm Latin American urban or home environment.
-      Style: Social media influencer photography, authentic and aspirational, warm cinematic color grade, 4K quality.
-      The product must be shown clearly and prominently.
+      Style: Social media influencer photography, authentic and aspirational, 4K quality.
+      Show the product clearly and prominently.
       CRITICAL: The product must be IDENTICAL to the reference — same shape, colors, design, packaging.
     `,
- 
     campaign: `
       ${getSeasonPrompt(season)}
       ${productCtx}
       Shot composition: ${angle}.
       The product is the clear hero of the image.
-      Style: Professional marketing campaign photography, suitable for social media ads and digital campaigns.
-      High production value, brand-ready, 4K quality, photorealistic.
+      Style: Professional marketing campaign, suitable for social media ads, 4K quality, photorealistic.
       CRITICAL: The product must be IDENTICAL to the reference — same shape, colors, design, packaging.
     `,
   };
- 
+
   return prompts[template] || prompts.studio;
 }
- 
+
 function getSeasonPrompt(season) {
   const seasons = {
-    christmas: `
-      Christmas holiday product campaign.
-      Setting: Elegant Christmas scene — warm gold and red accents, subtle pine branches,
-      soft fairy lights bokeh in background, tasteful gift wrapping nearby.
-      Color palette: Deep reds, gold, ivory white, forest green accents.
-      Mood: Premium, festive, luxurious holiday campaign.
-    `,
-    valentines: `
-      Valentine's Day product campaign.
-      Setting: Romantic scene — soft pink and rose tones, rose petals,
-      velvet textures, candles with warm bokeh background.
-      Color palette: Deep rose, blush pink, burgundy, gold accents.
-      Mood: Romantic, luxurious, aspirational Valentine's gift.
-    `,
-    halloween: `
-      Halloween product campaign, stylish not scary.
-      Setting: Chic Halloween scene — pumpkins, autumn leaves,
-      moody atmosphere with orange and purple accent lighting.
-      Color palette: Deep orange, black, purple, gold.
-      Mood: Fun, fashion-forward Halloween campaign.
-    `,
-    mothers: `
-      Mother's Day product campaign.
-      Setting: Elegant spring scene — white roses, peonies,
-      soft pastel ribbons, warm natural light.
-      Color palette: Blush pink, ivory, sage green, soft lavender.
-      Mood: Tender, elegant. Premium Mother's Day gift campaign.
-    `,
-    blackfriday: `
-      Black Friday promotional campaign.
-      Setting: Bold dramatic dark background,
-      subtle gold or neon accent lighting, modern minimal composition.
-      Color palette: Deep black, gold, white, electric accent.
-      Mood: Powerful, exclusive, high-impact sale campaign.
-    `,
-    summer: `
-      Summer lifestyle campaign.
-      Setting: Bright fresh scene — natural light, tropical elements,
-      vibrant colors, fresh flowers as props.
-      Color palette: Bright coral, turquoise, sunny yellow, fresh white.
-      Mood: Energetic, fresh, joyful. Summer lifestyle campaign.
-    `,
+    christmas:   "Christmas holiday campaign. Elegant scene — gold and red accents, pine branches, fairy lights bokeh. Palette: deep reds, gold, ivory, forest green. Mood: premium festive luxury.",
+    valentines:  "Valentine's Day campaign. Romantic scene — rose petals, velvet textures, candle bokeh. Palette: deep rose, blush pink, burgundy, gold. Mood: romantic luxury.",
+    halloween:   "Halloween campaign, stylish not scary. Pumpkins, autumn leaves, orange and purple accent lighting. Palette: deep orange, black, purple, gold. Mood: fun fashion-forward.",
+    mothers:     "Mother's Day campaign. Elegant spring scene — white roses, peonies, soft pastel ribbons, warm natural light. Palette: blush pink, ivory, sage green, lavender. Mood: tender elegant.",
+    blackfriday: "Black Friday campaign. Bold dramatic dark background, gold or neon accent lighting, modern minimal composition. Palette: deep black, gold, white. Mood: powerful exclusive.",
+    summer:      "Summer lifestyle campaign. Bright natural light, tropical elements, vibrant colors, fresh flowers. Palette: coral, turquoise, sunny yellow, white. Mood: energetic fresh joyful.",
   };
   return seasons[season] || seasons.christmas;
 }
- 
-// ── Llamada a Gemini API (REST directo, sin SDK) ──────────────
-// Usamos fetch directo porque el proyecto es Vite/Node puro
-// y no queremos añadir dependencias pesadas
+
 async function callGemini(imageBase64, imageMimeType, prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
- 
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${apiKey}`;
- 
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            inline_data: {
-              mime_type: imageMimeType || "image/jpeg",
-              data: imageBase64,
-            },
-          },
-          {
-            text: `Use this product image as the exact reference. Generate a new professional photograph of this SAME product:\n\n${prompt}`,
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ["IMAGE"],
-      image_config: {
-        aspect_ratio: "1:1",
-      },
-    },
-  };
- 
+
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          { inline_data: { mime_type: imageMimeType || "image/jpeg", data: imageBase64 } },
+          { text: `Use this product image as the exact reference. Generate a new professional photograph of this SAME product:\n\n${prompt}` },
+        ],
+      }],
+      generationConfig: {
+        responseModalities: ["IMAGE"],
+        image_config: { aspect_ratio: "1:1" },
+      },
+    }),
   });
- 
+
   if (!r.ok) {
     const errText = await r.text().catch(() => "");
-    throw new Error(`Gemini HTTP ${r.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Gemini HTTP ${r.status}: ${errText.slice(0, 300)}`);
   }
- 
-  const data = await r.json();
- 
-  // Extraer imagen de la respuesta
+
+  const data  = await r.json();
   const parts = data?.candidates?.[0]?.content?.parts || [];
+
   for (const part of parts) {
     if (part.inline_data?.data) {
-      return {
-        base64: part.inline_data.data,
-        mimeType: part.inline_data.mime_type || "image/jpeg",
-      };
+      return { base64: part.inline_data.data, mimeType: part.inline_data.mime_type || "image/jpeg" };
     }
   }
- 
+
   throw new Error("Gemini no devolvió imagen en la respuesta");
 }
- 
+
 // ══════════════════════════════════════════════════════════════
 // HANDLER PRINCIPAL
 // ══════════════════════════════════════════════════════════════
 export default async function handler(req, res) {
+  const cors = {
+    "access-control-allow-origin":  "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type, authorization",
+    "content-type":                 "application/json; charset=utf-8",
+  };
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).setHeader("access-control-allow-origin", "*").end();
+  }
+  Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
+
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
- 
+
   try {
-    // ── 1. Auth ───────────────────────────────────────────────
-    const auth = await requireUser(req);
-    if (!auth.ok) {
-      console.log("[photoshoot] AUTH_FAILED:", auth.error);
-      return res.status(auth.code || 401).json({ ok: false, error: auth.error });
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+
+    // ── 1. Auth (idéntico a generate.js) ─────────────────────
+    const userId = await getUserIdFromAuthHeader(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
     }
-    const user = auth.user;
-    console.log("[photoshoot] user:", user.id);
- 
+    console.log("[photoshoot] user:", userId);
+
     // ── 2. Validar body ───────────────────────────────────────
-    const {
-      imageBase64,
-      imageMimeType,
-      template,
-      season,
-      productDescription,
-      variationIndex,
-    } = req.body || {};
- 
+    const { imageBase64, imageMimeType, template, season, productDescription, variationIndex } = body;
+
     if (!imageBase64) {
       return res.status(400).json({ ok: false, error: "MISSING_IMAGE" });
     }
- 
-    const validTemplates = ["studio", "lifestyle", "inuse", "campaign"];
-    if (!validTemplates.includes(template)) {
-      return res.status(400).json({ ok: false, error: "INVALID_TEMPLATE", validTemplates });
+    if (!["studio", "lifestyle", "inuse", "campaign"].includes(template)) {
+      return res.status(400).json({ ok: false, error: "INVALID_TEMPLATE" });
     }
- 
+
     const idx = Number(variationIndex) || 0;
-    console.log("[photoshoot] template:", template, "variation:", idx, "season:", season || "N/A");
- 
-    // ── 3. Verificar saldo de Jades server-side ───────────────
-    const sb = getSupabaseAdmin();
- 
-    const { data: profile, error: profileErr } = await sb
-      .from("profiles")
-      .select("jades")
-      .eq("id", user.id)
-      .single();
- 
-    if (profileErr || !profile) {
-      console.error("[photoshoot] ERROR leyendo perfil:", profileErr?.message);
-      return res.status(500).json({ ok: false, error: "PROFILE_NOT_FOUND" });
-    }
- 
-    if (profile.jades < JADES_PER_IMAGE) {
-      console.log("[photoshoot] SALDO_INSUFICIENTE:", profile.jades, "necesita:", JADES_PER_IMAGE);
-      return res.status(402).json({
-        ok: false,
-        error: "INSUFFICIENT_JADES",
-        jades_available: profile.jades,
-        jades_required: JADES_PER_IMAGE,
-      });
-    }
- 
-    // ── 4. Construir prompt y llamar a Gemini ─────────────────
-    const prompt = buildPrompt(template, productDescription || "", season || "christmas", idx);
- 
-    console.log("[photoshoot] llamando Gemini, variación:", idx);
-    const generated = await callGemini(imageBase64, imageMimeType, prompt);
-    console.log("[photoshoot] Gemini OK, mimeType:", generated.mimeType);
- 
-    // ── 5. Descontar Jades (solo si Gemini fue exitoso) ───────
-    const { error: spendErr } = await sb.rpc("spend_jades", {
-      p_user_id: user.id,
+    console.log("[photoshoot] template:", template, "variation:", idx);
+
+    // ── 3. Descontar Jades ANTES de llamar a Gemini ───────────
+    //       (igual que generate.js descuenta antes de RunPod)
+    const ref = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
+
+    const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+      p_user_id: userId,
       p_amount:  JADES_PER_IMAGE,
-      p_reason:  `photoshoot:${template}:v${idx}`,
+      p_reason:  `photoshoot_${template}_v${idx}`,
+      p_ref:     ref,
     });
- 
+
     if (spendErr) {
-      // El gasto falló pero la imagen ya se generó — loguear pero devolver imagen
-      console.error("[photoshoot] SPEND_ERROR (imagen generada igual):", spendErr.message);
-    } else {
-      console.log("[photoshoot] ✅ descontados", JADES_PER_IMAGE, "Jades, variación:", idx);
+      console.error("[photoshoot] JADE_CHARGE_FAILED:", spendErr);
+
+      if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
+        return res.status(402).json({
+          ok:       false,
+          error:    "INSUFFICIENT_JADES",
+          detail:   `Necesitas ${JADES_PER_IMAGE} Jades para esta generación.`,
+          required: JADES_PER_IMAGE,
+        });
+      }
+
+      return res.status(400).json({ ok: false, error: "JADE_CHARGE_FAILED", details: spendErr.message });
     }
- 
-    // ── 6. Devolver imagen como data URL ──────────────────────
-    const imageUrl = `data:${generated.mimeType};base64,${generated.base64}`;
- 
+
+    console.log("[photoshoot] ✅ descontados", JADES_PER_IMAGE, "Jades, ref:", ref);
+
+    // ── 4. Llamar a Gemini ────────────────────────────────────
+    const prompt    = buildPrompt(template, productDescription || "", season || "christmas", idx);
+    const generated = await callGemini(imageBase64, imageMimeType || "image/jpeg", prompt);
+    console.log("[photoshoot] Gemini OK, mimeType:", generated.mimeType);
+
+    // ── 5. Devolver imagen ────────────────────────────────────
     return res.status(200).json({
-      ok: true,
-      imageUrl,
+      ok:             true,
+      imageUrl:       `data:${generated.mimeType};base64,${generated.base64}`,
       template,
       variationIndex: idx,
-      jades_spent: JADES_PER_IMAGE,
+      jades_spent:    JADES_PER_IMAGE,
     });
- 
+
   } catch (e) {
     console.error("[photoshoot] SERVER_ERROR:", e?.message || e);
-    return res.status(500).json({
-      ok: false,
-      error: "SERVER_ERROR",
-      detail: String(e?.message || e),
-    });
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e?.message || e) });
   }
 }
- 
+
 export const config = { runtime: "nodejs" };
