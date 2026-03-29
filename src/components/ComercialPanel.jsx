@@ -8,6 +8,8 @@
 //   - Clips de video con Veo3 Fast
 //   - Narración con ElevenLabs
 // Costo: 120 Jades = $12 todo incluido
+//
+// FIX: handleRefFiles ahora acumula fotos en lugar de reemplazarlas
 // ─────────────────────────────────────────────────────────────
 import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
@@ -148,10 +150,23 @@ export default function ComercialPanel({ userStatus }) {
   const currentJades = userStatus?.jades ?? 0;
 
   // ── Manejar fotos ─────────────────────────────────────────
+  // FIX: acumula fotos nuevas al estado anterior en lugar de reemplazarlo
   async function handleRefFiles(e) {
-    const files = Array.from(e.target.files || []).slice(0, 3);
-    setRefFiles(files);
-    setRefPreviews(files.map(f => URL.createObjectURL(f)));
+    const nuevas = Array.from(e.target.files || []);
+    if (!nuevas.length) return;
+
+    setRefFiles(prev => {
+      const combined = [...prev, ...nuevas].slice(0, 3);
+      return combined;
+    });
+
+    setRefPreviews(prev => {
+      const nuevasPreviews = nuevas.map(f => URL.createObjectURL(f));
+      return [...prev, ...nuevasPreviews].slice(0, 3);
+    });
+
+    // Limpiar el input para que el mismo archivo pueda seleccionarse de nuevo si hace falta
+    e.target.value = "";
   }
 
   function removeRef(idx) {
@@ -305,11 +320,13 @@ export default function ComercialPanel({ userStatus }) {
                 </div>
               ))}
 
+              {/* Botón agregar — solo visible si hay menos de 3 fotos */}
               {refFiles.length < 3 && (
                 <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/30 hover:border-cyan-400/40 hover:bg-cyan-500/5 transition-all">
                   <span className="text-2xl">+</span>
                   <span className="mt-1 text-[10px] text-neutral-400">Agregar foto</span>
-                  <input type="file" accept="image/*" multiple onChange={handleRefFiles} className="hidden" />
+                  {/* FIX: sin "multiple" para abrir de a una y acumular correctamente */}
+                  <input type="file" accept="image/*" onChange={handleRefFiles} className="hidden" />
                 </label>
               )}
             </div>
