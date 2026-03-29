@@ -56,6 +56,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   const [step, setStep] = useState("upload"); // upload | configure | generating | results
   const [uploadedImage, setUploadedImage] = useState(null);
   const [uploadedImageBase64, setUploadedImageBase64] = useState(null);
+  const [uploadedMimeType, setUploadedMimeType] = useState("image/jpeg");
   const [selectedTemplate, setSelectedTemplate] = useState("studio");
   const [selectedSeason, setSelectedSeason] = useState("christmas");
   const [productDescription, setProductDescription] = useState("");
@@ -68,6 +69,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   // ---- manejo de upload ----
   const handleFile = useCallback((file) => {
     if (!file || !file.type.startsWith("image/")) return;
+    setUploadedMimeType(file.type || "image/jpeg");
     const url = URL.createObjectURL(file);
     setUploadedImage(url);
 
@@ -134,20 +136,32 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   };
 
   const generateVariation = async (variationIndex) => {
-    const res = await fetch("/api/product-photoshoot", {
+    // Obtener token de sesión de Supabase (igual que otros módulos)
+    let authHeaders = {};
+    try {
+      const { supabase } = await import("../lib/supabaseClient");
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) authHeaders = { Authorization: `Bearer ${token}` };
+    } catch {}
+
+    const response = await fetch("/api/product-photoshoot", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
-        imageBase64: uploadedImageBase64,
-        template: selectedTemplate,
-        season: selectedTemplate === "campaign" ? selectedSeason : null,
+        imageBase64:        uploadedImageBase64,
+        imageMimeType:      uploadedMimeType,
+        template:           selectedTemplate,
+        season:             selectedTemplate === "campaign" ? selectedSeason : null,
         productDescription,
         variationIndex,
       }),
     });
 
-    if (!res.ok) throw new Error("API error");
-    const data = await res.json();
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Error generando imagen");
+    }
     return data.imageUrl;
   };
 
@@ -155,6 +169,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
     setStep("upload");
     setUploadedImage(null);
     setUploadedImageBase64(null);
+    setUploadedMimeType("image/jpeg");
     setGeneratedImages([]);
     setProductDescription("");
     setSelectedTemplate("studio");
