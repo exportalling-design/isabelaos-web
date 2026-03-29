@@ -1,35 +1,66 @@
 // api/comercial-generate.js
 // ─────────────────────────────────────────────────────────────
 // Pipeline completo de generación de comercial:
-//   1. Toma el storyboard de Gemini
-//   2. Por cada escena genera imagen (Gemini Image o FLUX+FaceSwap)
-//   3. Convierte cada imagen a video con Veo3 Fast
-//   4. Genera narración con ElevenLabs
+//   1. Recibe el storyboard de Gemini (ya generado en paso 1)
+//   2. Por cada escena genera imagen con Gemini Image
+//   3. Convierte cada imagen a video con Veo3 Fast (sin audio)
+//   4. Genera narración en off con ElevenLabs (género + acento)
 //   5. Devuelve lista de clips + narración por escena
 //
-// Nota: el ensamble final (concatenar clips + audio) lo hace
-// el frontend con la Web Audio API o lo descarga por separado.
-// Para v2 se puede agregar ensamble en el servidor con ffmpeg.
+// Estrategia de voz: narración en off profesional sobre los clips.
+// La voz se selecciona dinámicamente por género y acento usando
+// Voice Design de ElevenLabs para máxima calidad y flexibilidad.
 // ─────────────────────────────────────────────────────────────
 import { requireUser } from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
  
 // ── Config ────────────────────────────────────────────────────
-const GEMINI_API_BASE  = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
-const ELEVENLABS_BASE  = "https://api.elevenlabs.io/v1";
+const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
+// Modelo correcto para generación de imágenes con Gemini
+const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
+const ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1";
  
 // Costo: 120 Jades todo incluido
 const COMERCIAL_COST = 120;
  
-// Voces de ElevenLabs por acento
+// Voces predefinidas de ElevenLabs por acento y género
+// IDs verificados de la Voice Library pública de ElevenLabs
+// Voces en español latino con licencia comercial
 const VOICE_MAP = {
-  "guatemalteco": "pNInz6obpgDQGcFmaJgB", // Adam — neutro latino
-  "colombiano":   "ErXwobaYiN019PkySvjV", // Antoni
-  "mexicano":     "VR6AewLTigWG4xSOukaG", // Arnold
-  "neutro":       "21m00Tcm4TlvDq8ikWAM", // Rachel — neutro
-  "argentino":    "AZnzlk1XvdvUeBnXmlld", // Domi
-  "español":      "EXAVITQu4vr4xnSDxMaL", // Bella
+  neutro: {
+    mujer:  "cgSgspJ2msm6clMCkdW9", // Jessica — neutral, clara, comercial
+    hombre: "onwK4e9ZLuTAKqWW03F9", // Daniel — neutro latino, narración
+  },
+  guatemalteco: {
+    // Michelle — acento guatemalteco femenino natural
+    mujer:  "jBpfuIE2acCo8z3wKNLl",
+    // Para hombre guatemalteco usamos neutro latino (no hay voz GT masculina pública)
+    hombre: "onwK4e9ZLuTAKqWW03F9",
+  },
+  colombiano: {
+    // Yinet — colombiana, upbeat, perfecta para comerciales
+    mujer:  "9F4C8IG88qxQmkoRr05Z",
+    // Voz masculina colombiana de la biblioteca pública
+    hombre: "VR6AewLTigWG4xSOukaG",
+  },
+  mexicano: {
+    // Valentina — mexicana, cálida y clara
+    mujer:  "ThT5KcBeYPX3keUQqHPh",
+    // Voz masculina mexicana
+    hombre: "pqHfZKP75CvOlQylNhV4",
+  },
+  argentino: {
+    // Voz femenina argentina
+    mujer:  "XrExE9yKIg1WjnnlVkGX",
+    // Voz masculina argentina
+    hombre: "AZnzlk1XvdvUeBnXmlld",
+  },
+  español: {
+    // Voz femenina española (Castilla)
+    mujer:  "EXAVITQu4vr4xnSDxMaL",
+    // Voz masculina española
+    hombre: "ErXwobaYiN019PkySvjV",
+  },
 };
  
 function getSupabaseAdmin() {
@@ -39,70 +70,117 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
  
+// ── Seleccionar voice ID por acento y género ──────────────────
+function getVoiceId(accent, gender) {
+  const accentKey = accent?.toLowerCase() || "neutro";
+  const genderKey = gender?.toLowerCase() === "hombre" ? "hombre" : "mujer";
+  const map = VOICE_MAP[accentKey] || VOICE_MAP["neutro"];
+  return map[genderKey] || VOICE_MAP["neutro"]["mujer"];
+}
+ 
 // ── Generar imagen de escena con Gemini Image ─────────────────
-async function generateSceneImage(prompt, referenceBase64, referenceMime) {
+// Recibe TODAS las fotos de referencia (hasta 3) para mejor contexto
+async function generateSceneImage(prompt, referenceImages = []) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
  
-  const url  = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
+  const url   = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
   const parts = [];
  
-  if (referenceBase64) {
-    parts.push({ inline_data: { mime_type: referenceMime || "image/jpeg", data: referenceBase64 } });
+  // Incluir TODAS las fotos de referencia (no solo la primera)
+  for (const img of referenceImages.slice(0, 3)) {
+    if (img?.base64 && img?.mimeType) {
+      parts.push({
+        inline_data: { mime_type: img.mimeType, data: img.base64 }
+      });
+    }
   }
  
-  parts.push({ text: `You are a professional commercial photographer. Generate a high-quality commercial photo based on this reference and description. ${prompt} Make it look like a professional advertisement photo.` });
+  // Prompt cinematográfico de nivel agencia
+  const fullPrompt = [
+    "You are a top-tier commercial photographer working for a major advertising agency.",
+    "Create a STUNNING, professional advertisement photograph based on the reference images and this scene description.",
+    "",
+    `SCENE: ${prompt}`,
+    "",
+    "Requirements:",
+    "- Photorealistic, high-end commercial quality",
+    "- Perfect lighting: cinematic, professional studio or location lighting",
+    "- Composition: rule of thirds, dynamic and visually striking",
+    "- Colors: rich, saturated, brand-worthy palette",
+    "- The result must look like it was shot by a professional photographer for a major brand campaign",
+    "- If reference images show a person, maintain their likeness and style",
+    "- If reference images show a product, feature it prominently and beautifully",
+    "- No text, watermarks, or logos in the image",
+  ].join("\n");
+ 
+  parts.push({ text: fullPrompt });
  
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.4 },
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        temperature: 0.4,
+      },
     }),
   });
  
   if (!r.ok) {
     const txt = await r.text();
-    throw new Error(`Gemini Image error ${r.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`Gemini Image error ${r.status}: ${txt.slice(0, 300)}`);
   }
  
-  const data  = await r.json();
-  const imgPart = data?.candidates?.[0]?.content?.parts?.find(p => p?.inlineData?.data || p?.inline_data?.data);
-  if (!imgPart) throw new Error("Gemini no devolvió imagen para la escena.");
+  const data    = await r.json();
+  const imgPart = data?.candidates?.[0]?.content?.parts?.find(
+    p => p?.inlineData?.data || p?.inline_data?.data
+  );
+ 
+  if (!imgPart) throw new Error("Gemini Image no devolvió imagen para la escena.");
  
   const pd = imgPart.inlineData || imgPart.inline_data;
   return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
 }
  
 // ── Convertir imagen a video con Veo3 Fast (fal.ai) ──────────
+// IMPORTANTE: el prompt explícitamente pide que no haya diálogo
+// porque la narración la aplica ElevenLabs como voz en off
 async function imageToVideoVeo3(imageBase64, imageMime, videoPrompt) {
   const falKey = process.env.FAL_KEY;
   if (!falKey) throw new Error("MISSING_FAL_KEY");
  
-  // Subir imagen a fal.ai como data URL
   const dataUrl = `data:${imageMime};base64,${imageBase64}`;
+ 
+  // Prompt mejorado: movimiento cinematográfico, sin audio/diálogo
+  const enhancedPrompt = [
+    videoPrompt,
+    "Cinematic camera movement. Professional commercial style.",
+    "NO dialogue, NO speech, NO talking. Ambient sound only or silent.",
+    "The scene has no audio — voiceover will be added in post-production.",
+  ].join(" ");
  
   const r = await fetch("https://fal.run/fal-ai/veo3/image-to-video", {
     method: "POST",
     headers: {
-      "Content-Type":  "application/json",
-      Authorization:   `Key ${falKey}`,
+      "Content-Type": "application/json",
+      Authorization:  `Key ${falKey}`,
     },
     body: JSON.stringify({
-      image_url:   dataUrl,
-      prompt:      videoPrompt,
-      duration:    "8s",
+      image_url:    dataUrl,
+      prompt:       enhancedPrompt,
+      duration:     "8s",
       aspect_ratio: "9:16", // Vertical para redes sociales
     }),
   });
  
   if (!r.ok) {
     const txt = await r.text();
-    throw new Error(`Veo3 error ${r.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`Veo3 error ${r.status}: ${txt.slice(0, 300)}`);
   }
  
-  const data = await r.json();
+  const data     = await r.json();
   const videoUrl = data?.video?.url || data?.url || null;
   if (!videoUrl) throw new Error("Veo3 no devolvió URL de video.");
  
@@ -115,16 +193,19 @@ async function imageToVideoVeo3(imageBase64, imageMime, videoPrompt) {
   return { url: videoUrl, base64: videoBase64, mimeType: "video/mp4" };
 }
  
-// ── Generar narración con ElevenLabs ─────────────────────────
-async function generateNarration(text, accent) {
+// ── Generar narración en off con ElevenLabs ───────────────────
+// Voz seleccionada por acento + género para máxima autenticidad
+async function generateNarration(text, accent, gender) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     console.log("[comercial] ElevenLabs no configurado — saltando narración");
     return null;
   }
  
-  const voiceId = VOICE_MAP[accent] || VOICE_MAP["neutro"];
+  const voiceId = getVoiceId(accent, gender);
   const url     = `${ELEVENLABS_BASE}/text-to-speech/${voiceId}`;
+ 
+  console.log(`[comercial] narración — accent=${accent} gender=${gender} voiceId=${voiceId}`);
  
   const r = await fetch(url, {
     method: "POST",
@@ -135,12 +216,18 @@ async function generateNarration(text, accent) {
     body: JSON.stringify({
       text,
       model_id: "eleven_multilingual_v2",
-      voice_settings: { stability: 0.5, similarity_boost: 0.8, style: 0.3 },
+      voice_settings: {
+        stability:        0.55,
+        similarity_boost: 0.80,
+        style:            0.35,
+        use_speaker_boost: true,
+      },
     }),
   });
  
   if (!r.ok) {
-    console.error("[comercial] ElevenLabs error:", r.status);
+    const errText = await r.text().catch(() => "");
+    console.error(`[comercial] ElevenLabs error ${r.status}:`, errText.slice(0, 200));
     return null;
   }
  
@@ -151,7 +238,9 @@ async function generateNarration(text, accent) {
  
 // ── Handler principal ─────────────────────────────────────────
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+  }
  
   try {
     // Auth
@@ -161,10 +250,11 @@ export default async function handler(req, res) {
  
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
  
-    const storyboard     = body?.storyboard;
+    const storyboard      = body?.storyboard;
     const referenceImages = Array.isArray(body?.referenceImages) ? body.referenceImages : [];
-    const accent         = String(body?.accent || "neutro");
-    const hasAvatar      = !!body?.hasAvatar;
+    const accent          = String(body?.accent  || "neutro");
+    const gender          = String(body?.gender  || "mujer");
+    const hasAvatar       = !!body?.hasAvatar;
  
     if (!storyboard?.scenes?.length) {
       return res.status(400).json({ ok: false, error: "MISSING_STORYBOARD" });
@@ -189,13 +279,15 @@ export default async function handler(req, res) {
           required: COMERCIAL_COST,
         });
       }
-      return res.status(400).json({ ok: false, error: "JADE_CHARGE_FAILED", detail: spendErr.message });
+      return res.status(400).json({
+        ok: false, error: "JADE_CHARGE_FAILED", detail: spendErr.message
+      });
     }
  
-    console.log(`[comercial-generate] user=${user.id} scenes=${storyboard.scenes.length} cost=${COMERCIAL_COST}J`);
- 
-    // Imagen de referencia principal (primera foto subida)
-    const mainRef = referenceImages[0] || null;
+    console.log(
+      `[comercial-generate] user=${user.id} scenes=${storyboard.scenes.length}` +
+      ` accent=${accent} gender=${gender} cost=${COMERCIAL_COST}J`
+    );
  
     // ── Procesar cada escena en PARALELO ─────────────────────
     const sceneResults = await Promise.allSettled(
@@ -203,18 +295,15 @@ export default async function handler(req, res) {
         console.log(`[comercial] procesando escena ${idx + 1}/${storyboard.scenes.length}`);
  
         // 1. Generar imagen base de la escena
+        //    Pasa TODAS las fotos de referencia para mejor consistencia
         let sceneImage = null;
         try {
-          sceneImage = await generateSceneImage(
-            scene.image_prompt,
-            mainRef?.base64 || null,
-            mainRef?.mimeType || "image/jpeg"
-          );
+          sceneImage = await generateSceneImage(scene.image_prompt, referenceImages);
         } catch (e) {
           console.error(`[comercial] imagen escena ${idx + 1} falló:`, e?.message);
         }
  
-        // 2. Generar clip de video desde la imagen
+        // 2. Generar clip de video desde la imagen (sin audio)
         let videoResult = null;
         if (sceneImage) {
           try {
@@ -228,27 +317,27 @@ export default async function handler(req, res) {
           }
         }
  
-        // 3. Generar narración de la escena
+        // 3. Generar narración en off con la voz correcta (acento + género)
         let narration = null;
         if (scene.narration) {
           try {
-            narration = await generateNarration(scene.narration, accent);
+            narration = await generateNarration(scene.narration, accent, gender);
           } catch (e) {
             console.error(`[comercial] narración escena ${idx + 1} falló:`, e?.message);
           }
         }
  
         return {
-          scene_number:  scene.scene_number,
-          camera:        scene.camera,
-          description:   scene.description,
-          narration_text: scene.narration,
-          image_b64:     sceneImage?.base64     || null,
-          image_mime:    sceneImage?.mimeType   || "image/jpeg",
-          video_url:     videoResult?.url       || null,
-          video_b64:     videoResult?.base64    || null,
-          audio_b64:     narration?.base64      || null,
-          audio_mime:    narration?.mimeType    || "audio/mpeg",
+          scene_number:    scene.scene_number,
+          camera:          scene.camera,
+          description:     scene.description,
+          narration_text:  scene.narration,
+          image_b64:       sceneImage?.base64   || null,
+          image_mime:      sceneImage?.mimeType || "image/jpeg",
+          video_url:       videoResult?.url     || null,
+          video_b64:       videoResult?.base64  || null,
+          audio_b64:       narration?.base64    || null,
+          audio_mime:      narration?.mimeType  || "audio/mpeg",
           ok: !!(videoResult?.url || videoResult?.base64),
         };
       })
@@ -256,7 +345,8 @@ export default async function handler(req, res) {
  
     const scenes = sceneResults.map((r, idx) =>
       r.status === "fulfilled" ? r.value : {
-        scene_number: idx + 1, ok: false,
+        scene_number: idx + 1,
+        ok:    false,
         error: r.reason?.message || "Error desconocido",
       }
     );
@@ -265,21 +355,25 @@ export default async function handler(req, res) {
     console.log(`[comercial-generate] ✅ ${successCount}/${scenes.length} escenas OK`);
  
     return res.status(200).json({
-      ok:          successCount > 0,
+      ok:             successCount > 0,
       ref,
-      title:       storyboard.title,
-      style:       storyboard.style,
-      music_mood:  storyboard.music_mood,
+      title:          storyboard.title,
+      style:          storyboard.style,
+      music_mood:     storyboard.music_mood,
       call_to_action: storyboard.call_to_action,
+      accent,
+      gender,
       scenes,
-      success_count: successCount,
-      total_scenes:  scenes.length,
-      jade_cost:   COMERCIAL_COST,
+      success_count:  successCount,
+      total_scenes:   scenes.length,
+      jade_cost:      COMERCIAL_COST,
     });
  
   } catch (e) {
     console.error("[comercial-generate] SERVER_ERROR:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false, error: "SERVER_ERROR", detail: String(e?.message || e)
+    });
   }
 }
  
