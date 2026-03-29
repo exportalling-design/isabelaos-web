@@ -6,29 +6,29 @@
 // ─────────────────────────────────────────────────────────────
 import { requireUser } from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
-
+ 
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("MISSING_SUPABASE_ENV");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
-
+ 
 const JADES_PER_IMAGE = 5;
-
+ 
 const VARIATION_ANGLES = [
   "front view, perfectly centered composition",
   "three-quarter angle, slightly elevated perspective",
   "side profile view, horizontal composition",
   "overhead flat lay, top-down bird's eye view",
 ];
-
+ 
 function buildPrompt(template, productDescription, season, variationIndex) {
   const angle      = VARIATION_ANGLES[variationIndex] || VARIATION_ANGLES[0];
   const productCtx = productDescription
     ? `The product is: ${productDescription}.`
     : "Use the exact product shown in the reference image.";
-
+ 
   const prompts = {
     studio: `
       Professional e-commerce product photography, ${angle}.
@@ -66,10 +66,10 @@ function buildPrompt(template, productDescription, season, variationIndex) {
       CRITICAL: The product must be IDENTICAL to the reference — same shape, colors, design, packaging.
     `,
   };
-
+ 
   return prompts[template] || prompts.studio;
 }
-
+ 
 function getSeasonPrompt(season) {
   const seasons = {
     christmas:   "Christmas holiday campaign. Elegant scene — gold and red accents, pine branches, fairy lights bokeh. Palette: deep reds, gold, ivory, forest green. Mood: premium festive luxury.",
@@ -81,13 +81,13 @@ function getSeasonPrompt(season) {
   };
   return seasons[season] || seasons.christmas;
 }
-
+ 
 async function callGemini(imageBase64, imageMimeType, prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
-
+ 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`;
-
+ 
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -100,29 +100,44 @@ async function callGemini(imageBase64, imageMimeType, prompt) {
         ],
       }],
       generationConfig: {
-        responseModalities: ["IMAGE"],
-        image_config: { aspect_ratio: "1:1" },
+        responseModalities: ["TEXT", "IMAGE"],
       },
     }),
   });
-
+ 
   if (!r.ok) {
     const errText = await r.text().catch(() => "");
     throw new Error(`Gemini HTTP ${r.status}: ${errText.slice(0, 300)}`);
   }
-
+ 
   const data  = await r.json();
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-
-  for (const part of parts) {
-    if (part.inline_data?.data) {
-      return { base64: part.inline_data.data, mimeType: part.inline_data.mime_type || "image/jpeg" };
+ 
+  // Log completo para debug
+  const rawParts = data?.candidates?.[0]?.content?.parts || [];
+  console.log("[photoshoot] Gemini parts count:", rawParts.length);
+  rawParts.forEach((p, i) => {
+    if (p.text) console.log(`[photoshoot] part[${i}] text:`, p.text.slice(0, 100));
+    if (p.inlineData || p.inline_data) {
+      const pd = p.inlineData || p.inline_data;
+      console.log(`[photoshoot] part[${i}] image mimeType:`, pd.mimeType || pd.mime_type, "dataLen:", (pd.data||"").length);
+    }
+  });
+  if (data?.candidates?.[0]?.finishReason) {
+    console.log("[photoshoot] finishReason:", data.candidates[0].finishReason);
+  }
+ 
+  // Buscar imagen en ambos formatos (inlineData y inline_data)
+  for (const part of rawParts) {
+    const pd = part.inlineData || part.inline_data;
+    if (pd?.data) {
+      return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
     }
   }
-
-  throw new Error("Gemini no devolvió imagen en la respuesta");
+ 
+  const textParts = rawParts.filter(p => p.text).map(p => p.text).join(" ");
+  throw new Error("Gemini no devolvió imagen. finishReason=" + (data?.candidates?.[0]?.finishReason || "N/A") + " text=" + textParts.slice(0, 200));
 }
-
+ 
 // ══════════════════════════════════════════════════════════════
 // HANDLER PRINCIPAL
 // ══════════════════════════════════════════════════════════════
@@ -133,44 +148,44 @@ export default async function handler(req, res) {
     "access-control-allow-headers": "content-type, authorization",
     "content-type":                 "application/json; charset=utf-8",
   };
-
+ 
   if (req.method === "OPTIONS") {
     return res.status(204).setHeader("access-control-allow-origin", "*").end();
   }
   Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
-
+ 
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
-
+ 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-
+ 
     // ── 1. Auth (idéntico a generate-montaje.js) ─────────────
     const auth = await requireUser(req);
     if (!auth.ok) return res.status(auth.code || 401).json({ ok: false, error: auth.error });
     const userId = auth.user.id;
     console.log("[photoshoot] user:", userId);
-
+ 
     // ── 2. Validar body ───────────────────────────────────────
     const { imageBase64, imageMimeType, template, season, productDescription, variationIndex } = body;
-
+ 
     if (!imageBase64) {
       return res.status(400).json({ ok: false, error: "MISSING_IMAGE" });
     }
     if (!["studio", "lifestyle", "inuse", "campaign"].includes(template)) {
       return res.status(400).json({ ok: false, error: "INVALID_TEMPLATE" });
     }
-
+ 
     const idx = Number(variationIndex) || 0;
     console.log("[photoshoot] template:", template, "variation:", idx);
-
+ 
     // ── 3. Descontar Jades ANTES de llamar a Gemini ───────────
     //       (igual que generate.js descuenta antes de RunPod)
     const ref = globalThis.crypto?.randomUUID
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
-
+ 
     const sb = getSupabaseAdmin();
     const { error: spendErr } = await sb.rpc("spend_jades", {
       p_user_id: userId,
@@ -178,10 +193,10 @@ export default async function handler(req, res) {
       p_reason:  `photoshoot_${template}_v${idx}`,
       p_ref:     ref,
     });
-
+ 
     if (spendErr) {
       console.error("[photoshoot] JADE_CHARGE_FAILED:", spendErr);
-
+ 
       if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
         return res.status(402).json({
           ok:       false,
@@ -190,17 +205,17 @@ export default async function handler(req, res) {
           required: JADES_PER_IMAGE,
         });
       }
-
+ 
       return res.status(400).json({ ok: false, error: "JADE_CHARGE_FAILED", details: spendErr.message });
     }
-
+ 
     console.log("[photoshoot] ✅ descontados", JADES_PER_IMAGE, "Jades, ref:", ref);
-
+ 
     // ── 4. Llamar a Gemini ────────────────────────────────────
     const prompt    = buildPrompt(template, productDescription || "", season || "christmas", idx);
     const generated = await callGemini(imageBase64, imageMimeType || "image/jpeg", prompt);
     console.log("[photoshoot] Gemini OK, mimeType:", generated.mimeType);
-
+ 
     // ── 5. Devolver imagen ────────────────────────────────────
     return res.status(200).json({
       ok:             true,
@@ -209,11 +224,11 @@ export default async function handler(req, res) {
       variationIndex: idx,
       jades_spent:    JADES_PER_IMAGE,
     });
-
+ 
   } catch (e) {
     console.error("[photoshoot] SERVER_ERROR:", e?.message || e);
     return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e?.message || e) });
   }
 }
-
+ 
 export const config = { runtime: "nodejs" };
