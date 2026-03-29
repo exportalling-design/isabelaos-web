@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 // ============================================================
 // TIPOS DE TEMPLATE - 4 modos como Pomelli
@@ -53,6 +53,126 @@ const TOTAL_JADES = JADES_PER_IMAGE * IMAGES_PER_SESSION;
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
+  // Inyectar CSS responsive una sola vez
+  useEffect(() => {
+    const id = "photoshoot-responsive-css";
+    if (document.getElementById(id)) return;
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent = `
+      .ps-config-layout {
+        display: grid;
+        grid-template-columns: 240px 1fr;
+        min-height: 500px;
+      }
+      .ps-preview-panel {
+        padding: 24px;
+        border-right: 1px solid rgba(255,255,255,0.06);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .ps-config-panel {
+        padding: 24px;
+        overflow-y: auto;
+      }
+      .ps-templates-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+      .ps-results-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-bottom: 24px;
+      }
+      .ps-cost-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 20px;
+        padding: 16px 20px;
+        background: rgba(124,255,212,0.04);
+        border: 1px solid rgba(124,255,212,0.12);
+        border-radius: 12px;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .ps-placeholder-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .ps-more-templates-btns {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .ps-seasons-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      /* ── MOBILE ── */
+      @media (max-width: 640px) {
+        .ps-config-layout {
+          grid-template-columns: 1fr !important;
+          min-height: unset;
+        }
+        .ps-preview-panel {
+          border-right: none !important;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          padding: 16px !important;
+          flex-direction: row !important;
+          align-items: center;
+          gap: 16px;
+        }
+        .ps-preview-panel .ps-image-preview-box {
+          width: 90px !important;
+          min-width: 90px;
+          height: 90px !important;
+          flex-shrink: 0;
+        }
+        .ps-config-panel {
+          padding: 16px !important;
+        }
+        .ps-templates-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
+          gap: 8px !important;
+        }
+        .ps-results-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
+          gap: 10px !important;
+        }
+        .ps-placeholder-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+        .ps-cost-row {
+          flex-direction: column !important;
+          align-items: stretch !important;
+        }
+        .ps-cost-row .ps-generate-btn {
+          width: 100% !important;
+          text-align: center;
+        }
+        .ps-results-header {
+          flex-direction: column !important;
+          gap: 10px !important;
+        }
+        .ps-dropzone {
+          padding: 36px 20px !important;
+          margin: 12px !important;
+        }
+        .ps-generating-inner {
+          max-width: 100% !important;
+          padding: 0 8px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
   const [step, setStep] = useState("upload"); // upload | configure | generating | results
   const [uploadedImage, setUploadedImage] = useState(null);
   const [uploadedImageBase64, setUploadedImageBase64] = useState(null);
@@ -210,7 +330,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
           style={{
             ...styles.dropzone,
             ...(isDragging ? styles.dropzoneActive : {}),
-          }}
+          }} className="ps-dropzone"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -235,11 +355,11 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
 
       {/* ---- STEP: CONFIGURE ---- */}
       {step === "configure" && (
-        <div style={styles.configLayout}>
+        <div style={styles.configLayout} className="ps-config-layout">
           {/* Preview del producto */}
-          <div style={styles.previewPanel}>
+          <div style={styles.previewPanel} className="ps-preview-panel">
             <p style={styles.panelLabel}>Tu producto</p>
-            <div style={styles.imagePreviewBox}>
+            <div style={styles.imagePreviewBox} className="ps-image-preview-box">
               <img
                 src={uploadedImage}
                 alt="Producto"
@@ -252,10 +372,10 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
           </div>
 
           {/* Configuración */}
-          <div style={styles.configPanel}>
+          <div style={styles.configPanel} className="ps-config-panel">
             {/* Templates */}
             <p style={styles.panelLabel}>Tipo de foto</p>
-            <div style={styles.templatesGrid}>
+            <div style={styles.templatesGrid} className="ps-templates-grid">
               {TEMPLATES.map((t) => (
                 <div
                   key={t.id}
@@ -279,7 +399,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
             {selectedTemplate === "campaign" && (
               <div style={{ marginTop: 16 }}>
                 <p style={styles.panelLabel}>Temporada</p>
-                <div style={styles.seasonsGrid}>
+                <div style={styles.seasonsGrid} className="ps-seasons-grid">
                   {SEASONS.map((s) => (
                     <button
                       key={s.id}
@@ -314,7 +434,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
             </div>
 
             {/* Costo y CTA */}
-            <div style={styles.costRow}>
+            <div style={styles.costRow} className="ps-cost-row">
               <div style={styles.costInfo}>
                 <span style={styles.costLabel}>Costo de sesión</span>
                 <div style={styles.costAmount}>
@@ -354,7 +474,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
       {/* ---- STEP: GENERATING ---- */}
       {step === "generating" && (
         <div style={styles.generatingWrapper}>
-          <div style={styles.generatingInner}>
+          <div style={styles.generatingInner} className="ps-generating-inner">
             <div style={styles.spinnerWrapper}>
               <div style={styles.spinner} />
               <span style={styles.spinnerIcon}>◈</span>
@@ -373,7 +493,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
             <p style={styles.progressText}>{progress}% completado</p>
 
             {/* Placeholders animados */}
-            <div style={styles.placeholderGrid}>
+            <div style={styles.placeholderGrid} className="ps-placeholder-grid">
               {[0, 1, 2, 3].map((i) => (
                 <div
                   key={i}
@@ -393,7 +513,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
       {/* ---- STEP: RESULTS ---- */}
       {step === "results" && (
         <div style={styles.resultsWrapper}>
-          <div style={styles.resultsHeader}>
+          <div style={styles.resultsHeader} className="ps-results-header">
             <div>
               <h3 style={styles.resultsTitle}>
                 ✦ Tus fotos están listas
@@ -410,7 +530,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
             </div>
           </div>
 
-          <div style={styles.resultsGrid}>
+          <div style={styles.resultsGrid} className="ps-results-grid">
             {generatedImages.map((imgUrl, i) => (
               <div key={i} style={styles.resultCard}>
                 <div style={styles.resultImageBox}>
@@ -440,7 +560,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
 
           <div style={styles.moreTemplates}>
             <p style={styles.moreLabel}>¿Quieres probar otro estilo?</p>
-            <div style={styles.moreTemplatesBtns}>
+            <div style={styles.moreTemplatesBtns} className="ps-more-templates-btns">
               {TEMPLATES.filter((t) => t.id !== selectedTemplate).map((t) => (
                 <button
                   key={t.id}
