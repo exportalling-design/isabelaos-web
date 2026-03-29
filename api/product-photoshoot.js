@@ -216,10 +216,49 @@ export default async function handler(req, res) {
     const generated = await callGemini(imageBase64, imageMimeType || "image/jpeg", prompt);
     console.log("[photoshoot] Gemini OK, mimeType:", generated.mimeType);
  
-    // ── 5. Devolver imagen ────────────────────────────────────
+    // ── 5. Guardar en Storage y biblioteca (igual que generate-montaje.js) ──
+    let imageUrl = `data:${generated.mimeType};base64,${generated.base64}`; // fallback
+ 
+    try {
+      const mime      = generated.mimeType || "image/jpeg";
+      const ext       = mime.includes("png") ? "png" : "jpg";
+      const fname     = `photoshoot-${template}-v${idx}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const storagePath = `${userId}/${fname}`;
+      const imgBuffer = Buffer.from(generated.base64, "base64");
+ 
+      const { error: upErr } = await sb.storage
+        .from("generations")
+        .upload(storagePath, imgBuffer, { contentType: mime, upsert: false });
+ 
+      if (!upErr) {
+        const { data: pub } = sb.storage.from("generations").getPublicUrl(storagePath);
+        if (pub?.publicUrl) imageUrl = pub.publicUrl;
+        console.log("[photoshoot] imagen subida a Storage:", imageUrl.slice(0, 80));
+      } else {
+        console.error("[photoshoot] Storage upload error:", upErr.message);
+      }
+ 
+      // Guardar en tabla generations para la biblioteca
+      const promptLabel = `[Photoshoot ${template}${template === "campaign" ? " " + (season || "") : ""}] ${productDescription || ""}`.trim();
+      await sb.from("generations").insert({
+        user_id:         userId,
+        image_url:       imageUrl,
+        prompt:          promptLabel,
+        negative_prompt: "",
+        width:           0,
+        height:          0,
+        steps:           0,
+      });
+      console.log("[photoshoot] guardado en biblioteca, variacion:", idx);
+    } catch (saveErr) {
+      console.error("[photoshoot] error guardando en biblioteca:", saveErr?.message);
+      // No fallar — imagen generada aunque no se guarde en biblioteca
+    }
+ 
+    // ── 6. Devolver imagen ────────────────────────────────────
     return res.status(200).json({
       ok:             true,
-      imageUrl:       `data:${generated.mimeType};base64,${generated.base64}`,
+      imageUrl,
       template,
       variationIndex: idx,
       jades_spent:    JADES_PER_IMAGE,
