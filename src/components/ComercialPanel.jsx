@@ -1,19 +1,13 @@
 // src/components/ComercialPanel.jsx
 // ─────────────────────────────────────────────────────────────
 // Módulo Comercial IA — IsabelaOS
-// Genera comerciales profesionales completos con:
+// Genera comerciales profesionales completos:
 //   • Storyboard de nivel agencia (Gemini 2.5 Flash)
 //   • Imágenes por escena (Gemini Image)
 //   • Clips de video sin audio (Veo3 Fast)
 //   • Narración en off (ElevenLabs — acento + género verificados)
+//   • Ensamble final con transiciones (RunPod FFmpeg Worker)
 // Costo: 120 Jades = $12 USD todo incluido
-//
-// Cambios:
-//   - Selector de género (Mujer / Hombre)
-//   - Idioma/acento: inglés agregado con Erin y Jon
-//   - Avatar marcado como En desarrollo
-//   - Fix acumulación de fotos
-//   - Prompt Veo3 con negativo fuerte (sin subtítulos, sin texto)
 // ─────────────────────────────────────────────────────────────
 import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
@@ -54,15 +48,20 @@ async function compressImage(file, maxWidth = 1024) {
   });
 }
 
-// Acentos/idiomas disponibles — voces verificadas en ElevenLabs
 const ACCENTS = [
-  { value: "neutro",       label: "🌎 Neutro latino",  lang: "es" },
-  { value: "guatemalteco", label: "🇬🇹 Guatemalteco",  lang: "es" },
-  { value: "colombiano",   label: "🇨🇴 Colombiano",    lang: "es" },
-  { value: "mexicano",     label: "🇲🇽 Mexicano",      lang: "es" },
-  { value: "argentino",    label: "🇦🇷 Argentino",     lang: "es" },
-  { value: "español",      label: "🇪🇸 Español",       lang: "es" },
-  { value: "ingles",       label: "🇺🇸 English (US)",  lang: "en" },
+  { value: "neutro",       label: "🌎 Neutro latino" },
+  { value: "guatemalteco", label: "🇬🇹 Guatemalteco" },
+  { value: "colombiano",   label: "🇨🇴 Colombiano"   },
+  { value: "mexicano",     label: "🇲🇽 Mexicano"     },
+  { value: "argentino",    label: "🇦🇷 Argentino"    },
+  { value: "español",      label: "🇪🇸 Español"      },
+  { value: "ingles",       label: "🇺🇸 English (US)" },
+];
+
+const TRANSITIONS = [
+  { value: "fade",     label: "⬛ Fade",     sub: "Fade to black — cinematográfico" },
+  { value: "dissolve", label: "🌀 Dissolve", sub: "Cross-dissolve — elegante"       },
+  { value: "cut",      label: "✂️ Cut",      sub: "Corte directo — energético"      },
 ];
 
 const EXAMPLES = [
@@ -75,10 +74,8 @@ const EXAMPLES = [
 // ── Tarjeta de escena generada ────────────────────────────────
 function SceneCard({ scene }) {
   const videoRef = useRef(null);
-
   return (
     <div className="rounded-2xl border border-white/10 bg-black/40 overflow-hidden">
-      {/* Header */}
       <div className="bg-black/60 px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-white">Escena {scene.scene_number}</span>
@@ -91,17 +88,16 @@ function SceneCard({ scene }) {
         <span className="text-[10px] text-neutral-400">{scene.camera}</span>
       </div>
 
-      {/* Video o imagen */}
-      <div className="relative bg-black aspect-[9/16] max-h-[300px] w-full">
+      <div className="relative bg-black aspect-[9/16] max-h-[280px] w-full">
         {scene.video_url ? (
           <video ref={videoRef} src={scene.video_url} controls className="w-full h-full object-contain" />
         ) : scene.video_b64 ? (
           <video ref={videoRef} src={`data:video/mp4;base64,${scene.video_b64}`} controls className="w-full h-full object-contain" />
         ) : scene.image_b64 ? (
-          <img src={`data:${scene.image_mime};base64,${scene.image_b64}`} alt={`Escena ${scene.scene_number}`} className="w-full h-full object-contain" />
+          <img src={`data:${scene.image_mime};base64,${scene.image_b64}`} alt="" className="w-full h-full object-contain" />
         ) : (
           <div className="flex items-center justify-center h-full text-neutral-500 text-xs p-4 text-center">
-            {scene.error || "Sin contenido generado"}
+            {scene.error || "Sin contenido"}
           </div>
         )}
         {!scene.ok && scene.error && (
@@ -111,7 +107,6 @@ function SceneCard({ scene }) {
         )}
       </div>
 
-      {/* Narración + audio */}
       {scene.narration_text && (
         <div className="px-4 py-3 border-t border-white/5">
           <p className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Narración en off</p>
@@ -123,14 +118,20 @@ function SceneCard({ scene }) {
         </div>
       )}
 
-      {/* Descargar clip */}
       {(scene.video_url || scene.video_b64) && (
-        <div className="px-4 pb-3">
+        <div className="px-4 pb-3 flex gap-2">
           <a href={scene.video_url || `data:video/mp4;base64,${scene.video_b64}`}
-            download={`comercial-escena-${scene.scene_number}.mp4`}
-            className="block text-center rounded-xl border border-cyan-400/30 py-1.5 text-[11px] text-cyan-200 hover:bg-cyan-500/10 transition-all">
-            ↓ Descargar clip
+            download={`escena-${scene.scene_number}.mp4`}
+            className="flex-1 block text-center rounded-xl border border-white/20 py-1.5 text-[10px] text-neutral-300 hover:bg-white/10 transition-all">
+            ↓ Video
           </a>
+          {scene.audio_b64 && (
+            <a href={`data:audio/mpeg;base64,${scene.audio_b64}`}
+              download={`narración-${scene.scene_number}.mp3`}
+              className="flex-1 block text-center rounded-xl border border-cyan-400/30 py-1.5 text-[10px] text-cyan-200 hover:bg-cyan-500/10 transition-all">
+              ↓ Audio
+            </a>
+          )}
         </div>
       )}
     </div>
@@ -145,10 +146,14 @@ export default function ComercialPanel({ userStatus }) {
   const [duration,    setDuration]    = useState(30);
   const [accent,      setAccent]      = useState("neutro");
   const [gender,      setGender]      = useState("mujer");
+  const [transition,  setTransition]  = useState("fade");
+
   const [step,        setStep]        = useState("config");
   const [storyboard,  setStoryboard]  = useState(null);
   const [result,      setResult]      = useState(null);
+  const [finalVideo,  setFinalVideo]  = useState(null); // video ensamblado
   const [loading,     setLoading]     = useState(false);
+  const [assembling,  setAssembling]  = useState(false);
   const [statusText,  setStatusText]  = useState("");
   const [error,       setError]       = useState("");
 
@@ -172,7 +177,7 @@ export default function ComercialPanel({ userStatus }) {
     const refImages = [];
     for (const file of refFiles) {
       const compressed = await compressImage(file);
-      const b64        = await fileToBase64(new File([compressed], "ref.jpg", { type: "image/jpeg" }));
+      const b64 = await fileToBase64(new File([compressed], "ref.jpg", { type: "image/jpeg" }));
       refImages.push({ base64: b64, mimeType: "image/jpeg" });
     }
     return refImages;
@@ -182,11 +187,10 @@ export default function ComercialPanel({ userStatus }) {
   async function handleGenerateStoryboard() {
     if (!description.trim()) { setError("Describe tu comercial primero."); return; }
     if (currentJades < COMERCIAL_COST) { setError(`Necesitas ${COMERCIAL_COST} Jades. Tienes ${currentJades}.`); return; }
-
-    setError(""); setLoading(true); setStatusText("Diseñando tu comercial con Gemini...");
+    setError(""); setLoading(true); setStatusText("Diseñando storyboard con Gemini...");
     try {
       const refImages = await compressAll();
-      const auth      = await getAuthHeaders();
+      const auth = await getAuthHeaders();
       const r = await fetch("/api/comercial-storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
@@ -196,19 +200,17 @@ export default function ComercialPanel({ userStatus }) {
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Error generando storyboard.");
       setStoryboard(j.storyboard);
       setStep("storyboard");
-    } catch (e) {
-      setError("No se pudo generar el storyboard. Intenta de nuevo.");
-      console.error(e);
-    } finally { setLoading(false); setStatusText(""); }
+    } catch (e) { setError("No se pudo generar el storyboard."); console.error(e); }
+    finally { setLoading(false); setStatusText(""); }
   }
 
-  // Paso 2: Comercial completo
+  // Paso 2: Generar escenas
   async function handleGenerateComercial() {
     setError(""); setLoading(true); setStep("generating");
     setStatusText(`Generando ${storyboard.scenes.length} escenas en paralelo...`);
     try {
       const refImages = await compressAll();
-      const auth      = await getAuthHeaders();
+      const auth = await getAuthHeaders();
       const r = await fetch("/api/comercial-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...auth },
@@ -216,14 +218,57 @@ export default function ComercialPanel({ userStatus }) {
       });
       const j = await r.json().catch(() => null);
       if (!r.ok) {
-        if (j?.error === "INSUFFICIENT_JADES") { setError(`Jades insuficientes.`); setStep("config"); return; }
+        if (j?.error === "INSUFFICIENT_JADES") { setError("Jades insuficientes."); setStep("config"); return; }
         throw new Error(j?.error || "Error generando comercial.");
       }
-      setResult(j); setStep("done");
+      setResult(j);
+      setStep("done");
+    } catch (e) { setError("Ocurrió un problema. Intenta de nuevo."); setStep("storyboard"); console.error(e); }
+    finally { setLoading(false); setStatusText(""); }
+  }
+
+  // Paso 3: Ensamblar video final con RunPod FFmpeg
+  async function handleAssemble() {
+    if (!result?.scenes?.length) return;
+    const validScenes = result.scenes.filter(s => s.video_b64 || s.video_url);
+    if (!validScenes.length) { setError("No hay clips para ensamblar."); return; }
+
+    setAssembling(true); setError("");
+    setStatusText("Enviando clips al worker FFmpeg de RunPod...");
+
+    try {
+      const auth = await getAuthHeaders();
+
+      // Si alguna escena tiene video_url pero no video_b64, necesitamos el b64
+      // (normalmente ya vienen con b64 del paso anterior)
+      const scenesPayload = validScenes.map(s => ({
+        scene_number:     s.scene_number,
+        video_b64:        s.video_b64  || null,
+        audio_b64:        s.audio_b64  || null,
+        duration_seconds: s.duration_seconds || 8,
+      }));
+
+      setStatusText("Aplicando transiciones y ensamblando... esto toma 1-3 minutos ⏳");
+
+      const r = await fetch("/api/comercial-assemble", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...auth },
+        body: JSON.stringify({
+          scenes:     scenesPayload,
+          title:      result.title,
+          transition,
+        }),
+      });
+
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.detail || j?.error || "Error ensamblando.");
+
+      setFinalVideo(j);
+      setStatusText(`✅ Video final listo — ${j.duration_total?.toFixed(1)}s`);
     } catch (e) {
-      setError("Ocurrió un problema. Intenta de nuevo.");
-      setStep("storyboard"); console.error(e);
-    } finally { setLoading(false); setStatusText(""); }
+      setError(`Error ensamblando: ${e?.message || e}`);
+      console.error(e);
+    } finally { setAssembling(false); }
   }
 
   const selectedAccentLabel = ACCENTS.find(a => a.value === accent)?.label || accent;
@@ -251,8 +296,8 @@ export default function ComercialPanel({ userStatus }) {
         {[
           { icon: "🎬", label: "4-7 clips de video", sub: "Veo3 Fast · 8s cada uno" },
           { icon: "🎙️", label: "Voz en off IA",      sub: "ElevenLabs · acento + género" },
-          { icon: "🖼️", label: "Imágenes HD",         sub: "Gemini Image · por escena" },
-          { icon: "📱", label: "Formato vertical",   sub: "9:16 · Reels y TikTok" },
+          { icon: "✂️", label: "Video final",         sub: "FFmpeg · con transiciones" },
+          { icon: "📱", label: "Formato vertical",   sub: "1080×1920 · Reels y TikTok" },
         ].map(({ icon, label, sub }) => (
           <div key={label} className="rounded-2xl border border-white/10 bg-black/30 px-3 py-3 text-center">
             <div className="text-xl mb-1">{icon}</div>
@@ -262,25 +307,17 @@ export default function ComercialPanel({ userStatus }) {
         ))}
       </div>
 
-      {/* Nota voz en off */}
-      <div className="rounded-2xl border border-blue-400/20 bg-blue-500/5 px-4 py-3 text-xs text-blue-200">
-        <span className="font-semibold">🎙️ ¿Cómo funciona la voz?</span>{" "}
-        Cada clip viene con su narración en off lista para descargar. Importa ambos en CapCut, Premiere
-        o DaVinci y coloca el audio sobre el video para el resultado final.
-      </div>
-
       {/* ══ PASO 1: CONFIGURACIÓN ══ */}
       {(step === "config" || step === "storyboard") && (
         <div className="space-y-5">
 
-          {/* Fotos de referencia */}
+          {/* Fotos */}
           <div>
             <label className="text-sm font-semibold text-white">
               Fotos de referencia <span className="text-neutral-400 font-normal">(hasta 3)</span>
             </label>
             <p className="mt-1 text-xs text-neutral-400">
-              Sube fotos de tu producto, ropa, tienda, comida, persona o lo que quieras
-              mostrar. El sistema lo analiza y lo incluye en cada escena.
+              Sube fotos de tu producto, ropa, tienda, comida o persona. El sistema lo analiza automáticamente.
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
               {refPreviews.map((src, idx) => (
@@ -305,12 +342,8 @@ export default function ComercialPanel({ userStatus }) {
           {/* Descripción */}
           <div>
             <label className="text-sm font-semibold text-white">Describe tu comercial</label>
-            <p className="mt-1 text-xs text-neutral-400">
-              Explica qué vendes y qué quieres transmitir. Cuanto más detalle, mejor resultado.
-            </p>
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-              rows={4}
-              placeholder="Ej: Comercial de una boutique de ropa femenina. Una mujer entra, se prueba vestidos y sale radiante y segura de sí misma."
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4}
+              placeholder="Ej: Comercial de una boutique de ropa femenina. Una mujer se prueba vestidos y sale radiante."
               className="mt-2 w-full resize-none rounded-2xl bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400 transition-all" />
             <div className="mt-2 flex flex-wrap gap-2">
               {EXAMPLES.map((ex, i) => (
@@ -332,9 +365,7 @@ export default function ComercialPanel({ userStatus }) {
               ].map(({ val, label, sub }) => (
                 <button key={val} onClick={() => setDuration(val)}
                   className={`rounded-2xl border p-3 text-left text-sm transition-all ${
-                    duration === val
-                      ? "border-cyan-400 bg-cyan-500/10 text-white"
-                      : "border-white/10 bg-black/30 text-neutral-300 hover:border-white/20"
+                    duration === val ? "border-cyan-400 bg-cyan-500/10 text-white" : "border-white/10 bg-black/30 text-neutral-300 hover:border-white/20"
                   }`}>
                   <div className="font-semibold">{label}</div>
                   <div className="text-[10px] text-neutral-400">{sub}</div>
@@ -343,7 +374,23 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           </div>
 
-          {/* Acento / Idioma + Género */}
+          {/* Transición */}
+          <div>
+            <label className="text-sm font-semibold text-white">Tipo de transición</label>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {TRANSITIONS.map(({ value, label, sub }) => (
+                <button key={value} onClick={() => setTransition(value)}
+                  className={`rounded-2xl border p-3 text-left text-sm transition-all ${
+                    transition === value ? "border-fuchsia-400 bg-fuchsia-500/10 text-white" : "border-white/10 bg-black/30 text-neutral-300 hover:border-white/20"
+                  }`}>
+                  <div className="font-semibold text-xs">{label}</div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">{sub}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Acento + Género */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="text-sm font-semibold text-white">Idioma y acento</label>
@@ -357,15 +404,10 @@ export default function ComercialPanel({ userStatus }) {
             <div>
               <label className="text-sm font-semibold text-white">Voz del narrador</label>
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {[
-                  { val: "mujer",  label: "👩 Mujer"  },
-                  { val: "hombre", label: "👨 Hombre" },
-                ].map(({ val, label }) => (
+                {[{ val: "mujer", label: "👩 Mujer" }, { val: "hombre", label: "👨 Hombre" }].map(({ val, label }) => (
                   <button key={val} onClick={() => setGender(val)}
                     className={`rounded-2xl border p-3 text-sm font-semibold text-center transition-all ${
-                      gender === val
-                        ? "border-cyan-400 bg-cyan-500/10 text-white"
-                        : "border-white/10 bg-black/30 text-neutral-300 hover:border-white/20"
+                      gender === val ? "border-cyan-400 bg-cyan-500/10 text-white" : "border-white/10 bg-black/30 text-neutral-300 hover:border-white/20"
                     }`}>
                     {label}
                   </button>
@@ -374,26 +416,18 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           </div>
 
-          {/* Avatar — en desarrollo */}
+          {/* Avatar en desarrollo */}
           <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 flex items-center justify-between opacity-50 pointer-events-none select-none">
             <div>
               <div className="flex items-center gap-2">
                 <div className="text-sm font-semibold text-white">Avatar virtual en escenas</div>
-                <span className="rounded-full border border-yellow-400/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] text-yellow-300 font-semibold">
-                  🚧 En desarrollo
-                </span>
+                <span className="rounded-full border border-yellow-400/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] text-yellow-300 font-semibold">🚧 En desarrollo</span>
               </div>
-              <div className="text-xs text-neutral-500 mt-0.5">
-                Próximamente: usa tu avatar de IsabelaOS como modelo en cada escena del comercial.
-              </div>
+              <div className="text-xs text-neutral-500 mt-0.5">Próximamente: usa tu avatar de IsabelaOS en cada escena.</div>
             </div>
           </div>
 
-          {error && (
-            <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
-              {error}
-            </div>
-          )}
+          {error && <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">{error}</div>}
 
           {step === "config" && (
             <button onClick={handleGenerateStoryboard} disabled={loading || !description.trim()}
@@ -413,14 +447,13 @@ export default function ComercialPanel({ userStatus }) {
                 <p className="text-[11px] text-emerald-300 font-semibold uppercase tracking-wider">Storyboard listo</p>
                 <h3 className="mt-1 text-xl font-bold text-white">"{storyboard.title}"</h3>
                 <p className="mt-1 text-xs text-neutral-400">{storyboard.style}</p>
-                {storyboard.narrative_hook && (
-                  <p className="mt-2 text-xs text-cyan-300 italic">💡 {storyboard.narrative_hook}</p>
-                )}
+                {storyboard.narrative_hook && <p className="mt-2 text-xs text-cyan-300 italic">💡 {storyboard.narrative_hook}</p>}
               </div>
               <div className="text-right text-xs text-neutral-400 space-y-1">
-                <div>{storyboard.scenes?.length} escenas</div>
+                <div>{storyboard.scenes?.length} escenas · {duration}s</div>
                 <div>🎵 {storyboard.music_mood}</div>
                 <div>🎙️ {selectedAccentLabel} · {gender}</div>
+                <div>✂️ Transición: {transition}</div>
               </div>
             </div>
 
@@ -428,13 +461,9 @@ export default function ComercialPanel({ userStatus }) {
               {storyboard.scenes?.map((scene, idx) => (
                 <div key={idx} className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
                   <div className="flex items-center gap-2 flex-wrap mb-2">
-                    <span className="rounded-xl border border-white/10 bg-black/50 px-2.5 py-1 text-[10px] font-bold text-white">
-                      {scene.scene_number}
-                    </span>
+                    <span className="rounded-xl border border-white/10 bg-black/50 px-2.5 py-1 text-[10px] font-bold text-white">{scene.scene_number}</span>
                     {scene.narrative_role && (
-                      <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-300 capitalize">
-                        {scene.narrative_role}
-                      </span>
+                      <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-300 capitalize">{scene.narrative_role}</span>
                     )}
                     <span className="text-[10px] text-neutral-400">{scene.camera}</span>
                   </div>
@@ -449,9 +478,7 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           </div>
 
-          {error && (
-            <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">{error}</div>
-          )}
+          {error && <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">{error}</div>}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <button onClick={() => { setStep("config"); setStoryboard(null); }}
@@ -474,52 +501,102 @@ export default function ComercialPanel({ userStatus }) {
           <p className="mt-2 text-sm text-neutral-400">{statusText}</p>
           <div className="mt-5 text-left max-w-sm mx-auto space-y-2 text-xs text-neutral-400">
             <div>✅ Storyboard de nivel agencia generado</div>
-            <div>⏳ Generando imagen por escena con Gemini Image...</div>
-            <div>⏳ Convirtiendo imágenes a video con Veo3 (sin subtítulos)...</div>
+            <div>⏳ Generando imágenes con Gemini Image...</div>
+            <div>⏳ Convirtiendo a video con Veo3 (sin subtítulos)...</div>
             <div>⏳ Generando narración en off con ElevenLabs...</div>
           </div>
-          <p className="mt-5 text-xs text-neutral-500">
-            Las escenas se procesan en paralelo.<br />
-            Puede tomar 3-5 minutos. No cierres esta ventana.
-          </p>
+          <p className="mt-5 text-xs text-neutral-500">Puede tomar 3-5 minutos. No cierres esta ventana.</p>
           <div className="mt-5 flex justify-center gap-1">
             {[0,1,2,3,4].map(i => (
-              <div key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce"
-                style={{ animationDelay: `${i * 0.15}s` }} />
+              <div key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
             ))}
           </div>
         </div>
       )}
 
-      {/* ══ PASO 4: RESULTADO ══ */}
+      {/* ══ PASO 4: RESULTADO + ENSAMBLE ══ */}
       {step === "done" && result && (
         <div className="space-y-5">
+
+          {/* Resumen */}
           <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/5 px-5 py-4">
             <p className="text-sm font-semibold text-emerald-300">
               ✅ {result.success_count}/{result.total_scenes} escenas generadas
             </p>
             <p className="mt-1 text-xs text-neutral-400">"{result.title}"</p>
-            {result.call_to_action && (
-              <p className="mt-1 text-xs text-yellow-200">CTA: {result.call_to_action}</p>
-            )}
+            {result.call_to_action && <p className="mt-1 text-xs text-yellow-200">CTA: {result.call_to_action}</p>}
             <p className="mt-1 text-xs text-blue-300">
-              🎙️ {ACCENTS.find(a => a.value === result.accent)?.label} ·{" "}
-              {result.gender === "hombre" ? "Narrador" : "Narradora"}
+              🎙️ {ACCENTS.find(a => a.value === result.accent)?.label} · {result.gender === "hombre" ? "Narrador" : "Narradora"}
             </p>
           </div>
 
-          {/* Tip de edición */}
+          {/* Video final ensamblado */}
+          {finalVideo ? (
+            <div className="rounded-3xl border border-fuchsia-400/20 bg-fuchsia-500/5 p-5">
+              <p className="text-sm font-semibold text-fuchsia-300 mb-3">
+                🎬 Video final — {finalVideo.duration_total?.toFixed(1)}s · transición {finalVideo.transition}
+              </p>
+              <video
+                src={`data:video/mp4;base64,${finalVideo.video_b64}`}
+                controls
+                className="w-full max-w-xs mx-auto rounded-2xl overflow-hidden block"
+                style={{ maxHeight: "500px" }}
+              />
+              <a
+                href={`data:video/mp4;base64,${finalVideo.video_b64}`}
+                download={`${result.title || "comercial"}-final.mp4`}
+                className="mt-4 block text-center rounded-2xl bg-gradient-to-r from-fuchsia-500 to-cyan-500 py-3 text-sm font-bold text-white hover:opacity-90 transition-all">
+                ↓ Descargar video final completo
+              </a>
+              <p className="mt-3 text-xs text-neutral-500 text-center">
+                🎵 Sugerencia musical: {result.music_mood}
+              </p>
+            </div>
+          ) : (
+            /* Botón de ensamble */
+            <div className="rounded-3xl border border-fuchsia-400/20 bg-fuchsia-500/5 p-5 text-center">
+              <div className="text-3xl mb-3">✂️</div>
+              <h3 className="text-base font-semibold text-white">Ensamblar video final</h3>
+              <p className="mt-1 text-xs text-neutral-400">
+                El worker FFmpeg une todos los clips con transición <strong className="text-fuchsia-300">{transition}</strong>,
+                mezcla las narraciones y genera un único video listo para publicar.
+              </p>
+
+              {error && <div className="mt-3 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-xs text-red-200">{error}</div>}
+
+              {assembling ? (
+                <div className="mt-4">
+                  <p className="text-sm text-neutral-400">{statusText}</p>
+                  <div className="mt-3 flex justify-center gap-1">
+                    {[0,1,2,3,4].map(i => (
+                      <div key={i} className="h-2 w-2 rounded-full bg-fuchsia-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <button onClick={handleAssemble}
+                  className="mt-4 w-full rounded-2xl bg-gradient-to-r from-fuchsia-500 to-cyan-500 py-3 text-sm font-bold text-white hover:opacity-90 transition-all">
+                  🎬 Ensamblar video final
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Grid de escenas individuales */}
+          <div>
+            <p className="text-xs text-neutral-500 mb-3">Clips individuales por escena:</p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {result.scenes?.map((scene, idx) => <SceneCard key={idx} scene={scene} />)}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-xs text-neutral-400">
-            <span className="text-white font-semibold">💡 Cómo usar:</span> Descarga cada clip y su
-            audio. En CapCut o cualquier editor, coloca la narración sobre el clip correspondiente.
-            Agrega música de fondo según el mood sugerido: <span className="text-cyan-300">{result.music_mood}</span>.
+            <span className="text-white font-semibold">💡 Tip:</span> También puedes descargar cada clip y audio
+            individualmente para editar en CapCut, Premiere o DaVinci.
+            Mood musical sugerido: <span className="text-cyan-300">{result.music_mood}</span>.
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {result.scenes?.map((scene, idx) => <SceneCard key={idx} scene={scene} />)}
-          </div>
-
-          <button onClick={() => { setStep("config"); setStoryboard(null); setResult(null); setError(""); }}
+          <button onClick={() => { setStep("config"); setStoryboard(null); setResult(null); setFinalVideo(null); setError(""); }}
             className="w-full rounded-2xl border border-white/20 py-3 text-sm text-white hover:bg-white/10 transition-all">
             + Crear otro comercial
           </button>
