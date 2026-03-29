@@ -1,12 +1,11 @@
 // api/comercial-storyboard.js
 // ─────────────────────────────────────────────────────────────
-// Gemini analiza las fotos de referencia y la descripción
-// del usuario y genera un storyboard de nivel agencia con:
-//   - Escenas (4 para 30s, 7 para 60s)
-//   - Prompt de imagen por escena (para Gemini Image)
-//   - Prompt de video por escena (para Veo3, sin audio)
-//   - Texto de narración en off por escena (para ElevenLabs)
-//   - Estructura narrativa de comercial real (problema → solución → CTA)
+// Gemini genera un storyboard de nivel agencia publicitaria:
+//   - Estructura narrativa real (gancho → problema → solución → CTA)
+//   - Prompts de imagen universales (ropa, comida, carros, servicios...)
+//   - Prompts de video sin audio para Veo3
+//   - Narración en off por escena para ElevenLabs
+//   - Soporte de idioma: español (todos los acentos) e inglés
 // ─────────────────────────────────────────────────────────────
 import { requireUser } from "./_auth.js";
  
@@ -14,9 +13,7 @@ const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_MODEL    = "gemini-2.5-flash";
  
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
  
   try {
     const auth = await requireUser(req);
@@ -26,110 +23,113 @@ export default async function handler(req, res) {
  
     const description   = String(body?.description || "").trim();
     const duration      = body?.duration === 60 ? 60 : 30;
-    const hasAvatar     = !!body?.hasAvatar;
     const referenceImgs = Array.isArray(body?.referenceImages) ? body.referenceImages : [];
     const accent        = String(body?.accent  || "neutro").trim();
     const gender        = String(body?.gender  || "mujer").trim();
  
-    if (!description) {
-      return res.status(400).json({ ok: false, error: "MISSING_DESCRIPTION" });
-    }
+    if (!description) return res.status(400).json({ ok: false, error: "MISSING_DESCRIPTION" });
  
-    const sceneCount = duration === 60 ? 7 : 4;
+    const sceneCount  = duration === 60 ? 7 : 4;
+    const isEnglish   = accent === "ingles";
+    const narLang     = isEnglish ? "English" : "Spanish";
+    const narGender   = gender === "hombre" ? (isEnglish ? "male narrator" : "narrador masculino") : (isEnglish ? "female narrator" : "narradora femenina");
+    const narAccent   = isEnglish ? "American English accent" : `acento ${accent}`;
  
-    // Construir partes del mensaje para Gemini
     const parts = [];
  
-    // Incluir TODAS las fotos de referencia (hasta 3)
+    // Incluir todas las fotos de referencia
     for (const img of referenceImgs.slice(0, 3)) {
       if (img?.base64 && img?.mimeType) {
-        parts.push({
-          inline_data: { mime_type: img.mimeType, data: img.base64 }
-        });
+        parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
       }
     }
  
-    // Prompt de nivel agencia — estructura narrativa real de comerciales
     const systemPrompt = [
-      "Eres el director creativo de una agencia de publicidad de primer nivel en Latinoamérica.",
-      "Tu especialidad es crear comerciales que generan ventas reales, no solo 'bonitos'.",
-      "Has trabajado con marcas como Claro, Bimbo, Avianca, Corona y Coca-Cola.",
+      "You are the creative director of a top-tier Latin American advertising agency.",
+      "You have won Cannes Lions awards for commercial campaigns across every product category:",
+      "fashion, food, automotive, real estate, services, beauty, technology, and more.",
+      "Your job: generate a PROFESSIONAL, SALES-DRIVEN storyboard for a short commercial.",
       "",
-      "═══════════════════════════════════════",
-      "BRIEF DEL CLIENTE:",
-      "═══════════════════════════════════════",
-      `DESCRIPCIÓN: ${description}`,
-      `DURACIÓN: ${duration} segundos (${sceneCount} escenas de 8 segundos cada una)`,
-      `VOZ EN OFF: ${gender === "hombre" ? "Narrador masculino" : "Narradora femenina"}, acento ${accent}`,
-      `TIENE AVATAR/MODELO: ${hasAvatar ? "SÍ — mantener consistencia del modelo en cada escena" : "NO — usar personas genéricas o el producto como protagonista"}`,
+      "╔══════════════════════════════════════╗",
+      "  CLIENT BRIEF",
+      "╚══════════════════════════════════════╝",
+      `DESCRIPTION: ${description}`,
+      `DURATION: ${duration} seconds (${sceneCount} scenes × 8 seconds each)`,
+      `VOICEOVER: ${narGender}, ${narAccent}`,
+      `NARRATION LANGUAGE: ${narLang}`,
       referenceImgs.length > 0
-        ? `REFERENCIAS VISUALES: ${referenceImgs.length} imagen(es) adjunta(s) — úsalas como base visual para todas las escenas`
-        : "SIN REFERENCIAS VISUALES — crear desde la descripción",
+        ? `VISUAL REFERENCES: ${referenceImgs.length} image(s) provided — analyze them carefully to understand the product/service/person/location and incorporate them into every scene`
+        : "NO VISUAL REFERENCES — create from description only",
       "",
-      "═══════════════════════════════════════",
-      "ESTRUCTURA NARRATIVA OBLIGATORIA:",
-      "═══════════════════════════════════════",
-      "Los comerciales que venden siguen esta estructura psicológica:",
+      "╔══════════════════════════════════════╗",
+      "  MANDATORY NARRATIVE STRUCTURE",
+      "╚══════════════════════════════════════╝",
+      "Commercials that SELL follow this psychological arc:",
       "",
-      sceneCount === 4
-        ? [
-            "Escena 1 — GANCHO (2 primeros segundos son todo): imagen impactante que detiene el scroll",
-            "Escena 2 — PROBLEMA o DESEO: el espectador se identifica con la situación",
-            "Escena 3 — SOLUCIÓN: el producto/servicio entra como la respuesta perfecta",
-            "Escena 4 — CTA + RESULTADO: persona feliz usando el producto, llamada a la acción",
-          ].join("\n")
-        : [
-            "Escena 1 — GANCHO: imagen impactante que detiene el scroll",
-            "Escena 2 — PROBLEMA o CONTEXTO: situación con la que el espectador se identifica",
-            "Escena 3 — AGITACIÓN: el problema en su peor momento",
-            "Escena 4 — SOLUCIÓN: el producto aparece como la respuesta",
-            "Escena 5 — BENEFICIOS: mostrar 2-3 beneficios clave visualmente",
-            "Escena 6 — PRUEBA SOCIAL: resultado real, persona satisfecha",
-            "Escena 7 — CTA: llamada a la acción clara y urgente",
-          ].join("\n"),
+      sceneCount === 4 ? [
+        "Scene 1 — HOOK: Stop-the-scroll image. Visually shocking or emotionally magnetic.",
+        "Scene 2 — PROBLEM or DESIRE: Viewer identifies with the situation/need.",
+        "Scene 3 — SOLUTION: Product/service enters as the perfect answer.",
+        "Scene 4 — RESULT + CTA: Happy customer / beautiful product + action call.",
+      ].join("\n") : [
+        "Scene 1 — HOOK: Stop-the-scroll visual. Shocking, beautiful, or emotionally magnetic.",
+        "Scene 2 — CONTEXT: Situation the target audience recognizes and relates to.",
+        "Scene 3 — PROBLEM AGITATION: The need/pain at its peak.",
+        "Scene 4 — SOLUTION: Product/service enters as the answer.",
+        "Scene 5 — KEY BENEFITS: 2-3 benefits shown visually, not just stated.",
+        "Scene 6 — SOCIAL PROOF: Real-looking result, happy customer, transformation.",
+        "Scene 7 — CTA: Clear, urgent call to action.",
+      ].join("\n"),
       "",
-      "═══════════════════════════════════════",
-      "INSTRUCCIONES DE PRODUCCIÓN:",
-      "═══════════════════════════════════════",
-      "IMAGE PROMPTS (para Gemini Image):",
-      "- En INGLÉS, fotorrealistas, extremadamente detallados",
-      "- Especificar: iluminación, ángulo, composición, atmósfera",
-      "- Nivel de calidad: campaña nacional de TV y redes sociales",
-      "- Formato: 9:16 vertical (Reels, TikTok, Stories)",
+      "╔══════════════════════════════════════╗",
+      "  PRODUCTION INSTRUCTIONS",
+      "╚══════════════════════════════════════╝",
       "",
-      "VIDEO PROMPTS (para Veo3):",
-      "- En INGLÉS, describir el movimiento exacto de cámara",
-      "- Tipos de movimiento: slow zoom in, crane shot, dolly forward, pan, tilt, handheld",
-      "- CRÍTICO: NO incluir audio, diálogos ni música — solo movimiento visual",
-      "- El audio lo agrega ElevenLabs como voz en off en postproducción",
+      "IMAGE PROMPTS (for Gemini Image AI):",
+      "- Write in ENGLISH, extremely detailed, 60-100 words",
+      "- Specify: lighting type, camera angle, composition, atmosphere, color palette",
+      "- Must work for ANY product category (fashion, food, car, service, location...)",
+      "- If reference images show a product: the product must be featured prominently",
+      "- If reference images show a person: maintain their likeness",
+      "- Quality level: national TV commercial / luxury brand campaign",
+      "- Format: 9:16 vertical portrait",
+      "- NEVER include any text or subtitles in the image description",
       "",
-      "NARRACIÓN EN OFF (para ElevenLabs):",
-      "- En ESPAÑOL, máximo 18 palabras por escena",
-      "- Tono: persuasivo, emocional, natural — NO robótico",
-      "- Debe fluir como si fuera una sola narración continua",
-      `- Acento y registro: ${accent}, ${gender === "hombre" ? "voz masculina" : "voz femenina"}`,
-      "- Usar pausas naturales con comas",
+      "VIDEO PROMPTS (for Veo3 AI video generator):",
+      "- Write in ENGLISH, 25-40 words",
+      "- Describe ONLY camera movement and action — nothing else",
+      "- Examples: 'Slow zoom in on product', 'Tracking shot follows model walking',",
+      "  'Crane shot descends to reveal restaurant', 'Close-up handheld of food being plated'",
+      "- CRITICAL: DO NOT mention audio, music, dialogue, or speech",
+      "- CRITICAL: DO NOT mention text, subtitles, or captions",
+      "- These are SILENT clips — voiceover added separately",
       "",
-      `Genera exactamente ${sceneCount} escenas. Responde SOLO en JSON válido, sin markdown:`,
+      `VOICEOVER NARRATION (for ElevenLabs — write in ${narLang}):`,
+      `- ${isEnglish ? "Maximum 20 words per scene" : "Máximo 18 palabras por escena"}`,
+      `- ${isEnglish ? "Tone: persuasive, emotional, natural — NOT robotic" : "Tono: persuasivo, emocional, natural — NO robótico"}`,
+      `- ${isEnglish ? "Must flow as one continuous narration across all scenes" : "Debe fluir como narración continua entre escenas"}`,
+      `- ${isEnglish ? `Voice: ${narGender}, ${narAccent}` : `Voz: ${narGender}, ${narAccent}`}`,
+      "",
+      `Generate exactly ${sceneCount} scenes. Respond ONLY with valid JSON, no markdown, no explanation:`,
       "{",
-      '  "title": "título creativo del comercial (máx 6 palabras)",',
-      '  "style": "descripción del estilo visual: paleta de colores, iluminación, mood",',
-      '  "target_audience": "público objetivo específico (edad, contexto, necesidad)",',
-      '  "narrative_hook": "la idea central que hace memorable este comercial",',
+      '  "title": "creative commercial title (max 6 words)",',
+      '  "style": "visual style description: color palette, lighting, mood",',
+      '  "target_audience": "specific target audience (age, context, need)",',
+      '  "narrative_hook": "the core creative idea that makes this commercial memorable",',
       '  "scenes": [',
       "    {",
       '      "scene_number": 1,',
       '      "duration_seconds": 8,',
-      '      "narrative_role": "gancho|problema|solución|beneficio|cta",',
-      '      "camera": "tipo de plano en español (primer plano, plano general, plano medio, etc.)",',
-      '      "image_prompt": "prompt fotorrealista en inglés para Gemini Image, muy detallado, 50-80 palabras",',
-      '      "video_prompt": "prompt en inglés para Veo3 describiendo el movimiento de cámara, 20-40 palabras, sin audio",',
-      '      "narration": "texto de narración en off en español, máx 18 palabras, persuasivo",',
-      '      "description": "qué pasa en esta escena en 1-2 oraciones"',
+      `      "narrative_role": "hook|problem|solution|benefit|cta",`,
+      '      "camera": "shot type in Spanish (primer plano, plano general, plano medio, etc.)",',
+      '      "image_prompt": "detailed photorealistic image prompt in English for Gemini Image, 60-100 words",',
+      '      "video_prompt": "Veo3 camera movement prompt in English, 25-40 words, NO audio/text/dialogue",',
+      `      "narration": "voiceover text in ${narLang}, max ${isEnglish ? 20 : 18} words, persuasive",`,
+      '      "description": "what happens in this scene, 1-2 sentences"',
       "    }",
       "  ],",
-      '  "call_to_action": "texto del CTA final (ej: Visítanos hoy, Llama ahora, Pídelo en línea)",',
-      '  "music_mood": "mood musical sugerido para edición (ej: upbeat latino, emocional suave, energético)"',
+      '  "call_to_action": "final CTA text (e.g.: Visit us today / Call now / Order online)",',
+      '  "music_mood": "suggested music mood for editing (e.g.: upbeat latino, emotional, energetic)"',
       "}",
     ].join("\n");
  
@@ -138,41 +138,33 @@ export default async function handler(req, res) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
  
-    const url = `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
- 
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: {
-          temperature:      0.75,
-          topP:             0.9,
-          maxOutputTokens:  6000,
-        },
-      }),
-    });
+    const r = await fetch(
+      `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.75, topP: 0.9, maxOutputTokens: 6000 },
+        }),
+      }
+    );
  
     if (!r.ok) {
       const txt = await r.text();
       throw new Error(`Gemini error ${r.status}: ${txt.slice(0, 300)}`);
     }
  
-    const data   = await r.json();
+    const data    = await r.json();
     const rawText = data?.candidates?.[0]?.content?.parts
       ?.map(p => p?.text || "").join("").trim() || "";
  
-    // Parsear JSON del storyboard
     let storyboard = null;
     try {
-      const cleaned = rawText.replace(/```json|```/g, "").trim();
-      storyboard = JSON.parse(cleaned);
+      storyboard = JSON.parse(rawText.replace(/```json|```/g, "").trim());
     } catch {
-      // Intentar extraer JSON del texto si viene con texto extra
       const match = rawText.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { storyboard = JSON.parse(match[0]); } catch {}
-      }
+      if (match) { try { storyboard = JSON.parse(match[0]); } catch {} }
     }
  
     if (!storyboard?.scenes?.length) {
@@ -180,22 +172,12 @@ export default async function handler(req, res) {
       throw new Error("Gemini no generó un storyboard válido.");
     }
  
-    console.log(
-      `[comercial-storyboard] OK — ${storyboard.scenes.length} escenas` +
-      ` para "${storyboard.title}" accent=${accent} gender=${gender}`
-    );
+    console.log(`[comercial-storyboard] OK — ${storyboard.scenes.length} escenas — "${storyboard.title}" accent=${accent} gender=${gender}`);
  
-    return res.status(200).json({
-      ok:         true,
-      storyboard,
-      duration,
-      sceneCount: storyboard.scenes.length,
-    });
+    return res.status(200).json({ ok: true, storyboard, duration, sceneCount: storyboard.scenes.length });
  
   } catch (e) {
     console.error("[comercial-storyboard] ERROR:", e?.message || e);
-    return res.status(500).json({
-      ok: false, error: e?.message || "Error generando storyboard."
-    });
+    return res.status(500).json({ ok: false, error: e?.message || "Error generando storyboard." });
   }
 }
