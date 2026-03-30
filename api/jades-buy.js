@@ -79,7 +79,8 @@ export default async function handler(req, res) {
     const user = auth.user;
     console.log("[jades-buy] user:", user.id);
 
-    const { pack, card } = req.body || {};
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const { pack, card } = body;
     console.log("[jades-buy] pack:", pack);
 
     if (!pack || !JADE_PACKS[pack]) {
