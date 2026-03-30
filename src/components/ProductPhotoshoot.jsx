@@ -186,21 +186,42 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
-  // ---- manejo de upload ----
-  const handleFile = useCallback((file) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    setUploadedMimeType(file.type || "image/jpeg");
+  // ---- manejo de upload con compresión ----
+  // Comprime la imagen a máx 1200px y calidad 0.85 para evitar FUNCTION_PAYLOAD_TOO_LARGE
+  const compressImage = (file) => new Promise((resolve) => {
+    const img = new Image();
     const url = URL.createObjectURL(file);
-    setUploadedImage(url);
-
-    // convertir a base64 para enviar a la API
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result.split(",")[1];
-      setUploadedImageBase64(base64);
+    img.onload = () => {
+      const MAX = 1200;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+        else { width = Math.round(width * MAX / height); height = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      const quality = 0.85;
+      const base64 = canvas.toDataURL("image/jpeg", quality);
+      URL.revokeObjectURL(url);
+      resolve({ base64, dataUrl: base64 });
     };
-    reader.readAsDataURL(file);
+    img.src = url;
+  });
+
+  const handleFile = useCallback(async (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setUploadedMimeType("image/jpeg"); // siempre jpeg después de comprimir
     setStep("configure");
+
+    // Mostrar preview inmediato con la URL original
+    const previewUrl = URL.createObjectURL(file);
+    setUploadedImage(previewUrl);
+
+    // Comprimir en background
+    const { base64 } = await compressImage(file);
+    setUploadedImageBase64(base64.split(",")[1]);
   }, []);
 
   const handleDrop = useCallback(
