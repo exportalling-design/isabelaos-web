@@ -54,14 +54,65 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
   const [paying,       setPaying]       = useState(false);
   const [cardError,    setCardError]    = useState("");
   const [cardSuccess,  setCardSuccess]  = useState("");
+  const [fingerprint,  setFingerprint]  = useState("");
+  const fingerprintRef = useRef(null);
 
   const [card, setCard] = useState({
     cardHolderName: "", number: "", expirationDate: "", cvv: "",
     firstName: "", lastName: "", email: "", phone: "",
-    city: "Guatemala", state: "Guatemala", zip: "", countryId: "320", line1: "",
+    city: "", line1: "",
   });
 
   const upd = (k, v) => setCard((p) => ({ ...p, [k]: v }));
+
+  // Cargar script de Pagadito y generar fingerprint cuando se abre el modal
+  useEffect(() => {
+    if (!open) return;
+
+    const env = "SANDBOX"; // cambiar a "LIVE" en producción
+
+    // Remover script anterior si existe
+    const existing = document.getElementById("cybs-fp-script");
+    if (existing) existing.remove();
+
+    const script = document.createElement("script");
+    script.id  = "cybs-fp-script";
+    script.src = "https://sandbox-api.pagadito.com/cybs_devicefingerprint.js"; // sandbox
+    // En producción: "https://api.pagadito.com/cybs_devicefingerprint.js"
+    script.async = true;
+
+    script.onload = () => {
+      try {
+        // El script expone cybs_dfprofiler() que genera el fingerprint
+        const fp = window.cybs_dfprofiler("pagadito", env);
+        if (fp) {
+          setFingerprint(String(fp));
+          console.log("[BuyJades] fingerprint generado:", String(fp));
+        } else {
+          // Fallback: 16 dígitos numéricos si el script no devuelve valor
+          const ts   = String(Date.now()).slice(-8);
+          const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
+          setFingerprint(ts + rand);
+        }
+      } catch (err) {
+        console.warn("[BuyJades] error generando fingerprint:", err);
+        // Fallback numérico
+        const ts   = String(Date.now()).slice(-8);
+        const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
+        setFingerprint(ts + rand);
+      }
+    };
+
+    script.onerror = () => {
+      console.warn("[BuyJades] no se pudo cargar cybs_devicefingerprint.js");
+      // Fallback numérico
+      const ts   = String(Date.now()).slice(-8);
+      const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
+      setFingerprint(ts + rand);
+    };
+
+    document.head.appendChild(script);
+  }, [open]);
 
   if (!open) return null;
 
@@ -84,14 +135,23 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({
           pack: selectedPack,
+          deviceFingerprintID: fingerprint,
           card: {
-            number: card.number.trim(), expirationDate: card.expirationDate.trim(),
-            cvv: card.cvv.trim(), cardHolderName: card.cardHolderName.trim(),
-            firstName: card.firstName.trim(), lastName: card.lastName.trim(),
-            email: card.email.trim(),
+            number:         card.number.trim(),
+            expirationDate: card.expirationDate.trim(),
+            cvv:            card.cvv.trim(),
+            cardHolderName: card.cardHolderName.trim(),
+            firstName:      card.firstName.trim(),
+            lastName:       card.lastName.trim(),
+            email:          card.email.trim(),
+            phone:          card.phone.trim(),
             billingAddress: {
-              city: card.city.trim(), state: card.state.trim(), zip: card.zip.trim(),
-              countryId: card.countryId.trim(), line1: card.line1.trim(), phone: card.phone.trim(),
+              city:      "San Salvador",
+              state:     "San Salvador",
+              zip:       "",
+              countryId: "222",
+              line1:     card.line1.trim() || "7a Calle Pte. Bis, 511 y 531",
+              phone:     card.phone.trim() || "2264-7032",
             },
           },
         }),
@@ -150,7 +210,7 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           ))}
         </div>
 
-        {/* Equivalencias del pack seleccionado */}
+        {/* Equivalencias */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
           <div className="font-semibold text-white">Con {pack.jades} Jades puedes generar:</div>
           <div className="mt-2 space-y-1">
@@ -162,7 +222,7 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           </div>
         </div>
 
-        {/* Formulario de tarjeta */}
+        {/* Formulario */}
         <form onSubmit={handlePay} className="mt-5 space-y-3">
           <div className="text-xs font-semibold text-white">
             Pagar ${pack.price_usd} USD · Pack {pack.label}
@@ -170,15 +230,14 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
 
           {[
             { label: "Nombre en tarjeta",     key: "cardHolderName", placeholder: "JOHN DOE" },
-            { label: "Número de tarjeta",      key: "number",         placeholder: "4000000000002503" },
+            { label: "Número de tarjeta",      key: "number",         placeholder: "4456530000001005" },
             { label: "Vencimiento (MM/YYYY)",  key: "expirationDate", placeholder: "01/2027" },
             { label: "CVV",                    key: "cvv",            placeholder: "123" },
             { label: "Nombre",                 key: "firstName",      placeholder: "John" },
             { label: "Apellido",               key: "lastName",       placeholder: "Doe" },
             { label: "Correo",                 key: "email",          placeholder: "tu@email.com" },
-            { label: "Teléfono",               key: "phone",          placeholder: "5555-5555" },
-            { label: "Ciudad",                 key: "city",           placeholder: "Guatemala" },
-            { label: "Dirección",              key: "line1",          placeholder: "Zona 10" },
+            { label: "Teléfono",               key: "phone",          placeholder: "2264-7032" },
+            { label: "Dirección",              key: "line1",          placeholder: "7a Calle Pte. Bis, 511 y 531" },
           ].map(({ label, key, placeholder }) => (
             <div key={key}>
               <label className="text-[11px] text-neutral-400">{label}</label>
