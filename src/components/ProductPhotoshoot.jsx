@@ -185,6 +185,7 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
   const [progress, setProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
+  const [lightboxUrl, setLightboxUrl] = useState(null); // imagen abierta en grande
 
   // ---- manejo de upload con compresión ----
   // Comprime la imagen a máx 1200px y calidad 0.85 para evitar FUNCTION_PAYLOAD_TOO_LARGE
@@ -560,7 +561,15 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
                     alt={`Variación ${i + 1}`}
                     style={styles.resultImg}
                   />
-                  {/* Botón de descarga siempre visible — esquina superior derecha */}
+                  {/* Botón VER EN GRANDE — abre lightbox interno */}
+                  <button
+                    style={styles.expandBadge}
+                    title="Ver en grande"
+                    onClick={(e) => { e.stopPropagation(); setLightboxUrl(imgUrl); }}
+                  >
+                    ⤢
+                  </button>
+                  {/* Botón DESCARGAR — esquina superior derecha */}
                   <a
                     href={imgUrl}
                     download={`photoshoot-${selectedTemplate}-${i + 1}.jpg`}
@@ -578,6 +587,36 @@ export default function ProductPhotoshoot({ userJades = 0, onJadesDeducted }) {
               </div>
             ))}
           </div>
+
+          {/* ── LIGHTBOX ── */}
+          {lightboxUrl && (
+            <div
+              style={styles.lightboxOverlay}
+              onClick={() => setLightboxUrl(null)}
+            >
+              <div style={styles.lightboxInner} onClick={(e) => e.stopPropagation()}>
+                <button
+                  style={styles.lightboxClose}
+                  onClick={() => setLightboxUrl(null)}
+                >
+                  ✕
+                </button>
+                <img
+                  src={lightboxUrl}
+                  alt="Vista ampliada"
+                  style={styles.lightboxImg}
+                />
+                <a
+                  href={lightboxUrl}
+                  download={`photoshoot-${selectedTemplate}.jpg`}
+                  style={styles.lightboxDownload}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ↓ Descargar
+                </a>
+              </div>
+            </div>
+          )}
 
           <div style={styles.moreTemplates}>
             <p style={styles.moreLabel}>¿Quieres probar otro estilo?</p>
@@ -1103,6 +1142,82 @@ const styles = {
   },
 
   // More templates
+  // Badge expandir — esquina superior izquierda
+  expandBadge: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    background: "rgba(0,0,0,0.55)",
+    backdropFilter: "blur(4px)",
+    border: "1px solid rgba(255,255,255,0.2)",
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    zIndex: 2,
+    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+  },
+
+  // Lightbox overlay
+  lightboxOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 9999,
+    background: "rgba(0,0,0,0.92)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  lightboxInner: {
+    position: "relative",
+    maxWidth: "90vw",
+    maxHeight: "90vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 12,
+  },
+  lightboxClose: {
+    position: "absolute",
+    top: -44,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: "50%",
+    background: "rgba(255,255,255,0.1)",
+    border: "1px solid rgba(255,255,255,0.2)",
+    color: "#fff",
+    fontSize: 16,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lightboxImg: {
+    maxWidth: "90vw",
+    maxHeight: "80vh",
+    borderRadius: 12,
+    objectFit: "contain",
+    boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
+  },
+  lightboxDownload: {
+    padding: "10px 28px",
+    background: "#7cffd4",
+    color: "#0a0a0f",
+    borderRadius: 10,
+    fontSize: 14,
+    fontWeight: 700,
+    textDecoration: "none",
+    boxShadow: "0 4px 16px rgba(124,255,212,0.3)",
+  },
+
   moreTemplates: {
     padding: "16px 20px",
     background: "rgba(255,255,255,0.02)",
