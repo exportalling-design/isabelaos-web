@@ -126,9 +126,10 @@ export default async function handler(req, res) {
     const merchantTransactionId = `JADE-${pack}-${user.id}-${Date.now()}`;
     // Fingerprint generado en el browser del cliente con el script de Pagadito
     const fingerprint = String(body?.deviceFingerprintID || "").trim();
-    if (!fingerprint) {
-      return res.status(400).json({ ok: false, error: "MISSING_FINGERPRINT", detail: "deviceFingerprintID requerido" });
-    }
+    console.log("[jades-buy] deviceFingerprintID recibido:", fingerprint || "(vacío)");
+    // Si no llega fingerprint del browser, usar fallback numérico de 16 dígitos
+    const finalFingerprint = fingerprint || (String(Date.now()).slice(-8) + String(Math.floor(Math.random() * 100000000)).padStart(8, "0"));
+    console.log("[jades-buy] fingerprint final:", finalFingerprint);
     const clientIp = getClientIp(req);
     const siteUrl                = process.env.SITE_URL || "https://isabelaos.com";
 
@@ -177,7 +178,7 @@ export default async function handler(req, res) {
         }],
       },
       browserInfo: {
-        deviceFingerprintID: fingerprint,
+        deviceFingerprintID: finalFingerprint,
         customerIp:          clientIp,
       },
       consumerAuthenticationInformation: {
