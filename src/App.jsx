@@ -49,136 +49,187 @@ async function getAuthHeadersGlobal() {
 // ══════════════════════════════════════════════════════════════
 // MODAL DE COMPRA DE JADES
 // ══════════════════════════════════════════════════════════════
+// BuyJadesModal — flujo completo Pagadito 3DS
+// Paso 1: jades-setup → obtiene tokens
+// Paso 2: iframe Cardinal Commerce (recolección de datos)
+// Paso 3: jades-pay → procesa el cobro
+
 function BuyJadesModal({ open, onClose, userId, onSuccess }) {
   const [selectedPack, setSelectedPack] = useState("popular");
-  const [paying,       setPaying]       = useState(false);
+  const [step,         setStep]         = useState("form"); // form | loading | iframe | paying | done | error
   const [cardError,    setCardError]    = useState("");
   const [cardSuccess,  setCardSuccess]  = useState("");
-  const [fingerprint,  setFingerprint]  = useState("");
-  const fingerprintRef = useRef(null);
+  const [setupData,    setSetupData]    = useState(null); // tokens del setup-payer
+  const iframeRef = useRef(null);
+  const formRef   = useRef(null);
 
   const [card, setCard] = useState({
     cardHolderName: "", number: "", expirationDate: "", cvv: "",
     firstName: "", lastName: "", email: "", phone: "",
-    city: "", line1: "",
+    line1: "7a Calle Pte. Bis, 511 y 531",
   });
 
   const upd = (k, v) => setCard((p) => ({ ...p, [k]: v }));
 
-  // Cargar script de Pagadito y generar fingerprint cuando se abre el modal
+  // Escuchar evento del iframe de Cardinal Commerce
   useEffect(() => {
-    if (!open) return;
+    if (step !== "iframe") return;
 
-    const env = "SANDBOX"; // cambiar a "LIVE" en producción
+    const handleMessage = async (event) => {
+      // Cardinal sandbox
+      const validOrigins = [
+        "https://centinelapistag.cardinalcommerce.com",
+        "https://centinelapi.cardinalcommerce.com",
+      ];
+      if (!validOrigins.includes(event.origin)) return;
 
-    // Remover script anterior si existe
-    const existing = document.getElementById("cybs-fp-script");
-    if (existing) existing.remove();
+      console.log("[BuyJades] evento Cardinal recibido:", event.data);
 
-    const script = document.createElement("script");
-    script.id  = "cybs-fp-script";
-    script.src = "https://sandbox-api.pagadito.com/cybs_devicefingerprint.js"; // sandbox
-    // En producción: "https://api.pagadito.com/cybs_devicefingerprint.js"
-    script.async = true;
+      // El sessionId del evento confirma que la recolección terminó
+      // Ahora llamar a jades-pay
+      setStep("paying");
+      await callJadesPay();
+    };
 
-    script.onload = () => {
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [step, setupData]);
+
+  // Cuando setupData está listo, enviar el iframe
+  useEffect(() => {
+    if (step !== "iframe" || !setupData) return;
+
+    // Pequeño delay para que el iframe se monte
+    setTimeout(() => {
       try {
-        // El script expone cybs_dfprofiler() que genera el fingerprint
-        const fp = window.cybs_dfprofiler("pagadito", env);
-        if (fp) {
-          setFingerprint(String(fp));
-          console.log("[BuyJades] fingerprint generado:", String(fp));
-        } else {
-          // Fallback: 16 dígitos numéricos si el script no devuelve valor
-          const ts   = String(Date.now()).slice(-8);
-          const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
-          setFingerprint(ts + rand);
+        if (formRef.current) {
+          formRef.current.submit();
+          console.log("[BuyJades] iframe form submitted");
         }
-      } catch (err) {
-        console.warn("[BuyJades] error generando fingerprint:", err);
-        // Fallback numérico
-        const ts   = String(Date.now()).slice(-8);
-        const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
-        setFingerprint(ts + rand);
+      } catch (e) {
+        console.warn("[BuyJades] error submitting iframe form:", e);
+        // Si falla el iframe, intentar el pago directamente
+        setStep("paying");
+        callJadesPay();
       }
-    };
 
-    script.onerror = () => {
-      console.warn("[BuyJades] no se pudo cargar cybs_devicefingerprint.js");
-      // Fallback numérico
-      const ts   = String(Date.now()).slice(-8);
-      const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
-      setFingerprint(ts + rand);
-    };
-
-    document.head.appendChild(script);
-  }, [open]);
+      // Timeout de seguridad: si el iframe no responde en 5s, continuar igual
+      setTimeout(() => {
+        if (step === "iframe") {
+          console.log("[BuyJades] iframe timeout — continuando al pago");
+          setStep("paying");
+          callJadesPay();
+        }
+      }, 5000);
+    }, 500);
+  }, [step, setupData]);
 
   if (!open) return null;
 
   const pack = JADE_PACKS[selectedPack];
 
+  // Paso 1: setup-payer
   async function handlePay(e) {
     e.preventDefault();
-    setCardError(""); setCardSuccess("");
+    setCardError("");
+
     if (!card.number || !card.expirationDate || !card.cvv || !card.cardHolderName) {
       setCardError("Completa los datos de tarjeta."); return;
     }
     if (!card.firstName || !card.lastName || !card.email) {
       setCardError("Completa tu nombre y correo."); return;
     }
+
+    setStep("loading");
+
     try {
-      setPaying(true);
       const auth = await getAuthHeadersGlobal();
-      const r = await fetch("/api/jades-buy", {
-        method: "POST",
+      const r    = await fetch("/api/jades-setup", {
+        method:  "POST",
         headers: { "Content-Type": "application/json", ...auth },
-        body: JSON.stringify({
-          pack: selectedPack,
-          deviceFingerprintID: fingerprint,
-          card: {
-            number:         card.number.trim(),
-            expirationDate: card.expirationDate.trim(),
-            cvv:            card.cvv.trim(),
-            cardHolderName: card.cardHolderName.trim(),
-            firstName:      card.firstName.trim(),
-            lastName:       card.lastName.trim(),
-            email:          card.email.trim(),
-            phone:          card.phone.trim(),
-            billingAddress: {
-              city:      "San Salvador",
-              state:     "San Salvador",
-              zip:       "",
-              countryId: "222",
-              line1:     card.line1.trim() || "7a Calle Pte. Bis, 511 y 531",
-              phone:     card.phone.trim() || "2264-7032",
-            },
-          },
+        body:    JSON.stringify({ pack: selectedPack, card }),
+      });
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.response_message || j?.error || "Error en setup de pago.");
+      }
+
+      setSetupData(j);
+      setStep("iframe"); // dispara el useEffect del iframe
+
+    } catch (err) {
+      setCardError(err?.message || "Error iniciando el pago.");
+      setStep("form");
+    }
+  }
+
+  // Paso 3: customer (después del iframe)
+  async function callJadesPay() {
+    try {
+      const auth = await getAuthHeadersGlobal();
+      const r    = await fetch("/api/jades-pay", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", ...auth },
+        body:    JSON.stringify({
+          pack:           selectedPack,
+          card,
+          setupRequestId: setupData?.request_id,
+          referenceId:    setupData?.referenceId,
+          deviceFingerprintID: setupData?.fingerprint || "",
         }),
       });
       const j = await r.json().catch(() => null);
+
       if (!r.ok || !j?.ok) {
         if (j?.challenge_required) {
-          setCardError("Tu banco solicitó verificación 3D Secure. Intenta de nuevo o usa otra tarjeta.");
-          return;
+          setCardError("Tu banco requiere verificación adicional. Intenta con otra tarjeta.");
+          setStep("form"); return;
         }
-        throw new Error(j?.response_message || j?.error || "No se pudo procesar el pago.");
+        throw new Error(j?.response_message || j?.error || "Error procesando pago.");
       }
+
       setCardSuccess(`¡Listo! Se acreditaron ${j.jades_added} Jades a tu cuenta.`);
+      setStep("done");
       if (typeof onSuccess === "function") await onSuccess();
-      setTimeout(() => { setCardSuccess(""); onClose(); }, 2500);
+      setTimeout(() => { setCardSuccess(""); setStep("form"); onClose(); }, 2500);
+
     } catch (err) {
       setCardError(err?.message || "Error procesando pago.");
-    } finally {
-      setPaying(false);
+      setStep("form");
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-end" onClick={onClose}>
-      <div
-        className="relative h-full w-full max-w-md overflow-y-auto border-l border-white/10 bg-[#06070B] p-6 shadow-2xl"
+      <div className="relative h-full w-full max-w-md overflow-y-auto border-l border-white/10 bg-[#06070B] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
+
+        {/* Iframe oculto de Cardinal Commerce — recolección de datos del dispositivo */}
+        {step === "iframe" && setupData && (
+          <div style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
+            <iframe
+              ref={iframeRef}
+              id="cardinal_collection_iframe"
+              name="collectionIframe"
+              height="1" width="1"
+              style={{ display: "none" }}
+            />
+            <form
+              ref={formRef}
+              id="cardinal_collection_form"
+              method="POST"
+              target="collectionIframe"
+              action={setupData.deviceDataCollectionUrl}
+            >
+              <input
+                type="hidden"
+                name="JWT"
+                value={setupData.accessToken}
+              />
+            </form>
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <div>
@@ -191,79 +242,108 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           </button>
         </div>
 
-        {/* Packs */}
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          {Object.entries(JADE_PACKS).map(([key, p]) => (
-            <button key={key} type="button" onClick={() => setSelectedPack(key)}
-              className={`rounded-2xl border p-4 text-left transition ${
-                selectedPack === key
-                  ? "border-cyan-400 bg-cyan-500/10"
-                  : "border-white/10 bg-black/40 hover:bg-black/50"
-              }`}>
-              <div className="text-sm font-semibold text-white">{p.label}</div>
-              <div className="mt-1 text-xl font-bold text-cyan-300">{p.jades}J</div>
-              <div className="mt-1 text-xs text-neutral-400">${p.price_usd} USD</div>
-              <div className="mt-1 text-[10px] text-neutral-500">
-                ${(p.price_usd / p.jades * 10).toFixed(1)}¢ por jade
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {/* Equivalencias */}
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
-          <div className="font-semibold text-white">Con {pack.jades} Jades puedes generar:</div>
-          <div className="mt-2 space-y-1">
-            <div>· <span className="font-semibold text-white">{pack.jades}</span> imágenes sin avatar</div>
-            <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 2)}</span> imágenes con avatar</div>
-            <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / COSTS.vid_express_8s)}</span> videos Express 8s</div>
-            <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / COSTS.vid_standard_10s)}</span> videos Standard 10s</div>
-            <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 20)}</span> sesiones Photoshoot (4 fotos)</div>
+        {/* Loading / Paying */}
+        {(step === "loading" || step === "iframe" || step === "paying") && (
+          <div className="mt-10 text-center space-y-4">
+            <div className="text-4xl animate-pulse">💳</div>
+            <p className="text-sm text-white font-semibold">
+              {step === "loading" ? "Iniciando pago seguro..." :
+               step === "iframe"  ? "Verificando dispositivo..." :
+               "Procesando pago..."}
+            </p>
+            <p className="text-xs text-neutral-400">No cierres esta ventana</p>
+            <div className="flex justify-center gap-1 mt-4">
+              {[0,1,2,3,4].map(i => (
+                <div key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce"
+                  style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Done */}
+        {step === "done" && cardSuccess && (
+          <div className="mt-10 text-center space-y-4">
+            <div className="text-5xl">✅</div>
+            <p className="text-sm text-emerald-300 font-semibold">{cardSuccess}</p>
+          </div>
+        )}
 
         {/* Formulario */}
-        <form onSubmit={handlePay} className="mt-5 space-y-3">
-          <div className="text-xs font-semibold text-white">
-            Pagar ${pack.price_usd} USD · Pack {pack.label}
-          </div>
-
-          {[
-            { label: "Nombre en tarjeta",     key: "cardHolderName", placeholder: "JOHN DOE" },
-            { label: "Número de tarjeta",      key: "number",         placeholder: "4456530000001005" },
-            { label: "Vencimiento (MM/YYYY)",  key: "expirationDate", placeholder: "01/2027" },
-            { label: "CVV",                    key: "cvv",            placeholder: "123" },
-            { label: "Nombre",                 key: "firstName",      placeholder: "John" },
-            { label: "Apellido",               key: "lastName",       placeholder: "Doe" },
-            { label: "Correo",                 key: "email",          placeholder: "tu@email.com" },
-            { label: "Teléfono",               key: "phone",          placeholder: "2264-7032" },
-            { label: "Dirección",              key: "line1",          placeholder: "7a Calle Pte. Bis, 511 y 531" },
-          ].map(({ label, key, placeholder }) => (
-            <div key={key}>
-              <label className="text-[11px] text-neutral-400">{label}</label>
-              <input type={key === "email" ? "email" : "text"}
-                value={card[key]} onChange={(e) => upd(key, e.target.value)}
-                placeholder={placeholder}
-                className="mt-1 w-full rounded-xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400" />
+        {step === "form" && (
+          <>
+            {/* Packs */}
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              {Object.entries(JADE_PACKS).map(([key, p]) => (
+                <button key={key} type="button" onClick={() => setSelectedPack(key)}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    selectedPack === key
+                      ? "border-cyan-400 bg-cyan-500/10"
+                      : "border-white/10 bg-black/40 hover:bg-black/50"
+                  }`}>
+                  <div className="text-sm font-semibold text-white">{p.label}</div>
+                  <div className="mt-1 text-xl font-bold text-cyan-300">{p.jades}J</div>
+                  <div className="mt-1 text-xs text-neutral-400">${p.price_usd} USD</div>
+                  <div className="mt-1 text-[10px] text-neutral-500">
+                    ${(p.price_usd / p.jades * 10).toFixed(1)}¢ por jade
+                  </div>
+                </button>
+              ))}
             </div>
-          ))}
 
-          {cardError && (
-            <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-              {cardError}
+            {/* Equivalencias */}
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
+              <div className="font-semibold text-white">Con {pack.jades} Jades puedes generar:</div>
+              <div className="mt-2 space-y-1">
+                <div>· <span className="font-semibold text-white">{pack.jades}</span> imágenes sin avatar</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 2)}</span> imágenes con avatar</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / COSTS.vid_express_8s)}</span> videos Express 8s</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 20)}</span> sesiones Photoshoot</div>
+              </div>
             </div>
-          )}
-          {cardSuccess && (
-            <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-              {cardSuccess}
-            </div>
-          )}
 
-          <button type="submit" disabled={paying}
-            className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60">
-            {paying ? "Procesando..." : `Pagar $${pack.price_usd} · ${pack.jades} Jades`}
-          </button>
-        </form>
+            {/* Formulario de tarjeta */}
+            <form onSubmit={handlePay} className="mt-5 space-y-3">
+              <div className="text-xs font-semibold text-white">
+                Pagar ${pack.price_usd} USD · Pack {pack.label}
+              </div>
+
+              {[
+                { label: "Nombre en tarjeta",    key: "cardHolderName", placeholder: "JOHN DOE"                  },
+                { label: "Número de tarjeta",     key: "number",         placeholder: "4000000000002701"           },
+                { label: "Vencimiento (MM/YYYY)", key: "expirationDate", placeholder: "01/2030"                   },
+                { label: "CVV",                   key: "cvv",            placeholder: "123"                        },
+                { label: "Nombre",                key: "firstName",      placeholder: "John"                       },
+                { label: "Apellido",              key: "lastName",       placeholder: "Doe"                        },
+                { label: "Correo",                key: "email",          placeholder: "tu@email.com"               },
+                { label: "Teléfono",              key: "phone",          placeholder: "2264-7032"                  },
+                { label: "Dirección",             key: "line1",          placeholder: "7a Calle Pte. Bis, 511 y 531" },
+              ].map(({ label, key, placeholder }) => (
+                <div key={key}>
+                  <label className="text-[11px] text-neutral-400">{label}</label>
+                  <input
+                    type={key === "email" ? "email" : "text"}
+                    value={card[key]}
+                    onChange={(e) => upd(key, e.target.value)}
+                    placeholder={placeholder}
+                    className="mt-1 w-full rounded-xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400"
+                  />
+                </div>
+              ))}
+
+              {cardError && (
+                <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  {cardError}
+                </div>
+              )}
+
+              <button type="submit"
+                className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white hover:opacity-90 transition-all">
+                Pagar ${pack.price_usd} · {pack.jades} Jades
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
