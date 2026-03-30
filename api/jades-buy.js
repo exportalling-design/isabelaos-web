@@ -23,13 +23,8 @@ function basicAuth(uid, wsk) {
   return "Basic " + Buffer.from(`${uid}:${wsk}`).toString("base64");
 }
 
-// Generar un fingerprint único por request
-function generateFingerprint() {
-  // Pagadito requiere exactamente 16 dígitos numéricos
-  const ts   = String(Date.now()).slice(-8);
-  const rand = String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
-  return ts + rand; // 16 dígitos numéricos
-}
+// deviceFingerprintID viene del browser del cliente (generado por cybs_devicefingerprint.js de Pagadito)
+// NO se genera en el servidor
 
 async function pagaditoPost(step, body, uid, wsk) {
   const base = getPagaditoBase();
@@ -128,8 +123,12 @@ export default async function handler(req, res) {
     }
 
     const merchantTransactionId = `JADE-${pack}-${user.id}-${Date.now()}`;
-    const fingerprint            = generateFingerprint();
-    const clientIp               = getClientIp(req);
+    // Fingerprint generado en el browser del cliente con el script de Pagadito
+    const fingerprint = String(body?.deviceFingerprintID || "").trim();
+    if (!fingerprint) {
+      return res.status(400).json({ ok: false, error: "MISSING_FINGERPRINT", detail: "deviceFingerprintID requerido" });
+    }
+    const clientIp = getClientIp(req);
     const siteUrl                = process.env.SITE_URL || "https://isabelaos.com";
 
     console.log("[jades-buy] merchantTransactionId:", merchantTransactionId);
