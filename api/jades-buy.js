@@ -6,31 +6,38 @@
 import { createClient } from "@supabase/supabase-js";
 import { requireUser }  from "./_auth.js";
 import { JADE_PACKS }   from "../src/lib/pricing.js";
- 
+
 function getPagaditoBase() {
   return process.env.PAGADITO_ENV === "production"
     ? "https://app.pagadito.com/api/v1"
     : "https://sandbox-api.pagadito.com/v1";
 }
- 
+
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
   if (fwd) return String(fwd).split(",")[0].trim();
   return req.socket?.remoteAddress || "127.0.0.1";
 }
- 
+
 function basicAuth(uid, wsk) {
   return "Basic " + Buffer.from(`${uid}:${wsk}`).toString("base64");
 }
- 
-// ── Wrapper con logs para cada llamada a Pagadito ─────────────
+
+// Generar un fingerprint único por request
+function generateFingerprint() {
+  const ts   = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return (ts + rand).padEnd(16, "0").slice(0, 32);
+}
+
 async function pagaditoPost(step, body, uid, wsk) {
   const base = getPagaditoBase();
   const url  = `${base}/${step}/`;
- 
+
   console.log(`[pagadito:${step}] → ${url}`);
   console.log(`[pagadito:${step}] ENV=${process.env.PAGADITO_ENV || "sandbox"}`);
- 
+  console.log(`[pagadito:${step}] body=${JSON.stringify(body).slice(0, 400)}`);
+
   let r, text, json;
   try {
     r    = await fetch(url, {
@@ -46,28 +53,28 @@ async function pagaditoPost(step, body, uid, wsk) {
     console.error(`[pagadito:${step}] FETCH_ERROR:`, fetchErr.message);
     throw fetchErr;
   }
- 
+
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
- 
+
   console.log(`[pagadito:${step}] HTTP=${r.status} code=${json?.response_code || "N/A"} msg=${json?.response_message || "N/A"}`);
- 
+  console.log(`[pagadito:${step}] full_response=${JSON.stringify(json).slice(0, 500)}`);
+
   return { ok: r.ok, status: r.status, data: json };
 }
- 
+
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("MISSING_SUPABASE_ENV");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
- 
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
- 
+
   try {
-    // ── 1. Auth ───────────────────────────────────────────────
     const auth = await requireUser(req);
     if (!auth.ok) {
       console.log("[jades-buy] AUTH_FAILED:", auth.error);
@@ -75,77 +82,85 @@ export default async function handler(req, res) {
     }
     const user = auth.user;
     console.log("[jades-buy] user:", user.id);
- 
-    // ── 2. Validar pack ───────────────────────────────────────
+
     const { pack, card } = req.body || {};
     console.log("[jades-buy] pack:", pack);
- 
+
     if (!pack || !JADE_PACKS[pack]) {
       return res.status(400).json({ ok: false, error: "INVALID_PACK", valid_packs: Object.keys(JADE_PACKS) });
     }
     const packInfo = JADE_PACKS[pack];
     console.log("[jades-buy] packInfo:", packInfo);
- 
-    // ── 3. Validar tarjeta ────────────────────────────────────
+
     if (!card?.number || !card?.expirationDate || !card?.cvv || !card?.cardHolderName) {
-      console.log("[jades-buy] MISSING_CARD_FIELDS");
       return res.status(400).json({ ok: false, error: "MISSING_CARD_FIELDS" });
     }
     if (!card?.firstName || !card?.lastName || !card?.email) {
-      console.log("[jades-buy] MISSING_PERSONAL_FIELDS");
       return res.status(400).json({ ok: false, error: "MISSING_PERSONAL_FIELDS" });
     }
+
     console.log("[jades-buy] card number ends:", card.number?.slice(-4));
     console.log("[jades-buy] card expiry:", card.expirationDate);
- 
-    // ── 4. Credenciales ───────────────────────────────────────
+
     const uid = process.env.PAGADITO_UID;
     const wsk = process.env.PAGADITO_WSK;
     if (!uid || !wsk) {
-      console.error("[jades-buy] MISSING_PAGADITO_ENV");
       return res.status(500).json({ ok: false, error: "MISSING_PAGADITO_ENV" });
     }
     console.log("[jades-buy] UID prefix:", uid?.slice(0, 8));
- 
-    // ── 5. setup-payer ────────────────────────────────────────
+
+    // ── setup-payer ───────────────────────────────────────────
     console.log("[jades-buy] llamando setup-payer...");
     const setup = await pagaditoPost("setup-payer", {
       card: {
-        number:         card.number,
+        number:         card.number.replace(/\s/g, ""),
         expirationDate: card.expirationDate,
         cvv:            card.cvv,
         cardHolderName: card.cardHolderName,
       },
     }, uid, wsk);
- 
-    console.log("[jades-buy] setup-payer result:", JSON.stringify(setup.data).slice(0, 300));
- 
+
     if (!setup.ok || setup?.data?.response_code !== "PG200-00") {
       return res.status(setup.status || 400).json({
         ok: false, stage: "setup-payer", ...setup.data,
       });
     }
- 
+
     const merchantTransactionId = `JADE-${pack}-${user.id}-${Date.now()}`;
+    const fingerprint            = generateFingerprint();
+    const clientIp               = getClientIp(req);
+    const siteUrl                = process.env.SITE_URL || "https://isabelaos.com";
+
     console.log("[jades-buy] merchantTransactionId:", merchantTransactionId);
- 
-    // ── 6. customer ───────────────────────────────────────────
+    console.log("[jades-buy] fingerprint:", fingerprint);
+    console.log("[jades-buy] clientIp:", clientIp);
+
+    // ── customer ──────────────────────────────────────────────
     console.log("[jades-buy] llamando customer...");
+
+    // Dirección: usar exactamente los campos del sandbox de Pagadito
+    const billingCity    = card.billingAddress?.city    || "San Salvador";
+    const billingLine1   = card.billingAddress?.line1   || "7a Calle Pte. Bis 511";
+    const billingZip     = card.billingAddress?.zip     || "01101";
+    const billingState   = card.billingAddress?.state   || "SS";
+    const billingCountry = card.billingAddress?.countryId || "222"; // 222 = El Salvador
+    const billingPhone   = card.billingAddress?.phone   || card.phone || "22647032";
+
     const customer = await pagaditoPost("customer", {
       card: {
-        number:         card.number,
+        number:         card.number.replace(/\s/g, ""),
         expirationDate: card.expirationDate,
         cvv:            card.cvv,
         cardHolderName: card.cardHolderName,
         firstName:      card.firstName,
         lastName:       card.lastName,
         billingAddress: {
-          city:      card.billingAddress?.city      || "",
-          state:     card.billingAddress?.state     || "",
-          zip:       card.billingAddress?.zip       || "",
-          countryId: card.billingAddress?.countryId || "320",
-          line1:     card.billingAddress?.line1     || "",
-          phone:     card.billingAddress?.phone     || "",
+          city:      billingCity,
+          state:     billingState,
+          zip:       billingZip,
+          countryId: billingCountry,
+          line1:     billingLine1,
+          phone:     billingPhone,
         },
         email: card.email,
       },
@@ -159,18 +174,18 @@ export default async function handler(req, res) {
         }],
       },
       browserInfo: {
-        deviceFingerprintID: "1234567890123456",
-        customerIp:          getClientIp(req),
+        deviceFingerprintID: fingerprint,
+        customerIp:          clientIp,
       },
       consumerAuthenticationInformation: {
         setup_request_id: setup.data.request_id,
-        referenceId:      setup.data.referenceId,
-        returnUrl: `${process.env.SITE_URL || "https://www.isabelaos.com"}/api/payment-return`,
+        referenceId:      setup.data.referenceId || null,
+        returnUrl:        `${siteUrl}/api/payment-return`,
       },
     }, uid, wsk);
- 
-    console.log("[jades-buy] customer result:", JSON.stringify(customer.data).slice(0, 300));
- 
+
+    console.log("[jades-buy] customer result:", JSON.stringify(customer.data).slice(0, 500));
+
     // 3D Secure challenge
     if (customer?.data?.response_code === "PG402-05") {
       console.log("[jades-buy] 3DS challenge requerido");
@@ -187,29 +202,29 @@ export default async function handler(req, res) {
         },
       });
     }
- 
+
     if (!customer.ok || customer?.data?.response_code !== "PG200-00") {
       console.log("[jades-buy] customer failed:", customer.data?.response_code, customer.data?.response_message);
       return res.status(customer.status || 402).json({
         ok: false, stage: "customer", ...customer.data,
       });
     }
- 
-    // ── 7. Acreditar Jades ────────────────────────────────────
+
+    // ── Acreditar Jades ───────────────────────────────────────
     const sb = getSupabaseAdmin();
     const reference_id = customer?.data?.customer_reply?.payment_token ||
                          customer?.data?.request_id ||
                          merchantTransactionId;
- 
+
     console.log("[jades-buy] acreditando jades:", packInfo.jades, "ref:", reference_id);
- 
+
     const { error: creditErr } = await sb.rpc("credit_jades_from_payment", {
       p_user_id:      user.id,
       p_amount:       packInfo.jades,
       p_reference_id: reference_id,
       p_reason:       `jade_pack:${pack}`,
     });
- 
+
     if (creditErr) {
       console.error("[jades-buy] CREDIT_ERROR:", creditErr.message);
       return res.status(500).json({
@@ -219,10 +234,9 @@ export default async function handler(req, res) {
         reference_id,
       });
     }
- 
+
     console.log("[jades-buy] ✅ pago exitoso, jades acreditados:", packInfo.jades);
- 
-    // ── 8. Éxito ──────────────────────────────────────────────
+
     return res.status(200).json({
       ok: true, pack,
       jades_added: packInfo.jades,
@@ -230,7 +244,7 @@ export default async function handler(req, res) {
       reference_id,
       payment:     customer.data,
     });
- 
+
   } catch (e) {
     console.error("[jades-buy] SERVER_ERROR:", e?.message || e);
     return res.status(500).json({
@@ -239,6 +253,5 @@ export default async function handler(req, res) {
     });
   }
 }
- 
+
 export const config = { runtime: "nodejs" };
- 
