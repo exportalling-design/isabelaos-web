@@ -1,31 +1,44 @@
 // api/cineai/status/[taskId].js
 // ─────────────────────────────────────────────────────────────
 // Polling del estado de un job de CineAI en PiAPI.
-// El frontend llama cada 4s hasta que status = completed | failed.
-// Al completar guarda la video_url en video_jobs para que
-// aparezca en la biblioteca igual que los demás videos.
 //
-// Cuando fal.ai lance Seedance 2.0, solo cambia fetchFromPiAPI()
-// por fetchFromFalAI() aquí. El frontend no necesita cambios.
+// FIX: PiAPI devuelve la URL en output.video (no output.video_url)
+// Se revisan todos los campos posibles para no perder el video.
+//
+// Al completar:
+//   - Guarda result_url en video_jobs → aparece en biblioteca
+//   - Devuelve videoUrl al frontend
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }           from "../../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader }  from "../../../src/lib/getUserIdFromAuth.js";
 
-// ── Consulta el estado del job en PiAPI ──────────────────────
 async function fetchFromPiAPI(taskId) {
   const res = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
     headers: { "x-api-key": process.env.PIAPI_KEY },
   });
   const data = await res.json();
-  if (!res.ok || data.code !== 200) throw new Error("PiAPI status error");
+  if (!res.ok || data.code !== 200) {
+    throw new Error(`PiAPI status error: ${data.message || res.status}`);
+  }
   return data.data;
 }
 
-// ── Swap futuro a fal.ai cuando lancen Seedance 2.0 ──────────
-// async function fetchFromFalAI(taskId) { ... }
+// Extrae la URL del video del output de PiAPI
+// PiAPI puede devolver la URL en distintos campos según la versión
+function extractVideoUrl(output) {
+  if (!output) return null;
+  return (
+    output.video        ||  // ← campo real según Task Detail de PiAPI
+    output.video_url    ||
+    output.url          ||
+    output.videoUrl     ||
+    (Array.isArray(output) ? output[0]?.url : null) ||
+    output[0]?.video    ||
+    null
+  );
+}
 
 export default async function handler(req, res) {
-  // ── CORS ──────────────────────────────────────────────────
   res.setHeader("access-control-allow-origin",  "*");
   res.setHeader("access-control-allow-methods", "GET, OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type, authorization");
@@ -35,15 +48,13 @@ export default async function handler(req, res) {
   if (req.method !== "GET")
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
 
-  // ── Auth ──────────────────────────────────────────────────
   const userId = await getUserIdFromAuthHeader(req);
   if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
-  // taskId viene del path /api/cineai/status/[taskId]
   const { taskId } = req.query;
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
-  // ── Buscar job en video_jobs y verificar que pertenece al usuario ──
+  // ── Buscar job en video_jobs ──────────────────────────────
   const { data: job, error: findErr } = await supabaseAdmin
     .from("video_jobs")
     .select("*")
@@ -53,16 +64,16 @@ export default async function handler(req, res) {
     .single();
 
   if (findErr || !job) {
+    console.error("[cineai/status] job not found:", taskId, findErr?.message);
     return res.status(404).json({ ok: false, error: "Job no encontrado" });
   }
 
-  // ── Si ya está terminado, devolver resultado cacheado ─────
-  // Evita llamadas innecesarias a PiAPI
-  if (job.status === "COMPLETED") {
+  // ── Si ya terminó, devolver resultado cacheado ────────────
+  if (job.status === "COMPLETED" && job.result_url) {
     return res.status(200).json({
       ok:       true,
       status:   "completed",
-      videoUrl: job.result_url || null,
+      videoUrl: job.result_url,
       jobId:    job.id,
     });
   }
@@ -76,60 +87,74 @@ export default async function handler(req, res) {
     });
   }
 
-  // ── Consultar estado actual en PiAPI ─────────────────────
+  // ── Consultar PiAPI ───────────────────────────────────────
   let taskData;
   try {
     taskData = await fetchFromPiAPI(taskId);
-    // Futuro: if (job.payload?.provider === "falai") taskData = await fetchFromFalAI(taskId);
   } catch (err) {
     console.error("[cineai/status] PiAPI poll error:", err.message);
-    return res.status(500).json({ ok: false, error: "Error consultando estado" });
+    // No fallar — devolver processing para que el frontend siga intentando
+    return res.status(200).json({
+      ok:     true,
+      status: "processing",
+      jobId:  job.id,
+    });
   }
 
-  // ── Mapear status de PiAPI al nuestro ────────────────────
+  console.error("[cineai/status] PiAPI response:", JSON.stringify({
+    taskId,
+    status: taskData?.status,
+    output: taskData?.output,
+  }));
+
+  // ── Mapear status ─────────────────────────────────────────
   const providerStatus = taskData?.status;
-  let newStatus   = "IN_PROGRESS";
-  let videoUrl    = null;
-  let errorMsg    = null;
+  let newStatus = "IN_PROGRESS";
+  let videoUrl  = null;
+  let errorMsg  = null;
 
   if (providerStatus === "completed") {
     newStatus = "COMPLETED";
-    // PiAPI puede devolver la URL en distintos campos
-    videoUrl =
-      taskData?.output?.video_url ||
-      taskData?.output?.url       ||
-      taskData?.output?.[0]?.url  ||
-      null;
+    videoUrl  = extractVideoUrl(taskData?.output);
+
+    if (!videoUrl) {
+      // Si no hay URL a pesar de completed, loguear todo el output para debug
+      console.error("[cineai/status] completed but no videoUrl. Full output:", JSON.stringify(taskData?.output));
+    }
   } else if (providerStatus === "failed" || providerStatus === "error") {
     newStatus = "FAILED";
-    errorMsg  = taskData?.error?.message || "Error en PiAPI";
+    errorMsg  = taskData?.error?.message || taskData?.meta?.error || "Error en PiAPI";
   } else if (providerStatus === "processing" || providerStatus === "running") {
     newStatus = "IN_PROGRESS";
   }
 
-  // ── Actualizar video_jobs con el nuevo estado ─────────────
+  // ── Actualizar video_jobs ─────────────────────────────────
   const updateData = {
     status:          newStatus,
     provider_status: providerStatus || "unknown",
     updated_at:      new Date().toISOString(),
   };
 
-  if (videoUrl)  updateData.result_url      = videoUrl;
-  if (errorMsg)  updateData.provider_error  = errorMsg;
+  if (videoUrl)  updateData.result_url     = videoUrl;
+  if (errorMsg)  updateData.provider_error = errorMsg;
   if (newStatus === "COMPLETED") updateData.completed_at = new Date().toISOString();
 
-  await supabaseAdmin
+  const { error: updErr } = await supabaseAdmin
     .from("video_jobs")
     .update(updateData)
     .eq("id", job.id);
+
+  if (updErr) {
+    console.error("[cineai/status] video_jobs update failed:", updErr.message);
+  }
 
   return res.status(200).json({
     ok:       true,
     status:   newStatus === "COMPLETED" ? "completed"
             : newStatus === "FAILED"    ? "failed"
             : "processing",
-    videoUrl,
-    error:    errorMsg,
+    videoUrl: videoUrl || null,
+    error:    errorMsg || null,
     jobId:    job.id,
   });
 }
