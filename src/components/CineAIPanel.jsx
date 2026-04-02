@@ -433,7 +433,7 @@ export default function CineAIPanel() {
         .upload-zone.uploading { border-color:rgba(200,160,80,0.4); animation:pulse-b 1s infinite; }
         @keyframes pulse-b { 50%{border-color:rgba(200,160,80,0.1);} }
         .uz-thumb { width:60px; height:60px; object-fit:cover; border-radius:6px; border:2px solid #c8a050; }
-        .uz-video-thumb { width:100%; max-height:76px; border-radius:6px; border:2px solid #c8a050; object-fit:cover; }
+        .uz-video-thumb { width:auto; max-width:100%; max-height:110px; border-radius:6px; border:2px solid #c8a050; object-fit:contain; background:#000; display:block; margin:0 auto; }
         .uz-label { font-size:11px; color:#333; line-height:1.5; }
         .uz-hint { font-size:10px; color:#c8a050; letter-spacing:1px; }
         .uz-badge { position:absolute; top:6px; right:6px; background:rgba(200,160,80,0.12); border:1px solid rgba(200,160,80,0.25); border-radius:4px; font-size:8px; color:#c8a050; padding:2px 6px; letter-spacing:1px; text-transform:uppercase; }
@@ -770,7 +770,7 @@ export default function CineAIPanel() {
             </p>
             <div
               className={`upload-zone ${refVideoPreview ? "has-file" : ""} ${uploadingVideo ? "uploading" : ""}`}
-              style={{ minHeight: 100 }}
+              style={{ minHeight: 130, maxHeight: 170 }}
               onClick={() => !refVideoPreview && videoInputRef.current?.click()}
             >
               {refVideoPreview ? (
