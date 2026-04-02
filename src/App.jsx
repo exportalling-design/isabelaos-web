@@ -1,10 +1,11 @@
 // src/App.jsx
 // ─────────────────────────────────────────────────────────────
 // App principal de IsabelaOS Studio
-// CAMBIOS v3:
-//   - Módulo Product Photoshoot integrado (tipo Pomelli)
-//   - Tab "📸 Photoshoot" en el dashboard
-//   - Conectado al sistema de Jades existente
+// CAMBIOS v4:
+//   - Módulo CineAI integrado (Seedance 2.0 via PiAPI)
+//   - Tab "🎬 CineAI" en el dashboard
+//   - Soporte TikTok Trends + Escenas Cinematográficas
+//   - Continuación de video (extracción de último frame)
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useAuth } from "./context/AuthContext";
@@ -20,7 +21,8 @@ import AvatarStudioPanel        from "./components/AvatarStudioPanel";
 import MontajeIAPanel           from "./components/MontajeIAPanel";
 import CreatorPanel             from "./components/CreatorPanel";
 import ComercialPanel           from "./components/ComercialPanel";
-import ProductPhotoshoot        from "./components/ProductPhotoshoot"; // ← NUEVO
+import ProductPhotoshoot        from "./components/ProductPhotoshoot";
+import CineAIPanel              from "./components/CineAIPanel"; // ← NUEVO
 
 import { startPaypalSubscription } from "./lib/PaypalCheckout";
 
@@ -49,17 +51,12 @@ async function getAuthHeadersGlobal() {
 // ══════════════════════════════════════════════════════════════
 // MODAL DE COMPRA DE JADES
 // ══════════════════════════════════════════════════════════════
-// BuyJadesModal — flujo completo Pagadito 3DS
-// Paso 1: jades-setup → obtiene tokens
-// Paso 2: iframe Cardinal Commerce (recolección de datos)
-// Paso 3: jades-pay → procesa el cobro
-
 function BuyJadesModal({ open, onClose, userId, onSuccess }) {
   const [selectedPack, setSelectedPack] = useState("popular");
   const [step,         setStep]         = useState("form"); // form | loading | iframe | paying | done | error
   const [cardError,    setCardError]    = useState("");
   const [cardSuccess,  setCardSuccess]  = useState("");
-  const [setupData,    setSetupData]    = useState(null); // tokens del setup-payer
+  const [setupData,    setSetupData]    = useState(null);
   const iframeRef = useRef(null);
   const formRef   = useRef(null);
 
@@ -74,23 +71,16 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
   // Escuchar evento del iframe de Cardinal Commerce
   useEffect(() => {
     if (step !== "iframe") return;
-
     const handleMessage = async (event) => {
-      // Cardinal sandbox
       const validOrigins = [
         "https://centinelapistag.cardinalcommerce.com",
         "https://centinelapi.cardinalcommerce.com",
       ];
       if (!validOrigins.includes(event.origin)) return;
-
       console.log("[BuyJades] evento Cardinal recibido:", event.data);
-
-      // El sessionId del evento confirma que la recolección terminó
-      // Ahora llamar a jades-pay
       setStep("paying");
       await callJadesPay();
     };
-
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [step, setupData]);
@@ -98,8 +88,6 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
   // Cuando setupData está listo, enviar el iframe
   useEffect(() => {
     if (step !== "iframe" || !setupData) return;
-
-    // Pequeño delay para que el iframe se monte
     setTimeout(() => {
       try {
         if (formRef.current) {
@@ -108,12 +96,9 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         }
       } catch (e) {
         console.warn("[BuyJades] error submitting iframe form:", e);
-        // Si falla el iframe, intentar el pago directamente
         setStep("paying");
         callJadesPay();
       }
-
-      // Timeout de seguridad: si el iframe no responde en 5s, continuar igual
       setTimeout(() => {
         if (step === "iframe") {
           console.log("[BuyJades] iframe timeout — continuando al pago");
@@ -128,20 +113,16 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
 
   const pack = JADE_PACKS[selectedPack];
 
-  // Paso 1: setup-payer
   async function handlePay(e) {
     e.preventDefault();
     setCardError("");
-
     if (!card.number || !card.expirationDate || !card.cvv || !card.cardHolderName) {
       setCardError("Completa los datos de tarjeta."); return;
     }
     if (!card.firstName || !card.lastName || !card.email) {
       setCardError("Completa tu nombre y correo."); return;
     }
-
     setStep("loading");
-
     try {
       const auth = await getAuthHeadersGlobal();
       const r    = await fetch("/api/jades-setup", {
@@ -150,21 +131,15 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         body:    JSON.stringify({ pack: selectedPack, card }),
       });
       const j = await r.json().catch(() => null);
-
-      if (!r.ok || !j?.ok) {
-        throw new Error(j?.response_message || j?.error || "Error en setup de pago.");
-      }
-
+      if (!r.ok || !j?.ok) throw new Error(j?.response_message || j?.error || "Error en setup de pago.");
       setSetupData(j);
-      setStep("iframe"); // dispara el useEffect del iframe
-
+      setStep("iframe");
     } catch (err) {
       setCardError(err?.message || "Error iniciando el pago.");
       setStep("form");
     }
   }
 
-  // Paso 3: customer (después del iframe)
   async function callJadesPay() {
     try {
       const auth = await getAuthHeadersGlobal();
@@ -180,7 +155,6 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         }),
       });
       const j = await r.json().catch(() => null);
-
       if (!r.ok || !j?.ok) {
         if (j?.challenge_required) {
           setCardError("Tu banco requiere verificación adicional. Intenta con otra tarjeta.");
@@ -188,12 +162,10 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         }
         throw new Error(j?.response_message || j?.error || "Error procesando pago.");
       }
-
       setCardSuccess(`¡Listo! Se acreditaron ${j.jades_added} Jades a tu cuenta.`);
       setStep("done");
       if (typeof onSuccess === "function") await onSuccess();
       setTimeout(() => { setCardSuccess(""); setStep("form"); onClose(); }, 2500);
-
     } catch (err) {
       setCardError(err?.message || "Error procesando pago.");
       setStep("form");
@@ -205,28 +177,13 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
       <div className="relative h-full w-full max-w-md overflow-y-auto border-l border-white/10 bg-[#06070B] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
 
-        {/* Iframe oculto de Cardinal Commerce — recolección de datos del dispositivo */}
         {step === "iframe" && setupData && (
           <div style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
-            <iframe
-              ref={iframeRef}
-              id="cardinal_collection_iframe"
-              name="collectionIframe"
-              height="1" width="1"
-              style={{ display: "none" }}
-            />
-            <form
-              ref={formRef}
-              id="cardinal_collection_form"
-              method="POST"
-              target="collectionIframe"
-              action={setupData.deviceDataCollectionUrl}
-            >
-              <input
-                type="hidden"
-                name="JWT"
-                value={setupData.accessToken}
-              />
+            <iframe ref={iframeRef} id="cardinal_collection_iframe" name="collectionIframe"
+              height="1" width="1" style={{ display: "none" }} />
+            <form ref={formRef} id="cardinal_collection_form" method="POST"
+              target="collectionIframe" action={setupData.deviceDataCollectionUrl}>
+              <input type="hidden" name="JWT" value={setupData.accessToken} />
             </form>
           </div>
         )}
@@ -237,19 +194,15 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
             <p className="mt-1 text-xs text-neutral-400">1 Jade = $0.10 USD · Sin suscripción</p>
           </div>
           <button onClick={onClose}
-            className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-neutral-400 hover:bg-white/10">
-            ✕
-          </button>
+            className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-neutral-400 hover:bg-white/10">✕</button>
         </div>
 
-        {/* Loading / Paying */}
         {(step === "loading" || step === "iframe" || step === "paying") && (
           <div className="mt-10 text-center space-y-4">
             <div className="text-4xl animate-pulse">💳</div>
             <p className="text-sm text-white font-semibold">
               {step === "loading" ? "Iniciando pago seguro..." :
-               step === "iframe"  ? "Verificando dispositivo..." :
-               "Procesando pago..."}
+               step === "iframe"  ? "Verificando dispositivo..." : "Procesando pago..."}
             </p>
             <p className="text-xs text-neutral-400">No cierres esta ventana</p>
             <div className="flex justify-center gap-1 mt-4">
@@ -261,7 +214,6 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           </div>
         )}
 
-        {/* Done */}
         {step === "done" && cardSuccess && (
           <div className="mt-10 text-center space-y-4">
             <div className="text-5xl">✅</div>
@@ -269,10 +221,8 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           </div>
         )}
 
-        {/* Formulario */}
         {step === "form" && (
           <>
-            {/* Packs */}
             <div className="mt-5 grid grid-cols-2 gap-3">
               {Object.entries(JADE_PACKS).map(([key, p]) => (
                 <button key={key} type="button" onClick={() => setSelectedPack(key)}
@@ -284,14 +234,11 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                   <div className="text-sm font-semibold text-white">{p.label}</div>
                   <div className="mt-1 text-xl font-bold text-cyan-300">{p.jades}J</div>
                   <div className="mt-1 text-xs text-neutral-400">${p.price_usd} USD</div>
-                  <div className="mt-1 text-[10px] text-neutral-500">
-                    ${(p.price_usd / p.jades * 10).toFixed(1)}¢ por jade
-                  </div>
+                  <div className="mt-1 text-[10px] text-neutral-500">${(p.price_usd / p.jades * 10).toFixed(1)}¢ por jade</div>
                 </button>
               ))}
             </div>
 
-            {/* Equivalencias */}
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
               <div className="font-semibold text-white">Con {pack.jades} Jades puedes generar:</div>
               <div className="mt-2 space-y-1">
@@ -299,25 +246,25 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                 <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 2)}</span> imágenes con avatar</div>
                 <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / COSTS.vid_express_8s)}</span> videos Express 8s</div>
                 <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 20)}</span> sesiones Photoshoot</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 40)}</span> videos CineAI 5s</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 75)}</span> videos CineAI 10s</div>
               </div>
             </div>
 
-            {/* Formulario de tarjeta */}
             <form onSubmit={handlePay} className="mt-5 space-y-3">
               <div className="text-xs font-semibold text-white">
                 Pagar ${pack.price_usd} USD · Pack {pack.label}
               </div>
-
               {[
-                { label: "Nombre en tarjeta",    key: "cardHolderName", placeholder: "JOHN DOE"                  },
-                { label: "Número de tarjeta",     key: "number",         placeholder: "4000000000002701"           },
-                { label: "Vencimiento (MM/YYYY)", key: "expirationDate", placeholder: "01/2030"                   },
-                { label: "CVV",                   key: "cvv",            placeholder: "123"                        },
-                { label: "Nombre",                key: "firstName",      placeholder: "John"                       },
-                { label: "Apellido",              key: "lastName",       placeholder: "Doe"                        },
-                { label: "Correo",                key: "email",          placeholder: "tu@email.com"               },
-                { label: "Teléfono",              key: "phone",          placeholder: "2264-7032"                  },
-                { label: "Dirección",             key: "line1",          placeholder: "7a Calle Pte. Bis, 511 y 531" },
+                { label: "Nombre en tarjeta",    key: "cardHolderName", placeholder: "JOHN DOE"                   },
+                { label: "Número de tarjeta",     key: "number",         placeholder: "4000000000002701"            },
+                { label: "Vencimiento (MM/YYYY)", key: "expirationDate", placeholder: "01/2030"                    },
+                { label: "CVV",                   key: "cvv",            placeholder: "123"                         },
+                { label: "Nombre",                key: "firstName",      placeholder: "John"                        },
+                { label: "Apellido",              key: "lastName",       placeholder: "Doe"                         },
+                { label: "Correo",                key: "email",          placeholder: "tu@email.com"                },
+                { label: "Teléfono",              key: "phone",          placeholder: "2264-7032"                   },
+                { label: "Dirección",             key: "line1",          placeholder: "7a Calle Pte. Bis, 511 y 531"},
               ].map(({ label, key, placeholder }) => (
                 <div key={key}>
                   <label className="text-[11px] text-neutral-400">{label}</label>
@@ -330,13 +277,9 @@ function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                   />
                 </div>
               ))}
-
               {cardError && (
-                <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                  {cardError}
-                </div>
+                <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{cardError}</div>
               )}
-
               <button type="submit"
                 className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white hover:opacity-90 transition-all">
                 Pagar ${pack.price_usd} · {pack.jades} Jades
@@ -492,8 +435,6 @@ function DashboardView() {
     return data;
   };
 
-  // Función de deducción para ProductPhotoshoot
-  // Descuenta 5 Jades por imagen (20 total por sesión de 4 imágenes)
   const handlePhotoshootJades = async (amount) => {
     try {
       await spendJades({ amount, reason: "product_photoshoot" });
@@ -509,15 +450,15 @@ function DashboardView() {
   };
 
   // ── Tabs del dashboard ─────────────────────────────────────
-  // Se agrega "photoshoot" como nueva tab
   const tabs = [
-    { key: "generator",  label: "Imagen"          },
-    { key: "img2video",  label: "Imagen → Video"  },
-    { key: "avatars",    label: "Avatares"         },
-    { key: "library",    label: "Biblioteca"       },
-    { key: "montaje",    label: "Montaje IA"       },
-    { key: "comercial",  label: "🎬 Comercial IA"  },
-    { key: "photoshoot", label: "📸 Photoshoot"    }, // ← NUEVO
+    { key: "generator",  label: "Imagen"            },
+    { key: "img2video",  label: "Imagen → Video"    },
+    { key: "avatars",    label: "Avatares"           },
+    { key: "library",    label: "Biblioteca"         },
+    { key: "montaje",    label: "Montaje IA"         },
+    { key: "comercial",  label: "🎬 Comercial IA"   },
+    { key: "photoshoot", label: "📸 Photoshoot"      },
+    { key: "cineai",     label: "🎥 CineAI"          }, // ← NUEVO
   ];
 
   return (
@@ -539,7 +480,6 @@ function DashboardView() {
 
           <div className="flex items-center gap-2 md:gap-3 text-xs">
             <span className="hidden lg:inline text-neutral-300">{user?.email}{isAdmin ? " · admin" : ""}</span>
-
             <button
               onClick={() => setBuyJadesOpen(true)}
               className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5 hover:border-cyan-400/40 hover:bg-cyan-500/5 transition-all"
@@ -550,7 +490,6 @@ function DashboardView() {
               </span>
               <span className="text-[10px] text-cyan-400/70">+ Comprar</span>
             </button>
-
             <button onClick={handleContact}
               className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10">
               Contacto
@@ -611,13 +550,18 @@ function DashboardView() {
             {activeModule === "library"    && <LibraryView />}
             {activeModule === "montaje"    && <MontajeIAPanel userStatus={userStatus} />}
             {activeModule === "comercial"  && <ComercialPanel userStatus={userStatus} />}
-
-            {/* ── PHOTOSHOOT MODULE ── */}
             {activeModule === "photoshoot" && (
               <ProductPhotoshoot
                 userJades={userStatus.jades ?? 0}
                 onJadesDeducted={handlePhotoshootJades}
               />
+            )}
+
+            {/* ── CINEAI MODULE ── */}
+            {activeModule === "cineai" && (
+              // CineAIPanel maneja su propia auth y Jades internamente
+              // via /api/cineai/generate y /api/cineai/status/[taskId]
+              <CineAIPanel />
             )}
           </section>
         )}
@@ -629,13 +573,16 @@ function DashboardView() {
               <button key={item.key} type="button" onClick={() => setActiveModule(item.key)}
                 className={[
                   "group rounded-[28px] border p-6 text-left transition-all",
-                  // Card especial para Photoshoot
                   item.key === "photoshoot"
                     ? "border-cyan-400/25 bg-cyan-500/5 hover:border-cyan-400/40 hover:bg-cyan-500/8"
+                    : item.key === "cineai"
+                    ? "border-yellow-400/25 bg-yellow-500/5 hover:border-yellow-400/40 hover:bg-yellow-500/8"
                     : "border-white/10 bg-black/35 hover:border-cyan-400/30 hover:bg-black/50"
                 ].join(" ")}>
                 <div className={["text-base font-semibold transition-colors",
-                  item.key === "photoshoot" ? "text-cyan-200 group-hover:text-cyan-100" : "text-white group-hover:text-cyan-300"
+                  item.key === "photoshoot" ? "text-cyan-200 group-hover:text-cyan-100"
+                  : item.key === "cineai"   ? "text-yellow-200 group-hover:text-yellow-100"
+                  : "text-white group-hover:text-cyan-300"
                 ].join(" ")}>{item.label}</div>
                 <div className="mt-2 text-xs text-neutral-400">
                   {item.key === "generator"  && "Genera imágenes con FLUX y avatares faciales"}
@@ -645,14 +592,21 @@ function DashboardView() {
                   {item.key === "montaje"    && "Monta personas o productos en fondos personalizados"}
                   {item.key === "comercial"  && "Genera comerciales profesionales con video, voz y narración IA"}
                   {item.key === "photoshoot" && "Convierte fotos de productos en shoots profesionales — Studio, Lifestyle, In Use, Campaign"}
+                  {item.key === "cineai"     && "Escenas cinematográficas tipo Hollywood y trends de TikTok con Seedance 2.0 — copia cualquier baile o movimiento"}
                 </div>
                 {item.key === "photoshoot" && (
                   <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-cyan-400/20 bg-cyan-400/8 px-3 py-1 text-[10px] text-cyan-300">
                     ✦ Nuevo · 20 Jades por sesión · 4 variaciones
                   </div>
                 )}
+                {item.key === "cineai" && (
+                  <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-yellow-400/20 bg-yellow-400/8 px-3 py-1 text-[10px] text-yellow-300">
+                    ✦ Nuevo · Seedance 2.0 · TikTok Trends + Cine · desde 40 Jades
+                  </div>
+                )}
                 <div className={["mt-4 text-[11px] transition-colors",
-                  item.key === "photoshoot" ? "text-cyan-400/60 group-hover:text-cyan-400" : "text-cyan-400/60 group-hover:text-cyan-400"
+                  item.key === "cineai" ? "text-yellow-400/60 group-hover:text-yellow-400"
+                  : "text-cyan-400/60 group-hover:text-cyan-400"
                 ].join(" ")}>
                   Abrir módulo →
                 </div>
@@ -720,15 +674,14 @@ function PricingSection({ onOpenAuth }) {
                 <span className="mb-1 text-xs text-neutral-400">USD</span>
               </div>
               <div className="mt-1 text-lg font-semibold text-cyan-300">{p.jades} Jades</div>
-
               <div className="mt-5 space-y-2 text-[11px] text-neutral-300">
                 <div className="flex items-center gap-2"><span className="text-cyan-400">✓</span> {p.jades} imágenes sin avatar</div>
                 <div className="flex items-center gap-2"><span className="text-cyan-400">✓</span> {Math.floor(p.jades / 2)} imágenes con avatar</div>
                 <div className="flex items-center gap-2"><span className="text-fuchsia-400">✓</span> {Math.floor(p.jades / COSTS.vid_express_8s)} videos Express 8s</div>
                 <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {Math.floor(p.jades / 20)} sesiones Photoshoot</div>
+                <div className="flex items-center gap-2"><span className="text-yellow-400">✓</span> {Math.floor(p.jades / 40)} videos CineAI 5s</div>
                 <div className="flex items-center gap-2"><span className="text-yellow-400">✓</span> Jades sin vencimiento</div>
               </div>
-
               <button onClick={onOpenAuth}
                 className={`mt-6 w-full rounded-2xl py-2.5 text-xs font-semibold transition-all ${
                   isPopular
@@ -747,15 +700,18 @@ function PricingSection({ onOpenAuth }) {
         <div className="text-sm font-semibold text-white mb-4">Costo por generación</div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-[11px]">
           {[
-            { label: "Imagen sin avatar",       cost: COSTS.img_prompt,         icon: "🖼️", color: "text-cyan-300"    },
-            { label: "Imagen con avatar",        cost: COSTS.img_anchor,         icon: "👤", color: "text-cyan-300"    },
-            { label: "Video Express 8s",         cost: COSTS.vid_express_8s,     icon: "🎬", color: "text-fuchsia-300" },
-            { label: "Video Standard 10s",       cost: COSTS.vid_standard_10s,   icon: "🎥", color: "text-yellow-300"  },
-            { label: "Video Standard 15s",       cost: COSTS.vid_standard_15s,   icon: "🎥", color: "text-yellow-300"  },
-            { label: "Audio Express",            cost: COSTS.vid_express_audio,  icon: "🔊", color: "text-fuchsia-300" },
-            { label: "Audio Standard",           cost: COSTS.vid_standard_audio, icon: "🔊", color: "text-yellow-300"  },
-            { label: "Montaje IA",               cost: 5,                        icon: "✨", color: "text-emerald-300" },
-            { label: "Photoshoot (sesión 4 fotos)", cost: 20,                   icon: "📸", color: "text-cyan-300"    }, // ← NUEVO
+            { label: "Imagen sin avatar",          cost: COSTS.img_prompt,         icon: "🖼️", color: "text-cyan-300"    },
+            { label: "Imagen con avatar",           cost: COSTS.img_anchor,         icon: "👤", color: "text-cyan-300"    },
+            { label: "Video Express 8s",            cost: COSTS.vid_express_8s,     icon: "🎬", color: "text-fuchsia-300" },
+            { label: "Video Standard 10s",          cost: COSTS.vid_standard_10s,   icon: "🎥", color: "text-yellow-300"  },
+            { label: "Video Standard 15s",          cost: COSTS.vid_standard_15s,   icon: "🎥", color: "text-yellow-300"  },
+            { label: "Audio Express",               cost: COSTS.vid_express_audio,  icon: "🔊", color: "text-fuchsia-300" },
+            { label: "Audio Standard",              cost: COSTS.vid_standard_audio, icon: "🔊", color: "text-yellow-300"  },
+            { label: "Montaje IA",                  cost: 5,                        icon: "✨", color: "text-emerald-300" },
+            { label: "Photoshoot (4 fotos)",        cost: 20,                       icon: "📸", color: "text-cyan-300"    },
+            { label: "CineAI 5s",                   cost: 40,                       icon: "🎥", color: "text-yellow-300"  },
+            { label: "CineAI 10s",                  cost: 75,                       icon: "🎥", color: "text-yellow-300"  },
+            { label: "CineAI 15s",                  cost: 110,                      icon: "🎥", color: "text-yellow-300"  },
           ].map(({ label, cost, icon, color }) => (
             <div key={label} className="flex items-center justify-between rounded-2xl border border-white/5 bg-black/40 px-4 py-3">
               <span className="flex items-center gap-2 text-neutral-300">{icon} {label}</span>
@@ -844,8 +800,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
 
         {/* ── HERO ── */}
         <section className="grid gap-10 xl:grid-cols-[1fr_1.2fr_0.85fr]">
-
-          {/* Izquierda */}
           <div className="xl:pt-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/30 bg-yellow-400/10 px-4 py-1.5 text-[11px] text-yellow-200">
               <span className="h-1.5 w-1.5 rounded-full bg-yellow-400 animate-pulse" />
@@ -861,7 +815,7 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
               Crea, organiza y escala contenido visual para personajes y modelos virtuales desde un solo sistema conectado a GPU.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              {["Producción en GPU","Consistencia de rostro","Imagen → Video","Montaje IA","📸 Photoshoot"].map((t) => (
+              {["Producción en GPU","Consistencia de rostro","Imagen → Video","Montaje IA","📸 Photoshoot","🎥 CineAI"].map((t) => (
                 <span key={t} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/70">
                   <span className="h-1 w-1 rounded-full bg-cyan-400" />{t}
                 </span>
@@ -877,8 +831,6 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
                 Ver presentación
               </button>
             </div>
-
-            {/* Mini stats */}
             <div className="mt-10 grid grid-cols-3 gap-4 border-t border-white/10 pt-8">
               <StatCounter value={1240} suffix="+" label="Modelos creados" />
               <StatCounter value={3}    suffix="s"  label="Tiempo promedio" />
@@ -917,17 +869,15 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
             </div>
           </div>
 
-          {/* Derecha — demo box sticky */}
+          {/* Derecha — demo box */}
           <div className="order-2 xl:order-3 xl:pt-10">
             <div className="sticky top-24">
               <div id="demo-box"
                 className="relative overflow-hidden rounded-[30px] border-2 border-yellow-400/35 bg-black/60 p-6 backdrop-blur-md shadow-[0_0_60px_rgba(250,204,21,0.10)]">
                 <div className="pointer-events-none absolute inset-0 rounded-[30px] ring-1 ring-cyan-400/15" />
                 <div className="pointer-events-none absolute -inset-12 -z-10 bg-gradient-to-br from-cyan-500/15 via-transparent to-yellow-400/15 blur-3xl" />
-
                 <p className="text-[11px] uppercase tracking-[0.22em] text-yellow-200/80">Inicio rápido</p>
                 <h2 className="mt-2 text-xl font-bold text-white">Empieza con tu primer modelo virtual</h2>
-
                 <div className="mt-4 grid grid-cols-3 gap-2">
                   {["Imagen","Imagen → Video","Avatar"].map((t, i) => (
                     <div key={t} className={`rounded-2xl px-3 py-2 text-[11px] text-center border ${
@@ -936,18 +886,15 @@ function LandingView({ onOpenAuth, onStartDemo, onOpenContact, onOpenAbout }) {
                       : "border-white/10 bg-white/5 text-white/70"}`}>{t}</div>
                   ))}
                 </div>
-
                 <textarea
                   className="mt-4 h-28 w-full resize-none rounded-2xl border border-yellow-400/20 bg-black/60 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-yellow-300 transition-all"
                   value={demoPrompt} onChange={(e) => setDemoPrompt(e.target.value)}
                   placeholder="Ej: modelo virtual elegante para redes sociales..." />
-
                 <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
                   {["Modelo virtual","Imagen vertical","Cuenta → panel"].map(t => (
                     <div key={t} className="rounded-xl border border-white/10 bg-black/50 px-2 py-2 text-center text-neutral-400">{t}</div>
                   ))}
                 </div>
-
                 <button
                   onClick={() => { saveDemoPrompt(demoPrompt); onStartDemo(); }}
                   disabled={!demoPrompt.trim()}
@@ -1135,7 +1082,6 @@ function AboutView({ onBackHome }) {
           </button>
         </div>
       </header>
-
       <main className="mx-auto max-w-6xl px-4 pb-16 pt-10">
         <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 p-4">
           <div className="mb-4">
@@ -1155,7 +1101,6 @@ function AboutView({ onBackHome }) {
             )}
           </div>
         </section>
-
         <div className="mt-8">
           <button onClick={onBackHome}
             className="rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white">
@@ -1163,7 +1108,6 @@ function AboutView({ onBackHome }) {
           </button>
         </div>
       </main>
-
       <footer className="border-t border-white/10 bg-black/30">
         <div className="mx-auto max-w-6xl px-4 py-6 text-center text-[11px] text-neutral-400">
           IsabelaOS 2025 creado por Stalling Technologic Cobán, Alta Verapaz.
@@ -1205,4 +1149,3 @@ export default function App() {
     </>
   );
 }
-
