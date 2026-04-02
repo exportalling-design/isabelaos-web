@@ -1,3 +1,4 @@
+
 // src/App.jsx
 // ─────────────────────────────────────────────────────────────
 // App principal de IsabelaOS Studio
