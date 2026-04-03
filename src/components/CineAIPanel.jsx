@@ -31,7 +31,7 @@ const PRESETS = {
     { id: "action",  icon: "⚡", label: "Acción",   prompt: "Person sprinting across rooftops at golden hour, dynamic parkour moves, cinematic slow motion impact, film grain, dramatic orchestral score, tracking shot" },
     { id: "fight",   icon: "🥊", label: "Pelea",    prompt: "Intense epic fight scene in heavy rain at night, slow motion combat moves, neon lights reflecting on wet concrete, cinematic action thriller, deep dramatic shadows, bullet time camera effect" },
     { id: "drama",   icon: "🎭", label: "Drama",    prompt: "Cinematic close-up of person standing in heavy rain at night, intense emotional expression, city lights bokeh, film noir lighting, slow dolly push-in" },
-    { id: "epic",    icon: "🌅", label: "Épico",    prompt: "Aerial drone shot descending to reveal person standing at cliff edge overlooking city at sunset, golden hour light, epic orchestral atmosphere, National Geographic quality" },
+    { id: "epic",    icon: "🌅", label: "Épico",    prompt: "Medium close-up shot of person standing heroically at cliff edge, city visible behind them at sunset, camera slowly pulls back revealing the epic landscape, golden hour light hitting their face, cinematic epic atmosphere" },
     { id: "noir",    icon: "🕵️", label: "Noir",     prompt: "Detective walking down rain-soaked alley at night, neon signs reflecting in puddles, steam rising from manholes, slow dolly follow shot, film noir, 1940s meets cyberpunk" },
     { id: "custom",  icon: "✏️", label: "Custom",   prompt: "" },
   ],
@@ -135,6 +135,7 @@ export default function CineAIPanel() {
   const [extractingFrame, setExtractingFrame] = useState(false);
   const [lastFrameUrl,    setLastFrameUrl]    = useState(null);
   const [isContinuation,  setIsContinuation]  = useState(false);
+  const [frameExtracted,  setFrameExtracted]  = useState(false); // confirmación visual
 
   // UI
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
@@ -285,6 +286,7 @@ export default function CineAIPanel() {
   const handleContinueScene = async () => {
     if (!videoUrl) return;
     setExtractingFrame(true);
+    setFrameExtracted(false);
     setError(null);
     try {
       const frameBlob = await extractLastFrame(videoUrl);
@@ -295,10 +297,15 @@ export default function CineAIPanel() {
       if (upErr) throw upErr;
       const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
       setLastFrameUrl(data.publicUrl);
-      setIsContinuation(true);
-      setVideoUrl(null);
-      setJobStatus(null);
-      setCurrentTaskId(null);
+      setFrameExtracted(true); // mostrar confirmación
+      // Esperar 1.5s para que el usuario vea el mensaje, luego activar modo continuación
+      setTimeout(() => {
+        setIsContinuation(true);
+        setVideoUrl(null);
+        setJobStatus(null);
+        setCurrentTaskId(null);
+        setFrameExtracted(false);
+      }, 1500);
     } catch (e) {
       setError("No se pudo extraer el último frame: " + e.message);
     } finally {
@@ -315,6 +322,7 @@ export default function CineAIPanel() {
     setGenerating(false);
     setIsContinuation(false);
     setLastFrameUrl(null);
+    setFrameExtracted(false);
     clearInterval(pollRef.current);
   };
 
@@ -574,8 +582,28 @@ export default function CineAIPanel() {
                 <div className="result-actions">
                   <button className="ra-btn" onClick={() => setVideoFullscreen(true)}>⛶ Ver en grande</button>
                   <a href={videoUrl} download className="ra-btn gold">⬇ Descargar</a>
-                  <button className="ra-btn green" onClick={handleContinueScene} disabled={extractingFrame}>
-                    {extractingFrame ? "Extrayendo frame..." : "▶ Continuar escena"}
+                  {/* Mensaje de confirmación extracción de frame */}
+                  {frameExtracted && (
+                    <div style={{
+                      background: "rgba(80,180,100,0.12)",
+                      border: "1px solid rgba(80,180,100,0.3)",
+                      borderRadius: 8,
+                      padding: "8px 16px",
+                      fontSize: 12,
+                      color: "#60c870",
+                      letterSpacing: 1,
+                      marginTop: 8,
+                    }}>
+                      ✅ Último frame extraído — preparando continuación...
+                    </div>
+                  )}
+                  <button
+                    className="ra-btn green"
+                    onClick={handleContinueScene}
+                    disabled={extractingFrame || frameExtracted}
+                    style={extractingFrame ? { animation: "pulse-b 0.8s infinite", opacity: 0.7 } : {}}
+                  >
+                    {extractingFrame ? "⏳ Extrayendo último frame..." : frameExtracted ? "✅ Frame extraído" : "▶ Continuar escena →"}
                   </button>
                   <button className="ra-btn" onClick={handleReset}>✦ Nueva escena</button>
                 </div>
