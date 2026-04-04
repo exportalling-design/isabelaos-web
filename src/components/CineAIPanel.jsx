@@ -61,7 +61,40 @@ const BLOCKED_PREVIEW = [
 
 function hasBlockedName(text) {
   const lower = (text || "").toLowerCase();
-  return BLOCKED_PREVIEW.find((n) => lower.includes(n)) || null;
+  return BLOCKED_PREVIEW.find((n) => {
+    const escaped = n.replace(/[-]/g, "\\-");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    return regex.test(lower);
+  }) || null;
+}
+
+// ── Clave localStorage para términos aceptados ────────────────
+const TERMS_ACCEPTED_KEY = "isabelaos_cineai_terms_v1";
+
+// ── Verificación básica de contenido inapropiado en imagen ────
+async function checkImageSafety(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 50; canvas.height = 50;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, 50, 50);
+      const data = ctx.getImageData(0, 0, 50, 50).data;
+      URL.revokeObjectURL(url);
+      let skinPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2];
+        if (r > 95 && g > 40 && b > 20 && r > g && r > b &&
+            Math.abs(r-g) > 15 && r-b > 15 && g-b > 0) skinPixels++;
+      }
+      // Más del 60% de tonos piel → posible desnudo → bloquear
+      resolve((skinPixels / (50*50)) < 0.60);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(true); };
+    img.src = url;
+  });
 }
 
 function extractLastFrame(videoSrc) {
@@ -140,6 +173,14 @@ export default function CineAIPanel() {
   // UI
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
+
+  // ── Modales de seguridad ──────────────────────────────────
+  const [showTermsModal,   setShowTermsModal]   = useState(false);
+  const [termsAccepted,    setTermsAccepted]    = useState(() => {
+    try { return !!localStorage.getItem(TERMS_ACCEPTED_KEY); } catch { return false; }
+  });
+  const [showPhotoConsent, setShowPhotoConsent] = useState(false);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState(null);
   const [showExtUrlInput, setShowExtUrlInput] = useState(false); // toggle URL externa
 
   const faceInputRef  = useRef();
@@ -179,6 +220,15 @@ export default function CineAIPanel() {
   }, [activeMode]);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // Mostrar modal de términos si es la primera vez
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(TERMS_ACCEPTED_KEY)) {
+        setShowTermsModal(true);
+      }
+    } catch {}
+  }, []);
 
   const uploadToStorage = async (file, folder, setUrl, setPreview, setUploading, previewMode = "url") => {
     setUploading(true);
@@ -497,6 +547,175 @@ export default function CineAIPanel() {
         }
       `}</style>
 
+      {/* ══ MODAL TÉRMINOS — primera vez ════════════════════ */}
+      {showTermsModal && (
+        <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
+          <div className="modal-box" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title" style={{ fontSize: 22, marginBottom: 6 }}>⚖️ TÉRMINOS DE USO — CINEAI</div>
+            <p style={{ fontSize: 11, color: "#555", marginBottom: 20, letterSpacing: 1 }}>
+              Lee y acepta antes de continuar
+            </p>
+
+            <div style={{ fontSize: 12, color: "#888", lineHeight: 1.8, maxHeight: 340, overflowY: "auto", paddingRight: 8 }}>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>1. USO RESPONSABLE</p>
+              <p style={{ marginBottom: 14 }}>
+                CineAI es una herramienta de generación de video con inteligencia artificial. El usuario es el único y exclusivo responsable del contenido que genera, solicita o publica usando esta plataforma. IsabelaOS Studio no asume ninguna responsabilidad por el uso inadecuado de esta tecnología.
+              </p>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>2. PROHIBICIÓN DE SUPLANTACIÓN DE IDENTIDAD</p>
+              <p style={{ marginBottom: 14 }}>
+                Queda estrictamente prohibido usar CineAI para suplantar la identidad de cualquier persona, ya sea pública o privada, con fines de engaño, fraude, difamación, acoso o cualquier actividad que cause daño. El uso de la imagen de terceros sin su consentimiento explícito es responsabilidad total del usuario.
+              </p>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>3. DERECHOS DE IMAGEN Y COPYRIGHT</p>
+              <p style={{ marginBottom: 14 }}>
+                Al subir fotografías, el usuario declara que posee los derechos sobre dichas imágenes o cuenta con el consentimiento expreso de las personas que aparecen en ellas. IsabelaOS Studio no es responsable por violaciones de derechos de imagen o copyright cometidas por los usuarios.
+              </p>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>4. CONTENIDO PROHIBIDO</p>
+              <p style={{ marginBottom: 14 }}>
+                Está terminantemente prohibido generar contenido de carácter sexual explícito, violencia real contra personas identificables, material que involucre menores de edad, propaganda de odio, o cualquier contenido ilegal según las leyes aplicables. Las violaciones pueden resultar en la suspensión permanente de la cuenta.
+              </p>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>5. EXENCIÓN DE RESPONSABILIDAD</p>
+              <p style={{ marginBottom: 14 }}>
+                IsabelaOS Studio proporciona esta tecnología como herramienta creativa. Cualquier uso que viole estos términos, las leyes locales o los derechos de terceros es responsabilidad exclusiva del usuario. La plataforma se reserva el derecho de suspender cuentas que violen estos términos sin previo aviso.
+              </p>
+
+              <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>6. COOPERACIÓN LEGAL</p>
+              <p style={{ marginBottom: 6 }}>
+                IsabelaOS Studio cooperará con las autoridades competentes ante cualquier reporte de uso ilegal o dañino de la plataforma, proporcionando la información disponible sobre el usuario responsable.
+              </p>
+            </div>
+
+            <div style={{
+              marginTop: 20,
+              padding: "12px 14px",
+              background: "rgba(200,160,80,0.06)",
+              border: "1px solid rgba(200,160,80,0.15)",
+              borderRadius: 8,
+              fontSize: 11,
+              color: "#666",
+              lineHeight: 1.6,
+            }}>
+              Al hacer click en <strong style={{ color: "#c8a050" }}>"Acepto los términos"</strong> confirmas que has leído, entendido y aceptas estos términos de uso. Eres el único responsable del contenido que generes.
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button
+                onClick={() => {
+                  try { localStorage.setItem(TERMS_ACCEPTED_KEY, "1"); } catch {}
+                  setTermsAccepted(true);
+                  setShowTermsModal(false);
+                }}
+                style={{
+                  flex: 1,
+                  background: "#c8a050",
+                  border: "none",
+                  borderRadius: 10,
+                  color: "#060608",
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  fontSize: 18,
+                  letterSpacing: 3,
+                  padding: "14px",
+                  cursor: "pointer",
+                }}
+              >
+                ✓ ACEPTO LOS TÉRMINOS
+              </button>
+              <button
+                onClick={() => setShowTermsModal(false)}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #222",
+                  borderRadius: 10,
+                  color: "#555",
+                  fontFamily: "'Syne', sans-serif",
+                  fontSize: 12,
+                  padding: "14px 18px",
+                  cursor: "pointer",
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ MODAL CONSENTIMIENTO FOTO ════════════════════════ */}
+      {showPhotoConsent && (
+        <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
+          <div className="modal-box" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title" style={{ fontSize: 20, marginBottom: 6 }}>📸 CONSENTIMIENTO DE IMAGEN</div>
+
+            <div style={{ fontSize: 13, color: "#888", lineHeight: 1.8 }}>
+              <p style={{ marginBottom: 12 }}>
+                Antes de subir esta fotografía, confirma lo siguiente:
+              </p>
+
+              <div style={{ background: "rgba(200,160,80,0.05)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
+                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>
+                  ☑ <strong>Soy el titular de los derechos</strong> de esta fotografía, o tengo el consentimiento expreso de la(s) persona(s) que aparecen en ella para usar su imagen en esta plataforma.
+                </p>
+                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>
+                  ☑ <strong>No usaré esta imagen</strong> para suplantar la identidad de ninguna persona, difamar, engañar o causar daño a terceros.
+                </p>
+                <p style={{ color: "#ddd8cc", marginBottom: 0 }}>
+                  ☑ <strong>Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado con esta imagen. IsabelaOS Studio no es responsable del uso inadecuado.
+                </p>
+              </div>
+
+              <p style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>
+                Las fotos con contenido inapropiado, desnudos o que violen los derechos de imagen de terceros serán bloqueadas automáticamente. Las violaciones pueden resultar en la suspensión de tu cuenta.
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button
+                onClick={async () => {
+                  setShowPhotoConsent(false);
+                  if (pendingPhotoFile) {
+                    uploadToStorage(pendingPhotoFile, "cineai/faces", setFaceImageUrl, setFacePreview, setUploadingFace);
+                    setPendingPhotoFile(null);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  background: "#c8a050",
+                  border: "none",
+                  borderRadius: 10,
+                  color: "#060608",
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  fontSize: 16,
+                  letterSpacing: 3,
+                  padding: "14px",
+                  cursor: "pointer",
+                }}
+              >
+                ✓ ACEPTO Y SUBO LA FOTO
+              </button>
+              <button
+                onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #222",
+                  borderRadius: 10,
+                  color: "#555",
+                  fontFamily: "'Syne', sans-serif",
+                  fontSize: 12,
+                  padding: "14px 18px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal cómo funciona */}
       {showHowItWorks && (
         <div className="modal-overlay" onClick={() => setShowHowItWorks(false)}>
@@ -545,6 +764,28 @@ export default function CineAIPanel() {
           <strong>Rostros de celebridades y personajes de Hollywood están bloqueados por derechos de autor.</strong>{" "}
           No puedes usar Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc. Describe un personaje original.
         </span>
+      </div>
+
+      {/* Banner recordatorio de términos — siempre visible */}
+      <div style={{
+        background: "rgba(200,160,80,0.04)",
+        borderBottom: "1px solid rgba(200,160,80,0.1)",
+        padding: "8px 26px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        flexWrap: "wrap",
+      }}>
+        <p style={{ fontSize: 11, color: "#444", letterSpacing: 1, lineHeight: 1.5 }}>
+          ⚖️ Todo el contenido generado es <strong style={{ color: "#666" }}>responsabilidad exclusiva del usuario</strong>. Prohibida la suplantación de identidad y el uso sin consentimiento de imágenes de terceros.
+        </p>
+        <button
+          onClick={() => setShowTermsModal(true)}
+          style={{ background: "none", border: "none", color: "#c8a050", fontSize: 11, cursor: "pointer", letterSpacing: 1, whiteSpace: "nowrap", textDecoration: "underline", padding: 0 }}
+        >
+          Ver términos completos
+        </button>
       </div>
 
       {/* Selector de modo */}
@@ -716,9 +957,20 @@ export default function CineAIPanel() {
               </div>
 
               <input ref={faceInputRef} type="file" accept="image/*" style={{ display: "none" }}
-                onChange={(e) => {
+                onChange={async (e) => {
                   const f = e.target.files[0];
-                  if (f) uploadToStorage(f, "cineai/faces", setFaceImageUrl, setFacePreview, setUploadingFace);
+                  if (!f) return;
+                  // Verificar contenido inapropiado
+                  const isSafe = await checkImageSafety(f);
+                  if (!isSafe) {
+                    setError("La imagen fue bloqueada por contener contenido inapropiado. Solo se permiten fotos de rostros y retratos.");
+                    e.target.value = "";
+                    return;
+                  }
+                  // Mostrar modal de consentimiento antes de subir
+                  setPendingPhotoFile(f);
+                  setShowPhotoConsent(true);
+                  e.target.value = "";
                 }} />
               <input ref={audioInputRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*" style={{ display: "none" }}
                 onChange={(e) => {
