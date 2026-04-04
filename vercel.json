@@ -2,5 +2,8 @@
   "crons": [],
   "functions": {
     "api/generate-video.js": { "maxDuration": 800 }
-  }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
