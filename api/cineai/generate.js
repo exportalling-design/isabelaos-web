@@ -51,7 +51,9 @@ const BLOCKED_NAMES = [
 function detectBlockedContent(text) {
   const lower = (text || "").toLowerCase();
   for (const name of BLOCKED_NAMES) {
-    if (lower.includes(name)) return name;
+    const escaped = name.replace(/[-]/g, "\\-");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    if (regex.test(lower)) return name;
   }
   return null;
 }
