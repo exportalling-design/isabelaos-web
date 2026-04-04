@@ -1,4 +1,3 @@
-
 // src/App.jsx
 // ─────────────────────────────────────────────────────────────
 // App principal de IsabelaOS Studio — v5
@@ -26,6 +25,7 @@ import CineAIPanel              from "./components/CineAIPanel";
 import Terms                    from "./components/Terms";
 import Refund                   from "./components/Refund";
 import TermsAcceptanceModal     from "./components/TermsAcceptanceModal";
+import LandingView              from "./components/LandingView";
 
 const DEMO_PROMPT_KEY = "isabela_demo_prompt_text2img";
 function saveDemoPrompt(p) { try { localStorage.setItem(DEMO_PROMPT_KEY, String(p || "")); } catch {} }
@@ -551,7 +551,16 @@ export default function App() {
       <AuthModal open={authOpen} onClose={()=>setAuthOpen(false)} />
       <GoogleOnlyModal open={googleModalOpen} onClose={()=>setGoogleModalOpen(false)}
         onGoogle={async()=>{ try{await signInWithGoogle();setGoogleModalOpen(false);}catch(e){alert(e?.message||"Error.");} }} />
-      {landingPage==="home"    && <LandingView onOpenAuth={()=>setAuthOpen(true)} onStartDemo={()=>setGoogleModalOpen(true)} onOpenContact={()=>setLandingPage("contact")} onOpenAbout={()=>setLandingPage("about")} lang={lang} setLang={setLang}/>}
+      {landingPage==="home" && (
+        <LandingView
+          onOpenAuth={()    => setAuthOpen(true)}
+          onStartDemo={()   => setGoogleModalOpen(true)}
+          onOpenContact={() => setLandingPage("contact")}
+          onOpenAbout={()   => setLandingPage("about")}
+          lang={lang}
+          setLang={setLang}
+        />
+      )}
       {landingPage==="contact" && <ContactView onBack={()=>setLandingPage("home")} />}
       {landingPage==="about"   && <AboutView onBackHome={()=>setLandingPage("home")} lang={lang} />}
     </>
