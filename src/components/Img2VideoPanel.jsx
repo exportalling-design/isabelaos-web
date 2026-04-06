@@ -2,11 +2,50 @@
 // ─────────────────────────────────────────────────────────────
 // Panel de Imagen → Video
 // Modos: Express (Veo3 Fast) y Standard (WAN)
-// Studio eliminado — ya no usamos WAN en serverless propio
+//
+// FIXES:
+//   - Prompt anti-subtítulos forzado: Veo3 no inventa texto,
+//     no agrega subtítulos, no cambia personajes ni escenario
+//   - Modal de consentimiento de imagen antes de subir foto
+//   - Verificación básica de contenido inapropiado (desnudos)
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
+
+// ── Prefijo forzado que se antepone a TODO prompt enviado ──────
+// Esto instruye a Veo3 / WAN a NO inventar contenido nuevo,
+// NO agregar subtítulos o texto, NO cambiar personajes ni escenario.
+const FORCED_PREFIX =
+  "NO subtitles, NO text overlays, NO captions, NO watermarks, NO generated text of any kind. " +
+  "Do NOT invent new characters, objects, or backgrounds not present in the source image. " +
+  "Keep all original characters, faces, clothing, and environment exactly as they appear in the image. " +
+  "Only add natural realistic motion to existing elements. ";
+
+// ── Verificación básica de contenido inapropiado ──────────────
+async function checkImageSafety(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 50; canvas.height = 50;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, 50, 50);
+      const data = ctx.getImageData(0, 0, 50, 50).data;
+      URL.revokeObjectURL(url);
+      let skinPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        if (r > 95 && g > 40 && b > 20 && r > g && r > b &&
+            Math.abs(r - g) > 15 && r - b > 15 && g - b > 0) skinPixels++;
+      }
+      resolve((skinPixels / (50 * 50)) < 0.60);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(true); };
+    img.src = url;
+  });
+}
 
 export function Img2VideoPanel({ userStatus }) {
   const { user } = useAuth();
@@ -27,23 +66,26 @@ export function Img2VideoPanel({ userStatus }) {
   const [seedMode, setSeedMode]   = useState("RANDOM");
   const [seedFixed, setSeedFixed] = useState(12345);
 
-  // Solo "express" o "standard" — Studio eliminado
   const [generationMode, setGenerationMode] = useState("standard");
   const [useNineSixteen, setUseNineSixteen] = useState(true);
   const [durationSec, setDurationSec]       = useState(10);
   const [includeAudio, setIncludeAudio]     = useState(false);
   const [showModuleInfo, setShowModuleInfo] = useState(false);
 
+  // ── Consentimiento de imagen ──────────────────────────────
+  const [showPhotoConsent, setShowPhotoConsent] = useState(false);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState(null);
+
   const fps = 16;
 
-  const [status, setStatus]                       = useState("IDLE");
-  const [statusText, setStatusText]               = useState("");
-  const [jobId, setJobId]                         = useState(null);
-  const [videoUrl, setVideoUrl]                   = useState(null);
-  const [error, setError]                         = useState("");
-  const [progress, setProgress]                   = useState(0);
+  const [status, setStatus]                         = useState("IDLE");
+  const [statusText, setStatusText]                 = useState("");
+  const [jobId, setJobId]                           = useState(null);
+  const [videoUrl, setVideoUrl]                     = useState(null);
+  const [error, setError]                           = useState("");
+  const [progress, setProgress]                     = useState(0);
   const [needsManualRefresh, setNeedsManualRefresh] = useState(false);
-  const [lastKnownJob, setLastKnownJob]           = useState(null);
+  const [lastKnownJob, setLastKnownJob]             = useState(null);
 
   const currentJades = userStatus?.jades ?? 0;
   const fileInputId  = "img2video-file-input";
@@ -55,39 +97,32 @@ export function Img2VideoPanel({ userStatus }) {
     steps: 18, numFrames: 161, durationSec: 10, fps: 16, generationMode: "standard",
   });
 
-  const [useOptimized, setUseOptimized]         = useState(false);
-  const [optimizedPrompt, setOptimizedPrompt]   = useState("");
+  const [useOptimized, setUseOptimized]           = useState(false);
+  const [optimizedPrompt, setOptimizedPrompt]     = useState("");
   const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [isOptimizing, setIsOptimizing]         = useState(false);
-  const [optError, setOptError]                 = useState("");
+  const [isOptimizing, setIsOptimizing]           = useState(false);
+  const [optError, setOptError]                   = useState("");
 
-  // Resetear prompt optimizado si el usuario cambia los campos
   useEffect(() => {
     setOptimizedPrompt("");
     setOptimizedNegative("");
     setOptError("");
   }, [prompt, negative]);
 
-  // Al cambiar de modo, ajustar duración válida
-  // Express → solo 8s | Standard → 10 o 15s
   useEffect(() => {
     if (generationMode === "express") {
       setDurationSec(8);
     } else if (generationMode === "standard") {
       if (![10, 15].includes(Number(durationSec))) setDurationSec(10);
     }
-  }, [generationMode, durationSec]);
+  }, [generationMode]);
 
-  // Opciones de duración según modo
   function getDurationOptions() {
     if (generationMode === "express")  return [8];
     if (generationMode === "standard") return [10, 15];
     return [10];
   }
 
-  // ── Precios actualizados (sin Studio) ─────────────────────
-  // Express 8s = 18J | +audio = +4J
-  // Standard 10s = 17J | 15s = 24J | +audio = +4J
   function getCurrentPrice() {
     let base = 0;
     if (generationMode === "express") {
@@ -134,7 +169,6 @@ export function Img2VideoPanel({ userStatus }) {
       : "Audio Layer apagado: el backend forzará un video silencioso.";
   }
 
-  // ── Auth helpers ───────────────────────────────────────────
   async function getAuthHeaders() {
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token || null;
@@ -152,7 +186,6 @@ export function Img2VideoPanel({ userStatus }) {
     return { r, j, txt };
   }
 
-  // ── Optimizador de prompt ──────────────────────────────────
   const handleOptimize = async () => {
     setOptError("");
     setIsOptimizing(true);
@@ -175,13 +208,15 @@ export function Img2VideoPanel({ userStatus }) {
 
   const getEffectivePrompts = () => {
     const canUse = useOptimized && optimizedPrompt?.trim()?.length > 0;
-    return {
-      finalPrompt:   canUse ? optimizedPrompt.trim()   : (prompt || "").trim(),
-      finalNegative: canUse ? (optimizedNegative || "").trim() : (negative || "").trim(),
-    };
+    const rawPrompt   = canUse ? optimizedPrompt.trim()    : (prompt || "").trim();
+    const rawNegative = canUse ? (optimizedNegative || "").trim() : (negative || "").trim();
+    // ── FORZAR prefijo anti-subtítulos en todos los modos ──
+    const finalPrompt   = FORCED_PREFIX + (rawPrompt || "Animate this image naturally with subtle realistic motion.");
+    const finalNegative = "subtitles, text, captions, watermarks, letters, words, typography, " +
+                          "new characters, new backgrounds, new objects, " + (rawNegative || "blurry, low quality, deformed");
+    return { finalPrompt, finalNegative };
   };
 
-  // ── Imagen helpers ─────────────────────────────────────────
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -215,9 +250,8 @@ export function Img2VideoPanel({ userStatus }) {
 
   const handlePickFile = () => document.getElementById(fileInputId)?.click();
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Procesar archivo DESPUÉS de que el usuario acepte el consentimiento
+  const processFile = async (file) => {
     try {
       const compressed = await compressImageFile(file, 1280, 0.82);
       setDataUrl(compressed);
@@ -235,7 +269,21 @@ export function Img2VideoPanel({ userStatus }) {
     }
   };
 
-  // ── Polling de estado ──────────────────────────────────────
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ""; // reset para poder seleccionar el mismo archivo
+    // Verificar contenido inapropiado primero
+    const isSafe = await checkImageSafety(file);
+    if (!isSafe) {
+      setError("La imagen fue bloqueada por contener contenido inapropiado. Solo se permiten fotos de personas y retratos.");
+      return;
+    }
+    // Mostrar modal de consentimiento
+    setPendingPhotoFile(file);
+    setShowPhotoConsent(true);
+  };
+
   async function pollVideoStatus(job_id) {
     const auth = await getAuthHeaders();
     const { r, j } = await safeFetchJson(
@@ -377,7 +425,6 @@ export function Img2VideoPanel({ userStatus }) {
     }, 2000);
   }
 
-  // Persistir estado en localStorage para recuperar si cierra la pestaña
   useEffect(() => {
     if (!user?.id) return;
     const payload = { jobId, status, statusText, progress, needsManualRefresh,
@@ -392,7 +439,6 @@ export function Img2VideoPanel({ userStatus }) {
     } catch {}
   }, [user?.id, jobId, status, statusText, progress, needsManualRefresh, lastKnownJob, videoUrl, error, STORAGE_KEY]);
 
-  // Restaurar estado si el usuario recarga la página
   useEffect(() => {
     if (!user?.id) return;
     try {
@@ -404,14 +450,14 @@ export function Img2VideoPanel({ userStatus }) {
       const savedAt = saved?.savedAt ? new Date(saved.savedAt).getTime() : null;
       if (savedAt && Date.now() - savedAt > 1000 * 60 * 60 * 2) { localStorage.removeItem(STORAGE_KEY); return; }
       if (saved?.currentParams) currentParamsRef.current = saved.currentParams;
-      if (saved?.jobId)    setJobId(saved.jobId);
-      if (saved?.status)   setStatus(saved.status);
-      if (saved?.statusText) setStatusText(saved.statusText || "");
+      if (saved?.jobId)          setJobId(saved.jobId);
+      if (saved?.status)         setStatus(saved.status);
+      if (saved?.statusText)     setStatusText(saved.statusText || "");
       if (typeof saved?.progress === "number") setProgress(saved.progress);
       if (typeof saved?.needsManualRefresh === "boolean") setNeedsManualRefresh(saved.needsManualRefresh);
-      if (saved?.lastKnownJob) setLastKnownJob(saved.lastKnownJob);
-      if (saved?.videoUrl) setVideoUrl(saved.videoUrl);
-      if (saved?.error) setError(saved.error);
+      if (saved?.lastKnownJob)   setLastKnownJob(saved.lastKnownJob);
+      if (saved?.videoUrl)       setVideoUrl(saved.videoUrl);
+      if (saved?.error)          setError(saved.error);
       const wasRunning = saved?.jobId && (["IN_PROGRESS","STARTING"].includes(saved?.status) || saved?.needsManualRefresh);
       if (wasRunning) {
         setTimeout(async () => {
@@ -443,7 +489,6 @@ export function Img2VideoPanel({ userStatus }) {
 
   useEffect(() => () => stopPolling(), []);
 
-  // ── Generar video ──────────────────────────────────────────
   async function handleGenerate() {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -458,7 +503,10 @@ export function Img2VideoPanel({ userStatus }) {
         if (!prompt?.trim()) return setErrorState("Escribe un prompt o desactiva el optimizado.");
         await handleOptimize();
       }
+
+      // ── Construir prompts con prefijo forzado anti-subtítulos ──
       const { finalPrompt, finalNegative } = getEffectivePrompts();
+
       setStatus("STARTING"); setStatusText("Enviando trabajo...");
       const auth      = await getAuthHeaders();
       const numFrames = fixFramesForWan(Math.max(1, Math.round(Number(durationSec) * fps)));
@@ -467,10 +515,12 @@ export function Img2VideoPanel({ userStatus }) {
       const den = clampFloat(strength, 0.1, 1.0, 0.65);
       const ms  = clampFloat(motionStrength, 0.1, 2.0, 1.0);
       currentParamsRef.current = { steps: stp, numFrames, durationSec: Number(durationSec), fps, generationMode };
+
       const payload = {
         mode: "i2v", generation_mode: generationMode,
         is_fast_mode: generationMode === "express",
-        prompt: finalPrompt || "", negative_prompt: finalNegative || "",
+        prompt:          finalPrompt,
+        negative_prompt: finalNegative,
         ...(useNineSixteen ? { aspect_ratio: "9:16" } : {}),
         duration_s: Number(durationSec), fps, num_frames: numFrames,
         steps: stp, guidance_scale: gs, strength: den, denoise: den,
@@ -478,6 +528,7 @@ export function Img2VideoPanel({ userStatus }) {
         image_b64: pureB64 || null, image_url: imageUrl || null,
         include_audio: includeAudio,
       };
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
       const { r, j } = await safeFetchJson("/api/generate-img2video", {
@@ -531,6 +582,57 @@ export function Img2VideoPanel({ userStatus }) {
 
   return (
     <>
+      {/* ══ MODAL CONSENTIMIENTO DE IMAGEN ══════════════════════ */}
+      {showPhotoConsent && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="bg-gradient-to-r from-cyan-500/10 to-fuchsia-500/10 border-b border-white/10 p-5">
+              <h3 className="text-lg font-bold text-white">📸 Consentimiento de imagen</h3>
+              <p className="mt-1 text-xs text-neutral-400">Antes de subir esta fotografía, confirma lo siguiente:</p>
+            </div>
+            <div className="p-5">
+              <div className="space-y-3 text-sm text-neutral-300">
+                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
+                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
+                  <span>Soy el titular de los derechos de esta fotografía, o tengo el <strong className="text-white">consentimiento expreso</strong> de la persona que aparece en ella para usar su imagen.</span>
+                </div>
+                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
+                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
+                  <span><strong className="text-white">No usaré</strong> esta imagen para suplantar identidades, difamar, engañar o causar daño a terceros.</span>
+                </div>
+                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
+                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
+                  <span><strong className="text-white">Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado. IsabelaOS Studio no es responsable del uso inadecuado.</span>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-neutral-600 leading-relaxed">
+                Las imágenes con contenido inapropiado o que violen derechos de imagen serán bloqueadas. Las violaciones pueden resultar en suspensión de cuenta.
+              </p>
+            </div>
+            <div className="p-5 pt-0 flex gap-3">
+              <button
+                onClick={async () => {
+                  setShowPhotoConsent(false);
+                  if (pendingPhotoFile) {
+                    await processFile(pendingPhotoFile);
+                    setPendingPhotoFile(null);
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-black font-bold text-sm rounded-2xl py-3 cursor-pointer transition-opacity hover:opacity-90"
+              >
+                ✓ Acepto y subo la imagen
+              </button>
+              <button
+                onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
+                className="border border-white/15 text-neutral-400 text-sm rounded-2xl px-5 py-3 cursor-pointer hover:bg-white/5 transition-all"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-8 lg:grid-cols-2">
         {/* ── Panel izquierdo ── */}
         <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
@@ -542,9 +644,21 @@ export function Img2VideoPanel({ userStatus }) {
             </button>
           </div>
 
+          {/* Aviso de consentimiento de imagen */}
+          <div className="mt-3 rounded-2xl border border-yellow-400/20 bg-yellow-500/5 px-4 py-3 text-[12px] text-yellow-200">
+            <span className="font-semibold text-yellow-100">⚠️ Importante:</span>{" "}
+            Al subir una fotografía declaras que posees los derechos sobre ella o tienes el consentimiento de las personas que aparecen. El uso inadecuado es tu responsabilidad exclusiva.
+          </div>
+
           <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[12px] text-cyan-100">
             <span className="font-semibold text-white">Recomendación:</span> si buscas la mejor calidad de video y la voz más natural, utiliza el modo{" "}
             <span className="font-semibold text-cyan-300">Express</span>.
+          </div>
+
+          {/* Aviso sobre subtítulos */}
+          <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-[12px] text-emerald-200">
+            <span className="font-semibold text-emerald-100">✓ Sin subtítulos automáticos:</span>{" "}
+            El sistema envía instrucciones forzadas para que el modelo NO agregue subtítulos, texto, marcas de agua ni personajes nuevos. El video respetará tu imagen original.
           </div>
 
           {/* Estado y Jades */}
@@ -561,7 +675,6 @@ export function Img2VideoPanel({ userStatus }) {
             <div className="mt-1 text-[10px] text-red-400">{getAllPricesText()}</div>
             {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
 
-            {/* Barra de progreso */}
             {["IN_PROGRESS","STARTING","DONE"].includes(status) && (
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[10px] text-neutral-400">
@@ -600,7 +713,6 @@ export function Img2VideoPanel({ userStatus }) {
 
           {/* Modo, Formato, Duración */}
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            {/* Modo — solo Express y Standard */}
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-xs text-neutral-300">Modo</div>
               <div className="mt-3 space-y-2">
@@ -618,7 +730,6 @@ export function Img2VideoPanel({ userStatus }) {
               <div className="mt-2 text-[10px] text-neutral-500">{getModeDescription()}</div>
             </div>
 
-            {/* Formato */}
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-xs text-neutral-300">Formato / tamaño</div>
               <div className="mt-3 flex items-center gap-2">
@@ -631,7 +742,6 @@ export function Img2VideoPanel({ userStatus }) {
               </div>
             </div>
 
-            {/* Duración */}
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-xs text-neutral-300">Duración</div>
               <div className="mt-3 space-y-2">
@@ -677,6 +787,9 @@ export function Img2VideoPanel({ userStatus }) {
               <textarea className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
                 value={prompt} onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe movimiento, cámara, ambiente. Si Audio Layer está activado, escribe aquí lo que debe decir el personaje." />
+              <div className="mt-1 text-[10px] text-neutral-500">
+                ℹ️ Se añaden automáticamente instrucciones para evitar subtítulos y cambios no deseados.
+              </div>
             </div>
 
             <div>
@@ -684,6 +797,9 @@ export function Img2VideoPanel({ userStatus }) {
               <textarea className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
                 value={negative} onChange={(e) => setNegative(e.target.value)}
                 placeholder="borroso, baja calidad, deformado..." />
+              <div className="mt-1 text-[10px] text-neutral-500">
+                ℹ️ Se añade automáticamente: "subtitles, text, captions, watermarks..."
+              </div>
             </div>
 
             {/* Optimizador */}
@@ -841,7 +957,10 @@ export function Img2VideoPanel({ userStatus }) {
                 <p><span className="font-semibold text-white">4.</span> Si quieres voz, activa <span className="font-semibold">Audio Layer</span>.</p>
                 <p><span className="font-semibold text-white">5.</span> Haz clic en <span className="font-semibold">Generar video</span> y espera.</p>
               </div>
-              <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[12px] text-cyan-100">
+              <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-200">
+                ✓ El sistema evita automáticamente subtítulos, texto y cambios no deseados en todos los videos.
+              </div>
+              <div className="mt-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[12px] text-cyan-100">
                 Recomendación: usa <span className="font-semibold text-cyan-300">Express</span> para la mejor calidad de video y voz.
               </div>
             </div>
