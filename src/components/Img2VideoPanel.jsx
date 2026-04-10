@@ -1,28 +1,28 @@
 // src/components/Img2VideoPanel.jsx
 // ─────────────────────────────────────────────────────────────
 // Panel de Imagen → Video
-// Modos: Express (Veo3 Fast) y Standard (WAN)
-//
-// FIXES:
-//   - Prompt anti-subtítulos forzado: Veo3 no inventa texto,
-//     no agrega subtítulos, no cambia personajes ni escenario
-//   - Modal de consentimiento de imagen antes de subir foto
-//   - Verificación básica de contenido inapropiado (desnudos)
+// Modos: Express (Veo3 Fast) y Standard (WAN + ElevenLabs + Latentsync)
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 
-// ── Prefijo forzado que se antepone a TODO prompt enviado ──────
-// Esto instruye a Veo3 / WAN a NO inventar contenido nuevo,
-// NO agregar subtítulos o texto, NO cambiar personajes ni escenario.
 const FORCED_PREFIX =
   "NO subtitles, NO text overlays, NO captions, NO watermarks, NO generated text of any kind. " +
   "Do NOT invent new characters, objects, or backgrounds not present in the source image. " +
   "Keep all original characters, faces, clothing, and environment exactly as they appear in the image. " +
   "Only add natural realistic motion to existing elements. ";
 
-// ── Verificación básica de contenido inapropiado ──────────────
+const ACCENTS = [
+  { value: "neutro",       label: "🌎 Neutro latino" },
+  { value: "guatemalteco", label: "🇬🇹 Guatemalteco" },
+  { value: "colombiano",   label: "🇨🇴 Colombiano"   },
+  { value: "mexicano",     label: "🇲🇽 Mexicano"     },
+  { value: "argentino",    label: "🇦🇷 Argentino"    },
+  { value: "español",      label: "🇪🇸 Español"      },
+  { value: "ingles",       label: "🇺🇸 English (US)" },
+];
+
 async function checkImageSafety(file) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -52,69 +52,65 @@ export function Img2VideoPanel({ userStatus }) {
 
   const STORAGE_KEY = user?.id ? `i2v_job_state_${user.id}` : "i2v_job_state_guest";
 
-  const [dataUrl, setDataUrl]       = useState(null);
-  const [pureB64, setPureB64]       = useState(null);
-  const [imageUrl, setImageUrl]     = useState("");
-  const [prompt, setPrompt]         = useState("");
-  const [negative, setNegative]     = useState("");
+  const [dataUrl,    setDataUrl]    = useState(null);
+  const [pureB64,    setPureB64]    = useState(null);
+  const [imageUrl,   setImageUrl]   = useState("");
+  const [prompt,     setPrompt]     = useState("");
+  const [negative,   setNegative]   = useState("");
 
-  const [steps, setSteps]                   = useState(18);
-  const [guidanceScale, setGuidanceScale]   = useState(5.0);
-  const [strength, setStrength]             = useState(0.65);
+  const [steps,          setSteps]          = useState(18);
+  const [guidanceScale,  setGuidanceScale]  = useState(5.0);
+  const [strength,       setStrength]       = useState(0.65);
   const [motionStrength, setMotionStrength] = useState(1.0);
 
-  const [seedMode, setSeedMode]   = useState("RANDOM");
+  const [seedMode,  setSeedMode]  = useState("RANDOM");
   const [seedFixed, setSeedFixed] = useState(12345);
 
-  const [generationMode, setGenerationMode] = useState("standard");
-  const [useNineSixteen, setUseNineSixteen] = useState(true);
-  const [durationSec, setDurationSec]       = useState(10);
-  const [includeAudio, setIncludeAudio]     = useState(false);
-  const [showModuleInfo, setShowModuleInfo] = useState(false);
+  const [generationMode,  setGenerationMode]  = useState("standard");
+  const [useNineSixteen,  setUseNineSixteen]  = useState(true);
+  const [durationSec,     setDurationSec]     = useState(10);
+  const [includeAudio,    setIncludeAudio]    = useState(false);
+  const [showModuleInfo,  setShowModuleInfo]  = useState(false);
 
-  // ── Consentimiento de imagen ──────────────────────────────
+  // ── ElevenLabs + Latentsync (Standard) ───────────────────────
+  const [enableLipsync,  setEnableLipsync]  = useState(false);
+  const [narrationText,  setNarrationText]  = useState("");
+  const [voiceAccent,    setVoiceAccent]    = useState("neutro");
+  const [voiceGender,    setVoiceGender]    = useState("mujer");
+
+  // ── Consentimiento de imagen ──────────────────────────────────
   const [showPhotoConsent, setShowPhotoConsent] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState(null);
 
   const fps = 16;
 
-  const [status, setStatus]                         = useState("IDLE");
-  const [statusText, setStatusText]                 = useState("");
-  const [jobId, setJobId]                           = useState(null);
-  const [videoUrl, setVideoUrl]                     = useState(null);
-  const [error, setError]                           = useState("");
-  const [progress, setProgress]                     = useState(0);
-  const [needsManualRefresh, setNeedsManualRefresh] = useState(false);
-  const [lastKnownJob, setLastKnownJob]             = useState(null);
+  const [status,              setStatus]              = useState("IDLE");
+  const [statusText,          setStatusText]          = useState("");
+  const [jobId,               setJobId]               = useState(null);
+  const [videoUrl,            setVideoUrl]            = useState(null);
+  const [error,               setError]               = useState("");
+  const [progress,            setProgress]            = useState(0);
+  const [needsManualRefresh,  setNeedsManualRefresh]  = useState(false);
+  const [lastKnownJob,        setLastKnownJob]        = useState(null);
 
-  const currentJades = userStatus?.jades ?? 0;
-  const fileInputId  = "img2video-file-input";
-  const lockRef      = useRef(false);
-  const pollTimerRef = useRef(null);
-  const progTimerRef = useRef(null);
+  const currentJades     = userStatus?.jades ?? 0;
+  const fileInputId      = "img2video-file-input";
+  const lockRef          = useRef(false);
+  const pollTimerRef     = useRef(null);
+  const progTimerRef     = useRef(null);
+  const currentParamsRef = useRef({ steps: 18, numFrames: 161, durationSec: 10, fps: 16, generationMode: "standard" });
 
-  const currentParamsRef = useRef({
-    steps: 18, numFrames: 161, durationSec: 10, fps: 16, generationMode: "standard",
-  });
+  const [useOptimized,       setUseOptimized]       = useState(false);
+  const [optimizedPrompt,    setOptimizedPrompt]    = useState("");
+  const [optimizedNegative,  setOptimizedNegative]  = useState("");
+  const [isOptimizing,       setIsOptimizing]       = useState(false);
+  const [optError,           setOptError]           = useState("");
 
-  const [useOptimized, setUseOptimized]           = useState(false);
-  const [optimizedPrompt, setOptimizedPrompt]     = useState("");
-  const [optimizedNegative, setOptimizedNegative] = useState("");
-  const [isOptimizing, setIsOptimizing]           = useState(false);
-  const [optError, setOptError]                   = useState("");
-
-  useEffect(() => {
-    setOptimizedPrompt("");
-    setOptimizedNegative("");
-    setOptError("");
-  }, [prompt, negative]);
+  useEffect(() => { setOptimizedPrompt(""); setOptimizedNegative(""); setOptError(""); }, [prompt, negative]);
 
   useEffect(() => {
-    if (generationMode === "express") {
-      setDurationSec(8);
-    } else if (generationMode === "standard") {
-      if (![10, 15].includes(Number(durationSec))) setDurationSec(10);
-    }
+    if (generationMode === "express") setDurationSec(8);
+    else if (generationMode === "standard") { if (![10, 15].includes(Number(durationSec))) setDurationSec(10); }
   }, [generationMode]);
 
   function getDurationOptions() {
@@ -127,46 +123,43 @@ export function Img2VideoPanel({ userStatus }) {
     let base = 0;
     if (generationMode === "express") {
       base = 18;
+      if (includeAudio) base += 4;
     } else {
       base = Number(durationSec) === 15 ? 24 : 17;
+      if (enableLipsync) base += 4;
     }
-    if (includeAudio) base += 4;
     return base;
   }
 
-  const COST_I2V = getCurrentPrice();
+  const COST_I2V  = getCurrentPrice();
   const hasEnough = currentJades >= COST_I2V;
 
   function getPriceText() {
     if (generationMode === "express") {
-      return includeAudio
-        ? "Express • 8s = 18 jades • Audio Layer +4 jades"
-        : "Express • 8s = 18 jades";
+      return includeAudio ? "Express • 8s = 18 jades • Audio Layer +4 jades" : "Express • 8s = 18 jades";
     }
-    const base = Number(durationSec) === 15
-      ? "Standard • 15s = 24 jades"
-      : "Standard • 10s = 17 jades";
-    return includeAudio ? `${base} • Audio Layer +4 jades` : base;
+    const base = Number(durationSec) === 15 ? "Standard • 15s = 24 jades" : "Standard • 10s = 17 jades";
+    return enableLipsync ? `${base} • Voz + Lip Sync +4 jades` : base;
   }
 
   function getAllPricesText() {
-    return "Precios: Express 8s = 18 jades • Express Audio Layer +4 jades • Standard 10s = 17 jades • Standard 15s = 24 jades • Standard Audio Layer +4 jades";
+    return "Precios: Express 8s = 18 jades • Express Audio +4 jades • Standard 10s = 17 jades • Standard 15s = 24 jades • Voz + Lip Sync +4 jades";
   }
 
   function getModeDescription() {
     if (generationMode === "express") return "Modo premium con la mejor calidad de video y voz.";
-    return "Modo equilibrado para clips más largos y más económicos.";
+    return "Modo equilibrado para clips más largos. Incluye voz ElevenLabs + lip sync opcional.";
   }
 
   function getAudioHelpText() {
     if (generationMode === "express") {
       return includeAudio
         ? "Audio Layer activado: el modelo puede devolver voz o sonido si lo describes en el prompt."
-        : "Audio Layer apagado: el backend forzará un video silencioso.";
+        : "Audio Layer apagado: video silencioso.";
     }
-    return includeAudio
-      ? "Audio Layer activado: escribe voz o sonido directamente en el prompt."
-      : "Audio Layer apagado: el backend forzará un video silencioso.";
+    return enableLipsync
+      ? "Voz + Lip Sync: WAN genera video mudo → ElevenLabs genera la voz → Latentsync sincroniza los labios."
+      : "Sin voz: el video Standard se entrega mudo.";
   }
 
   async function getAuthHeaders() {
@@ -180,15 +173,12 @@ export function Img2VideoPanel({ userStatus }) {
     const r   = await fetch(url, options);
     const txt = await r.text();
     let j = null;
-    try { j = JSON.parse(txt); } catch {
-      j = { ok: false, error: txt?.slice(0, 500) || "Respuesta no JSON." };
-    }
+    try { j = JSON.parse(txt); } catch { j = { ok: false, error: txt?.slice(0, 500) || "Respuesta no JSON." }; }
     return { r, j, txt };
   }
 
   const handleOptimize = async () => {
-    setOptError("");
-    setIsOptimizing(true);
+    setOptError(""); setIsOptimizing(true);
     try {
       const { r, j } = await safeFetchJson("/api/optimize-prompt", {
         method: "POST",
@@ -199,31 +189,25 @@ export function Img2VideoPanel({ userStatus }) {
       setOptimizedPrompt(String(j.optimizedPrompt || "").trim());
       setOptimizedNegative(String(j.optimizedNegative || "").trim());
       setUseOptimized(true);
-    } catch (e) {
-      setOptError(e?.message || String(e));
-    } finally {
-      setIsOptimizing(false);
-    }
+    } catch (e) { setOptError(e?.message || String(e)); }
+    finally { setIsOptimizing(false); }
   };
 
   const getEffectivePrompts = () => {
-    const canUse = useOptimized && optimizedPrompt?.trim()?.length > 0;
+    const canUse      = useOptimized && optimizedPrompt?.trim()?.length > 0;
     const rawPrompt   = canUse ? optimizedPrompt.trim()    : (prompt || "").trim();
     const rawNegative = canUse ? (optimizedNegative || "").trim() : (negative || "").trim();
-    // ── FORZAR prefijo anti-subtítulos en todos los modos ──
     const finalPrompt   = FORCED_PREFIX + (rawPrompt || "Animate this image naturally with subtle realistic motion.");
-    const finalNegative = "subtitles, text, captions, watermarks, letters, words, typography, " +
-                          "new characters, new backgrounds, new objects, " + (rawNegative || "blurry, low quality, deformed");
+    const finalNegative = "subtitles, text, captions, watermarks, letters, words, typography, new characters, new backgrounds, new objects, " + (rawNegative || "blurry, low quality, deformed");
     return { finalPrompt, finalNegative };
   };
 
-  const fileToBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload  = () => resolve(reader.result);
-      reader.onerror = (err) => reject(err);
-      reader.readAsDataURL(file);
-    });
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
 
   async function compressImageFile(file, maxWidth = 1280, quality = 0.82) {
     const original = await fileToBase64(file);
@@ -244,97 +228,56 @@ export function Img2VideoPanel({ userStatus }) {
     });
   }
 
-  function estimateBase64Bytes(b64) {
-    return Math.ceil((String(b64 || "").length * 3) / 4);
-  }
+  function estimateBase64Bytes(b64) { return Math.ceil((String(b64 || "").length * 3) / 4); }
 
   const handlePickFile = () => document.getElementById(fileInputId)?.click();
 
-  // Procesar archivo DESPUÉS de que el usuario acepte el consentimiento
   const processFile = async (file) => {
     try {
       const compressed = await compressImageFile(file, 1280, 0.82);
       setDataUrl(compressed);
       const b64 = compressed.split(",")[1] || null;
-      if (estimateBase64Bytes(b64) > 1400000) {
-        setError("Imagen demasiado grande. Usa una imagen más pequeña.");
-        setPureB64(null);
-        return;
-      }
-      setPureB64(b64);
-      setImageUrl("");
-      setError("");
-    } catch {
-      setError("No se pudo leer o comprimir la imagen.");
-    }
+      if (estimateBase64Bytes(b64) > 1400000) { setError("Imagen demasiado grande."); setPureB64(null); return; }
+      setPureB64(b64); setImageUrl(""); setError("");
+    } catch { setError("No se pudo leer o comprimir la imagen."); }
   };
 
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ""; // reset para poder seleccionar el mismo archivo
-    // Verificar contenido inapropiado primero
+    e.target.value = "";
     const isSafe = await checkImageSafety(file);
-    if (!isSafe) {
-      setError("La imagen fue bloqueada por contener contenido inapropiado. Solo se permiten fotos de personas y retratos.");
-      return;
-    }
-    // Mostrar modal de consentimiento
+    if (!isSafe) { setError("La imagen fue bloqueada por contener contenido inapropiado."); return; }
     setPendingPhotoFile(file);
     setShowPhotoConsent(true);
   };
 
   async function pollVideoStatus(job_id) {
     const auth = await getAuthHeaders();
-    const { r, j } = await safeFetchJson(
-      `/api/video-status?job_id=${encodeURIComponent(job_id)}`,
-      { headers: { ...auth } }
-    );
+    const { r, j } = await safeFetchJson(`/api/video-status?job_id=${encodeURIComponent(job_id)}`, { headers: { ...auth } });
     if (!r.ok || !j) throw new Error(j?.error || "error en video-status");
     return j;
   }
 
-  const setErrorState = (msg) => {
-    setStatus("ERROR");
-    setStatusText("Error.");
-    setError(msg || "Ocurrió un error.");
-  };
+  const setErrorState = (msg) => { setStatus("ERROR"); setStatusText("Error."); setError(msg || "Ocurrió un error."); };
 
-  function clampInt(v, lo, hi, def) {
-    const n = Number(v);
-    return !Number.isFinite(n) ? def : Math.max(lo, Math.min(hi, Math.round(n)));
-  }
+  function clampInt(v, lo, hi, def)   { const n = Number(v); return !Number.isFinite(n) ? def : Math.max(lo, Math.min(hi, Math.round(n))); }
+  function clampFloat(v, lo, hi, def) { const n = Number(v); return !Number.isFinite(n) ? def : Math.max(lo, Math.min(hi, n)); }
 
-  function clampFloat(v, lo, hi, def) {
-    const n = Number(v);
-    return !Number.isFinite(n) ? def : Math.max(lo, Math.min(hi, n));
-  }
-
-  function fixFramesForWan(numFrames) {
-    let nf = Math.max(5, Math.round(Number(numFrames) || 0));
-    const r = (nf - 1) % 4;
-    return r === 0 ? nf : nf + (4 - r);
-  }
-
-  function getSeedForRequest() {
-    if (seedMode === "FIXED") return clampInt(seedFixed, 0, 2147483647, 12345);
-    return Math.floor(Date.now() % 2147483647);
-  }
+  function fixFramesForWan(numFrames) { let nf = Math.max(5, Math.round(Number(numFrames) || 0)); const r = (nf - 1) % 4; return r === 0 ? nf : nf + (4 - r); }
+  function getSeedForRequest()        { if (seedMode === "FIXED") return clampInt(seedFixed, 0, 2147483647, 12345); return Math.floor(Date.now() % 2147483647); }
 
   function isFetchDisconnectError(e) {
     const m = String(e?.message || e || "").toLowerCase();
-    return m.includes("failed to fetch") || m.includes("networkerror") ||
-           m.includes("network request failed") || m.includes("load failed");
+    return m.includes("failed to fetch") || m.includes("networkerror") || m.includes("network request failed") || m.includes("load failed");
   }
 
   function getExpectedSeconds() {
-    const p    = currentParamsRef.current || {};
-    const s    = Number(p.steps || 18);
-    const f    = Number(p.numFrames || 129);
-    const dur  = Number(p.durationSec || 8);
-    const mode = String(p.generationMode || "express");
-    const base = mode === "express" ? 220 : (dur >= 15 ? 480 : 360);
-    return Math.max(60, Math.min(1800, base + Math.max(0,(s-18)*8) + Math.max(0,(f-129)*2)));
+    const p = currentParamsRef.current || {};
+    const s = Number(p.steps || 18), f = Number(p.numFrames || 129), dur = Number(p.durationSec || 8), mode = String(p.generationMode || "express");
+    // Standard tarda más por ElevenLabs + Latentsync
+    const base = mode === "express" ? 220 : (dur >= 15 ? 780 : 600);
+    return Math.max(60, Math.min(2400, base + Math.max(0,(s-18)*8) + Math.max(0,(f-129)*2)));
   }
 
   function computeProgressFromStartedAt(startedAtIso) {
@@ -352,17 +295,12 @@ export function Img2VideoPanel({ userStatus }) {
 
   function getEtaText() {
     if (generationMode === "express") return "Espera estimada: 2-4 min";
+    if (enableLipsync) return Number(durationSec) === 15 ? "Espera estimada: 8-15 min (WAN + ElevenLabs + Latentsync)" : "Espera estimada: 6-12 min (WAN + ElevenLabs + Latentsync)";
     return Number(durationSec) === 15 ? "Espera estimada: 4-8 min" : "Espera estimada: 3-6 min";
   }
 
-  function stopPolling() {
-    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
-    if (progTimerRef.current) { clearInterval(progTimerRef.current); progTimerRef.current = null; }
-  }
-
-  function clearPersistedJob() {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
-  }
+  function stopPolling()     { if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; } if (progTimerRef.current) { clearInterval(progTimerRef.current); progTimerRef.current = null; } }
+  function clearPersistedJob() { try { localStorage.removeItem(STORAGE_KEY); } catch {} }
 
   function hardResetPanel() {
     stopPolling();
@@ -375,15 +313,12 @@ export function Img2VideoPanel({ userStatus }) {
     const jid = overrideJobId || jobId;
     if (!jid) return;
     try {
-      setNeedsManualRefresh(false);
-      setError("");
+      setNeedsManualRefresh(false); setError("");
       const stData = await pollVideoStatus(jid);
       const st     = String(stData?.status || "IN_PROGRESS").toUpperCase();
       if (stData?.job) setLastKnownJob(stData.job);
-
       if (["DONE","COMPLETED","SUCCESS","FINISHED"].includes(st)) {
-        const url = stData?.video_url || stData?.output?.video_url ||
-                    stData?.output?.videoUrl || stData?.output?.video?.url || null;
+        const url = stData?.video_url || stData?.output?.video_url || stData?.output?.video?.url || null;
         if (url) setVideoUrl(url);
         setStatus("DONE"); setStatusText("Video listo."); setProgress(100);
         stopPolling(); clearPersistedJob(); return;
@@ -393,18 +328,16 @@ export function Img2VideoPanel({ userStatus }) {
         setError(stData?.error || "La generación falló.");
         setProgress(0); stopPolling(); clearPersistedJob(); return;
       }
-      setStatus("IN_PROGRESS");
-      setStatusText(`Estado: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`);
+      // Mostrar estado intermedio de ElevenLabs/Latentsync
+      const providerStatus = stData?.job?.provider_status || "";
+      let friendlyStatus = `Estado: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`;
+      if (providerStatus === "elevenlabs_processing") friendlyStatus = "🎙️ Generando voz con ElevenLabs...";
+      if (providerStatus === "latentsync_processing") friendlyStatus = "👄 Sincronizando labios con Latentsync...";
+      setStatus("IN_PROGRESS"); setStatusText(friendlyStatus);
       const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
       if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
     } catch (e) {
-      if (isFetchDisconnectError(e)) {
-        setNeedsManualRefresh(true);
-        setStatus("IN_PROGRESS");
-        setStatusText("Conexión perdida.");
-        setError('Conexión perdida. Haz clic en "Actualizar estado".');
-        return;
-      }
+      if (isFetchDisconnectError(e)) { setNeedsManualRefresh(true); setStatus("IN_PROGRESS"); setStatusText("Conexión perdida."); setError('Conexión perdida. Haz clic en "Actualizar estado".'); return; }
       setErrorState(e?.message || String(e));
     }
   }
@@ -416,7 +349,6 @@ export function Img2VideoPanel({ userStatus }) {
       if (!startedAt) return;
       setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
     }, 1000);
-
     let tick = 0;
     pollTimerRef.current = setInterval(async () => {
       tick += 1;
@@ -427,15 +359,10 @@ export function Img2VideoPanel({ userStatus }) {
 
   useEffect(() => {
     if (!user?.id) return;
-    const payload = { jobId, status, statusText, progress, needsManualRefresh,
-                      lastKnownJob, videoUrl, error, currentParams: currentParamsRef.current,
-                      savedAt: new Date().toISOString() };
+    const payload = { jobId, status, statusText, progress, needsManualRefresh, lastKnownJob, videoUrl, error, currentParams: currentParamsRef.current, savedAt: new Date().toISOString() };
     try {
-      if (payload.jobId || payload.videoUrl || ["IN_PROGRESS","STARTING"].includes(payload.status)) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-      }
+      if (payload.jobId || payload.videoUrl || ["IN_PROGRESS","STARTING"].includes(payload.status)) localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      else localStorage.removeItem(STORAGE_KEY);
     } catch {}
   }, [user?.id, jobId, status, statusText, progress, needsManualRefresh, lastKnownJob, videoUrl, error, STORAGE_KEY]);
 
@@ -494,19 +421,18 @@ export function Img2VideoPanel({ userStatus }) {
     lockRef.current = true;
     let jidLocal = null;
     try {
-      setError(""); setVideoUrl(null); setProgress(0);
-      setNeedsManualRefresh(false); setLastKnownJob(null);
+      setError(""); setVideoUrl(null); setProgress(0); setNeedsManualRefresh(false); setLastKnownJob(null);
       if (!user)      return setErrorState("Debes iniciar sesión.");
       if (!hasEnough) return setErrorState(`Necesitas ${COST_I2V} jades para este video.`);
       if (!pureB64 && !imageUrl) return setErrorState("Sube una imagen o pega una URL.");
+      if (generationMode === "standard" && enableLipsync && !narrationText.trim()) {
+        return setErrorState("Escribe el texto que dirá el personaje para activar el lip sync.");
+      }
       if (useOptimized && !optimizedPrompt?.trim()) {
         if (!prompt?.trim()) return setErrorState("Escribe un prompt o desactiva el optimizado.");
         await handleOptimize();
       }
-
-      // ── Construir prompts con prefijo forzado anti-subtítulos ──
       const { finalPrompt, finalNegative } = getEffectivePrompts();
-
       setStatus("STARTING"); setStatusText("Enviando trabajo...");
       const auth      = await getAuthHeaders();
       const numFrames = fixFramesForWan(Math.max(1, Math.round(Number(durationSec) * fps)));
@@ -526,7 +452,12 @@ export function Img2VideoPanel({ userStatus }) {
         steps: stp, guidance_scale: gs, strength: den, denoise: den,
         motion_strength: ms, seed: getSeedForRequest(),
         image_b64: pureB64 || null, image_url: imageUrl || null,
-        include_audio: includeAudio,
+        include_audio: generationMode === "express" ? includeAudio : false,
+        // ElevenLabs + Latentsync para Standard
+        narration_text: generationMode === "standard" ? narrationText.trim() : "",
+        voice_accent:   voiceAccent,
+        voice_gender:   voiceGender,
+        enable_lipsync: generationMode === "standard" && enableLipsync,
       };
 
       const controller = new AbortController();
@@ -557,32 +488,23 @@ export function Img2VideoPanel({ userStatus }) {
       } else {
         setErrorState(e?.message || String(e));
       }
-    } finally {
-      lockRef.current = false;
-    }
+    } finally { lockRef.current = false; }
   }
 
   const handleDownload = () => {
     if (!videoUrl) return;
     const link = document.createElement("a");
-    link.href     = videoUrl;
-    link.download = "isabelaos-img2video.mp4";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    link.href = videoUrl; link.download = "isabelaos-img2video.mp4";
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   if (!user) {
-    return (
-      <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-yellow-100">
-        Debes iniciar sesión para usar Imagen → Video.
-      </div>
-    );
+    return <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-yellow-100">Debes iniciar sesión para usar Imagen → Video.</div>;
   }
 
   return (
     <>
-      {/* ══ MODAL CONSENTIMIENTO DE IMAGEN ══════════════════════ */}
+      {/* ══ MODAL CONSENTIMIENTO ══════════════════════════════════ */}
       {showPhotoConsent && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
           <div className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
@@ -592,40 +514,25 @@ export function Img2VideoPanel({ userStatus }) {
             </div>
             <div className="p-5">
               <div className="space-y-3 text-sm text-neutral-300">
-                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
-                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
-                  <span>Soy el titular de los derechos de esta fotografía, o tengo el <strong className="text-white">consentimiento expreso</strong> de la persona que aparece en ella para usar su imagen.</span>
-                </div>
-                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
-                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
-                  <span><strong className="text-white">No usaré</strong> esta imagen para suplantar identidades, difamar, engañar o causar daño a terceros.</span>
-                </div>
-                <div className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
-                  <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
-                  <span><strong className="text-white">Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado. IsabelaOS Studio no es responsable del uso inadecuado.</span>
-                </div>
+                {[
+                  "Soy el titular de los derechos de esta fotografía, o tengo el consentimiento expreso de la persona que aparece en ella.",
+                  "No usaré esta imagen para suplantar identidades, difamar, engañar o causar daño a terceros.",
+                  "Asumo toda la responsabilidad por el uso que haga del contenido generado.",
+                ].map((t, i) => (
+                  <div key={i} className="flex gap-3 p-3 rounded-xl border border-white/10 bg-white/3">
+                    <span className="text-cyan-400 mt-0.5 flex-shrink-0">☑</span>
+                    <span>{t}</span>
+                  </div>
+                ))}
               </div>
-              <p className="mt-4 text-xs text-neutral-600 leading-relaxed">
-                Las imágenes con contenido inapropiado o que violen derechos de imagen serán bloqueadas. Las violaciones pueden resultar en suspensión de cuenta.
-              </p>
             </div>
             <div className="p-5 pt-0 flex gap-3">
-              <button
-                onClick={async () => {
-                  setShowPhotoConsent(false);
-                  if (pendingPhotoFile) {
-                    await processFile(pendingPhotoFile);
-                    setPendingPhotoFile(null);
-                  }
-                }}
-                className="flex-1 bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-black font-bold text-sm rounded-2xl py-3 cursor-pointer transition-opacity hover:opacity-90"
-              >
+              <button onClick={async () => { setShowPhotoConsent(false); if (pendingPhotoFile) { await processFile(pendingPhotoFile); setPendingPhotoFile(null); } }}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-black font-bold text-sm rounded-2xl py-3 cursor-pointer hover:opacity-90">
                 ✓ Acepto y subo la imagen
               </button>
-              <button
-                onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
-                className="border border-white/15 text-neutral-400 text-sm rounded-2xl px-5 py-3 cursor-pointer hover:bg-white/5 transition-all"
-              >
+              <button onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
+                className="border border-white/15 text-neutral-400 text-sm rounded-2xl px-5 py-3 cursor-pointer hover:bg-white/5">
                 Cancelar
               </button>
             </div>
@@ -634,7 +541,7 @@ export function Img2VideoPanel({ userStatus }) {
       )}
 
       <div className="grid gap-8 lg:grid-cols-2">
-        {/* ── Panel izquierdo ── */}
+        {/* ── Panel izquierdo ────────────────────────────────────── */}
         <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-white">Imagen → Video</h2>
@@ -644,21 +551,14 @@ export function Img2VideoPanel({ userStatus }) {
             </button>
           </div>
 
-          {/* Aviso de consentimiento de imagen */}
           <div className="mt-3 rounded-2xl border border-yellow-400/20 bg-yellow-500/5 px-4 py-3 text-[12px] text-yellow-200">
             <span className="font-semibold text-yellow-100">⚠️ Importante:</span>{" "}
-            Al subir una fotografía declaras que posees los derechos sobre ella o tienes el consentimiento de las personas que aparecen. El uso inadecuado es tu responsabilidad exclusiva.
+            Al subir una fotografía declaras que posees los derechos sobre ella o tienes el consentimiento de las personas que aparecen.
           </div>
 
           <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[12px] text-cyan-100">
-            <span className="font-semibold text-white">Recomendación:</span> si buscas la mejor calidad de video y la voz más natural, utiliza el modo{" "}
-            <span className="font-semibold text-cyan-300">Express</span>.
-          </div>
-
-          {/* Aviso sobre subtítulos */}
-          <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-[12px] text-emerald-200">
-            <span className="font-semibold text-emerald-100">✓ Sin subtítulos automáticos:</span>{" "}
-            El sistema envía instrucciones forzadas para que el modelo NO agregue subtítulos, texto, marcas de agua ni personajes nuevos. El video respetará tu imagen original.
+            <span className="font-semibold text-white">Recomendación:</span> para la mejor calidad de video y voz usa el modo{" "}
+            <span className="font-semibold text-cyan-300">Express</span>. Para Standard con voz activa <span className="font-semibold text-cyan-300">Voz + Lip Sync</span>.
           </div>
 
           {/* Estado y Jades */}
@@ -667,10 +567,7 @@ export function Img2VideoPanel({ userStatus }) {
               <span>Estado: {statusText || "Listo."}</span>
               <span>Jades: <span className="font-semibold text-white">{userStatus?.jades ?? "..."}</span></span>
             </div>
-            <div className="mt-1 text-[11px] text-neutral-400">
-              Costo actual: <span className="font-semibold text-red-400">{COST_I2V}</span>{" "}
-              <span className="text-red-400">jades</span>
-            </div>
+            <div className="mt-1 text-[11px] text-neutral-400">Costo actual: <span className="font-semibold text-red-400">{COST_I2V} jades</span></div>
             <div className="mt-1 text-[11px] font-semibold text-red-400">{getPriceText()}</div>
             <div className="mt-1 text-[10px] text-red-400">{getAllPricesText()}</div>
             {jobId && <div className="mt-1 text-[10px] text-neutral-500">Job: {jobId}</div>}
@@ -678,19 +575,13 @@ export function Img2VideoPanel({ userStatus }) {
             {["IN_PROGRESS","STARTING","DONE"].includes(status) && (
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[10px] text-neutral-400">
-                  <span>Progreso</span>
-                  <span>{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
+                  <span>Progreso</span><span>{Math.max(0, Math.min(100, Number(progress) || 0))}%</span>
                 </div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all"
-                    style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }} />
+                  <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-all" style={{ width: `${Math.max(0, Math.min(100, Number(progress) || 0))}%` }} />
                 </div>
                 <div className="mt-2 text-[11px] text-neutral-300">{getEtaText()}</div>
-                {needsManualRefresh && (
-                  <div className="mt-2 text-[11px] text-yellow-200">
-                    Conexión perdida. Haz clic en <span className="font-semibold">"Actualizar estado"</span>.
-                  </div>
-                )}
+                {needsManualRefresh && <div className="mt-2 text-[11px] text-yellow-200">Conexión perdida. Haz clic en <span className="font-semibold">"Actualizar estado"</span>.</div>}
               </div>
             )}
 
@@ -702,7 +593,6 @@ export function Img2VideoPanel({ userStatus }) {
                 </button>
               </div>
             )}
-
             <div className="mt-3">
               <button type="button" onClick={hardResetPanel}
                 className="w-full rounded-xl border border-red-400/30 px-3 py-2 text-[11px] text-red-300 hover:bg-red-500/10">
@@ -716,29 +606,21 @@ export function Img2VideoPanel({ userStatus }) {
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-xs text-neutral-300">Modo</div>
               <div className="mt-3 space-y-2">
-                <label className="flex items-center gap-2 text-[12px] text-neutral-200">
-                  <input type="radio" name="i2v_mode" checked={generationMode === "express"}
-                    onChange={() => setGenerationMode("express")} className="h-4 w-4" />
-                  Express
-                </label>
-                <label className="flex items-center gap-2 text-[12px] text-neutral-200">
-                  <input type="radio" name="i2v_mode" checked={generationMode === "standard"}
-                    onChange={() => setGenerationMode("standard")} className="h-4 w-4" />
-                  Standard
-                </label>
+                {[["express","Express"],["standard","Standard"]].map(([v,l]) => (
+                  <label key={v} className="flex items-center gap-2 text-[12px] text-neutral-200">
+                    <input type="radio" name="i2v_mode" checked={generationMode === v} onChange={() => setGenerationMode(v)} className="h-4 w-4" />
+                    {l}
+                  </label>
+                ))}
               </div>
               <div className="mt-2 text-[10px] text-neutral-500">{getModeDescription()}</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="text-xs text-neutral-300">Formato / tamaño</div>
+              <div className="text-xs text-neutral-300">Formato</div>
               <div className="mt-3 flex items-center gap-2">
-                <input id="i2v_916" type="checkbox" checked={useNineSixteen}
-                  onChange={(e) => setUseNineSixteen(e.target.checked)} className="h-4 w-4" />
+                <input id="i2v_916" type="checkbox" checked={useNineSixteen} onChange={(e) => setUseNineSixteen(e.target.checked)} className="h-4 w-4" />
                 <label htmlFor="i2v_916" className="text-[12px] text-neutral-200">Vertical 9:16</label>
-              </div>
-              <div className="mt-2 text-[10px] text-neutral-500">
-                {useNineSixteen ? "Formato vertical seleccionado" : "Formato por defecto"}
               </div>
             </div>
 
@@ -747,21 +629,18 @@ export function Img2VideoPanel({ userStatus }) {
               <div className="mt-3 space-y-2">
                 {getDurationOptions().map((sec) => (
                   <label key={sec} className="flex items-center gap-2 text-[12px] text-neutral-200">
-                    <input type="radio" name="i2v_duration" checked={Number(durationSec) === sec}
-                      onChange={() => setDurationSec(sec)} className="h-4 w-4" />
+                    <input type="radio" name="i2v_duration" checked={Number(durationSec) === sec} onChange={() => setDurationSec(sec)} className="h-4 w-4" />
                     {sec} segundos
                   </label>
                 ))}
               </div>
-              <div className="mt-2 text-[10px] text-neutral-500">
-                fps: {fps} • frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}
-              </div>
+              <div className="mt-2 text-[10px] text-neutral-500">fps: {fps} • frames: {fixFramesForWan(Math.round(Number(durationSec) * fps))}</div>
             </div>
           </div>
 
-          {/* Campos del formulario */}
+          {/* Formulario */}
           <div className="mt-4 space-y-4 text-sm">
-            {/* Subir imagen */}
+            {/* Imagen */}
             <div>
               <p className="text-xs text-neutral-300">1. Sube una imagen</p>
               <button type="button" onClick={handlePickFile}
@@ -769,37 +648,27 @@ export function Img2VideoPanel({ userStatus }) {
                 {dataUrl ? "Cambiar imagen" : "Haz clic para subir una imagen"}
               </button>
               <input id={fileInputId} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-              {dataUrl && (
-                <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                  <img src={dataUrl} alt="Base" className="w-full object-cover" />
-                </div>
-              )}
+              {dataUrl && <div className="mt-3 overflow-hidden rounded-2xl border border-white/10"><img src={dataUrl} alt="Base" className="w-full object-cover" /></div>}
             </div>
 
             <div>
               <p className="text-xs text-neutral-300">o pega una URL de imagen</p>
-              <input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://..." className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10" />
+              <input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..."
+                className="mt-2 w-full rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10" />
             </div>
 
             <div>
               <label className="text-neutral-300">Prompt (opcional)</label>
               <textarea className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
                 value={prompt} onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe movimiento, cámara, ambiente. Si Audio Layer está activado, escribe aquí lo que debe decir el personaje." />
-              <div className="mt-1 text-[10px] text-neutral-500">
-                ℹ️ Se añaden automáticamente instrucciones para evitar subtítulos y cambios no deseados.
-              </div>
+                placeholder="Describe movimiento, cámara, ambiente..." />
+              <div className="mt-1 text-[10px] text-neutral-500">ℹ️ Se añaden instrucciones automáticas para evitar subtítulos.</div>
             </div>
 
             <div>
               <label className="text-neutral-300">Negativo (opcional)</label>
               <textarea className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                value={negative} onChange={(e) => setNegative(e.target.value)}
-                placeholder="borroso, baja calidad, deformado..." />
-              <div className="mt-1 text-[10px] text-neutral-500">
-                ℹ️ Se añade automáticamente: "subtitles, text, captions, watermarks..."
-              </div>
+                value={negative} onChange={(e) => setNegative(e.target.value)} placeholder="borroso, baja calidad..." />
             </div>
 
             {/* Optimizador */}
@@ -807,9 +676,7 @@ export function Img2VideoPanel({ userStatus }) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs text-neutral-300">
                   Optimización de prompt (OpenAI)
-                  {optimizedPrompt
-                    ? <span className="ml-2 text-[10px] text-emerald-300">Listo ✓</span>
-                    : <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>}
+                  {optimizedPrompt ? <span className="ml-2 text-[10px] text-emerald-300">Listo ✓</span> : <span className="ml-2 text-[10px] text-neutral-400">Opcional</span>}
                 </div>
                 <button type="button" onClick={handleOptimize} disabled={isOptimizing || !prompt?.trim()}
                   className="rounded-xl border border-white/20 px-3 py-1 text-[11px] text-white hover:bg-white/10 disabled:opacity-50">
@@ -817,33 +684,81 @@ export function Img2VideoPanel({ userStatus }) {
                 </button>
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <input id="useOptI2V" type="checkbox" checked={useOptimized}
-                  onChange={(e) => setUseOptimized(e.target.checked)} className="h-4 w-4" />
+                <input id="useOptI2V" type="checkbox" checked={useOptimized} onChange={(e) => setUseOptimized(e.target.checked)} className="h-4 w-4" />
                 <label htmlFor="useOptI2V" className="text-[11px] text-neutral-300">Usar prompt optimizado para generar</label>
               </div>
-              {optError && <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>}
+              {optError && <div className="mt-2 text-[11px] text-red-400">{optError}</div>}
             </div>
 
-            {/* Audio Layer */}
-            <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="text-xs text-neutral-300">Audio Layer</div>
-              <div className="mt-2 flex items-center gap-2">
-                <input id="i2v_audio" type="checkbox" checked={includeAudio}
-                  onChange={(e) => setIncludeAudio(e.target.checked)} className="h-4 w-4" />
-                <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">
-                  Activar audio o voz desde el prompt (+4 jades)
-                </label>
-              </div>
-              <div className="mt-2 text-[10px] text-neutral-500">{getAudioHelpText()}</div>
-              {generationMode === "standard" && (
-                <div className="mt-2 text-[10px] text-cyan-200/80">
-                  Consejo: en Standard, con Audio Layer activado, escribe el diálogo o sonidos directamente en el prompt.
+            {/* Audio Express */}
+            {generationMode === "express" && (
+              <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
+                <div className="text-xs text-neutral-300">Audio Layer</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input id="i2v_audio" type="checkbox" checked={includeAudio} onChange={(e) => setIncludeAudio(e.target.checked)} className="h-4 w-4" />
+                  <label htmlFor="i2v_audio" className="text-[11px] text-neutral-300">Activar audio o voz desde el prompt (+4 jades)</label>
                 </div>
-              )}
-            </div>
+                <div className="mt-2 text-[10px] text-neutral-500">{getAudioHelpText()}</div>
+              </div>
+            )}
+
+            {/* ── Voz ElevenLabs + Latentsync para Standard ─────── */}
+            {generationMode === "standard" && (
+              <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-white">🎙️ Voz ElevenLabs + Lip Sync</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">WAN genera mudo → ElevenLabs agrega voz → Latentsync sincroniza labios</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input id="enable_lipsync" type="checkbox" checked={enableLipsync} onChange={e => setEnableLipsync(e.target.checked)} className="h-4 w-4" />
+                    <label htmlFor="enable_lipsync" className="text-[11px] text-neutral-300">Activar (+4 jades)</label>
+                  </div>
+                </div>
+
+                {enableLipsync && (
+                  <>
+                    <div>
+                      <label className="text-[11px] text-neutral-400">Texto que dirá el personaje</label>
+                      <textarea
+                        className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400"
+                        value={narrationText}
+                        onChange={e => setNarrationText(e.target.value)}
+                        placeholder="Escribe aquí lo que el personaje debe decir en el video..."
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] text-neutral-400">Acento / Región</label>
+                        <select value={voiceAccent} onChange={e => setVoiceAccent(e.target.value)}
+                          className="mt-1 w-full rounded-xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400">
+                          {ACCENTS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-neutral-400">Género de voz</label>
+                        <div className="mt-2 space-y-2">
+                          {[["mujer","Femenina"],["hombre","Masculina"]].map(([v,l]) => (
+                            <label key={v} className="flex items-center gap-2 text-[12px] text-neutral-200">
+                              <input type="radio" name="voice_gender" checked={voiceGender === v} onChange={() => setVoiceGender(v)} className="h-4 w-4" />
+                              {l}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/5 px-3 py-2 text-[10px] text-yellow-200">
+                      ⏱️ El proceso toma 6-15 min: WAN genera el video → ElevenLabs crea la voz → Latentsync sincroniza los labios.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Parámetros avanzados */}
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-neutral-300">Steps</label>
                 <input type="number" min={1} max={80} value={steps} onChange={(e) => setSteps(Number(e.target.value))}
@@ -856,18 +771,18 @@ export function Img2VideoPanel({ userStatus }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-neutral-300">Strength (denoise)</label>
+                <label className="text-neutral-300">Strength</label>
                 <input type="number" step="0.05" min={0.1} max={1.0} value={strength} onChange={(e) => setStrength(Number(e.target.value))}
                   className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10" />
-                <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.60–0.70</div>
+                <div className="mt-1 text-[10px] text-neutral-500">Rec: 0.60–0.70</div>
               </div>
               <div>
-                <label className="text-neutral-300">Fuerza de movimiento</label>
+                <label className="text-neutral-300">Movimiento</label>
                 <input type="number" step="0.05" min={0.1} max={2.0} value={motionStrength} onChange={(e) => setMotionStrength(Number(e.target.value))}
                   className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10" />
-                <div className="mt-2 text-[10px] text-neutral-500">Recomendado: 0.9–1.1</div>
+                <div className="mt-1 text-[10px] text-neutral-500">Rec: 0.9–1.1</div>
               </div>
             </div>
 
@@ -875,11 +790,9 @@ export function Img2VideoPanel({ userStatus }) {
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
               <div className="text-xs text-neutral-300">Seed</div>
               <div className="mt-2 flex items-center gap-3">
-                <input id="i2v_seed_random" type="checkbox" checked={seedMode === "RANDOM"}
-                  onChange={(e) => e.target.checked && setSeedMode("RANDOM")} className="h-4 w-4" />
-                <label htmlFor="i2v_seed_random" className="text-[12px] text-neutral-200">Aleatorio (recomendado)</label>
-                <input id="i2v_seed_fixed" type="checkbox" checked={seedMode === "FIXED"}
-                  onChange={(e) => e.target.checked && setSeedMode("FIXED")} className="ml-4 h-4 w-4" />
+                <input id="i2v_seed_random" type="checkbox" checked={seedMode === "RANDOM"} onChange={(e) => e.target.checked && setSeedMode("RANDOM")} className="h-4 w-4" />
+                <label htmlFor="i2v_seed_random" className="text-[12px] text-neutral-200">Aleatorio</label>
+                <input id="i2v_seed_fixed" type="checkbox" checked={seedMode === "FIXED"} onChange={(e) => e.target.checked && setSeedMode("FIXED")} className="ml-4 h-4 w-4" />
                 <label htmlFor="i2v_seed_fixed" className="text-[12px] text-neutral-200">Fijo</label>
               </div>
               {seedMode === "FIXED" && (
@@ -888,13 +801,11 @@ export function Img2VideoPanel({ userStatus }) {
               )}
             </div>
 
-            {/* Resumen de precios */}
+            {/* Resumen precios */}
             <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[11px] text-cyan-100">
-              <div className="font-semibold text-white">Información de precios del video</div>
-              <div className="mt-2 text-red-400">{getAllPricesText()}</div>
-              <div className="mt-1 text-cyan-200/80">
-                Selección actual: <span className="font-semibold text-red-400">{getPriceText()}</span>
-              </div>
+              <div className="font-semibold text-white">Precios</div>
+              <div className="mt-1 text-red-400">{getAllPricesText()}</div>
+              <div className="mt-1 text-cyan-200/80">Selección actual: <span className="font-semibold text-red-400">{getPriceText()}</span></div>
             </div>
 
             {/* Botón generar */}
@@ -912,7 +823,7 @@ export function Img2VideoPanel({ userStatus }) {
           </div>
         </div>
 
-        {/* ── Panel derecho: resultado ── */}
+        {/* ── Panel derecho: resultado ─────────────────────────── */}
         <div className="flex flex-col rounded-3xl border border-white/10 bg-black/40 p-6">
           <h2 className="text-lg font-semibold text-white">Resultado</h2>
           <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
@@ -921,47 +832,39 @@ export function Img2VideoPanel({ userStatus }) {
               : <p>Aquí verás el video cuando termine.</p>}
           </div>
           {videoUrl && (
-            <button onClick={handleDownload}
-              className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10">
+            <button onClick={handleDownload} className="mt-4 w-full rounded-2xl border border-white/30 py-2 text-xs text-white hover:bg-white/10">
               Descargar video
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Modal: Sobre este módulo ── */}
+      {/* ── Modal: Sobre este módulo ────────────────────────────── */}
       {showModuleInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
           <div className="relative w-full max-w-4xl rounded-3xl border border-white/10 bg-[#05070d] p-5 shadow-2xl">
             <button type="button" onClick={() => setShowModuleInfo(false)}
-              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10">
-              ✕
-            </button>
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10">✕</button>
             <div className="pr-12">
               <h3 className="text-xl font-semibold text-white">Sobre este módulo</h3>
-              <p className="mt-1 text-sm text-neutral-300">Convierte una imagen en video con Express (Veo3) o Standard (WAN).</p>
+              <p className="mt-1 text-sm text-neutral-300">Convierte una imagen en video con Express (Veo3) o Standard (WAN + ElevenLabs + Latentsync).</p>
             </div>
             <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black">
               <video src="/videoinstruvideo.mp4" controls className="h-full max-h-[420px] w-full object-contain" />
             </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-neutral-300">
-              <div className="font-semibold text-white">Cómo usar Imagen → Video</div>
-              <div className="mt-3 space-y-2">
-                <p><span className="font-semibold text-white">1.</span> Sube una imagen o pega una URL.</p>
-                <p><span className="font-semibold text-white">2.</span> Escribe un prompt describiendo movimiento, cámara, ambiente o diálogo.</p>
-                <p><span className="font-semibold text-white">3.</span> Elige el modo:</p>
-                <div className="ml-4 space-y-1 text-[13px]">
-                  <p><span className="font-semibold text-cyan-300">Express:</span> mejor calidad, voz más natural.</p>
-                  <p><span className="font-semibold text-cyan-300">Standard:</span> más económico, clips más largos.</p>
-                </div>
-                <p><span className="font-semibold text-white">4.</span> Si quieres voz, activa <span className="font-semibold">Audio Layer</span>.</p>
-                <p><span className="font-semibold text-white">5.</span> Haz clic en <span className="font-semibold">Generar video</span> y espera.</p>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-neutral-300 space-y-2">
+              <div className="font-semibold text-white">Cómo usar</div>
+              <p><span className="font-semibold text-white">1.</span> Sube una imagen o pega una URL.</p>
+              <p><span className="font-semibold text-white">2.</span> Elige el modo:</p>
+              <div className="ml-4 space-y-1 text-[13px]">
+                <p><span className="font-semibold text-cyan-300">Express:</span> mejor calidad, voz más natural (Veo3).</p>
+                <p><span className="font-semibold text-cyan-300">Standard:</span> más económico, clips más largos, con opción de voz ElevenLabs + lip sync.</p>
               </div>
-              <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-200">
-                ✓ El sistema evita automáticamente subtítulos, texto y cambios no deseados en todos los videos.
-              </div>
-              <div className="mt-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[12px] text-cyan-100">
-                Recomendación: usa <span className="font-semibold text-cyan-300">Express</span> para la mejor calidad de video y voz.
+              <p><span className="font-semibold text-white">3.</span> En Standard, activa <span className="font-semibold">Voz + Lip Sync</span> y escribe lo que debe decir el personaje.</p>
+              <p><span className="font-semibold text-white">4.</span> Elige acento y género de voz.</p>
+              <p><span className="font-semibold text-white">5.</span> Haz clic en Generar y espera.</p>
+              <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/5 px-3 py-2 text-[12px] text-yellow-200">
+                ⏱️ Standard con Lip Sync tarda 6-15 min porque procesa WAN → ElevenLabs → Latentsync en secuencia.
               </div>
             </div>
           </div>
