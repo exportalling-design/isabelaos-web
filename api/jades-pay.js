@@ -99,9 +99,7 @@ export default async function handler(req, res) {
         consumerAuthenticationInformation: {
           setup_request_id: setupRequestId,
           referenceId:      referenceId,
-          returnUrl: process.env.PAGADITO_ENV === "production"
-            ? `${siteUrl}/api/payment-return`
-            : "https://sandbox.pagadito.com/",
+          returnUrl:        `${siteUrl}/api/payment-return`,
         },
       }),
     });
@@ -112,12 +110,12 @@ export default async function handler(req, res) {
     // 3DS Challenge requerido
     if (data?.response_code === "PG402-05") {
       return res.status(200).json({
-        ok:               false,
+        ok:                 false,
         challenge_required: true,
-        stepUpUrl:        data?.customer_reply?.stepUpUrl,
-        accessToken:      data?.customer_reply?.accessToken,
-        id_transaction:   data?.customer_reply?.id_transaction,
-        request_id:       data?.request_id,
+        stepUpUrl:          data?.customer_reply?.stepUpUrl,
+        accessToken:        data?.customer_reply?.accessToken,
+        id_transaction:     data?.customer_reply?.id_transaction,
+        request_id:         data?.request_id,
       });
     }
 
