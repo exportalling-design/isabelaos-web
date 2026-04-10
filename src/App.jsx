@@ -26,6 +26,7 @@ import Terms                    from "./components/Terms";
 import Refund                   from "./components/Refund";
 import TermsAcceptanceModal     from "./components/TermsAcceptanceModal";
 import LandingView              from "./components/LandingView";
+import { BuyJadesModal }        from "./components/BuyJadesModal";
 
 const DEMO_PROMPT_KEY = "isabela_demo_prompt_text2img";
 function saveDemoPrompt(p) { try { localStorage.setItem(DEMO_PROMPT_KEY, String(p || "")); } catch {} }
@@ -72,7 +73,6 @@ function LegalFooter({ lang = "es", onOpenAuth, onOpenAbout, onOpenContact }) {
             </div>
           </div>
           <div>
-            {/* Legal — conectado a rutas reales */}
             <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Legal</div>
             <div className="space-y-2 text-xs text-neutral-400">
               <a href="/terms"   target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">{isEs ? "Términos y Condiciones" : "Terms & Conditions"}</a>
@@ -92,81 +92,6 @@ function LegalFooter({ lang = "es", onOpenAuth, onOpenAbout, onOpenContact }) {
         </div>
       </div>
     </footer>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════
-// MODAL DE COMPRA DE JADES
-// ══════════════════════════════════════════════════════════════
-function BuyJadesModal({ open, onClose, userId, onSuccess }) {
-  const [selectedPack, setSelectedPack] = useState("popular");
-  const [step,  setStep]  = useState("form");
-  const [cardError,   setCardError]   = useState("");
-  const [cardSuccess, setCardSuccess] = useState("");
-  const [setupData,   setSetupData]   = useState(null);
-  const iframeRef = useRef(null);
-  const formRef   = useRef(null);
-  const [card, setCard] = useState({ cardHolderName:"", number:"", expirationDate:"", cvv:"", firstName:"", lastName:"", email:"", phone:"", line1:"7a Calle Pte. Bis, 511 y 531" });
-  const upd = (k,v) => setCard(p=>({...p,[k]:v}));
-
-  useEffect(()=>{
-    if(step!=="iframe") return;
-    const h = async(e)=>{ if(!["https://centinelapistag.cardinalcommerce.com","https://centinelapi.cardinalcommerce.com"].includes(e.origin))return; setStep("paying"); await callJadesPay(); };
-    window.addEventListener("message",h); return ()=>window.removeEventListener("message",h);
-  },[step,setupData]);
-  useEffect(()=>{
-    if(step!=="iframe"||!setupData) return;
-    setTimeout(()=>{ try{formRef.current?.submit();}catch{setStep("paying");callJadesPay();} setTimeout(()=>{if(step==="iframe"){setStep("paying");callJadesPay();}},5000);},500);
-  },[step,setupData]);
-
-  if(!open) return null;
-  const pack = JADE_PACKS[selectedPack];
-
-  async function handlePay(e){
-    e.preventDefault(); setCardError("");
-    if(!card.number||!card.expirationDate||!card.cvv||!card.cardHolderName){setCardError("Completa los datos de tarjeta.");return;}
-    if(!card.firstName||!card.lastName||!card.email){setCardError("Completa tu nombre y correo.");return;}
-    setStep("loading");
-    try{
-      const auth=await getAuthHeadersGlobal();
-      const r=await fetch("/api/jades-setup",{method:"POST",headers:{"Content-Type":"application/json",...auth},body:JSON.stringify({pack:selectedPack,card})});
-      const j=await r.json().catch(()=>null);
-      if(!r.ok||!j?.ok) throw new Error(j?.response_message||j?.error||"Error en setup.");
-      setSetupData(j); setStep("iframe");
-    }catch(err){setCardError(err?.message||"Error iniciando el pago.");setStep("form");}
-  }
-
-  async function callJadesPay(){
-    try{
-      const auth=await getAuthHeadersGlobal();
-      const r=await fetch("/api/jades-pay",{method:"POST",headers:{"Content-Type":"application/json",...auth},body:JSON.stringify({pack:selectedPack,card,setupRequestId:setupData?.request_id,referenceId:setupData?.referenceId,deviceFingerprintID:setupData?.fingerprint||""})});
-      const j=await r.json().catch(()=>null);
-      if(!r.ok||!j?.ok){if(j?.challenge_required){setCardError("Tu banco requiere verificación adicional.");setStep("form");return;} throw new Error(j?.response_message||j?.error||"Error.");}
-      setCardSuccess(`¡Listo! Se acreditaron ${j.jades_added} Jades.`); setStep("done");
-      if(typeof onSuccess==="function") await onSuccess();
-      setTimeout(()=>{setCardSuccess("");setStep("form");onClose();},2500);
-    }catch(err){setCardError(err?.message||"Error procesando pago.");setStep("form");}
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end" onClick={onClose}>
-      <div className="relative h-full w-full max-w-md overflow-y-auto border-l border-white/10 bg-[#06070B] p-6 shadow-2xl" onClick={e=>e.stopPropagation()}>
-        {step==="iframe"&&setupData&&(<div style={{position:"absolute",width:0,height:0,overflow:"hidden"}}><iframe ref={iframeRef} name="collectionIframe" height="1" width="1" style={{display:"none"}}/><form ref={formRef} method="POST" target="collectionIframe" action={setupData.deviceDataCollectionUrl}><input type="hidden" name="JWT" value={setupData.accessToken}/></form></div>)}
-        <div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold text-white">Comprar Jades</h2><p className="mt-1 text-xs text-neutral-400">1 Jade = $0.10 USD · Sin suscripción</p></div><button onClick={onClose} className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-neutral-400 hover:bg-white/10">✕</button></div>
-        {(step==="loading"||step==="iframe"||step==="paying")&&(<div className="mt-10 text-center space-y-4"><div className="text-4xl animate-pulse">💳</div><p className="text-sm text-white font-semibold">{step==="loading"?"Iniciando pago seguro...":step==="iframe"?"Verificando dispositivo...":"Procesando pago..."}</p><p className="text-xs text-neutral-400">No cierres esta ventana</p><div className="flex justify-center gap-1 mt-4">{[0,1,2,3,4].map(i=>(<div key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce" style={{animationDelay:`${i*0.15}s`}}/>))}</div></div>)}
-        {step==="done"&&cardSuccess&&(<div className="mt-10 text-center space-y-4"><div className="text-5xl">✅</div><p className="text-sm text-emerald-300 font-semibold">{cardSuccess}</p></div>)}
-        {step==="form"&&(<>
-          <div className="mt-5 grid grid-cols-2 gap-3">{Object.entries(JADE_PACKS).map(([key,p])=>(<button key={key} type="button" onClick={()=>setSelectedPack(key)} className={`rounded-2xl border p-4 text-left transition ${selectedPack===key?"border-cyan-400 bg-cyan-500/10":"border-white/10 bg-black/40 hover:bg-black/50"}`}><div className="text-sm font-semibold text-white">{p.label}</div><div className="mt-1 text-xl font-bold text-cyan-300">{p.jades}J</div><div className="mt-1 text-xs text-neutral-400">${p.price_usd} USD</div></button>))}</div>
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300"><div className="font-semibold text-white">Con {pack.jades} Jades:</div><div className="mt-2 space-y-1"><div>· <span className="font-semibold text-white">{pack.jades}</span> imágenes sin avatar</div><div>· <span className="font-semibold text-white">{Math.floor(pack.jades/2)}</span> imágenes con avatar</div><div>· <span className="font-semibold text-white">{Math.floor(pack.jades/COSTS.vid_express_8s)}</span> videos Express 8s</div><div>· <span className="font-semibold text-white">{Math.floor(pack.jades/40)}</span> videos CineAI 5s</div></div></div>
-          <form onSubmit={handlePay} className="mt-5 space-y-3">
-            <div className="text-xs font-semibold text-white">Pagar ${pack.price_usd} USD · Pack {pack.label}</div>
-            {[{label:"Nombre en tarjeta",key:"cardHolderName",ph:"JOHN DOE"},{label:"Número de tarjeta",key:"number",ph:"4000000000002701"},{label:"Vencimiento (MM/YYYY)",key:"expirationDate",ph:"01/2030"},{label:"CVV",key:"cvv",ph:"123"},{label:"Nombre",key:"firstName",ph:"John"},{label:"Apellido",key:"lastName",ph:"Doe"},{label:"Correo",key:"email",ph:"tu@email.com"},{label:"Teléfono",key:"phone",ph:"2264-7032"},{label:"Dirección",key:"line1",ph:"7a Calle Pte. Bis, 511 y 531"}].map(({label,key,ph})=>(<div key={key}><label className="text-[11px] text-neutral-400">{label}</label><input type={key==="email"?"email":"text"} value={card[key]} onChange={e=>upd(key,e.target.value)} placeholder={ph} className="mt-1 w-full rounded-xl bg-black/60 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/10 focus:ring-cyan-400"/></div>))}
-            {cardError&&(<div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{cardError}</div>)}
-            <button type="submit" className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white hover:opacity-90 transition-all">Pagar ${pack.price_usd} · {pack.jades} Jades</button>
-          </form>
-        </>)}
-      </div>
-    </div>
   );
 }
 
@@ -264,7 +189,6 @@ function DashboardView({ lang, setLang }) {
   return (
     <div className="min-h-screen w-full text-white" style={{background:"radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B"}}>
 
-      {/* Modal de términos — primera vez que entra al dashboard */}
       <TermsAcceptanceModal user={user} lang={lang} onAccepted={()=>{}} />
 
       {/* Header */}
@@ -276,7 +200,6 @@ function DashboardView({ lang, setLang }) {
           </div>
           <div className="flex items-center gap-2 md:gap-3 text-xs">
             <span className="hidden lg:inline text-neutral-300">{user?.email}{isAdmin?" · admin":""}</span>
-            {/* Botón idioma */}
             <button onClick={()=>setLang(lang==="es"?"en":"es")} className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10 font-semibold">
               {lang==="es"?"🌐 EN":"🌐 ES"}
             </button>
@@ -372,7 +295,6 @@ function DashboardView({ lang, setLang }) {
 export default function App() {
   const { user, signInWithGoogle } = useAuth();
 
-  // Idioma global — persiste en localStorage
   const [lang, setLangState] = useState(() => {
     try { return localStorage.getItem("isabelaos_lang") || "es"; } catch { return "es"; }
   });
@@ -382,7 +304,6 @@ export default function App() {
   const [landingPage,     setLandingPage]     = useState("home");
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
 
-  // Rutas legales simples
   const path = window.location.pathname;
   if (path === "/terms")  return <Terms  lang={lang} />;
   if (path === "/refund") return <Refund lang={lang} />;
