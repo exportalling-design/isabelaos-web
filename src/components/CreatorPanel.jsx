@@ -1,8 +1,10 @@
 // src/components/CreatorPanel.jsx
 // ─────────────────────────────────────────────────────────────
-// Panel de generación de imágenes — extraído de App.jsx
-// Se importa en DashboardView y se renderiza en la pestaña "Imagen"
-// Costos: 1 Jade sin avatar | 2 Jades con avatar
+// FIXES:
+//   - Avatar nunca preseleccionado (usuario elige manualmente)
+//   - Prompt de ejemplo cambiado (menos tokens, sin blur)
+//   - Aviso de ejemplo junto al label del prompt
+//   - Aviso legal de suplantación de identidad
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -28,13 +30,17 @@ async function getAuthHeadersGlobal() {
 const DAILY_LIMIT = 5;
 const DEMO_LIMIT  = 5;
 
+// FIX: prompt de ejemplo simple — evita blur por CLIP truncation
+const EXAMPLE_PROMPT   = "Portrait of a woman, natural light, sharp focus, professional photo";
+const EXAMPLE_NEGATIVE = "blurry, low quality, deformed, watermark, text, nude, nsfw";
+
 export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const { user } = useAuth();
   const userLoggedIn = !isDemo && !!user;
 
   // ── Estado del formulario ──────────────────────────────────
-  const [prompt,    setPrompt]    = useState("Cinematic portrait, ultra detailed, soft light, 8k");
-  const [negative,  setNegative]  = useState("blurry, low quality, deformed, watermark, text");
+  const [prompt,    setPrompt]    = useState(EXAMPLE_PROMPT);
+  const [negative,  setNegative]  = useState(EXAMPLE_NEGATIVE);
   const [width,     setWidth]     = useState(1080);
   const [height,    setHeight]    = useState(1920);
   const [steps,     setSteps]     = useState(22);
@@ -47,13 +53,13 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
   const [dailyCount, setDailyCount] = useState(0);
   const [demoCount,  setDemoCount]  = useState(0);
-
   const [profilePlan,  setProfilePlan]  = useState("free");
   const [profileJades, setProfileJades] = useState(0);
 
   // ── Avatares / anchors ─────────────────────────────────────
   const [avatars,        setAvatars]        = useState([]);
   const [avatarsLoading, setAvatarsLoading] = useState(false);
+  // FIX: siempre vacío — usuario debe elegir manualmente
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
   const selectedAvatar = avatars.find((a) => String(a.id) === String(selectedAvatarId)) || null;
 
@@ -68,7 +74,6 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
   const isOptStale = optStatus === "READY" &&
     (optSource.prompt !== prompt || optSource.negative !== negative);
 
-  // Resetear error de optimización si cambian los campos
   useEffect(() => { setOptError(""); }, [prompt, negative]);
 
   // Prefill prompt desde landing demo
@@ -97,7 +102,7 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
     })();
   }, [userLoggedIn, user?.id]);
 
-  const isFreeUser   = !profilePlan || profilePlan === "free" || profilePlan === "none";
+  const isFreeUser    = !profilePlan || profilePlan === "free" || profilePlan === "none";
   const hasPaidAccess = !isFreeUser || profileJades > 0;
 
   // ── Cargar avatares ────────────────────────────────────────
@@ -114,10 +119,8 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
           (a) => String(a?.status || "").toUpperCase() === "READY" && Number(a?.anchor_count || 0) >= 1
         );
         setAvatars(ready);
-        setSelectedAvatarId((prev) => {
-          if (prev && ready.some((a) => String(a.id) === String(prev))) return prev;
-          return ready[0]?.id || "";
-        });
+        // FIX: nunca preseleccionar — siempre vacío
+        setSelectedAvatarId("");
       } catch (e) { console.error("Error cargando avatares:", e); setAvatars([]); setSelectedAvatarId(""); }
       finally { setAvatarsLoading(false); }
     })();
@@ -140,14 +143,11 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
   }, [isDemo]);
 
   const limitReached = !isDemo && !hasPaidAccess && dailyCount >= DAILY_LIMIT;
-
   const disabled =
     status === "IN_QUEUE" || status === "IN_PROGRESS" ||
     (!isDemo && !userLoggedIn) || limitReached ||
     (isDemo && demoCount >= DEMO_LIMIT);
 
-  // ── Calcular costo en Jades ────────────────────────────────
-  // 1 Jade sin avatar | 2 Jades con avatar
   const jadeCost = selectedAvatar ? 2 : 1;
 
   // ── Optimizar prompt ───────────────────────────────────────
@@ -212,12 +212,12 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
       setError(`Has llegado al límite de ${DAILY_LIMIT} renders gratuitos por hoy. Compra Jades para generar sin límite.`);
       return;
     }
-    // Verificar Jades si tiene acceso pagado
     if (!isDemo && hasPaidAccess && profileJades < jadeCost) {
       setStatus("ERROR"); setStatusText("Jades insuficientes.");
       setError(`Necesitas ${jadeCost} Jade${jadeCost > 1 ? "s" : ""} para esta generación. Compra más Jades.`);
       return;
     }
+
     setImageB64(null); setStatus("IN_QUEUE"); setStatusText("Preparando job...");
     try {
       let finalPrompt = prompt, finalNegative = negative;
@@ -233,21 +233,19 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
           finalPrompt = eff.finalPrompt; finalNegative = eff.finalNegative;
         }
       }
+
       let avatarAnchors = [];
       if (selectedAvatar?.id) {
         setStatusText("Cargando referencias faciales del avatar...");
         avatarAnchors = await getAvatarAnchors(selectedAvatar.id);
       }
-      setStatusText("Enviando job a RunPod...");
 
-      // Fix cara fantasmal: Realistic Vision necesita 512x768 para generar
-      // un solo rostro bien integrado. A resoluciones mayores genera personas
-      // duplicadas o rostros pequeños que el FaceSwap no puede pegar bien.
+      setStatusText("Enviando job a RunPod...");
       const isNaturalWithAvatar = skinMode === "natural" && !!selectedAvatar;
       const finalWidth  = isNaturalWithAvatar ? 512  : Number(width);
       const finalHeight = isNaturalWithAvatar ? 768  : Number(height);
-
       const authHeaders = isDemo ? {} : await getAuthHeadersGlobal();
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
@@ -266,9 +264,10 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Error en /api/generate.");
+
       const jobId = data.jobId;
       setStatus("IN_PROGRESS"); setStatusText(`Job enviado. Consultando estado...`);
-      // Polling hasta completar
+
       let finished = false;
       while (!finished) {
         await new Promise((r) => setTimeout(r, 2000));
@@ -280,29 +279,35 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
         setStatus(st); setStatusText(`Estado: ${st}...`);
         if (st === "IN_QUEUE" || st === "IN_PROGRESS") continue;
         finished = true;
+
         if (st === "COMPLETED" && statusData.output?.image_b64) {
           const b64 = statusData.output.image_b64;
-          setImageB64(b64); setStatusText("Render completado.");
+          setImageB64(b64); setStatusText("Render completado ✅");
+
           if (isDemo) {
             const next = demoCount + 1;
             setDemoCount(next);
             localStorage.setItem("isabelaos_demo_count", String(next));
           } else if (userLoggedIn) {
             if (!hasPaidAccess) setDailyCount((p) => p + 1);
-            // Subir imagen a Storage y guardar URL en DB
+            setStatusText("Guardando en biblioteca...");
             (async () => {
               try {
-                const publicUrl = await uploadImageToStorage(user.id, b64, "image/png");
+                const publicUrl = await uploadImageToStorage(user.id, b64, "image/jpeg");
                 await saveGenerationInSupabase({
                   userId: user.id,
-                  imageUrl: publicUrl || `data:image/png;base64,${b64}`,
+                  imageUrl: publicUrl || `data:image/jpeg;base64,${b64}`,
                   prompt, negativePrompt: negative,
                   width: Number(width), height: Number(height), steps: Number(steps),
                   optimizedPrompt:         useOptimizer ? (optimizedPrompt || null) : null,
                   optimizedNegativePrompt: useOptimizer ? (optimizedNegative || null) : null,
                   usedOptimizer: !!useOptimizer,
                 });
-              } catch (e) { console.error("Error guardando en Supabase:", e); }
+                setStatusText("Render completado y guardado ✅");
+              } catch (e) {
+                console.error("Error guardando en Supabase:", e);
+                setStatusText("Render completado (error al guardar en biblioteca)");
+              }
             })();
           }
         } else {
@@ -320,12 +325,11 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
     if (isDemo) { alert("Para descargar, crea tu cuenta o inicia sesión."); onAuthRequired?.(); return; }
     if (!imageB64) return;
     const link = document.createElement("a");
-    link.href     = `data:image/png;base64,${imageB64}`;
-    link.download = "isabelaos-image.png";
+    link.href     = `data:image/jpeg;base64,${imageB64}`;
+    link.download = "isabelaos-image.jpg";
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // Si no está logueado y no es demo, mostrar aviso
   if (!userLoggedIn && !isDemo) {
     return (
       <div className="rounded-3xl border border-yellow-400/30 bg-yellow-500/5 p-6 text-center text-sm text-yellow-100">
@@ -346,19 +350,24 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
       <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
         <h2 className="text-lg font-semibold text-white">Motor de imagen · Producción visual</h2>
 
+        {/* FIX: Aviso legal de suplantación */}
+        <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/8 px-4 py-3 text-[11px] text-red-200">
+          <span className="font-semibold">⚠️ Aviso legal:</span> El uso de esta herramienta para suplantar la identidad de personas reales sin su consentimiento es una violación de la ley y está penado legalmente. Úsala solo con imágenes propias o con autorización explícita.
+        </div>
+
         {/* Bandas de estado */}
         {isDemo && (
-          <div className="mt-4 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
+          <div className="mt-3 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-[11px] text-cyan-100">
             Modo demo: te quedan {remaining} outputs sin registrarte. Descarga y biblioteca requieren cuenta.
           </div>
         )}
         {!isDemo && !hasPaidAccess && remaining <= 2 && remaining > 0 && (
-          <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
+          <div className="mt-3 rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-4 py-2 text-[11px] text-yellow-100">
             Atención: solo te quedan {remaining} renders hoy.
           </div>
         )}
         {!isDemo && hasPaidAccess && (
-          <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-[11px] text-emerald-100">
+          <div className="mt-3 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-[11px] text-emerald-100">
             Acceso activo · renders por Jades.
             <span className="ml-2 text-emerald-200/80">Jades: {profileJades}</span>
             <span className="ml-2 text-emerald-200/60">· Costo: {jadeCost} jade{jadeCost > 1 ? "s" : ""}</span>
@@ -369,33 +378,39 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
           {/* Selector de avatar */}
           {!isDemo && (
             <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
-              <div className="text-sm font-medium text-white">Anchors faciales</div>
+              <div className="text-sm font-medium text-white">Anchors faciales (opcional)</div>
               <div className="mt-1 text-[11px] text-neutral-400">
-                Elige un anchor guardado para enviar 1 a 3 fotos de referencia al worker.
+                Elige un anchor guardado para enviar fotos de referencia al motor.
                 {selectedAvatar && <span className="ml-2 text-cyan-300/80">Costo: 2 Jades</span>}
                 {!selectedAvatar && <span className="ml-2 text-neutral-500">Sin avatar: 1 Jade</span>}
               </div>
               <select
-                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-3 text-sm text-white outline-none ring-1 ring-cyan-400/60 focus:ring-2 focus:ring-cyan-400"
+                className="mt-3 w-full rounded-2xl bg-black/60 px-3 py-3 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
                 value={selectedAvatarId}
                 onChange={(e) => setSelectedAvatarId(e.target.value)}
                 disabled={avatarsLoading}>
-                <option value="">Sin avatar</option>
+                {/* FIX: opción vacía siempre primera */}
+                <option value="">— Sin avatar —</option>
                 {avatars.map((avatar) => (
                   <option key={avatar.id} value={avatar.id}>{avatar.name}</option>
                 ))}
               </select>
               <div className="mt-2 text-[11px] text-neutral-500">
                 {avatarsLoading ? "Cargando avatares..." :
-                  avatars.length > 0 ? `${avatars.length} avatar(es) READY encontrados` :
+                  avatars.length > 0 ? `${avatars.length} avatar(es) READY disponibles` :
                   "No hay anchors READY todavía"}
               </div>
             </div>
           )}
 
-          {/* Prompt */}
+          {/* FIX: Prompt con aviso de ejemplo */}
           <div>
-            <label className="text-neutral-300">Prompt</label>
+            <div className="flex items-center justify-between">
+              <label className="text-neutral-300">Prompt</label>
+              <span className="text-[10px] text-yellow-300/80">
+                💡 Ejemplo precargado — bórralo y escribe el tuyo, o prueba con este.
+              </span>
+            </div>
             <textarea className="mt-1 h-24 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={prompt} onChange={(e) => setPrompt(e.target.value)} />
           </div>
@@ -403,7 +418,7 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
           {/* Negative */}
           <div>
             <label className="text-neutral-300">Negative prompt</label>
-            <textarea className="mt-1 h-20 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
+            <textarea className="mt-1 h-16 w-full resize-none rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"
               value={negative} onChange={(e) => setNegative(e.target.value)} />
           </div>
 
@@ -428,16 +443,14 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
               <label htmlFor="useOptImage" className="text-[11px] text-neutral-300">Usar prompt optimizado para generar</label>
               <span className="ml-auto text-[10px] text-neutral-500">
                 {useOptimizer && optStatus === "READY" && optimizedPrompt && !isOptStale
-                  ? "Activo (mandará optimizado)" : "Mandará tu prompt"}
+                  ? "Activo" : "Inactivo"}
               </span>
             </div>
             {optimizedPrompt && (
               <div className="mt-2">
                 <div className="text-[10px] text-neutral-400">Prompt optimizado:</div>
-                <div className="mt-1 max-h-24 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">{optimizedPrompt}</div>
-                <div className="mt-2 text-[10px] text-neutral-400">Negative optimizado:</div>
-                <div className="mt-1 max-h-20 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">{optimizedNegative || "(vacío)"}</div>
-                {isOptStale && <div className="mt-2 text-[10px] text-yellow-200/90">Cambiaste el prompt: se re-optimizará al generar.</div>}
+                <div className="mt-1 max-h-20 overflow-auto rounded-xl bg-black/60 p-2 text-[10px] text-neutral-200">{optimizedPrompt}</div>
+                {isOptStale && <div className="mt-1 text-[10px] text-yellow-200/90">Cambiaste el prompt: se re-optimizará al generar.</div>}
               </div>
             )}
             {optError && <div className="mt-2 whitespace-pre-line text-[11px] text-red-400">{optError}</div>}
@@ -481,7 +494,7 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
               {isDemo
                 ? `Uso: ${demoCount} / ${DEMO_LIMIT}`
                 : hasPaidAccess
-                  ? `Uso: por Jades · Costo: ${jadeCost}J`
+                  ? `Jades: ${profileJades} · Costo: ${jadeCost}J`
                   : `Uso: ${dailyCount} / ${DAILY_LIMIT}`}
               <span className="ml-2 opacity-70">(plan: {profilePlan})</span>
               {useOptimizer && <span className="ml-2 opacity-70">(IA: ON)</span>}
@@ -492,7 +505,6 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
 
           {error && <p className="whitespace-pre-line text-xs text-red-400">{error}</p>}
 
-          {/* Botón generar */}
           <button onClick={handleGenerate} disabled={disabled}
             className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white disabled:opacity-60">
             {isDemo && demoCount >= DEMO_LIMIT ? "Límite alcanzado"
@@ -509,7 +521,7 @@ export default function CreatorPanel({ isDemo = false, onAuthRequired }) {
         <h2 className="text-lg font-semibold text-white">Resultado</h2>
         <div className="mt-4 flex h-[420px] flex-1 items-center justify-center rounded-2xl bg-black/70 text-sm text-neutral-400">
           {imageB64
-            ? <img src={`data:image/png;base64,${imageB64}`} alt="Imagen generada"
+            ? <img src={`data:image/jpeg;base64,${imageB64}`} alt="Imagen generada"
                 className="h-full w-full rounded-2xl object-contain" />
             : <p>Aquí verás el resultado en cuanto se complete el render.</p>}
         </div>
