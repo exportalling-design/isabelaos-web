@@ -2,9 +2,7 @@
 // ─────────────────────────────────────────────────────────────
 // Paso 3 del flujo 3DS:
 // Se llama DESPUÉS de que el usuario completó el challenge del banco.
-// El iframe de payment-return.js envía el TransactionId via postMessage,
-// este endpoint lo usa para llamar a /v1/validate-process-card/ de Pagadito
-// y acreditar los Jades si el pago es aprobado.
+// Usa los datos reales del usuario (ciudad, país) que llenó en el formulario.
 // ─────────────────────────────────────────────────────────────
 import { requireUser }  from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
@@ -44,7 +42,7 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
     const { pack, card, transactionId, id_transaction, setupRequestId, referenceId } = body;
 
-    if (!pack || !JADE_PACKS[pack])  return res.status(400).json({ ok: false, error: "INVALID_PACK" });
+    if (!pack || !JADE_PACKS[pack]) return res.status(400).json({ ok: false, error: "INVALID_PACK" });
     if (!transactionId && !id_transaction) return res.status(400).json({ ok: false, error: "MISSING_TRANSACTION_ID" });
 
     const packInfo = JADE_PACKS[pack];
@@ -74,12 +72,12 @@ export default async function handler(req, res) {
           firstName:      card.firstName,
           lastName:       card.lastName,
           billingAddress: {
-            city:      "San Salvador",
-            state:     "San Salvador",
-            zip:       "",
-            countryId: "222",
-            line1:     card.line1 || "7a Calle Pte. Bis, 511 y 531",
-            phone:     card.phone || "2264-7032",
+            city:      card.city      || "Ciudad",
+            state:     card.city      || "Estado",
+            zip:       card.zip       || "",
+            countryId: card.countryId || "320",
+            line1:     card.line1     || "",
+            phone:     card.phone     || "",
           },
           email: card.email,
         },
@@ -112,7 +110,7 @@ export default async function handler(req, res) {
       return res.status(r.status || 402).json({ ok: false, ...data });
     }
 
-    // ── Acreditar Jades ───────────────────────────────────────
+    // Acreditar Jades
     const sb           = getSupabaseAdmin();
     const reference_id = data?.customer_reply?.payment_token || data?.request_id || merchantTransactionId;
 
@@ -125,13 +123,7 @@ export default async function handler(req, res) {
 
     if (creditErr) {
       console.error("[validate-process-card] CREDIT_ERROR:", creditErr.message);
-      return res.status(500).json({
-        ok:    false,
-        error: "CREDIT_ERROR",
-        detail: creditErr.message,
-        note:  "El pago se procesó pero falló el crédito. Contacta soporte.",
-        reference_id,
-      });
+      return res.status(500).json({ ok: false, error: "CREDIT_ERROR", detail: creditErr.message, reference_id });
     }
 
     console.log("[validate-process-card] ✅ Pago 3DS exitoso:", packInfo.jades, "jades acreditados");
