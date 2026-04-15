@@ -2,26 +2,30 @@
 // ─────────────────────────────────────────────────────────────
 // Polling del status de un job de plantilla (Seedance via PiAPI).
 //
-// Cuando el job termina en PiAPI:
-//   1. Guarda la URL del video de PiAPI en video_jobs (NO descarga en Vercel)
-//   2. Si hay narración → genera audio con ElevenLabs
-//   3. Envía video_url + audio_b64 al worker RunPod FFmpeg para mezclar
-//   4. RunPod devuelve video final mezclado → sube a Supabase Storage
-//   5. Actualiza video_jobs con status COMPLETED + output_url final
+// Cuando PiAPI completa el video:
+//   1. Si hay narración → genera audio con ElevenLabs
+//   2. Mezcla video + audio con fal-ai/ffmpeg-api (narración en off)
+//      NO es lip sync — es narración sobre el video completo
+//   3. Sube video final a Supabase Storage (bucket "videos")
+//   4. Actualiza video_jobs con COMPLETED + output_url
 //
-// Si NO hay narración → sube el video directo de PiAPI a Storage.
+// Si NO hay narración → sube el video de PiAPI directo a Storage.
 // ─────────────────────────────────────────────────────────────
 import { requireUser }  from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
+import { fal }          from "@fal-ai/client";
 
 const PIAPI_TASK_URL  = "https://api.piapi.ai/api/v1/task";
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
-const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
 const VIDEO_BUCKET    = "videos";
+const BUCKET_PUBLIC   = String(process.env.SUPABASE_VIDEO_BUCKET_PUBLIC ?? "true").toLowerCase() === "true";
 
-const RUNPOD_ENDPOINT = process.env.RUNPOD_ASSEMBLER_ENDPOINT_ID;
-const RUNPOD_API_KEY  = process.env.RUNPOD_API_KEY || process.env.RP_API_KEY;
+const FAL_KEY            = process.env.FAL_KEY || null;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || null;
 
+if (FAL_KEY) fal.config({ credentials: FAL_KEY });
+
+// ── Voces ElevenLabs ──────────────────────────────────────────
 const VOICE_MAP = {
   neutro:       { mujer: "htFfPSZGJwjBv1CL0aMD", hombre: "htFfPSZGJwjBv1CL0aMD" },
   guatemalteco: { mujer: "MbMvLOFbicjtQwgx0j2r", hombre: "htFfPSZGJwjBv1CL0aMD" },
@@ -32,6 +36,12 @@ const VOICE_MAP = {
   ingles:       { mujer: "DXFkLCBUTmvXpp2QwZjA", hombre: "sB7vwSCyX0tQmU24cW2C" },
 };
 
+function getVoiceId(accent, gender) {
+  const a = (accent || "neutro").toLowerCase().trim();
+  const g = (gender || "mujer").toLowerCase().trim() === "hombre" ? "hombre" : "mujer";
+  return (VOICE_MAP[a] || VOICE_MAP["neutro"])[g] || VOICE_MAP["neutro"]["mujer"];
+}
+
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -39,113 +49,119 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-function getVoiceId(accent, gender) {
-  const a = (accent || "neutro").toLowerCase().trim();
-  const g = (gender || "mujer").toLowerCase().trim() === "hombre" ? "hombre" : "mujer";
-  return (VOICE_MAP[a] || VOICE_MAP["neutro"])[g] || VOICE_MAP["neutro"]["mujer"];
+// ── Descargar URL a Buffer ────────────────────────────────────
+async function fetchUrlToBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
 }
 
-// ── ElevenLabs ────────────────────────────────────────────────
-async function generateAudio(text, accent, gender) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey || !text?.trim()) return null;
+// ── Subir video a Supabase Storage ────────────────────────────
+async function uploadToStorage(sb, userId, jobId, buf, suffix = "") {
+  const filePath = `${userId}/${jobId}${suffix}.mp4`;
+  const { error } = await sb.storage
+    .from(VIDEO_BUCKET)
+    .upload(filePath, buf, { contentType: "video/mp4", upsert: true });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+
+  if (BUCKET_PUBLIC) {
+    const { data } = sb.storage.from(VIDEO_BUCKET).getPublicUrl(filePath);
+    return data?.publicUrl || null;
+  } else {
+    const { data, error: signErr } = await sb.storage
+      .from(VIDEO_BUCKET)
+      .createSignedUrl(filePath, 60 * 60 * 24 * 7);
+    if (signErr) throw new Error(`Signed URL failed: ${signErr.message}`);
+    return data?.signedUrl || null;
+  }
+}
+
+// ── ElevenLabs: generar narración ─────────────────────────────
+async function generateElevenLabsAudio(text, accent, gender) {
+  if (!ELEVENLABS_API_KEY) { console.error("[plantillas-status] No ELEVENLABS_API_KEY"); return null; }
+  if (!text?.trim())        { return null; }
+
   const voiceId = getVoiceId(accent, gender);
+  console.error(`[plantillas-status] ElevenLabs voice=${voiceId} accent=${accent} gender=${gender}`);
+
   try {
     const r = await fetch(`${ELEVENLABS_BASE}/text-to-speech/${voiceId}`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
+      method: "POST",
+      headers: { "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY },
       body: JSON.stringify({
         text,
         model_id: "eleven_multilingual_v2",
         voice_settings: { stability: 0.55, similarity_boost: 0.80, style: 0.35, use_speaker_boost: true },
       }),
     });
-    if (!r.ok) { console.error("[plantillas-status] ElevenLabs error:", r.status); return null; }
-    const buf = await r.arrayBuffer();
-    console.log("[plantillas-status] ✅ audio ElevenLabs generado");
-    return Buffer.from(buf).toString("base64");
-  } catch (e) { console.error("[plantillas-status] ElevenLabs:", e?.message); return null; }
+    if (!r.ok) { console.error(`[plantillas-status] ElevenLabs error ${r.status}`); return null; }
+    const buf = Buffer.from(await r.arrayBuffer());
+    console.error("[plantillas-status] ✅ audio ElevenLabs generado");
+    return buf;
+  } catch (e) { console.error("[plantillas-status] ElevenLabs exception:", e?.message); return null; }
 }
 
-// ── RunPod FFmpeg: mezclar video URL + audio base64 ───────────
-async function mixVideoWithAudio(videoUrl, audioBase64) {
-  if (!RUNPOD_ENDPOINT || !RUNPOD_API_KEY) {
-    console.error("[plantillas-status] RunPod no configurado");
-    return null;
-  }
+// ── fal: subir audio y mezclar con video (narración en off) ───
+// Usa fal-ai/ffmpeg-api para mezclar el audio sobre el video
+// sin lip sync — es simplemente narración en off encima del video
+async function mixNarrationWithVideo(videoUrl, audioBuf) {
+  if (!FAL_KEY) { console.error("[plantillas-status] No FAL_KEY para mezcla"); return null; }
+
   try {
-    const submitRes = await fetch(`${RUNPOD_API_BASE}/${RUNPOD_ENDPOINT}/run`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${RUNPOD_API_KEY}` },
-      body: JSON.stringify({
-        input: {
-          action:    "mix_audio",
-          video_url: videoUrl,
-          audio_b64: audioBase64,
-        },
-      }),
+    fal.config({ credentials: FAL_KEY });
+
+    // Subir audio a fal storage
+    const audioBlob = new Blob([audioBuf], { type: "audio/mpeg" });
+    const audioFile = new File([audioBlob], "narration.mp3", { type: "audio/mpeg" });
+    const audioUpload = await fal.storage.upload(audioFile);
+    const audioUrl    = audioUpload?.url || audioUpload;
+
+    console.error("[plantillas-status] audio subido a fal:", audioUrl);
+    console.error("[plantillas-status] mezclando con video:", videoUrl);
+
+    // ffmpeg-api: mezcla video + audio, audio como narración en off
+    // El video original no tiene audio (Seedance genera mudo)
+    // así que simplemente pegamos el audio encima
+    const result = await fal.subscribe("fal-ai/ffmpeg-api", {
+      input: {
+        // Comandos FFmpeg para mezclar video mudo + audio narración
+        // -shortest: corta al más corto de los dos
+        // -map 0:v: toma el video del input 0
+        // -map 1:a: toma el audio del input 1
+        commands: [
+          {
+            command: "ffmpeg",
+            args: [
+              "-i", videoUrl,
+              "-i", audioUrl,
+              "-map", "0:v",
+              "-map", "1:a",
+              "-c:v", "copy",
+              "-c:a", "aac",
+              "-shortest",
+              "-y",
+              "output.mp4",
+            ],
+          },
+        ],
+      },
+      pollInterval: 3000,
     });
-    if (!submitRes.ok) throw new Error(`RunPod submit: ${submitRes.status}`);
-    const { id: rpJobId } = await submitRes.json();
-    if (!rpJobId) throw new Error("RunPod sin job ID");
-    console.log(`[plantillas-status] RunPod mix job: ${rpJobId}`);
 
-    // Polling RunPod máx 5 min
-    const deadline = Date.now() + 5 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 5000));
-      const sr = await fetch(`${RUNPOD_API_BASE}/${RUNPOD_ENDPOINT}/status/${rpJobId}`, {
-        headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
-      });
-      if (!sr.ok) continue;
-      const sd = await sr.json();
-      if (sd.status === "COMPLETED") {
-        if (sd.output?.video_b64) return { base64: sd.output.video_b64 };
-        if (sd.output?.video_url) return { url: sd.output.video_url };
-        throw new Error("RunPod COMPLETED sin video");
-      }
-      if (sd.status === "FAILED")    throw new Error(`RunPod FAILED: ${sd.error}`);
-      if (sd.status === "CANCELLED") throw new Error("RunPod cancelado");
-    }
-    throw new Error("RunPod timeout");
-  } catch (e) { console.error("[plantillas-status] mixVideoWithAudio:", e?.message); return null; }
-}
+    const finalUrl =
+      result?.output_url ||
+      result?.data?.output_url ||
+      result?.outputs?.[0]?.url ||
+      result?.data?.outputs?.[0]?.url ||
+      null;
 
-// ── Subir video a Supabase Storage ────────────────────────────
-async function saveToStorage(userId, plantillaId, source) {
-  // source: { base64 } | { url } | string (url directa)
-  const sb = getSupabaseAdmin();
-  try {
-    let buf;
-    if (typeof source === "string") {
-      const res = await fetch(source);
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-      buf = Buffer.from(await res.arrayBuffer());
-    } else if (source?.base64) {
-      buf = Buffer.from(source.base64, "base64");
-    } else if (source?.url) {
-      const res = await fetch(source.url);
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-      buf = Buffer.from(await res.arrayBuffer());
-    } else {
-      throw new Error("Sin fuente de video válida");
-    }
+    if (!finalUrl) throw new Error("fal ffmpeg-api no devolvió output_url");
 
-    const filename = `plantilla-${plantillaId}-${Date.now()}.mp4`;
-    const path     = `${userId}/${filename}`;
-
-    const { error } = await sb.storage
-      .from(VIDEO_BUCKET)
-      .upload(path, buf, { contentType: "video/mp4", upsert: false });
-
-    if (error) throw new Error(error.message);
-
-    const { data } = sb.storage.from(VIDEO_BUCKET).getPublicUrl(path);
-    console.log(`[plantillas-status] ✅ guardado en biblioteca: ${path}`);
-    return data?.publicUrl || null;
+    console.error("[plantillas-status] ✅ mezcla completada:", finalUrl);
+    return finalUrl;
   } catch (e) {
-    console.error("[plantillas-status] saveToStorage:", e?.message);
-    return null;
+    console.error("[plantillas-status] mixNarrationWithVideo falló:", e?.message);
+    return null; // fallback: video sin audio
   }
 }
 
@@ -164,6 +180,7 @@ export default async function handler(req, res) {
 
     const sb = getSupabaseAdmin();
 
+    // Buscar job
     const { data: job, error: fetchErr } = await sb
       .from("video_jobs")
       .select("*")
@@ -208,8 +225,8 @@ export default async function handler(req, res) {
     }
 
     const piStatus = (piData?.data?.status || piData?.status || "").toLowerCase();
-    console.log(`[plantillas-status] jobId=${jobId} piStatus=${piStatus}`);
-    console.log(`[plantillas-status] output keys:`, Object.keys(piData?.data?.output || {}).join(", "));
+    console.error(`[plantillas-status] jobId=${jobId} piStatus=${piStatus}`);
+    console.error(`[plantillas-status] output:`, JSON.stringify(piData?.data?.output || {}).slice(0, 400));
 
     // En progreso
     if (["pending", "processing", "running", "queued", "in_progress", "submitted"].includes(piStatus)) {
@@ -228,7 +245,7 @@ export default async function handler(req, res) {
     // Completado
     if (["completed", "success", "finished"].includes(piStatus)) {
 
-      // Extraer URL del video
+      // Extraer URL del video de PiAPI
       const piVideoUrl =
         piData?.data?.output?.video_url    ||
         piData?.data?.output?.url          ||
@@ -242,51 +259,96 @@ export default async function handler(req, res) {
         await sb.from("video_jobs")
           .update({ status: "FAILED", provider_error: "Video completado sin URL" })
           .eq("id", jobId);
-        return res.status(200).json({ ok: false, status: "FAILED", error: "Video generado pero URL no encontrada. Contacta soporte." });
+        return res.status(200).json({
+          ok: false, status: "FAILED",
+          error: "Video generado pero URL no encontrada. Contacta soporte.",
+        });
       }
 
       const payload        = job.payload || {};
       const narracionTexto = payload.narration_text || payload.textos?.narracion || "";
-      const accent         = payload.accent  || "neutro";
-      const gender         = payload.gender  || "mujer";
+      const accent         = payload.accent   || "neutro";
+      const gender         = payload.gender   || "mujer";
       const plantillaId    = payload.plantilla_id || "plantilla";
 
-      let finalUrl;
+      let finalVideoUrl = piVideoUrl; // fallback siempre es el video de PiAPI
 
+      // ── CON NARRACIÓN ──────────────────────────────────────
       if (narracionTexto?.trim()) {
-        // Con narración: ElevenLabs + RunPod mix
-        console.log(`[plantillas-status] procesando narración + mezcla de audio`);
-        const audioB64  = await generateAudio(narracionTexto, accent, gender);
-        const mixResult = audioB64 ? await mixVideoWithAudio(piVideoUrl, audioB64) : null;
+        console.error(`[plantillas-status] procesando narración: "${narracionTexto.slice(0, 60)}..."`);
 
-        // Si RunPod mix funcionó → guardar mezclado, si no → guardar video solo
-        finalUrl = await saveToStorage(user.id, plantillaId, mixResult || piVideoUrl);
-      } else {
-        // Sin narración: guardar video directo
-        finalUrl = await saveToStorage(user.id, plantillaId, piVideoUrl);
+        // 1. Generar audio ElevenLabs
+        await sb.from("video_jobs")
+          .update({ provider_status: "elevenlabs_processing" })
+          .eq("id", jobId);
+
+        const audioBuf = await generateElevenLabsAudio(narracionTexto, accent, gender);
+
+        if (audioBuf) {
+          // 2. Mezclar narración con video via fal ffmpeg-api
+          await sb.from("video_jobs")
+            .update({ provider_status: "mixing_audio" })
+            .eq("id", jobId);
+
+          const mixedUrl = await mixNarrationWithVideo(piVideoUrl, audioBuf);
+
+          if (mixedUrl) {
+            // 3. Descargar video mezclado y subir a Storage
+            try {
+              const buf     = await fetchUrlToBuffer(mixedUrl);
+              const savedUrl = await uploadToStorage(sb, user.id, jobId, buf, "_narrado");
+              if (savedUrl) finalVideoUrl = savedUrl;
+            } catch (e) {
+              console.error("[plantillas-status] upload mezclado falló:", e?.message);
+              // fallback: intentar subir el video de PiAPI sin audio
+            }
+          } else {
+            console.error("[plantillas-status] mezcla falló — entregando video sin audio");
+          }
+        } else {
+          console.error("[plantillas-status] ElevenLabs falló — entregando video sin audio");
+        }
       }
 
-      // Si saveToStorage falló → usar URL directa de PiAPI como fallback
-      if (!finalUrl) {
-        console.warn("[plantillas-status] Storage falló — usando URL directa de PiAPI como fallback");
-        finalUrl = piVideoUrl;
+      // ── SIN NARRACIÓN o como fallback ──────────────────────
+      // Si finalVideoUrl sigue siendo piVideoUrl (mezcla falló o no hay narración)
+      // subimos el video original de PiAPI a Storage
+      if (finalVideoUrl === piVideoUrl) {
+        try {
+          await sb.from("video_jobs")
+            .update({ provider_status: "uploading" })
+            .eq("id", jobId);
+
+          const buf      = await fetchUrlToBuffer(piVideoUrl);
+          const savedUrl = await uploadToStorage(sb, user.id, jobId, buf);
+          if (savedUrl) finalVideoUrl = savedUrl;
+        } catch (e) {
+          console.error("[plantillas-status] upload video original falló:", e?.message);
+          // Dejar finalVideoUrl como URL directa de PiAPI
+        }
       }
 
-      // Actualizar job como completado
+      // Marcar como completado
       await sb.from("video_jobs").update({
         status:          "COMPLETED",
         provider_status: "completed",
-        output_url:      finalUrl,
+        output_url:      finalVideoUrl,
         completed_at:    new Date().toISOString(),
-        payload: { ...payload, video_url: finalUrl, piapi_video_url: piVideoUrl },
+        payload: {
+          ...payload,
+          video_url:       finalVideoUrl,
+          piapi_video_url: piVideoUrl,
+        },
       }).eq("id", jobId);
 
-      return res.status(200).json({ ok: true, status: "COMPLETED", videoUrl: finalUrl });
+      return res.status(200).json({
+        ok: true, status: "COMPLETED", videoUrl: finalVideoUrl,
+      });
     }
 
-    // Estado desconocido
+    // Estado desconocido — log y seguir esperando
     console.warn(`[plantillas-status] piStatus desconocido: "${piStatus}"`);
-    console.warn(`[plantillas-status] piData completo:`, JSON.stringify(piData).slice(0, 600));
+    console.warn(`[plantillas-status] piData:`, JSON.stringify(piData).slice(0, 600));
     return res.status(200).json({ ok: true, status: "IN_PROGRESS" });
 
   } catch (e) {
@@ -297,5 +359,5 @@ export default async function handler(req, res) {
 
 export const config = {
   runtime:     "nodejs",
-  maxDuration: 300, // 5 min — necesario para RunPod polling
+  maxDuration: 300,
 };
