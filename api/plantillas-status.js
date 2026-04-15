@@ -102,8 +102,6 @@ async function generateElevenLabsAudio(text, accent, gender) {
 }
 
 // ── fal: subir audio y mezclar con video (narración en off) ───
-// Usa fal-ai/ffmpeg-api para mezclar el audio sobre el video
-// sin lip sync — es simplemente narración en off encima del video
 async function mixNarrationWithVideo(videoUrl, audioBuf) {
   if (!FAL_KEY) { console.error("[plantillas-status] No FAL_KEY para mezcla"); return null; }
 
@@ -119,49 +117,31 @@ async function mixNarrationWithVideo(videoUrl, audioBuf) {
     console.error("[plantillas-status] audio subido a fal:", audioUrl);
     console.error("[plantillas-status] mezclando con video:", videoUrl);
 
-    // ffmpeg-api: mezcla video + audio, audio como narración en off
-    // El video original no tiene audio (Seedance genera mudo)
-    // así que simplemente pegamos el audio encima
-    const result = await fal.subscribe("fal-ai/ffmpeg-api", {
+    // fal-ai/ffmpeg-api/merge-audio-video
+    // video_url: video mudo de Seedance
+    // audio_url: narración de ElevenLabs
+    const result = await fal.subscribe("fal-ai/ffmpeg-api/merge-audio-video", {
       input: {
-        // Comandos FFmpeg para mezclar video mudo + audio narración
-        // -shortest: corta al más corto de los dos
-        // -map 0:v: toma el video del input 0
-        // -map 1:a: toma el audio del input 1
-        commands: [
-          {
-            command: "ffmpeg",
-            args: [
-              "-i", videoUrl,
-              "-i", audioUrl,
-              "-map", "0:v",
-              "-map", "1:a",
-              "-c:v", "copy",
-              "-c:a", "aac",
-              "-shortest",
-              "-y",
-              "output.mp4",
-            ],
-          },
-        ],
+        video_url: videoUrl,
+        audio_url: audioUrl,
       },
       pollInterval: 3000,
     });
 
     const finalUrl =
-      result?.output_url ||
-      result?.data?.output_url ||
-      result?.outputs?.[0]?.url ||
-      result?.data?.outputs?.[0]?.url ||
+      result?.data?.video?.url  ||
+      result?.video?.url        ||
+      result?.data?.video_url   ||
+      result?.video_url         ||
       null;
 
-    if (!finalUrl) throw new Error("fal ffmpeg-api no devolvió output_url");
+    if (!finalUrl) throw new Error("fal merge-audio-video no devolvió URL");
 
     console.error("[plantillas-status] ✅ mezcla completada:", finalUrl);
     return finalUrl;
   } catch (e) {
     console.error("[plantillas-status] mixNarrationWithVideo falló:", e?.message);
-    return null; // fallback: video sin audio
+    return null;
   }
 }
 
