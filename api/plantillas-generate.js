@@ -24,11 +24,11 @@ const VIDEO_BUCKET    = "videos";
 
 // ── Duración y costo por plantilla (igual que CineAI) ─────────
 const PLANTILLA_CONFIG = {
-  transicion_moda:  { duracion: 15, costo: 110 },
-  producto_estelar: { duracion: 10, costo: 75  },
-  desfile_magico:   { duracion: 15, costo: 110 },
-  explosion_sabor:  { duracion: 10, costo: 75  },
-  chef_ia:          { duracion: 15, costo: 110 },
+  transicion_moda:  { duracion: 15, costo: 70  },
+  producto_estelar: { duracion: 10, costo: 35  },
+  desfile_magico:   { duracion: 15, costo: 70  },
+  explosion_sabor:  { duracion: 10, costo: 35  },
+  chef_ia:          { duracion: 15, costo: 70  },
 };
 
 // ── Voces ElevenLabs (mismo VOICE_MAP que comercial-generate) ─
