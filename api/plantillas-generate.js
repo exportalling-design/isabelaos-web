@@ -376,42 +376,58 @@ export default async function handler(req, res) {
 
     const narracionTexto = textos?.narracion?.trim() || "";
 
-    await sb.from("video_jobs").insert({
-      id:                  jobId,
-      user_id:             user.id,
-      status:              "IN_PROGRESS",
-      mode:                "plantilla",
-      prompt:              piPayload.input.prompt,
-      provider:            "piapi_seedance",
-      provider_request_id: taskId,
-      provider_status:     "pending",
-      started_at:          new Date().toISOString(),
-      payload: {
-        plantilla_id,
-        task_id:        taskId,
-        ref,
-        jade_cost:      PLANTILLA_COST,
-        narration_text: narracionTexto,
-        accent:         accent || "neutro",
-        gender:         gender || "mujer",
-        // Guardamos los textos y selectores para referencia
-        textos:    textos    || {},
-        selectores: selectores || {},
-      },
-    }).catch(e => console.error("[plantillas] video_jobs insert:", e?.message));
+    try {
+      await sb.from("video_jobs").insert({
+        id:                  jobId,
+        user_id:             user.id,
+        status:              "IN_PROGRESS",
+        mode:                "plantilla",
+        prompt:              piPayload.input.prompt,
+        provider:            "piapi_seedance",
+        provider_request_id: taskId,
+        provider_status:     "pending",
+        started_at:          new Date().toISOString(),
+        payload: {
+          plantilla_id,
+          task_id:        taskId,
+          ref,
+          jade_cost:      PLANTILLA_COST,
+          narration_text: narracionTexto,
+          accent:         accent || "neutro",
+          gender:         gender || "mujer",
+          textos:         textos     || {},
+          selectores:     selectores || {},
+        },
+      });
+    } catch (e) {
+      console.error("[plantillas] video_jobs insert:", e?.message);
+    }
 
     console.log(`[plantillas] ✅ job creado jobId=${jobId} taskId=${taskId}`);
 
-    // Generar narración en paralelo (no bloquea la respuesta)
-    // Se guarda en job payload cuando esté lista
+    // Narración en paralelo — no bloquea la respuesta
     if (narracionTexto) {
       generateNarration(narracionTexto, accent, gender)
         .then(async audio => {
           if (!audio) return;
-          await sb.from("video_jobs")
-            .update({ payload: sb.from("video_jobs").select() }) // placeholder — se actualiza en polling
-            .eq("id", jobId)
-            .catch(() => {});
+          // La narración queda guardada en el payload del job para uso futuro
+          try {
+            await sb.from("video_jobs").update({
+              payload: {
+                plantilla_id,
+                task_id:        taskId,
+                ref,
+                jade_cost:      PLANTILLA_COST,
+                narration_text: narracionTexto,
+                narration_b64:  audio.base64,
+                narration_mime: audio.mimeType,
+                accent:         accent || "neutro",
+                gender:         gender || "mujer",
+                textos:         textos     || {},
+                selectores:     selectores || {},
+              },
+            }).eq("id", jobId);
+          } catch {}
         })
         .catch(() => {});
     }
