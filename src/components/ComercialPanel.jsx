@@ -13,7 +13,8 @@
 import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const PLANTILLA_COST = 30;
+// ── Precios por duración (igual que CineAI) ───────────────────
+const JADE_COSTS = { 10: 75, 15: 110 };
 
 // ── Definición de plantillas ──────────────────────────────────
 const PLANTILLAS = [
@@ -21,11 +22,13 @@ const PLANTILLAS = [
     id: "transicion_moda",
     nombre: "Transición de Moda",
     emoji: "👗",
+    duracion: 15,
     descripcion: "Sube fotos de tu modelo y prendas. El modelo permanece igual y solo cambia la ropa en transición suave.",
     colores: "from-pink-500/20 via-rose-500/10 to-purple-500/20",
     borde: "border-pink-500/30",
     acento: "text-pink-300",
     boton: "bg-pink-500/20 hover:bg-pink-500/30 border-pink-400/40",
+    videoEjemplo: null, // Agregar URL cuando tengas el video de ejemplo
     campos: {
       modelo: { label: "📸 Foto del modelo (1 foto)", tipo: "imagen_unica", requerido: true, hint: "Foto completa del modelo de frente" },
       prendas: { label: "👚 Fotos de prendas (2-4 prendas)", tipo: "imagen_multiple", max: 4, requerido: true, hint: "Cada prenda en fondo blanco o claro" },
@@ -37,11 +40,13 @@ const PLANTILLAS = [
     id: "producto_estelar",
     nombre: "Producto Estelar",
     emoji: "✨",
+    duracion: 10,
     descripcion: "Sube la foto de tu producto. Una mano lo lanza al aire y se transforma con efectos espectaculares.",
     colores: "from-cyan-500/20 via-blue-500/10 to-indigo-500/20",
     borde: "border-cyan-500/30",
     acento: "text-cyan-300",
     boton: "bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-400/40",
+    videoEjemplo: null,
     campos: {
       producto: { label: "📦 Foto de tu producto", tipo: "imagen_unica", requerido: true, hint: "Cualquier producto: perfume, crema, ropa, accesorio..." },
       efecto: { label: "✨ Efecto de transformación", tipo: "selector", opciones: [
@@ -58,18 +63,20 @@ const PLANTILLAS = [
     id: "desfile_magico",
     nombre: "Desfile Mágico",
     emoji: "🪄",
+    duracion: 15,
     descripcion: "Sube prendas sueltas. La IA las une con un efecto mágico y hace aparecer el outfit completo en una modelo.",
     colores: "from-violet-500/20 via-purple-500/10 to-fuchsia-500/20",
     borde: "border-violet-500/30",
     acento: "text-violet-300",
     boton: "bg-violet-500/20 hover:bg-violet-500/30 border-violet-400/40",
+    videoEjemplo: null,
     campos: {
       prendas: { label: "👔 Fotos de prendas del outfit (2-5)", tipo: "imagen_multiple", max: 5, requerido: true, hint: "Blusa, pantalón, zapatos, accesorios — lo que tengas" },
       efecto: { label: "🎨 Estilo de efecto mágico", tipo: "selector", opciones: [
-        { value: "aurora",   label: "🌌 Aurora — partículas de luz + humo" },
-        { value: "bloom",    label: "🌺 Bloom — flores + líquido" },
-        { value: "galaxia",  label: "🌠 Galaxia — destellos + morphing" },
-        { value: "natura",   label: "🦋 Natura — mariposas + niebla" },
+        { value: "aurora",     label: "🌌 Aurora — partículas de luz + humo" },
+        { value: "bloom",      label: "🌺 Bloom — flores + líquido" },
+        { value: "galaxia",    label: "🌠 Galaxia — destellos + morphing" },
+        { value: "natura",     label: "🦋 Natura — mariposas + niebla" },
         { value: "fuego_frio", label: "❄️🔥 Fuego Frío — humo + cristales dorados" },
       ], requerido: true },
       fondo: { label: "🏖️ Fondo / escena (opcional)", tipo: "imagen_unica", requerido: false, hint: "Playa, resort, ciudad — o déjalo en blanco" },
@@ -80,11 +87,13 @@ const PLANTILLAS = [
     id: "explosion_sabor",
     nombre: "Explosión de Sabor",
     emoji: "💥",
+    duracion: 10,
     descripcion: "Sube la foto de tu platillo. La IA lo desintegra en capas mostrando cada ingrediente flotando con efectos épicos.",
     colores: "from-orange-500/20 via-amber-500/10 to-red-500/20",
     borde: "border-orange-500/30",
     acento: "text-orange-300",
     boton: "bg-orange-500/20 hover:bg-orange-500/30 border-orange-400/40",
+    videoEjemplo: null,
     campos: {
       plato: { label: "🍔 Foto de tu platillo", tipo: "imagen_unica", requerido: true, hint: "Burger, taco, pizza, comida china, lo que sea" },
       nombre_negocio: { label: "🏪 Nombre de tu negocio", tipo: "texto_corto", requerido: true, hint: "Ej: Burger Bros, Tacos El Rey, Sushi Palace" },
@@ -96,11 +105,13 @@ const PLANTILLAS = [
     id: "chef_ia",
     nombre: "Chef IA",
     emoji: "👨‍🍳",
+    duracion: 15,
     descripcion: "Sube tu foto o elige un avatar chef. La IA genera un video cinematográfico mostrando cómo preparas tu plato.",
     colores: "from-slate-500/20 via-zinc-500/10 to-neutral-500/20",
     borde: "border-slate-500/30",
     acento: "text-slate-300",
     boton: "bg-slate-500/20 hover:bg-slate-500/30 border-slate-400/40",
+    videoEjemplo: null,
     campos: {
       plato: { label: "🍽️ Foto de tu platillo terminado", tipo: "imagen_unica", requerido: true, hint: "La foto del plato que vas a preparar en el video" },
       chef: { label: "👤 Tu foto (rostro) o avatar IA", tipo: "imagen_unica_o_avatar", requerido: false, hint: "Sube tu foto para que aparezcas tú, o elige un chef IA" },
@@ -336,8 +347,7 @@ export default function ComercialPanel({ userStatus }) {
     setImagenes(prev => ({ ...prev, [campo]: nuevos }));
     setPreviews(prev => ({ ...prev, [campo]: nuevos.map(f => URL.createObjectURL(f)) }));
   }
-
-  // ── Validar campos requeridos ─────────────────────────────
+// ── Validar campos requeridos ─────────────────────────────
   function validar() {
     if (!plantillaActiva) return "Selecciona una plantilla.";
     for (const [key, campo] of Object.entries(plantillaActiva.campos)) {
@@ -356,8 +366,8 @@ export default function ComercialPanel({ userStatus }) {
   async function handleGenerar() {
     const err = validar();
     if (err) { setError(err); return; }
-    if (currentJades < PLANTILLA_COST) {
-      setError(`Necesitas ${PLANTILLA_COST} Jades. Tienes ${currentJades}.`);
+    if (currentJades < (JADE_COSTS[plantillaActiva?.duracion] || 75)) {
+      setError(`Necesitas ${JADE_COSTS[plantillaActiva?.duracion] || 75} Jades para esta plantilla. Tienes ${currentJades}.`);
       return;
     }
 
@@ -469,41 +479,76 @@ export default function ComercialPanel({ userStatus }) {
         </div>
         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-2 text-right">
           <div className="text-xs text-neutral-400">Por plantilla</div>
-          <div className="text-lg font-bold text-cyan-300">{PLANTILLA_COST} Jades</div>
-          <div className="text-[10px] text-neutral-500">Tus Jades: {currentJades}</div>
+          <div className="text-lg font-bold text-cyan-300">75–110 Jades</div>
+          <div className="text-[10px] text-neutral-500">Según duración del video</div>
         </div>
       </div>
 
       {/* ══ GRID DE PLANTILLAS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {PLANTILLAS.map(pl => (
-          <button
-            key={pl.id}
-            onClick={() => seleccionarPlantilla(pl)}
-            className={`relative overflow-hidden rounded-2xl border p-4 text-left transition-all group ${
-              plantillaActiva?.id === pl.id
-                ? `${pl.borde} bg-gradient-to-br ${pl.colores} ring-1 ring-white/20`
-                : "border-white/10 bg-black/30 hover:border-white/20 hover:bg-black/50"
-            }`}
-          >
-            {/* Preview animado al hover */}
-            <div className={`absolute inset-0 bg-gradient-to-br ${pl.colores} opacity-0 group-hover:opacity-100 transition-opacity`} />
-
-            <div className="relative">
-              <div className="text-3xl mb-2">{pl.emoji}</div>
-              <div className={`text-sm font-semibold mb-1 ${plantillaActiva?.id === pl.id ? pl.acento : "text-white"}`}>
-                {pl.nombre}
-              </div>
-              <div className="text-[10px] text-neutral-400 leading-relaxed">{pl.descripcion}</div>
-            </div>
-
-            {plantillaActiva?.id === pl.id && (
-              <div className={`absolute top-3 right-3 text-[9px] font-bold ${pl.acento} bg-black/40 rounded-full px-2 py-0.5`}>
-                ✓ Seleccionada
-              </div>
-            )}
-          </button>
-        ))}
+        {PLANTILLAS.map(pl => {
+          const jadeCosto = JADE_COSTS[pl.duracion] || 75;
+          return (
+            <button
+              key={pl.id}
+              onClick={() => seleccionarPlantilla(pl)}
+              className={`relative overflow-hidden rounded-2xl border text-left transition-all group ${
+                plantillaActiva?.id === pl.id
+                  ? `${pl.borde} ring-1 ring-white/20`
+                  : "border-white/10 bg-black/30 hover:border-white/20 hover:bg-black/50"
+              }`}
+            >
+              {/* Video de ejemplo O fondo gradiente */}
+              {pl.videoEjemplo ? (
+                <div className="relative aspect-[9/16] w-full overflow-hidden">
+                  <video
+                    src={pl.videoEjemplo}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Overlay oscuro para legibilidad */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                  {/* Info encima del video */}
+                  <div className="absolute bottom-0 left-0 right-0 p-3">
+                    <div className={`text-sm font-bold mb-0.5 ${plantillaActiva?.id === pl.id ? pl.acento : "text-white"}`}>
+                      {pl.emoji} {pl.nombre}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-neutral-300">{pl.duracion}s</span>
+                      <span className={`text-[10px] font-bold ${pl.acento}`}>{jadeCosto} Jades</span>
+                    </div>
+                  </div>
+                  {plantillaActiva?.id === pl.id && (
+                    <div className={`absolute top-2 right-2 text-[9px] font-bold ${pl.acento} bg-black/60 rounded-full px-2 py-0.5`}>
+                      ✓ Seleccionada
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Sin video — card con gradiente */
+                <div className={`relative p-4 bg-gradient-to-br ${pl.colores}`}>
+                  <div className="text-3xl mb-2">{pl.emoji}</div>
+                  <div className={`text-sm font-semibold mb-1 ${plantillaActiva?.id === pl.id ? pl.acento : "text-white"}`}>
+                    {pl.nombre}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 leading-relaxed mb-3">{pl.descripcion}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-neutral-500">{pl.duracion}s</span>
+                    <span className={`text-[11px] font-bold ${pl.acento}`}>{jadeCosto} Jades</span>
+                  </div>
+                  {plantillaActiva?.id === pl.id && (
+                    <div className={`absolute top-3 right-3 text-[9px] font-bold ${pl.acento} bg-black/40 rounded-full px-2 py-0.5`}>
+                      ✓ Seleccionada
+                    </div>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ══ FORMULARIO DE PLANTILLA SELECCIONADA ══ */}
@@ -646,9 +691,9 @@ export default function ComercialPanel({ userStatus }) {
           {/* Botón generar */}
           <button
             onClick={handleGenerar}
-            disabled={loading || currentJades < PLANTILLA_COST}
+            disabled={loading || currentJades < (JADE_COSTS[p.duracion] || 75)}
             className={`w-full rounded-2xl border py-3.5 text-sm font-semibold transition-all ${p.boton} ${
-              loading || currentJades < PLANTILLA_COST
+              loading || currentJades < (JADE_COSTS[p.duracion] || 75)
                 ? "opacity-40 cursor-not-allowed"
                 : "text-white cursor-pointer"
             }`}
@@ -659,7 +704,7 @@ export default function ComercialPanel({ userStatus }) {
                 {statusText || "Generando..."}
               </span>
             ) : (
-              `${p.emoji} Generar — ${PLANTILLA_COST} Jades`
+              `${p.emoji} Generar ${p.duracion}s — ${JADE_COSTS[p.duracion] || 75} Jades`
             )}
           </button>
         </div>
