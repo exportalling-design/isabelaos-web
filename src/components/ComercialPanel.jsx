@@ -683,3 +683,5 @@ export default function ComercialPanel({ userStatus }) {
       )}
 
     </div>
+  );
+}
