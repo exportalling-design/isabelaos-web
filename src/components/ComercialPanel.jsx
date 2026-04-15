@@ -14,7 +14,7 @@ import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 // ── Precios por duración (igual que CineAI) ───────────────────
-const JADE_COSTS = { 10: 75, 15: 110 };
+const JADE_COSTS = { 10: 35, 15: 70 };
 
 // ── Definición de plantillas ──────────────────────────────────
 const PLANTILLAS = [
@@ -347,7 +347,8 @@ export default function ComercialPanel({ userStatus }) {
     setImagenes(prev => ({ ...prev, [campo]: nuevos }));
     setPreviews(prev => ({ ...prev, [campo]: nuevos.map(f => URL.createObjectURL(f)) }));
   }
-// ── Validar campos requeridos ─────────────────────────────
+
+  // ── Validar campos requeridos ─────────────────────────────
   function validar() {
     if (!plantillaActiva) return "Selecciona una plantilla.";
     for (const [key, campo] of Object.entries(plantillaActiva.campos)) {
@@ -439,12 +440,17 @@ export default function ComercialPanel({ userStatus }) {
 
   // ── Polling de job Seedance vía PiAPI ─────────────────────
   async function pollJob(jobId, taskId) {
-    const TIMEOUT = 5 * 60 * 1000;
-    const start   = Date.now();
-    const auth    = await getAuthHeaders();
+    const TIMEOUT  = 10 * 60 * 1000; // 10 minutos
+    const INTERVAL = 10000;           // cada 10s
+    const start    = Date.now();
+    const auth     = await getAuthHeaders();
+    let intentos   = 0;
 
     while (Date.now() - start < TIMEOUT) {
-      await new Promise(r => setTimeout(r, 8000));
+      await new Promise(r => setTimeout(r, INTERVAL));
+      intentos++;
+      setStatusText(`Generando video... ${Math.round((Date.now() - start) / 1000)}s ⏳`);
+
       try {
         const r = await fetch(`/api/plantillas-status?jobId=${jobId}`, {
           headers: auth,
@@ -459,9 +465,18 @@ export default function ComercialPanel({ userStatus }) {
           setResultado({ status: "error", error: j?.error || "El video falló." });
           return;
         }
-      } catch {}
+        // IN_PROGRESS — seguir esperando
+      } catch {
+        // Error de red — seguir intentando
+      }
     }
-    setResultado({ status: "error", error: "Tiempo de espera agotado. Revisa tu biblioteca." });
+
+    // Timeout — pero el video puede seguir generándose en PiAPI
+    // Mostrar mensaje amigable indicando que revise biblioteca en unos minutos
+    setResultado({
+      status: "error",
+      error: "El video tardó más de lo esperado. Revisa tu biblioteca en 2-3 minutos — el video puede estar listo ahí. 📚",
+    });
   }
 
   const p = plantillaActiva;
@@ -479,7 +494,7 @@ export default function ComercialPanel({ userStatus }) {
         </div>
         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-2 text-right">
           <div className="text-xs text-neutral-400">Por plantilla</div>
-          <div className="text-lg font-bold text-cyan-300">75–110 Jades</div>
+          <div className="text-lg font-bold text-cyan-300">35–70 Jades</div>
           <div className="text-[10px] text-neutral-500">Según duración del video</div>
         </div>
       </div>
