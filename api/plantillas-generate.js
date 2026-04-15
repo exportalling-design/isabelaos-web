@@ -20,8 +20,16 @@ import { createClient } from "@supabase/supabase-js";
 
 const PIAPI_URL       = "https://api.piapi.ai/api/v1/task";
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
-const PLANTILLA_COST  = 30;
 const VIDEO_BUCKET    = "videos";
+
+// ── Duración y costo por plantilla (igual que CineAI) ─────────
+const PLANTILLA_CONFIG = {
+  transicion_moda:  { duracion: 15, costo: 110 },
+  producto_estelar: { duracion: 10, costo: 75  },
+  desfile_magico:   { duracion: 15, costo: 110 },
+  explosion_sabor:  { duracion: 10, costo: 75  },
+  chef_ia:          { duracion: 15, costo: 110 },
+};
 
 // ── Voces ElevenLabs (mismo VOICE_MAP que comercial-generate) ─
 const VOICE_MAP = {
@@ -98,7 +106,7 @@ async function saveToLibrary(userId, videoBase64, plantillaNombre) {
 }
 
 // ── Construir payload para PiAPI según plantilla ──────────────
-function buildPiapiPayload(plantillaId, imagenes, textos, selectores) {
+function buildPiapiPayload(plantillaId, imagenes, textos, selectores, duracion = 10) {
   let prompt     = "";
   let imageUrls  = [];
   let videoUrls  = [];
@@ -263,7 +271,7 @@ function buildPiapiPayload(plantillaId, imagenes, textos, selectores) {
 
   const input = {
     prompt,
-    duration:     10,
+    duration:     duracion,
     aspect_ratio: "9:16",
   };
 
@@ -296,6 +304,13 @@ export default async function handler(req, res) {
 
     if (!plantilla_id) return res.status(400).json({ ok: false, error: "MISSING_PLANTILLA_ID" });
 
+    // Obtener duración y costo según plantilla
+    const config = PLANTILLA_CONFIG[plantilla_id];
+    if (!config) return res.status(400).json({ ok: false, error: `Plantilla desconocida: ${plantilla_id}` });
+
+    const PLANTILLA_COST = config.costo;
+    const PLANTILLA_DUR  = config.duracion;
+
     // Cobrar Jades
     const sb  = getSupabaseAdmin();
     const ref = `plantilla-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -319,7 +334,7 @@ export default async function handler(req, res) {
     // Construir payload para PiAPI
     let piPayload;
     try {
-      piPayload = buildPiapiPayload(plantilla_id, imagenes, textos, selectores);
+      piPayload = buildPiapiPayload(plantilla_id, imagenes, textos, selectores, PLANTILLA_DUR);
     } catch (e) {
       // Reembolsar si el payload falla
       await sb.rpc("spend_jades", { p_user_id: user.id, p_amount: -PLANTILLA_COST, p_reason: "plantilla_refund_payload_error", p_ref: ref });
