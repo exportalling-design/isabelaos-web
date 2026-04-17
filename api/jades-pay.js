@@ -9,7 +9,7 @@ import { JADE_PACKS }   from "../src/lib/pricing.js";
 
 function getPagaditoBase() {
   return process.env.PAGADITO_ENV === "production"
-    ? "https://app.pagadito.com/api/v1"
+    ? "https://api.pagadito.com/v1"
     : "https://sandbox-api.pagadito.com/v1";
 }
 
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     const clientIp = getClientIp(req);
     const siteUrl  = process.env.SITE_URL || "https://isabelaos.com";
 
-    console.log(`[jades-pay] user=${user.id} pack=${pack} fingerprint=${fingerprint}`);
+    console.log(`[jades-pay] user=${user.id} pack=${pack} env=${process.env.PAGADITO_ENV}`);
 
     const url = `${getPagaditoBase()}/customer/`;
     const r   = await fetch(url, {
@@ -74,12 +74,12 @@ export default async function handler(req, res) {
           firstName:      card.firstName,
           lastName:       card.lastName,
           billingAddress: {
-            city:      "San Salvador",
-            state:     "San Salvador",
-            zip:       "",
-            countryId: "222",
-            line1:     card.line1 || "7a Calle Pte. Bis, 511 y 531",
-            phone:     card.phone || "2264-7032",
+            city:      card.city      || "Ciudad",
+            state:     card.city      || "Estado",
+            zip:       card.zip       || "",
+            countryId: card.countryId || "320",
+            line1:     card.line1     || "",
+            phone:     card.phone     || "",
           },
           email: card.email,
         },
