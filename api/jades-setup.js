@@ -8,7 +8,7 @@ import { JADE_PACKS }  from "../src/lib/pricing.js";
 
 function getPagaditoBase() {
   return process.env.PAGADITO_ENV === "production"
-    ? "https://app.pagadito.com/api/v1"
+    ? "https://api.pagadito.com/v1"
     : "https://sandbox-api.pagadito.com/v1";
 }
 
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     if (!uid || !wsk) return res.status(500).json({ ok: false, error: "MISSING_PAGADITO_ENV" });
 
     const url = `${getPagaditoBase()}/setup-payer/`;
-    console.log("[jades-setup] calling setup-payer...");
+    console.log("[jades-setup] calling setup-payer...", process.env.PAGADITO_ENV, url);
 
     const r = await fetch(url, {
       method: "POST",
@@ -63,12 +63,11 @@ export default async function handler(req, res) {
       return res.status(r.status || 400).json({ ok: false, ...data });
     }
 
-    // Devolver tokens al frontend para el iframe
     return res.status(200).json({
-      ok:                    true,
-      request_id:            data.request_id,
-      accessToken:           data.accessToken,
-      referenceId:           data.referenceId,
+      ok:                      true,
+      request_id:              data.request_id,
+      accessToken:             data.accessToken,
+      referenceId:             data.referenceId,
       deviceDataCollectionUrl: data.deviceDataCollectionUrl ||
         (process.env.PAGADITO_ENV === "production"
           ? "https://centinelapi.cardinalcommerce.com/V1/Cruise/Collect"
