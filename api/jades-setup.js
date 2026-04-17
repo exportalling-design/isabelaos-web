@@ -39,6 +39,7 @@ export default async function handler(req, res) {
 
     const url = `${getPagaditoBase()}/setup-payer/`;
     console.log("[jades-setup] calling setup-payer...", process.env.PAGADITO_ENV, url);
+    console.log("[jades-setup] uid prefix:", uid?.slice(0, 8));
 
     const r = await fetch(url, {
       method: "POST",
@@ -56,7 +57,12 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await r.json().catch(() => null);
+    let rawText = "";
+    try { rawText = await r.text(); } catch {}
+    console.log("[jades-setup] raw:", r.status, rawText.slice(0, 500));
+
+    let data = null;
+    try { data = rawText ? JSON.parse(rawText) : null; } catch {}
     console.log("[jades-setup] response:", data?.response_code, data?.response_message);
 
     if (!r.ok || data?.response_code !== "PG200-00") {
