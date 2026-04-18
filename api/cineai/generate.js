@@ -1,27 +1,51 @@
 // api/cineai/generate.js
 // ─────────────────────────────────────────────────────────────
-// Endpoint de generación de video con Seedance 2.0 via PiAPI
+// Endpoint de generación de video con Seedance 2.0 via BytePlus ModelArk
 //
-// Modos:
-//   t2v          → solo texto → video
-//   i2v          → foto del usuario → video animado
-//   r2v          → video de referencia → copia SOLO el movimiento
-//   r2v+face     → video referencia + foto → movimiento con cara del usuario
-//   animate      → foto exacta animada respetando fondo y personajes originales
-//   lipsync      → foto + audio → lip sync de esa canción específica
-//   continuation → último frame + video completo anterior → continuidad perfecta
+// Proveedor: BytePlus ModelArk (API oficial de ByteDance)
+// Base URL:  https://ark.ap-southeast.bytepluses.com/api/v3
+// Auth:      Authorization: Bearer BYTEPLUS_API_KEY
+// Variable Vercel: BYTEPLUS_API_KEY
 //
-// FIX CONTINUACIÓN:
-//   isContinuation=true manda imageUrl (último frame) + refVideoUrl (video completo anterior)
-//   Así Seedance mantiene atmósfera, iluminación, movimiento y estilo — no solo el frame
+// Modelos disponibles:
+//   dreamina-seedance-2-0-t2v-250924    → texto → video (sin imagen)
+//   dreamina-seedance-2-0-i2v-250924    → imagen → video (calidad máxima)
+//   dreamina-seedance-2-0-fast-t2v-250924 → texto rápido
+//   dreamina-seedance-2-0-fast-i2v-250924 → imagen rápida
+//
+// Estructura del payload BytePlus:
+//   content: array de objetos con type: "text" | "image_url" | "video_url"
+//   El texto incluye los parámetros al final: --ratio 9:16 --duration 10
+//   Las imágenes/videos se pasan como objetos separados en el array content
+//
+// IMPORTANTE — continuación de escena:
+//   imageUrl   = último frame del clip anterior (@Image1 = arranque visual)
+//   refVideoUrl = clip completo anterior     (@Video1 = referencia de atmósfera)
+//   Seedance mantiene luz, cámara y estilo entre clips con esta técnica.
+//
+// IMPORTANTE — audio:
+//   BytePlus Seedance 2.0 SÍ soporta audio nativo. Se pasa como type: "audio_url"
+//   en el array content. Formatos: mp3, wav. Máx 15 segundos.
 // ─────────────────────────────────────────────────────────────
-import { supabaseAdmin }           from "../../src/lib/supabaseAdmin.js";
-import { getUserIdFromAuthHeader }  from "../../src/lib/getUserIdFromAuth.js";
+import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
+import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-const PIAPI_URL = "https://api.piapi.ai/api/v1/task";
+const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
+const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 
+// ── Modelos BytePlus Seedance 2.0 ────────────────────────────
+// i2v = image-to-video (acepta imagen como referencia)
+// t2v = text-to-video (solo texto)
+// fast = más rápido y barato, misma calidad visual
+const MODEL_I2V      = "dreamina-seedance-2-0-i2v-250924";
+const MODEL_T2V      = "dreamina-seedance-2-0-t2v-250924";
+const MODEL_FAST_I2V = "dreamina-seedance-2-0-fast-i2v-250924";
+const MODEL_FAST_T2V = "dreamina-seedance-2-0-fast-t2v-250924";
+
+// ── Costo en Jades por duración ───────────────────────────────
 const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
 
+// ── Celebridades y personajes bloqueados ──────────────────────
 const BLOCKED_NAMES = [
   "tom cruise","brad pitt","angelina jolie","scarlett johansson",
   "will smith","dwayne johnson","the rock","ryan reynolds",
@@ -73,11 +97,11 @@ export default async function handler(req, res) {
 
   const {
     prompt,
-    imageUrl,         // URL foto del usuario / último frame en continuación
-    refVideoUrl,      // URL video de referencia / video completo anterior en continuación
-    audioUrl,         // URL audio para lip sync
-    animateExact,     // boolean: animar foto exacta respetando escenario
-    isContinuation,   // boolean: es continuación de clip anterior
+    imageUrl,        // URL foto del usuario O último frame en modo continuación
+    refVideoUrl,     // URL video de referencia O clip anterior en continuación
+    audioUrl,        // URL audio para lip sync (mp3/wav, máx 15s)
+    animateExact,    // boolean: animar foto exacta respetando escenario
+    isContinuation,  // boolean: modo continuación perfecta entre clips
     duration = 10,
     aspectRatio = "9:16",
     sceneMode = "tiktok",
@@ -102,6 +126,7 @@ export default async function handler(req, res) {
     ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 
+  // ── Descontar Jades antes de llamar a BytePlus ────────────
   const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
     p_user_id: userId,
     p_amount:  jadeCost,
@@ -121,104 +146,127 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: spendErr.message });
   }
 
-  // ── Construir prompt y payload ─────────────────────────────
+  // ── Construir payload BytePlus ────────────────────────────
+  // BytePlus usa un array "content" donde cada elemento es:
+  //   { type: "text",      text: "..." }
+  //   { type: "image_url", image_url: { url: "..." } }
+  //   { type: "video_url", video_url: { url: "..." } }
+  //   { type: "audio_url", audio_url: { url: "..." } }
+  // Los parámetros van al final del texto: --ratio 9:16 --duration 10
+
   let finalPrompt = String(prompt).trim();
-  const inputExtra = {};
   let mode = "t2v";
+  let modelId = MODEL_T2V;
+  const content = []; // array de contenido para BytePlus
 
   if (isContinuation && imageUrl && refVideoUrl) {
-    // ── CONTINUACIÓN PERFECTA ─────────────────────────────────
-    // último frame como imagen de inicio (ancla visual exacta)
-    // video completo anterior como @Video1 (referencia de atmósfera, luz, cámara, estilo)
-    // Esta es la técnica que usan los mejores creadores de AI video para continuidad perfecta
-    inputExtra.image_urls = [imageUrl];
-    inputExtra.video_urls = [refVideoUrl];
-    finalPrompt = `Continue this exact scene seamlessly from @Image1. Use @Video1 as full reference to maintain the same atmosphere, lighting, camera movement, color grading, and visual style throughout. The continuation must feel like an uninterrupted extension of the exact same shot with no cuts or style changes. ${finalPrompt}`;
+    // ── MODO CONTINUACIÓN PERFECTA ────────────────────────────
+    // Último frame como imagen de arranque + clip completo como referencia
+    // de atmósfera, iluminación, movimiento de cámara y estilo visual.
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
+    finalPrompt = `[Image 1] Start from this exact frame and continue the scene seamlessly. [Video 1] Use this clip as full reference to maintain the exact same atmosphere, lighting, color grade, and camera movement style. The continuation must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
     mode = "continuation";
+    modelId = MODEL_I2V;
 
   } else if (isContinuation && imageUrl && !refVideoUrl) {
-    // Fallback: solo frame (no debería pasar pero por si acaso)
-    inputExtra.image_urls = [imageUrl];
-    finalPrompt = `Continue this exact scene seamlessly from @Image1. Maintain the same atmosphere, lighting, and visual style. ${finalPrompt}`;
+    // Fallback continuación solo con frame (no debería pasar)
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    finalPrompt = `[Image 1] Continue this exact scene seamlessly from this frame. Maintain the same atmosphere, lighting, and visual style. ${finalPrompt}`;
     mode = "continuation_frame_only";
+    modelId = MODEL_I2V;
 
   } else if (animateExact && imageUrl) {
-    inputExtra.image_urls = [imageUrl];
-    finalPrompt = `Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, scenery, and all characters exactly as they appear in the image. Do not change, replace, or add any new backgrounds or characters. Only add natural movement to the existing subjects. ${finalPrompt}`;
+    // ── MODO ANIMAR FOTO EXACTA ───────────────────────────────
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    finalPrompt = `[Image 1] Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, scenery, and all characters exactly as they appear. Do not change, replace, or add any new backgrounds or characters. Only add natural movement to existing subjects. ${finalPrompt}`;
     mode = "animate";
+    modelId = MODEL_I2V;
 
   } else if (audioUrl && imageUrl) {
-    // Lip sync — foto + audio
-    // NOTA: audio_urls está temporalmente desactivado en PiAPI Seedance.
-    // Se genera lip sync visualmente con la foto. El audio se agrega en edición (CapCut).
-    inputExtra.image_urls = [imageUrl];
-    finalPrompt = `Lip sync the person in @Image1 to music, expressive and natural mouth movements, singing performance, close-up face, studio lighting. ${finalPrompt}`;
+    // ── MODO LIP SYNC — foto + audio ─────────────────────────
+    // BytePlus Seedance 2.0 SÍ soporta audio nativo (a diferencia de PiAPI)
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    content.push({ type: "audio_url", audio_url: { url: audioUrl } });
+    finalPrompt = `[Image 1] Lip sync the person in this image to the audio in [Audio 1]. Mouth movements must match the song exactly. Keep the original background and lighting. ${finalPrompt}`;
     mode = "lipsync";
+    modelId = MODEL_I2V;
 
   } else if (audioUrl && !imageUrl) {
-    // Audio sin foto — lip sync visual sin audio_urls
-    finalPrompt = `Person lip syncing to music, expressive and natural mouth movements, singing performance. ${finalPrompt}`;
-    mode = "lipsync";
+    // ── LIP SYNC SIN FOTO ─────────────────────────────────────
+    content.push({ type: "audio_url", audio_url: { url: audioUrl } });
+    finalPrompt = `[Audio 1] Person lip syncing to this audio, mouth movements perfectly synced to the music, expressive performance. ${finalPrompt}`;
+    mode = "lipsync_nophoto";
+    modelId = MODEL_T2V;
 
   } else if (refVideoUrl && imageUrl) {
-    // R2V + cara del usuario
-    inputExtra.video_urls = [refVideoUrl];
-    inputExtra.image_urls = [imageUrl];
-    finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Use the person from @Image1 as the subject. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
+    // ── R2V + CARA — copia movimiento con cara del usuario ────
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
+    finalPrompt = `[Image 1] Use this person as the subject. [Video 1] Copy ONLY the body movement and choreography from this reference video. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
     mode = "r2v+face";
+    modelId = MODEL_I2V;
 
-  } else if (refVideoUrl) {
-    // R2V solo movimiento
-    inputExtra.video_urls = [refVideoUrl];
-    finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
+  } else if (refVideoUrl && !imageUrl) {
+    // ── R2V — solo copia movimiento ───────────────────────────
+    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
+    finalPrompt = `[Video 1] Copy ONLY the body movement and choreography from this reference video. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
     mode = "r2v";
+    modelId = MODEL_T2V;
 
   } else if (imageUrl) {
-    inputExtra.image_urls = [imageUrl];
+    // ── I2V — animar foto ─────────────────────────────────────
+    content.push({ type: "image_url", image_url: { url: imageUrl } });
+    finalPrompt = `[Image 1] ${finalPrompt}`;
     mode = "i2v";
+    modelId = MODEL_I2V;
+
+  } else {
+    // ── T2V — solo texto ──────────────────────────────────────
+    mode = "t2v";
+    modelId = MODEL_T2V;
   }
 
-  const needsVip = !!(inputExtra.video_urls && inputExtra.video_urls.length > 0);
-  const piPayload = {
-    model: "seedance",
-    task_type: needsVip ? "seedance-2-preview-vip" : "seedance-2-preview",
-    input: {
-      prompt: finalPrompt,
-      duration,
-      aspect_ratio: aspectRatio,
-      ...inputExtra,
-    },
+  // Agregar el texto con los parámetros al final (formato BytePlus)
+  const textWithParams = `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`;
+  content.push({ type: "text", text: textWithParams });
+
+  const byteplusPayload = {
+    model:   modelId,
+    content: content,
   };
 
-  // ── Llamar a PiAPI ────────────────────────────────────────
-  let piTask;
+  // ── Llamar a BytePlus ─────────────────────────────────────
+  let taskData;
   try {
-    const piRes = await fetch(PIAPI_URL, {
-      method: "POST",
+    const bpRes = await fetch(BYTEPLUS_CREATE, {
+      method:  "POST",
       headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.PIAPI_KEY,
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
       },
-      body: JSON.stringify(piPayload),
+      body: JSON.stringify(byteplusPayload),
     });
 
-    piTask = await piRes.json();
+    taskData = await bpRes.json();
 
-    if (!piRes.ok || piTask.code !== 200) {
-      throw new Error(piTask.message || `PiAPI error ${piRes.status}`);
+    if (!bpRes.ok || taskData.error) {
+      throw new Error(taskData.error?.message || taskData.message || `BytePlus error ${bpRes.status}`);
     }
   } catch (err) {
+    // Reembolsar Jades si BytePlus falla
     await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount:  -jadeCost,
-      p_reason:  "cineai_refund_piapi_error",
+      p_reason:  "cineai_refund_byteplus_error",
       p_ref:     ref,
     });
-    console.error("[cineai/generate] PiAPI error:", err.message);
+    console.error("[cineai/generate] BytePlus error:", err.message);
     return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
-  const taskId = piTask.data?.task_id;
+  // BytePlus devuelve el task en taskData directamente (no en taskData.data)
+  const taskId = taskData.id;
 
   if (!taskId) {
     await supabaseAdmin.rpc("spend_jades", {
@@ -227,7 +275,8 @@ export default async function handler(req, res) {
       p_reason:  "cineai_refund_no_taskid",
       p_ref:     ref,
     });
-    return res.status(500).json({ ok: false, error: "PiAPI no devolvió task_id" });
+    console.error("[cineai/generate] BytePlus no devolvió task id. Response:", JSON.stringify(taskData));
+    return res.status(500).json({ ok: false, error: "BytePlus no devolvió task id" });
   }
 
   // ── Guardar en video_jobs ─────────────────────────────────
@@ -241,22 +290,23 @@ export default async function handler(req, res) {
     status:              "IN_PROGRESS",
     mode:                "cineai",
     prompt:              finalPrompt,
-    provider:            "piapi_seedance",
+    provider:            "byteplus_seedance",
     provider_request_id: taskId,
-    provider_status:     "pending",
+    provider_status:     "running",
     started_at:          new Date().toISOString(),
     payload: {
-      task_id:          taskId,
-      cineai_mode:      mode,
-      scene_mode:       sceneMode,
+      task_id:         taskId,
+      cineai_mode:     mode,
+      scene_mode:      sceneMode,
       duration,
-      aspect_ratio:     aspectRatio,
-      image_url:        imageUrl     || null,
-      ref_video_url:    refVideoUrl  || null,
-      audio_url:        audioUrl     || null,
-      animate_exact:    animateExact  || false,
-      is_continuation:  isContinuation || false,
-      jade_cost:        jadeCost,
+      aspect_ratio:    aspectRatio,
+      model:           modelId,
+      image_url:       imageUrl    || null,
+      ref_video_url:   refVideoUrl || null,
+      audio_url:       audioUrl    || null,
+      animate_exact:   animateExact   || false,
+      is_continuation: isContinuation || false,
+      jade_cost:       jadeCost,
       ref,
     },
   });
@@ -265,7 +315,7 @@ export default async function handler(req, res) {
     console.error("[cineai/generate] video_jobs insert failed:", insertErr.message);
   }
 
-  console.error("[cineai/generate] OK", { userId, jobId, taskId, mode, jadeCost });
+  console.error("[cineai/generate] OK", { userId, jobId, taskId, mode, modelId, jadeCost });
 
   return res.status(200).json({
     ok: true,
