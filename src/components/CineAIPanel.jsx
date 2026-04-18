@@ -249,7 +249,7 @@ export default function CineAIPanel() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        const res  = await fetch(`/api/cineai/status/${taskId}`, {
+        const res  = await fetch(`/api/cineai/poll?taskId=${taskId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
