@@ -160,21 +160,14 @@ export default async function handler(req, res) {
   let modelId = MODEL_T2V;
   const content = []; // array de contenido para BytePlus
 
-  if (isContinuation && imageUrl && refVideoUrl) {
-    // ── MODO CONTINUACIÓN PERFECTA ────────────────────────────
-    // Último frame como imagen de arranque + clip completo como referencia
-    // de atmósfera, iluminación, movimiento de cámara y estilo visual.
+  if (isContinuation && imageUrl) {
+    // ── MODO CONTINUACIÓN ─────────────────────────────────────
+    // BytePlus NO permite mezclar imagen de primer frame con video de referencia.
+    // Solo mandamos el último frame como imagen de arranque.
+    // El prompt describe la continuidad de atmósfera, luz y estilo.
     content.push({ type: "image_url", image_url: { url: imageUrl } });
-    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
-    finalPrompt = `[Image 1] Start from this exact frame and continue the scene seamlessly. [Video 1] Use this clip as full reference to maintain the exact same atmosphere, lighting, color grade, and camera movement style. The continuation must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
+    finalPrompt = `[Image 1] This is the last frame of the previous clip. Continue the scene seamlessly from this exact frame. Maintain the same atmosphere, lighting, color grade, camera movement style, and visual mood. The continuation must feel like an uninterrupted extension of the same shot with no style changes. ${finalPrompt}`;
     mode = "continuation";
-    modelId = MODEL_I2V;
-
-  } else if (isContinuation && imageUrl && !refVideoUrl) {
-    // Fallback continuación solo con frame (no debería pasar)
-    content.push({ type: "image_url", image_url: { url: imageUrl } });
-    finalPrompt = `[Image 1] Continue this exact scene seamlessly from this frame. Maintain the same atmosphere, lighting, and visual style. ${finalPrompt}`;
-    mode = "continuation_frame_only";
     modelId = MODEL_I2V;
 
   } else if (animateExact && imageUrl) {
