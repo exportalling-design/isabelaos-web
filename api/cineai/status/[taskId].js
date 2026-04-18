@@ -3,13 +3,14 @@
 // Polling del estado de un job de CineAI en PiAPI.
 //
 // Cuando el job completa:
-//   1. Extrae la URL del video de PiAPI (output.video)
+//   1. Extrae la URL del video de PiAPI en orden:
+//      output.video || output.video_url || output.url || output.videoUrl
 //   2. Descarga el video como buffer
 //   3. Lo sube al bucket "videos" del usuario en Supabase Storage
 //      → así aparece automáticamente en la biblioteca
 //   4. Actualiza video_jobs con result_url
-//   5. Borra la foto temporal de cineai/faces del bucket user-uploads
-//      para no llenar el disco
+//   5. Borra archivos temporales de cineai/faces, cineai/refs,
+//      cineai/frames y cineai/audio del bucket user-uploads
 //
 // La biblioteca (LibraryView) lee del bucket "videos" via
 // listUserVideosFromStorage() en src/lib/generations.ts
@@ -30,7 +31,8 @@ async function fetchFromPiAPI(taskId) {
 }
 
 // ── Extrae la URL del video del output de PiAPI ───────────────
-// PiAPI devuelve la URL en output.video según Task Detail
+// PiAPI puede devolver la URL en distintos campos según la versión.
+// Se revisan en orden de prioridad.
 function extractVideoUrl(output) {
   if (!output) return null;
   return (
@@ -44,14 +46,14 @@ function extractVideoUrl(output) {
 }
 
 // ── Descarga el video de PiAPI y lo sube al bucket "videos" ──
-// Esto hace que aparezca en la biblioteca del usuario
+// Esto hace que aparezca en la biblioteca del usuario.
+// Si falla la subida, devuelve la URL de PiAPI como fallback
+// (el video se puede ver pero no aparece en la biblioteca).
 async function saveVideoToLibrary(userId, piApiVideoUrl, taskId) {
   try {
     // 1. Descargar el video desde PiAPI como buffer
     const videoRes = await fetch(piApiVideoUrl);
-    if (!videoRes.ok) {
-      throw new Error(`No se pudo descargar el video: ${videoRes.status}`);
-    }
+    if (!videoRes.ok) throw new Error(`No se pudo descargar el video: ${videoRes.status}`);
 
     const arrayBuffer = await videoRes.arrayBuffer();
     const buffer      = Buffer.from(arrayBuffer);
@@ -64,14 +66,9 @@ async function saveVideoToLibrary(userId, piApiVideoUrl, taskId) {
     // Este es el bucket que lee la biblioteca (listUserVideosFromStorage)
     const { error: uploadErr } = await supabaseAdmin.storage
       .from("videos")
-      .upload(path, buffer, {
-        contentType: "video/mp4",
-        upsert:      false,
-      });
+      .upload(path, buffer, { contentType: "video/mp4", upsert: false });
 
-    if (uploadErr) {
-      throw new Error(`Error subiendo al bucket videos: ${uploadErr.message}`);
-    }
+    if (uploadErr) throw new Error(`Error subiendo al bucket videos: ${uploadErr.message}`);
 
     // 4. Obtener URL pública del video en Storage
     const { data: pubData } = supabaseAdmin.storage
@@ -83,42 +80,43 @@ async function saveVideoToLibrary(userId, piApiVideoUrl, taskId) {
 
   } catch (err) {
     // Si falla la subida a Storage, devolver la URL de PiAPI como fallback
-    // El video se puede ver pero no aparecerá en la biblioteca
     console.error("[cineai/status] saveVideoToLibrary failed:", err.message);
     return piApiVideoUrl;
   }
 }
 
-// ── Borra archivos temporales de cineai/faces ─────────────────
-// Las fotos que sube el usuario para que el modelo las use
-// se deben borrar después para no llenar el disco
+// ── Borra archivos temporales subidos por el usuario ──────────
+// Limpia: cineai/faces, cineai/refs, cineai/frames, cineai/audio
+// No toca ninguna otra carpeta del bucket user-uploads
 async function cleanupTempFiles(job) {
-  const payload = job?.payload || {};
+  const payload  = job?.payload || {};
   const imageUrl = payload.image_url;
-
   if (!imageUrl) return;
 
   try {
     // Extraer el path del archivo desde la URL pública de Supabase Storage
     // URL format: https://xxx.supabase.co/storage/v1/object/public/user-uploads/cineai/faces/xxx.jpg
-    const urlObj = new URL(imageUrl);
+    const urlObj    = new URL(imageUrl);
     const pathParts = urlObj.pathname.split("/object/public/user-uploads/");
     if (pathParts.length < 2) return;
 
     const filePath = pathParts[1]; // "cineai/faces/xxx.jpg"
 
-    // Solo borrar archivos de cineai/faces y cineai/refs, no otras carpetas
-    if (!filePath.startsWith("cineai/faces/") && !filePath.startsWith("cineai/refs/")) return;
+    // Solo borrar archivos de carpetas temporales de cineai
+    if (
+      !filePath.startsWith("cineai/faces/")  &&
+      !filePath.startsWith("cineai/refs/")   &&
+      !filePath.startsWith("cineai/frames/") &&
+      !filePath.startsWith("cineai/audio/")
+    ) return;
 
     const { error } = await supabaseAdmin.storage
       .from("user-uploads")
       .remove([filePath]);
 
-    if (error) {
-      console.error("[cineai/status] cleanup error:", error.message);
-    } else {
-      console.error("[cineai/status] cleaned up temp file:", filePath);
-    }
+    if (error) console.error("[cineai/status] cleanup error:", error.message);
+    else       console.error("[cineai/status] cleaned up temp file:", filePath);
+
   } catch (err) {
     console.error("[cineai/status] cleanup exception:", err.message);
   }
@@ -142,6 +140,7 @@ export default async function handler(req, res) {
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
   // ── Buscar job en video_jobs ──────────────────────────────
+  // IMPORTANTE: busca en video_jobs con mode="cineai", NO en cineai_jobs
   const { data: job, error: findErr } = await supabaseAdmin
     .from("video_jobs")
     .select("*")
@@ -156,6 +155,7 @@ export default async function handler(req, res) {
   }
 
   // ── Si ya terminó, devolver resultado cacheado ────────────
+  // Evita volver a consultar PiAPI si el job ya está resuelto en DB
   if (job.status === "COMPLETED" && job.result_url) {
     return res.status(200).json({
       ok:       true,
@@ -181,20 +181,16 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("[cineai/status] PiAPI poll error:", err.message);
     // Devolver processing para que el frontend siga intentando
-    return res.status(200).json({
-      ok:     true,
-      status: "processing",
-      jobId:  job.id,
-    });
+    return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
   }
 
   console.error("[cineai/status] PiAPI status:", taskData?.status, "output:", JSON.stringify(taskData?.output));
 
-  // ── Mapear status ─────────────────────────────────────────
+  // ── Mapear status de PiAPI a status interno ───────────────
   const providerStatus = taskData?.status;
-  let newStatus = "IN_PROGRESS";
+  let newStatus     = "IN_PROGRESS";
   let finalVideoUrl = null;
-  let errorMsg = null;
+  let errorMsg      = null;
 
   if (providerStatus === "completed") {
     const piApiVideoUrl = extractVideoUrl(taskData?.output);
@@ -202,11 +198,9 @@ export default async function handler(req, res) {
     if (piApiVideoUrl) {
       // Descargar y subir al bucket "videos" para que aparezca en biblioteca
       finalVideoUrl = await saveVideoToLibrary(userId, piApiVideoUrl, taskId);
-      newStatus = "COMPLETED";
-
-      // Borrar archivos temporales (fotos del usuario)
+      newStatus     = "COMPLETED";
+      // Borrar archivos temporales (fotos, frames, audio del usuario)
       await cleanupTempFiles(job);
-
     } else {
       // Completed pero sin URL — tratar como fallido
       console.error("[cineai/status] completed but no videoUrl. Full output:", JSON.stringify(taskData?.output));
@@ -239,13 +233,14 @@ export default async function handler(req, res) {
     .update(updateData)
     .eq("id", job.id);
 
+  // ── Responder al frontend ─────────────────────────────────
   return res.status(200).json({
     ok:       true,
     status:   newStatus === "COMPLETED" ? "completed"
             : newStatus === "FAILED"    ? "failed"
             : "processing",
     videoUrl: finalVideoUrl || null,
-    error:    errorMsg || null,
+    error:    errorMsg      || null,
     jobId:    job.id,
   });
 }
