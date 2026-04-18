@@ -2,13 +2,13 @@
 // ─────────────────────────────────────────────────────────────
 // Panel CineAI de IsabelaOS — Seedance 2.0 via PiAPI
 //
-// FIXES v3:
-//   - output.video es el campo real de PiAPI (no output.video_url)
-//   - animateExact tiene prompt mucho más fuerte para respetar fondo
-//   - Aviso claro: R2V copia movimiento pero NO el fondo del video
-//   - Upload de audio para Lip Sync (cualquier preset, opcional)
-//   - Campo para pegar URL externa de video (TikTok, YouTube, etc.)
-//   - Logs en consola para debug de generación
+// FIXES v4:
+//   - Continuación: manda TANTO el último frame (imageUrl) COMO el
+//     video anterior completo (refVideoUrl) para continuidad perfecta
+//   - Audio: zona de upload siempre visible, no solo con foto
+//   - Video de referencia: subida directa MP4 + URL externa (ya funcionaba)
+//   - isContinuation se manda al backend como campo propio
+//   - previousVideoUrl: estado separado que guarda la URL del clip anterior
 // ─────────────────────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
@@ -68,10 +68,8 @@ function hasBlockedName(text) {
   }) || null;
 }
 
-// ── Clave localStorage para términos aceptados ────────────────
 const TERMS_ACCEPTED_KEY = "isabelaos_cineai_terms_v1";
 
-// ── Verificación básica de contenido inapropiado en imagen ────
 async function checkImageSafety(file) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -89,7 +87,6 @@ async function checkImageSafety(file) {
         if (r > 95 && g > 40 && b > 20 && r > g && r > b &&
             Math.abs(r-g) > 15 && r-b > 15 && g-b > 0) skinPixels++;
       }
-      // Más del 60% de tonos piel → posible desnudo → bloquear
       resolve((skinPixels / (50*50)) < 0.60);
     };
     img.onerror = () => { URL.revokeObjectURL(url); resolve(true); };
@@ -123,13 +120,13 @@ function extractLastFrame(videoSrc) {
 
 const HOW_IT_WORKS = [
   { icon: "🕺", title: "TikTok Trends", desc: "Selecciona el tipo de trend. Si subes un video de referencia, el modelo copia el movimiento exacto. Si subes tu foto, tu cara aparece en el video." },
-  { icon: "🎬", title: "Escena Cinematográfica", desc: "Elige el tipo de escena (acción, pelea, drama, épico, noir). El modelo genera una escena de calidad Hollywood. Puedes subir tu foto para aparecer." },
+  { icon: "🎬", title: "Escena Cinematográfica", desc: "Elige el tipo de escena (acción, pelea, drama, épico, noir). El modelo genera una escena de calidad Hollywood." },
   { icon: "👤", title: "Tu foto (opcional)", desc: "Sube una foto tuya de frente con buena iluminación. El modelo usará tu cara como personaje principal." },
-  { icon: "🖼️", title: "Animar foto exacta", desc: "Activa esta opción para animar tu foto respetando el fondo y personajes originales. Ideal si tienes una foto en un escenario específico que quieres animar." },
-  { icon: "🎥", title: "Video de referencia", desc: "Sube el video del baile o pega la URL. El modelo copia el movimiento exacto. IMPORTANTE: el fondo siempre viene de tu foto o del prompt, nunca del video de referencia." },
-  { icon: "🎵", title: "Audio para Lip Sync", desc: "Sube un audio MP3 o WAV para que el personaje haga lip sync de esa canción específica. Funciona con cualquier preset, especialmente con el preset Lip Sync." },
-  { icon: "▶", title: "Continuar escena", desc: "Cuando termina un video, el botón 'Continuar escena' extrae el último fotograma y lo usa como punto de partida del siguiente clip. Puedes encadenar clips y crear escenas de 1-2 minutos." },
-  { icon: "🚫", title: "Celebridades bloqueadas", desc: "No puedes generar videos con Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc. El sistema lo bloquea automáticamente. Describe un personaje original." },
+  { icon: "🖼️", title: "Animar foto exacta", desc: "Activa esta opción para animar tu foto respetando el fondo y personajes originales." },
+  { icon: "🎥", title: "Video de referencia", desc: "Sube el video del baile en MP4 o pega la URL. El modelo copia el movimiento exacto. IMPORTANTE: el fondo siempre viene de tu foto o del prompt." },
+  { icon: "🎵", title: "Audio para Lip Sync", desc: "Sube un audio MP3 o WAV para que el personaje haga lip sync de esa canción específica." },
+  { icon: "▶", title: "Continuar escena — CONTINUIDAD PERFECTA", desc: "Cuando termina un clip, el botón 'Continuar escena' extrae el último frame Y usa el clip completo como referencia de atmósfera. Así Seedance mantiene la iluminación, el movimiento de cámara y el estilo entre clips. Esta es la técnica que usan los mejores creadores de AI video." },
+  { icon: "🚫", title: "Celebridades bloqueadas", desc: "No puedes generar videos con Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc." },
   { icon: "💎", title: "Costo en Jades", desc: "5 segundos = 40 Jades · 10 segundos = 75 Jades · 15 segundos = 110 Jades. Los Jades se reembolsan automáticamente si hay error del servidor." },
 ];
 
@@ -144,7 +141,7 @@ export default function CineAIPanel() {
   const [facePreview,     setFacePreview]     = useState(null);
   const [refVideoUrl,     setRefVideoUrl]     = useState(null);
   const [refVideoPreview, setRefVideoPreview] = useState(null);
-  const [refVideoExtUrl,  setRefVideoExtUrl]  = useState("");   // URL externa pegada
+  const [refVideoExtUrl,  setRefVideoExtUrl]  = useState("");
   const [audioUrl,        setAudioUrl]        = useState(null);
   const [audioName,       setAudioName]       = useState(null);
   const [uploadingFace,   setUploadingFace]   = useState(false);
@@ -164,24 +161,27 @@ export default function CineAIPanel() {
   const [error,          setError]          = useState(null);
   const [blockedWarning, setBlockedWarning] = useState(null);
 
-  // Continuación
-  const [extractingFrame, setExtractingFrame] = useState(false);
-  const [lastFrameUrl,    setLastFrameUrl]    = useState(null);
-  const [isContinuation,  setIsContinuation]  = useState(false);
-  const [frameExtracted,  setFrameExtracted]  = useState(false); // confirmación visual
+  // Continuación — FIX PRINCIPAL:
+  // previousVideoUrl = URL del clip anterior completo (para @Video1 en Seedance)
+  // lastFrameUrl     = último frame del clip anterior (para @Image1 en Seedance)
+  const [extractingFrame,  setExtractingFrame]  = useState(false);
+  const [lastFrameUrl,     setLastFrameUrl]     = useState(null);
+  const [previousVideoUrl, setPreviousVideoUrl] = useState(null); // ← NUEVO
+  const [isContinuation,   setIsContinuation]   = useState(false);
+  const [frameExtracted,   setFrameExtracted]   = useState(false);
 
   // UI
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
+  const [showExtUrlInput, setShowExtUrlInput] = useState(false);
 
-  // ── Modales de seguridad ──────────────────────────────────
+  // Modales
   const [showTermsModal,   setShowTermsModal]   = useState(false);
   const [termsAccepted,    setTermsAccepted]    = useState(() => {
     try { return !!localStorage.getItem(TERMS_ACCEPTED_KEY); } catch { return false; }
   });
   const [showPhotoConsent, setShowPhotoConsent] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState(null);
-  const [showExtUrlInput, setShowExtUrlInput] = useState(false); // toggle URL externa
 
   const faceInputRef  = useRef();
   const videoInputRef = useRef();
@@ -200,12 +200,10 @@ export default function CineAIPanel() {
 
   const promptText  = getFinalPrompt();
   const liveBlocked = hasBlockedName(promptText) || hasBlockedName(subjectDesc);
-
-  // El video de referencia efectivo es el subido o el de URL externa
   const effectiveRefVideoUrl = refVideoUrl || (refVideoExtUrl.trim() ? refVideoExtUrl.trim() : null);
 
   const modeLabel = isContinuation
-    ? "Continuando escena anterior 🎬"
+    ? "Continuando escena — continuidad perfecta 🎬"
     : animateExact && faceImageUrl
       ? "Animar foto exacta — respeta fondo original 🖼️"
       : audioUrl
@@ -215,18 +213,12 @@ export default function CineAIPanel() {
           : faceImageUrl ? "Animar tu foto"
           : "Solo texto";
 
-  useEffect(() => {
-    setSelectedPreset(PRESETS[activeMode][0].id);
-  }, [activeMode]);
-
+  useEffect(() => { setSelectedPreset(PRESETS[activeMode][0].id); }, [activeMode]);
   useEffect(() => () => clearInterval(pollRef.current), []);
 
-  // Mostrar modal de términos si es la primera vez
   useEffect(() => {
     try {
-      if (!localStorage.getItem(TERMS_ACCEPTED_KEY)) {
-        setShowTermsModal(true);
-      }
+      if (!localStorage.getItem(TERMS_ACCEPTED_KEY)) setShowTermsModal(true);
     } catch {}
   }, []);
 
@@ -298,22 +290,45 @@ export default function CineAIPanel() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
+      // ── Construcción del body según modo ──────────────────
+      let bodyPayload;
+
+      if (isContinuation) {
+        // MODO CONTINUACIÓN — técnica de continuidad perfecta:
+        // imageUrl   = último frame del clip anterior (@Image1 = punto de arranque)
+        // refVideoUrl = clip anterior completo      (@Video1 = referencia de atmósfera)
+        bodyPayload = {
+          prompt,
+          imageUrl:       lastFrameUrl,      // último frame
+          refVideoUrl:    previousVideoUrl,  // clip completo anterior ← FIX
+          isContinuation: true,
+          duration,
+          aspectRatio:    ratio,
+          sceneMode:      activeMode,
+        };
+      } else {
+        bodyPayload = {
+          prompt,
+          imageUrl:     faceImageUrl          || null,
+          refVideoUrl:  effectiveRefVideoUrl  || null,
+          audioUrl:     audioUrl              || null,
+          animateExact: !!(animateExact && faceImageUrl),
+          isContinuation: false,
+          duration,
+          aspectRatio:  ratio,
+          sceneMode:    activeMode,
+        };
+      }
+
+      console.log("[CineAI] generate body:", bodyPayload);
+
       const res = await fetch("/api/cineai/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization:  `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          prompt,
-          imageUrl:     isContinuation ? lastFrameUrl : (faceImageUrl          || null),
-          refVideoUrl:  isContinuation ? null          : (effectiveRefVideoUrl  || null),
-          audioUrl:     audioUrl || null,
-          animateExact: !isContinuation && animateExact && !!faceImageUrl,
-          duration,
-          aspectRatio:  ratio,
-          sceneMode:    activeMode,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       const data = await res.json();
@@ -333,22 +348,34 @@ export default function CineAIPanel() {
     }
   };
 
+  // ── CONTINUAR ESCENA — FIX PRINCIPAL ─────────────────────
+  // Guarda TANTO el último frame (imageUrl) COMO la URL del video
+  // completo (previousVideoUrl) para mandárselos juntos al siguiente generate.
   const handleContinueScene = async () => {
     if (!videoUrl) return;
     setExtractingFrame(true);
     setFrameExtracted(false);
     setError(null);
+
     try {
-      const frameBlob = await extractLastFrame(videoUrl);
+      // 1. Guardar URL del clip actual ANTES de resetear el estado
+      const currentVideoUrl = videoUrl; // ← URL pública en Supabase Storage
+
+      // 2. Extraer último frame del clip actual
+      const frameBlob = await extractLastFrame(currentVideoUrl);
       const path = `cineai/frames/${Date.now()}_lastframe.png`;
       const { error: upErr } = await supabase.storage
         .from("user-uploads")
         .upload(path, frameBlob, { contentType: "image/png", upsert: true });
       if (upErr) throw upErr;
+
       const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
-      setLastFrameUrl(data.publicUrl);
-      setFrameExtracted(true); // mostrar confirmación
-      // Esperar 1.5s para que el usuario vea el mensaje, luego activar modo continuación
+
+      // 3. Guardar ambas URLs en estado
+      setLastFrameUrl(data.publicUrl);       // último frame → @Image1
+      setPreviousVideoUrl(currentVideoUrl);  // clip completo → @Video1 ← FIX
+
+      setFrameExtracted(true);
       setTimeout(() => {
         setIsContinuation(true);
         setVideoUrl(null);
@@ -356,6 +383,7 @@ export default function CineAIPanel() {
         setCurrentTaskId(null);
         setFrameExtracted(false);
       }, 1500);
+
     } catch (e) {
       setError("No se pudo extraer el último frame: " + e.message);
     } finally {
@@ -372,6 +400,7 @@ export default function CineAIPanel() {
     setGenerating(false);
     setIsContinuation(false);
     setLastFrameUrl(null);
+    setPreviousVideoUrl(null);
     setFrameExtracted(false);
     clearInterval(pollRef.current);
   };
@@ -383,7 +412,6 @@ export default function CineAIPanel() {
         .cp*,.cp *::before,.cp *::after{box-sizing:border-box;margin:0;padding:0;}
         .cp{font-family:'Syne',sans-serif;background:#060608;min-height:100vh;color:#ddd8cc;}
 
-        /* Header */
         .cp-header{padding:32px 26px 20px;border-bottom:1px solid #111;position:relative;overflow:hidden;}
         .cp-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,80,0.3),transparent);}
         .cp-eyebrow{font-size:10px;letter-spacing:4px;color:#333;text-transform:uppercase;margin-bottom:4px;}
@@ -397,11 +425,9 @@ export default function CineAIPanel() {
         .how-btn{background:rgba(200,160,80,0.08);border:1px solid rgba(200,160,80,0.2);border-radius:8px;color:#c8a050;font-family:'Syne',sans-serif;font-size:12px;padding:8px 16px;cursor:pointer;letter-spacing:1px;white-space:nowrap;transition:all 0.15s;margin-top:12px;}
         .how-btn:hover{background:rgba(200,160,80,0.15);}
 
-        /* Banner celebridades */
         .blocked-banner-top{background:rgba(200,60,60,0.07);border-bottom:1px solid rgba(200,60,60,0.15);padding:10px 26px;font-size:12px;color:#e07070;display:flex;align-items:center;gap:10px;line-height:1.5;}
         .blocked-banner-top strong{color:#f09090;}
 
-        /* Selector modo */
         .mode-selector{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111;}
         .mode-btn{padding:16px 22px;background:transparent;border:none;cursor:pointer;text-align:left;transition:all 0.15s;border-bottom:3px solid transparent;color:#444;}
         .mode-btn:hover{background:rgba(255,255,255,0.02);color:#888;}
@@ -411,14 +437,12 @@ export default function CineAIPanel() {
         .mode-btn-label{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:3px;display:block;}
         .mode-btn-desc{font-size:10px;letter-spacing:1px;opacity:0.5;margin-top:1px;}
 
-        /* Grid */
         .cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#0e0e0e;}
         .cp-cell{background:#060608;padding:20px 24px;}
         .cp-cell-full{grid-column:1/-1;}
         .sec-label{font-size:9px;letter-spacing:4px;text-transform:uppercase;color:#2e2e2e;margin-bottom:14px;display:flex;align-items:center;gap:10px;}
         .sec-label::after{content:'';flex:1;height:1px;background:#111;}
 
-        /* Presets */
         .preset-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
         .preset-btn{background:#0a0a0c;border:1px solid #161616;border-radius:8px;padding:12px 4px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:#333;}
         .preset-btn:hover{border-color:#2a2820;color:#777;}
@@ -427,7 +451,6 @@ export default function CineAIPanel() {
         .pi{font-size:20px;display:block;margin-bottom:4px;}
         .pn{font-size:9px;letter-spacing:2px;text-transform:uppercase;}
 
-        /* Upload zones */
         .upload-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;position:relative;}
         .upload-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.02);}
         .upload-zone.has-file{border-style:solid;border-color:#2a2820;}
@@ -441,16 +464,17 @@ export default function CineAIPanel() {
         .remove-btn{background:none;border:none;color:#803030;font-size:10px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;padding:4px 0;font-family:'Syne',sans-serif;}
         .remove-btn:hover{color:#e07070;}
 
-        /* Audio zone */
-        .audio-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all 0.2s;margin-top:10px;}
+        /* Audio zone — siempre visible, no solo con foto */
+        .audio-section{margin-top:14px;}
+        .audio-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all 0.2s;}
         .audio-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.02);}
         .audio-zone.has-file{border-style:solid;border-color:#2a2820;}
+        .audio-zone.uploading{border-color:rgba(200,160,80,0.4);animation:pb 1s infinite;}
         .audio-zone-text{flex:1;text-align:left;}
         .audio-zone-label{font-size:11px;color:#c8a050;letter-spacing:1px;}
-        .audio-zone-name{font-size:12px;color:#ddd8cc;margin-top:2px;}
+        .audio-zone-name{font-size:12px;color:#ddd8cc;margin-top:2px;word-break:break-all;}
         .audio-zone-hint{font-size:10px;color:#333;letter-spacing:1px;}
 
-        /* Toggle animar exacta */
         .animate-toggle{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;background:rgba(200,160,80,0.04);border:1px solid rgba(200,160,80,0.1);border-radius:8px;cursor:pointer;transition:all 0.15s;}
         .animate-toggle:hover{border-color:rgba(200,160,80,0.2);}
         .animate-toggle.active{border-color:rgba(200,160,80,0.35);background:rgba(200,160,80,0.08);}
@@ -459,21 +483,22 @@ export default function CineAIPanel() {
         .animate-toggle.active .animate-toggle-label{color:#c8a050;}
         .animate-toggle-desc{font-size:10px;color:#444;margin-left:26px;margin-top:4px;letter-spacing:0.5px;line-height:1.4;}
 
-        /* Aviso R2V fondo */
         .r2v-notice{background:rgba(100,150,255,0.05);border:1px solid rgba(100,150,255,0.15);border-radius:8px;padding:8px 12px;font-size:11px;color:#7090e0;margin-top:8px;line-height:1.5;}
 
-        /* URL externa input */
         .ext-url-toggle{font-size:11px;color:#c8a050;cursor:pointer;letter-spacing:1px;margin-top:8px;display:inline-block;text-decoration:underline;}
         .ext-url-input{width:100%;background:#0a0a0c;border:1px solid #1e1e1e;border-radius:8px;color:#ddd8cc;font-family:'Syne',sans-serif;font-size:12px;padding:10px 13px;outline:none;margin-top:8px;transition:border-color 0.2s;}
         .ext-url-input:focus{border-color:#c8a050;}
         .ext-url-input::placeholder{color:#2a2a2a;}
 
-        /* Continuation badge */
-        .continuation-badge{background:rgba(80,180,100,0.08);border:1px solid rgba(80,180,100,0.2);border-radius:8px;padding:10px 14px;font-size:12px;color:#60c870;display:flex;align-items:center;gap:10px;}
+        /* Continuation badge mejorado — muestra frame + video anterior */
+        .continuation-badge{background:rgba(80,180,100,0.08);border:1px solid rgba(80,180,100,0.2);border-radius:8px;padding:10px 14px;font-size:12px;color:#60c870;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
         .continuation-badge img{width:40px;height:40px;border-radius:4px;border:1px solid rgba(80,180,100,0.3);object-fit:cover;}
+        .continuation-badge video{width:60px;height:40px;border-radius:4px;border:1px solid rgba(80,180,100,0.3);object-fit:cover;}
         .continuation-cancel{margin-left:auto;background:none;border:none;color:#803030;font-size:11px;cursor:pointer;letter-spacing:1px;font-family:'Syne',sans-serif;}
+        .continuation-info{flex:1;min-width:120px;}
+        .continuation-info-title{font-size:11px;color:#60c870;letter-spacing:1px;}
+        .continuation-info-desc{font-size:10px;color:#444;margin-top:2px;line-height:1.4;}
 
-        /* Inputs */
         .cp-input,.cp-textarea{width:100%;background:#0a0a0c;border:1px solid #161616;border-radius:8px;color:#ddd8cc;font-family:'Syne',sans-serif;font-size:13px;padding:11px 13px;outline:none;transition:border-color 0.2s;}
         .cp-input:focus,.cp-textarea:focus{border-color:#2a2820;}
         .cp-input::placeholder,.cp-textarea::placeholder{color:#222;}
@@ -482,7 +507,6 @@ export default function CineAIPanel() {
         .prompt-preview{margin-top:10px;padding:10px 13px;background:#080808;border:1px solid #111;border-radius:8px;font-size:11px;color:#252525;line-height:1.7;font-style:italic;}
         .blocked-banner{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.18);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;line-height:1.5;margin-top:10px;display:flex;gap:8px;}
 
-        /* Toggles */
         .toggle-row{display:flex;gap:6px;}
         .toggle-btn{flex:1;background:#0a0a0c;border:1px solid #161616;border-radius:8px;padding:12px 6px;cursor:pointer;text-align:center;transition:all 0.15s;color:#333;}
         .toggle-btn:hover{border-color:#2a2820;color:#777;}
@@ -491,7 +515,6 @@ export default function CineAIPanel() {
         .tm{display:block;font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:2px;}
         .ts{display:block;font-size:9px;letter-spacing:1px;opacity:0.5;margin-top:2px;}
 
-        /* CTA */
         .cta-cell{grid-column:1/-1;padding:18px 24px 26px;border-top:1px solid #0e0e0e;background:#060608;}
         .jade-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(200,160,80,0.04);border:1px solid rgba(200,160,80,0.1);border-radius:10px;margin-bottom:12px;}
         .jade-left{font-size:10px;color:#333;letter-spacing:2px;text-transform:uppercase;}
@@ -503,7 +526,6 @@ export default function CineAIPanel() {
         .gen-btn:disabled{background:#141414;color:#2a2a2a;cursor:not-allowed;transform:none;}
         .error-box{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.15);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;margin-bottom:12px;}
 
-        /* Resultado */
         .result-cell{grid-column:1/-1;padding:26px;text-align:center;border-bottom:1px solid #0e0e0e;background:#060608;}
         .spinner{width:32px;height:32px;border:2px solid #161616;border-top-color:#c8a050;border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 14px;}
         @keyframes spin{to{transform:rotate(360deg);}}
@@ -522,7 +544,6 @@ export default function CineAIPanel() {
         .ra-btn.green:hover{background:rgba(80,180,100,0.18);}
         .ra-btn:disabled{opacity:0.4;cursor:not-allowed;}
 
-        /* Modal */
         .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;overflow-y:auto;}
         .modal-box{background:#0a0a0c;border:1px solid #1e1e1e;border-radius:16px;width:100%;max-width:480px;padding:24px;position:relative;max-height:90vh;overflow-y:auto;}
         .modal-title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;color:#f0e8d0;margin-bottom:20px;}
@@ -533,7 +554,6 @@ export default function CineAIPanel() {
         .modal-item-title{font-size:13px;font-weight:700;color:#f0e8d0;margin-bottom:4px;letter-spacing:1px;}
         .modal-item-desc{font-size:12px;color:#666;line-height:1.6;}
 
-        /* Fullscreen */
         .fs-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;}
         .fs-close{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:50%;color:#fff;font-size:20px;width:44px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
         .fs-close:hover{background:rgba(200,160,80,0.3);border-color:#c8a050;}
@@ -547,96 +567,36 @@ export default function CineAIPanel() {
         }
       `}</style>
 
-      {/* ══ MODAL TÉRMINOS — primera vez ════════════════════ */}
+      {/* ══ MODAL TÉRMINOS ════════════════════════════════════ */}
       {showTermsModal && (
         <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
           <div className="modal-box" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title" style={{ fontSize: 22, marginBottom: 6 }}>⚖️ TÉRMINOS DE USO — CINEAI</div>
-            <p style={{ fontSize: 11, color: "#555", marginBottom: 20, letterSpacing: 1 }}>
-              Lee y acepta antes de continuar
-            </p>
-
+            <p style={{ fontSize: 11, color: "#555", marginBottom: 20, letterSpacing: 1 }}>Lee y acepta antes de continuar</p>
             <div style={{ fontSize: 12, color: "#888", lineHeight: 1.8, maxHeight: 340, overflowY: "auto", paddingRight: 8 }}>
-
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>1. USO RESPONSABLE</p>
-              <p style={{ marginBottom: 14 }}>
-                CineAI es una herramienta de generación de video con inteligencia artificial. El usuario es el único y exclusivo responsable del contenido que genera, solicita o publica usando esta plataforma. IsabelaOS Studio no asume ninguna responsabilidad por el uso inadecuado de esta tecnología.
-              </p>
-
+              <p style={{ marginBottom: 14 }}>CineAI es una herramienta de generación de video con inteligencia artificial. El usuario es el único y exclusivo responsable del contenido que genera, solicita o publica usando esta plataforma.</p>
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>2. PROHIBICIÓN DE SUPLANTACIÓN DE IDENTIDAD</p>
-              <p style={{ marginBottom: 14 }}>
-                Queda estrictamente prohibido usar CineAI para suplantar la identidad de cualquier persona, ya sea pública o privada, con fines de engaño, fraude, difamación, acoso o cualquier actividad que cause daño. El uso de la imagen de terceros sin su consentimiento explícito es responsabilidad total del usuario.
-              </p>
-
+              <p style={{ marginBottom: 14 }}>Queda estrictamente prohibido usar CineAI para suplantar la identidad de cualquier persona, ya sea pública o privada, con fines de engaño, fraude, difamación, acoso o cualquier actividad que cause daño.</p>
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>3. DERECHOS DE IMAGEN Y COPYRIGHT</p>
-              <p style={{ marginBottom: 14 }}>
-                Al subir fotografías, el usuario declara que posee los derechos sobre dichas imágenes o cuenta con el consentimiento expreso de las personas que aparecen en ellas. IsabelaOS Studio no es responsable por violaciones de derechos de imagen o copyright cometidas por los usuarios.
-              </p>
-
+              <p style={{ marginBottom: 14 }}>Al subir fotografías, el usuario declara que posee los derechos sobre dichas imágenes o cuenta con el consentimiento expreso de las personas que aparecen en ellas.</p>
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>4. CONTENIDO PROHIBIDO</p>
-              <p style={{ marginBottom: 14 }}>
-                Está terminantemente prohibido generar contenido de carácter sexual explícito, violencia real contra personas identificables, material que involucre menores de edad, propaganda de odio, o cualquier contenido ilegal según las leyes aplicables. Las violaciones pueden resultar en la suspensión permanente de la cuenta.
-              </p>
-
+              <p style={{ marginBottom: 14 }}>Está terminantemente prohibido generar contenido de carácter sexual explícito, violencia real contra personas identificables, material que involucre menores de edad, propaganda de odio, o cualquier contenido ilegal.</p>
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>5. EXENCIÓN DE RESPONSABILIDAD</p>
-              <p style={{ marginBottom: 14 }}>
-                IsabelaOS Studio proporciona esta tecnología como herramienta creativa. Cualquier uso que viole estos términos, las leyes locales o los derechos de terceros es responsabilidad exclusiva del usuario. La plataforma se reserva el derecho de suspender cuentas que violen estos términos sin previo aviso.
-              </p>
-
+              <p style={{ marginBottom: 14 }}>IsabelaOS Studio proporciona esta tecnología como herramienta creativa. La plataforma se reserva el derecho de suspender cuentas que violen estos términos sin previo aviso.</p>
               <p style={{ color: "#c8a050", fontWeight: 700, marginBottom: 6 }}>6. COOPERACIÓN LEGAL</p>
-              <p style={{ marginBottom: 6 }}>
-                IsabelaOS Studio cooperará con las autoridades competentes ante cualquier reporte de uso ilegal o dañino de la plataforma, proporcionando la información disponible sobre el usuario responsable.
-              </p>
+              <p>IsabelaOS Studio cooperará con las autoridades competentes ante cualquier reporte de uso ilegal o dañino de la plataforma.</p>
             </div>
-
-            <div style={{
-              marginTop: 20,
-              padding: "12px 14px",
-              background: "rgba(200,160,80,0.06)",
-              border: "1px solid rgba(200,160,80,0.15)",
-              borderRadius: 8,
-              fontSize: 11,
-              color: "#666",
-              lineHeight: 1.6,
-            }}>
-              Al hacer click en <strong style={{ color: "#c8a050" }}>"Acepto los términos"</strong> confirmas que has leído, entendido y aceptas estos términos de uso. Eres el único responsable del contenido que generes.
+            <div style={{ marginTop: 20, padding: "12px 14px", background: "rgba(200,160,80,0.06)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 8, fontSize: 11, color: "#666", lineHeight: 1.6 }}>
+              Al hacer click en <strong style={{ color: "#c8a050" }}>"Acepto los términos"</strong> confirmas que has leído, entendido y aceptas estos términos de uso.
             </div>
-
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button
-                onClick={() => {
-                  try { localStorage.setItem(TERMS_ACCEPTED_KEY, "1"); } catch {}
-                  setTermsAccepted(true);
-                  setShowTermsModal(false);
-                }}
-                style={{
-                  flex: 1,
-                  background: "#c8a050",
-                  border: "none",
-                  borderRadius: 10,
-                  color: "#060608",
-                  fontFamily: "'Bebas Neue', sans-serif",
-                  fontSize: 18,
-                  letterSpacing: 3,
-                  padding: "14px",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => { try { localStorage.setItem(TERMS_ACCEPTED_KEY, "1"); } catch {} setTermsAccepted(true); setShowTermsModal(false); }}
+                style={{ flex: 1, background: "#c8a050", border: "none", borderRadius: 10, color: "#060608", fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: 3, padding: "14px", cursor: "pointer" }}>
                 ✓ ACEPTO LOS TÉRMINOS
               </button>
-              <button
-                onClick={() => setShowTermsModal(false)}
-                style={{
-                  background: "transparent",
-                  border: "1px solid #222",
-                  borderRadius: 10,
-                  color: "#555",
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: 12,
-                  padding: "14px 18px",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => setShowTermsModal(false)}
+                style={{ background: "transparent", border: "1px solid #222", borderRadius: 10, color: "#555", fontFamily: "'Syne', sans-serif", fontSize: 12, padding: "14px 18px", cursor: "pointer" }}>
                 Cerrar
               </button>
             </div>
@@ -649,66 +609,22 @@ export default function CineAIPanel() {
         <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
           <div className="modal-box" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title" style={{ fontSize: 20, marginBottom: 6 }}>📸 CONSENTIMIENTO DE IMAGEN</div>
-
             <div style={{ fontSize: 13, color: "#888", lineHeight: 1.8 }}>
-              <p style={{ marginBottom: 12 }}>
-                Antes de subir esta fotografía, confirma lo siguiente:
-              </p>
-
+              <p style={{ marginBottom: 12 }}>Antes de subir esta fotografía, confirma lo siguiente:</p>
               <div style={{ background: "rgba(200,160,80,0.05)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
-                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>
-                  ☑ <strong>Soy el titular de los derechos</strong> de esta fotografía, o tengo el consentimiento expreso de la(s) persona(s) que aparecen en ella para usar su imagen en esta plataforma.
-                </p>
-                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>
-                  ☑ <strong>No usaré esta imagen</strong> para suplantar la identidad de ninguna persona, difamar, engañar o causar daño a terceros.
-                </p>
-                <p style={{ color: "#ddd8cc", marginBottom: 0 }}>
-                  ☑ <strong>Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado con esta imagen. IsabelaOS Studio no es responsable del uso inadecuado.
-                </p>
+                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>☑ <strong>Soy el titular de los derechos</strong> de esta fotografía, o tengo el consentimiento expreso de las personas que aparecen en ella.</p>
+                <p style={{ color: "#ddd8cc", marginBottom: 8 }}>☑ <strong>No usaré esta imagen</strong> para suplantar la identidad de ninguna persona.</p>
+                <p style={{ color: "#ddd8cc", marginBottom: 0 }}>☑ <strong>Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado.</p>
               </div>
-
-              <p style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>
-                Las fotos con contenido inapropiado, desnudos o que violen los derechos de imagen de terceros serán bloqueadas automáticamente. Las violaciones pueden resultar en la suspensión de tu cuenta.
-              </p>
+              <p style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>Las fotos con contenido inapropiado o que violen derechos de imagen de terceros serán bloqueadas automáticamente.</p>
             </div>
-
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-              <button
-                onClick={async () => {
-                  setShowPhotoConsent(false);
-                  if (pendingPhotoFile) {
-                    uploadToStorage(pendingPhotoFile, "cineai/faces", setFaceImageUrl, setFacePreview, setUploadingFace);
-                    setPendingPhotoFile(null);
-                  }
-                }}
-                style={{
-                  flex: 1,
-                  background: "#c8a050",
-                  border: "none",
-                  borderRadius: 10,
-                  color: "#060608",
-                  fontFamily: "'Bebas Neue', sans-serif",
-                  fontSize: 16,
-                  letterSpacing: 3,
-                  padding: "14px",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={async () => { setShowPhotoConsent(false); if (pendingPhotoFile) { uploadToStorage(pendingPhotoFile, "cineai/faces", setFaceImageUrl, setFacePreview, setUploadingFace); setPendingPhotoFile(null); } }}
+                style={{ flex: 1, background: "#c8a050", border: "none", borderRadius: 10, color: "#060608", fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, letterSpacing: 3, padding: "14px", cursor: "pointer" }}>
                 ✓ ACEPTO Y SUBO LA FOTO
               </button>
-              <button
-                onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
-                style={{
-                  background: "transparent",
-                  border: "1px solid #222",
-                  borderRadius: 10,
-                  color: "#555",
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: 12,
-                  padding: "14px 18px",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => { setShowPhotoConsent(false); setPendingPhotoFile(null); }}
+                style={{ background: "transparent", border: "1px solid #222", borderRadius: 10, color: "#555", fontFamily: "'Syne', sans-serif", fontSize: 12, padding: "14px 18px", cursor: "pointer" }}>
                 Cancelar
               </button>
             </div>
@@ -739,8 +655,7 @@ export default function CineAIPanel() {
       {videoFullscreen && videoUrl && (
         <div className="fs-overlay" onClick={() => setVideoFullscreen(false)}>
           <button className="fs-close" onClick={() => setVideoFullscreen(false)}>✕</button>
-          <video className="fs-video" src={videoUrl} controls autoPlay loop playsInline
-            onClick={(e) => e.stopPropagation()} />
+          <video className="fs-video" src={videoUrl} controls autoPlay loop playsInline onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 
@@ -760,30 +675,15 @@ export default function CineAIPanel() {
       {/* Banner celebridades bloqueadas */}
       <div className="blocked-banner-top">
         <span>🚫</span>
-        <span>
-          <strong>Rostros de celebridades y personajes de Hollywood están bloqueados por derechos de autor.</strong>{" "}
-          No puedes usar Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc. Describe un personaje original.
-        </span>
+        <span><strong>Rostros de celebridades y personajes de Hollywood están bloqueados por derechos de autor.</strong>{" "}No puedes usar Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc. Describe un personaje original.</span>
       </div>
 
-      {/* Banner recordatorio de términos — siempre visible */}
-      <div style={{
-        background: "rgba(200,160,80,0.04)",
-        borderBottom: "1px solid rgba(200,160,80,0.1)",
-        padding: "8px 26px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        flexWrap: "wrap",
-      }}>
+      {/* Banner términos */}
+      <div style={{ background: "rgba(200,160,80,0.04)", borderBottom: "1px solid rgba(200,160,80,0.1)", padding: "8px 26px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <p style={{ fontSize: 11, color: "#444", letterSpacing: 1, lineHeight: 1.5 }}>
           ⚖️ Todo el contenido generado es <strong style={{ color: "#666" }}>responsabilidad exclusiva del usuario</strong>. Prohibida la suplantación de identidad y el uso sin consentimiento de imágenes de terceros.
         </p>
-        <button
-          onClick={() => setShowTermsModal(true)}
-          style={{ background: "none", border: "none", color: "#c8a050", fontSize: 11, cursor: "pointer", letterSpacing: 1, whiteSpace: "nowrap", textDecoration: "underline", padding: 0 }}
-        >
+        <button onClick={() => setShowTermsModal(true)} style={{ background: "none", border: "none", color: "#c8a050", fontSize: 11, cursor: "pointer", letterSpacing: 1, whiteSpace: "nowrap", textDecoration: "underline", padding: 0 }}>
           Ver términos completos
         </button>
       </div>
@@ -791,10 +691,8 @@ export default function CineAIPanel() {
       {/* Selector de modo */}
       <div className="mode-selector">
         {MODES.map((m) => (
-          <button key={m.id}
-            className={`mode-btn ${activeMode === m.id ? "active" : ""}`}
-            onClick={() => { setActiveMode(m.id); handleReset(); }}
-            disabled={generating}>
+          <button key={m.id} className={`mode-btn ${activeMode === m.id ? "active" : ""}`}
+            onClick={() => { setActiveMode(m.id); handleReset(); }} disabled={generating}>
             <span className="mode-btn-icon">{m.icon}</span>
             <span className="mode-btn-label">{m.label}</span>
             <span className="mode-btn-desc">{m.desc}</span>
@@ -823,28 +721,15 @@ export default function CineAIPanel() {
                 <div className="result-actions">
                   <button className="ra-btn" onClick={() => setVideoFullscreen(true)}>⛶ Ver en grande</button>
                   <a href={videoUrl} download className="ra-btn gold">⬇ Descargar</a>
-                  {/* Mensaje de confirmación extracción de frame */}
                   {frameExtracted && (
-                    <div style={{
-                      background: "rgba(80,180,100,0.12)",
-                      border: "1px solid rgba(80,180,100,0.3)",
-                      borderRadius: 8,
-                      padding: "8px 16px",
-                      fontSize: 12,
-                      color: "#60c870",
-                      letterSpacing: 1,
-                      marginTop: 8,
-                    }}>
-                      ✅ Último frame extraído — preparando continuación...
+                    <div style={{ background: "rgba(80,180,100,0.12)", border: "1px solid rgba(80,180,100,0.3)", borderRadius: 8, padding: "8px 16px", fontSize: 12, color: "#60c870", letterSpacing: 1, width: "100%", marginTop: 4 }}>
+                      ✅ Frame extraído + clip guardado — preparando continuación perfecta...
                     </div>
                   )}
-                  <button
-                    className="ra-btn green"
-                    onClick={handleContinueScene}
+                  <button className="ra-btn green" onClick={handleContinueScene}
                     disabled={extractingFrame || frameExtracted}
-                    style={extractingFrame ? { animation: "pulse-b 0.8s infinite", opacity: 0.7 } : {}}
-                  >
-                    {extractingFrame ? "⏳ Extrayendo último frame..." : frameExtracted ? "✅ Frame extraído" : "▶ Continuar escena →"}
+                    style={extractingFrame ? { opacity: 0.7 } : {}}>
+                    {extractingFrame ? "⏳ Extrayendo frame..." : frameExtracted ? "✅ Listo" : "▶ Continuar escena →"}
                   </button>
                   <button className="ra-btn" onClick={handleReset}>✦ Nueva escena</button>
                 </div>
@@ -866,10 +751,8 @@ export default function CineAIPanel() {
           <p className="sec-label">{activeMode === "tiktok" ? "Tipo de trend" : "Tipo de escena"}</p>
           <div className="preset-grid">
             {currentPresets.map((p) => (
-              <button key={p.id}
-                className={`preset-btn ${selectedPreset === p.id ? "active" : ""}`}
-                onClick={() => setSelectedPreset(p.id)}
-                disabled={generating}>
+              <button key={p.id} className={`preset-btn ${selectedPreset === p.id ? "active" : ""}`}
+                onClick={() => setSelectedPreset(p.id)} disabled={generating}>
                 <span className="pi">{p.icon}</span>
                 <span className="pn">{p.label}</span>
               </button>
@@ -877,17 +760,26 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* Foto del usuario */}
+        {/* Foto del usuario + Audio */}
         <div className="cp-cell">
           <p className="sec-label">Tu foto (opcional)</p>
+
+          {/* Modo continuación — muestra frame + miniatura del video anterior */}
           {isContinuation && lastFrameUrl ? (
             <div className="continuation-badge">
               <img src={lastFrameUrl} alt="último frame" />
-              <div>
-                <div style={{ fontSize: 11, color: "#60c870", letterSpacing: 1 }}>CONTINUANDO</div>
-                <div style={{ fontSize: 10, color: "#444", marginTop: 2 }}>Desde el último frame</div>
+              {previousVideoUrl && (
+                <video src={previousVideoUrl} muted autoPlay loop playsInline />
+              )}
+              <div className="continuation-info">
+                <div className="continuation-info-title">CONTINUIDAD PERFECTA</div>
+                <div className="continuation-info-desc">
+                  Último frame + clip completo como referencia.<br />
+                  Seedance mantendrá luz, cámara y estilo.
+                </div>
               </div>
-              <button className="continuation-cancel" onClick={() => { setIsContinuation(false); setLastFrameUrl(null); }}>
+              <button className="continuation-cancel"
+                onClick={() => { setIsContinuation(false); setLastFrameUrl(null); setPreviousVideoUrl(null); }}>
                 × cancelar
               </button>
             </div>
@@ -907,12 +799,13 @@ export default function CineAIPanel() {
                 )}
               </div>
               {facePreview && (
-                <button className="remove-btn" onClick={() => { setFacePreview(null); setFaceImageUrl(null); setAnimateExact(false); }}>
+                <button className="remove-btn"
+                  onClick={() => { setFacePreview(null); setFaceImageUrl(null); setAnimateExact(false); }}>
                   × quitar foto
                 </button>
               )}
 
-              {/* Toggle animar foto exacta */}
+              {/* Toggle animar foto exacta — solo si hay foto */}
               {facePreview && (
                 <>
                   <div className={`animate-toggle ${animateExact ? "active" : ""}`}
@@ -922,80 +815,80 @@ export default function CineAIPanel() {
                   </div>
                   {animateExact && (
                     <p className="animate-toggle-desc">
-                      El modelo animará tu foto respetando el fondo, escenario y personajes originales. No cambiará nada del contexto de la imagen.
+                      El modelo animará tu foto respetando el fondo, escenario y personajes originales.
                     </p>
                   )}
                 </>
               )}
 
-              {/* Upload audio para lip sync */}
-              <div
-                className={`audio-zone ${audioUrl ? "has-file" : ""}`}
-                onClick={() => !audioUrl && audioInputRef.current?.click()}>
-                <span style={{ fontSize: 20 }}>{audioUrl ? "🎵" : "🎵"}</span>
-                <div className="audio-zone-text">
-                  {audioUrl ? (
-                    <>
-                      <div className="audio-zone-label">Audio cargado</div>
-                      <div className="audio-zone-name">{audioName}</div>
-                    </>
-                  ) : uploadingAudio ? (
-                    <div className="audio-zone-label">Subiendo audio...</div>
-                  ) : (
-                    <>
-                      <div className="audio-zone-label">Audio para Lip Sync (opcional)</div>
-                      <div className="audio-zone-hint">MP3 / WAV · cualquier canción</div>
-                    </>
-                  )}
-                </div>
-                {audioUrl && (
-                  <button className="remove-btn" style={{ marginLeft: "auto" }}
-                    onClick={(e) => { e.stopPropagation(); setAudioUrl(null); setAudioName(null); }}>
-                    ×
-                  </button>
-                )}
-              </div>
-
               <input ref={faceInputRef} type="file" accept="image/*" style={{ display: "none" }}
                 onChange={async (e) => {
                   const f = e.target.files[0];
                   if (!f) return;
-                  // Verificar contenido inapropiado
                   const isSafe = await checkImageSafety(f);
                   if (!isSafe) {
-                    setError("La imagen fue bloqueada por contener contenido inapropiado. Solo se permiten fotos de rostros y retratos.");
-                    e.target.value = "";
-                    return;
+                    setError("La imagen fue bloqueada por contener contenido inapropiado.");
+                    e.target.value = ""; return;
                   }
-                  // Mostrar modal de consentimiento antes de subir
                   setPendingPhotoFile(f);
                   setShowPhotoConsent(true);
                   e.target.value = "";
                 }} />
-              <input ref={audioInputRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*" style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files[0];
-                  if (f) {
-                    setAudioName(f.name);
-                    uploadToStorage(f, "cineai/audio", setAudioUrl, () => {}, setUploadingAudio, "name");
-                  }
-                }} />
             </>
           )}
+
+          {/* ── AUDIO — siempre visible, no solo con foto ────── */}
+          <div className="audio-section">
+            <p className="sec-label" style={{ marginTop: 14 }}>Audio para Lip Sync (opcional)</p>
+            <div
+              className={`audio-zone ${audioUrl ? "has-file" : ""} ${uploadingAudio ? "uploading" : ""}`}
+              onClick={() => !audioUrl && audioInputRef.current?.click()}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>🎵</span>
+              <div className="audio-zone-text">
+                {audioUrl ? (
+                  <>
+                    <div className="audio-zone-label">Audio cargado ✓</div>
+                    <div className="audio-zone-name">{audioName}</div>
+                  </>
+                ) : uploadingAudio ? (
+                  <div className="audio-zone-label">Subiendo audio...</div>
+                ) : (
+                  <>
+                    <div className="audio-zone-label">Subir audio</div>
+                    <div className="audio-zone-hint">MP3 / WAV · cualquier canción</div>
+                  </>
+                )}
+              </div>
+              {audioUrl && (
+                <button className="remove-btn" style={{ marginLeft: "auto", flexShrink: 0 }}
+                  onClick={(e) => { e.stopPropagation(); setAudioUrl(null); setAudioName(null); }}>
+                  ×
+                </button>
+              )}
+            </div>
+            <input ref={audioInputRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files[0];
+                if (f) {
+                  setAudioName(f.name);
+                  uploadToStorage(f, "cineai/audio", setAudioUrl, () => {}, setUploadingAudio, "name");
+                }
+              }} />
+          </div>
         </div>
 
-        {/* Video de referencia */}
+        {/* Video de referencia — solo si NO es continuación */}
         {!isContinuation && (
           <div className="cp-cell cp-cell-full">
             <p className="sec-label">
               {activeMode === "tiktok"
-                ? "Video del trend a copiar — el modelo copia el movimiento exacto (opcional)"
-                : "Video de referencia — copia el movimiento o coreografía (opcional)"}
+                ? "Video del trend a copiar — MP4 directo o URL (opcional)"
+                : "Video de referencia — MP4 directo o URL (opcional)"}
             </p>
 
-            {/* Aviso sobre el fondo */}
             <div className="r2v-notice">
-              ℹ️ <strong>Importante:</strong> el modelo copia el <strong>movimiento</strong> del video de referencia, pero el <strong>fondo siempre viene de tu foto o del prompt</strong>. Nunca se copia el fondo del video de referencia. Esto es comportamiento del modelo.
+              ℹ️ <strong>Importante:</strong> el modelo copia el <strong>movimiento</strong> del video de referencia, pero el <strong>fondo siempre viene de tu foto o del prompt</strong>. Nunca se copia el fondo del video de referencia.
             </div>
 
             <div style={{ marginTop: 10 }}>
@@ -1023,22 +916,22 @@ export default function CineAIPanel() {
                   <>
                     <span style={{ fontSize: 28 }}>🎬</span>
                     <p className="uz-label">
-                      {activeMode === "tiktok"
-                        ? "Haz click para subir el video del trend"
-                        : "Haz click para subir el video de referencia"}
+                      Haz click para subir video MP4<br />
+                      <span style={{ color: "#c8a050", fontSize: 10 }}>o pega una URL abajo</span>
                     </p>
-                    <p className="uz-hint">MP4 · máx recomendado 15s · opcional</p>
+                    <p className="uz-hint">MP4 · máx recomendado 15s</p>
                   </>
                 )}
               </div>
 
               {refVideoPreview && (
-                <button className="remove-btn" onClick={() => { setRefVideoPreview(null); setRefVideoUrl(null); }}>
+                <button className="remove-btn"
+                  onClick={() => { setRefVideoPreview(null); setRefVideoUrl(null); }}>
                   × quitar video
                 </button>
               )}
 
-              {/* Opción de pegar URL externa */}
+              {/* URL externa */}
               {!refVideoPreview && (
                 <>
                   <span className="ext-url-toggle" onClick={() => setShowExtUrlInput((v) => !v)}>
@@ -1053,7 +946,8 @@ export default function CineAIPanel() {
                     />
                   )}
                   {refVideoExtUrl && (
-                    <button className="remove-btn" onClick={() => { setRefVideoExtUrl(""); setShowExtUrlInput(false); }}>
+                    <button className="remove-btn"
+                      onClick={() => { setRefVideoExtUrl(""); setShowExtUrlInput(false); }}>
                       × quitar URL
                     </button>
                   )}
@@ -1113,8 +1007,7 @@ export default function CineAIPanel() {
           <p className="sec-label">Duración</p>
           <div className="toggle-row">
             {DURATIONS.map((d) => (
-              <button key={d.value}
-                className={`toggle-btn ${duration === d.value ? "active" : ""}`}
+              <button key={d.value} className={`toggle-btn ${duration === d.value ? "active" : ""}`}
                 onClick={() => setDuration(d.value)} disabled={generating}>
                 <span className="tm">{d.label}</span>
                 <span className="ts">{d.jades} Jades</span>
@@ -1128,8 +1021,7 @@ export default function CineAIPanel() {
           <p className="sec-label">Formato</p>
           <div className="toggle-row">
             {RATIOS.map((r) => (
-              <button key={r.value}
-                className={`toggle-btn ${ratio === r.value ? "active" : ""}`}
+              <button key={r.value} className={`toggle-btn ${ratio === r.value ? "active" : ""}`}
                 onClick={() => setRatio(r.value)} disabled={generating}>
                 <span className="tm">{r.label}</span>
                 <span className="ts">{r.desc}</span>
