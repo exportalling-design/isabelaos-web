@@ -178,9 +178,10 @@ export default async function handler(req, res) {
     mode = "i2v";
   }
 
+  const needsVip = !!(inputExtra.video_urls && inputExtra.video_urls.length > 0);
   const piPayload = {
     model: "seedance",
-    task_type: "seedance-2-preview-vision",
+    task_type: needsVip ? "seedance-2-preview-vip" : "seedance-2-preview",
     input: {
       prompt: finalPrompt,
       duration,
