@@ -1,59 +1,81 @@
 // api/cineai/status/[taskId].js
 // ─────────────────────────────────────────────────────────────
-// Polling del estado de un job de CineAI en PiAPI.
+// Polling del estado de un job de CineAI en BytePlus ModelArk.
 //
-// Cuando el job completa:
-//   1. Extrae la URL del video de PiAPI en orden:
-//      output.video || output.video_url || output.url || output.videoUrl
+// Proveedor: BytePlus ModelArk (API oficial de ByteDance)
+// Endpoint status: GET /contents/generations/tasks/{taskId}
+// Auth: Authorization: Bearer BYTEPLUS_API_KEY
+//
+// Estados de BytePlus:
+//   "running"   → en proceso (equivale a IN_PROGRESS)
+//   "succeeded" → completado con éxito
+//   "failed"    → error
+//
+// Cuando el job completa (succeeded):
+//   1. Extrae la URL del video de la respuesta de BytePlus
+//      La URL está en: content[].video_url.url
 //   2. Descarga el video como buffer
-//   3. Lo sube al bucket "videos" del usuario en Supabase Storage
+//   3. Lo sube al bucket "videos" de Supabase Storage
 //      → así aparece automáticamente en la biblioteca
 //   4. Actualiza video_jobs con result_url
-//   5. Borra archivos temporales de cineai/faces, cineai/refs,
-//      cineai/frames y cineai/audio del bucket user-uploads
+//   5. Borra archivos temporales de cineai/ en user-uploads
 //
-// La biblioteca (LibraryView) lee del bucket "videos" via
-// listUserVideosFromStorage() en src/lib/generations.ts
+// NOTA: Las URLs de BytePlus expiran en 24 horas.
+//   Por eso es crítico descargar y subir a Supabase Storage inmediatamente.
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../../src/lib/getUserIdFromAuth.js";
 
-// ── Consulta el estado del job en PiAPI ──────────────────────
-async function fetchFromPiAPI(taskId) {
-  const res = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
-    headers: { "x-api-key": process.env.PIAPI_KEY },
+const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
+
+// ── Consulta el estado del job en BytePlus ────────────────────
+async function fetchFromByteplus(taskId) {
+  const res = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
+    headers: {
+      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
+    },
   });
   const data = await res.json();
-  if (!res.ok || data.code !== 200) {
-    throw new Error(`PiAPI status error: ${data.message || res.status}`);
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message || data.message || `BytePlus status error ${res.status}`);
   }
-  return data.data;
+  return data;
 }
 
-// ── Extrae la URL del video del output de PiAPI ───────────────
-// PiAPI puede devolver la URL en distintos campos según la versión.
-// Se revisan en orden de prioridad.
-function extractVideoUrl(output) {
-  if (!output) return null;
-  return (
-    output.video     ||
-    output.video_url ||
-    output.url       ||
-    output.videoUrl  ||
-    (Array.isArray(output) ? output[0]?.url || output[0]?.video : null) ||
-    null
-  );
+// ── Extrae la URL del video del response de BytePlus ──────────
+// BytePlus devuelve el video en: content array, tipo "video_url"
+// Estructura: { content: [ { type: "video_url", video_url: { url: "..." } } ] }
+function extractVideoUrl(taskData) {
+  if (!taskData) return null;
+
+  // Buscar en el array content el elemento de tipo video_url
+  if (Array.isArray(taskData.content)) {
+    for (const item of taskData.content) {
+      if (item.type === "video_url" && item.video_url?.url) {
+        return item.video_url.url;
+      }
+    }
+  }
+
+  // Fallbacks por si la estructura cambia
+  if (taskData.video_url) return taskData.video_url;
+  if (taskData.output?.video_url) return taskData.output.video_url;
+  if (taskData.output?.video) return taskData.output.video;
+  if (taskData.result?.url) return taskData.result.url;
+
+  return null;
 }
 
-// ── Descarga el video de PiAPI y lo sube al bucket "videos" ──
-// Esto hace que aparezca en la biblioteca del usuario.
-// Si falla la subida, devuelve la URL de PiAPI como fallback
-// (el video se puede ver pero no aparece en la biblioteca).
-async function saveVideoToLibrary(userId, piApiVideoUrl, taskId) {
+// ── Descarga el video de BytePlus y lo sube al bucket "videos" ─
+// CRÍTICO: las URLs de BytePlus expiran en 24 horas.
+// Hay que descargar y persistir en Supabase Storage inmediatamente.
+async function saveVideoToLibrary(userId, byteplusVideoUrl, taskId) {
   try {
-    // 1. Descargar el video desde PiAPI como buffer
-    const videoRes = await fetch(piApiVideoUrl);
-    if (!videoRes.ok) throw new Error(`No se pudo descargar el video: ${videoRes.status}`);
+    // 1. Descargar el video desde BytePlus como buffer
+    const videoRes = await fetch(byteplusVideoUrl);
+    if (!videoRes.ok) {
+      throw new Error(`No se pudo descargar el video: ${videoRes.status}`);
+    }
 
     const arrayBuffer = await videoRes.arrayBuffer();
     const buffer      = Buffer.from(arrayBuffer);
@@ -62,45 +84,46 @@ async function saveVideoToLibrary(userId, piApiVideoUrl, taskId) {
     const filename = `cineai_${taskId.slice(0, 8)}_${Date.now()}.mp4`;
     const path     = `${userId}/${filename}`;
 
-    // 3. Subir al bucket "videos" del usuario
-    // Este es el bucket que lee la biblioteca (listUserVideosFromStorage)
+    // 3. Subir al bucket "videos" — este es el que lee la biblioteca
     const { error: uploadErr } = await supabaseAdmin.storage
       .from("videos")
-      .upload(path, buffer, { contentType: "video/mp4", upsert: false });
+      .upload(path, buffer, {
+        contentType: "video/mp4",
+        upsert:      false,
+      });
 
-    if (uploadErr) throw new Error(`Error subiendo al bucket videos: ${uploadErr.message}`);
+    if (uploadErr) {
+      throw new Error(`Error subiendo al bucket videos: ${uploadErr.message}`);
+    }
 
-    // 4. Obtener URL pública del video en Storage
+    // 4. Obtener URL pública permanente en Supabase Storage
     const { data: pubData } = supabaseAdmin.storage
       .from("videos")
       .getPublicUrl(path);
 
     console.error("[cineai/status] video saved to library:", path);
-    return pubData?.publicUrl || piApiVideoUrl;
+    return pubData?.publicUrl || byteplusVideoUrl;
 
   } catch (err) {
-    // Si falla la subida a Storage, devolver la URL de PiAPI como fallback
+    // Si falla la subida, devolver la URL de BytePlus como fallback
+    // (expira en 24h pero el usuario puede verlo de momento)
     console.error("[cineai/status] saveVideoToLibrary failed:", err.message);
-    return piApiVideoUrl;
+    return byteplusVideoUrl;
   }
 }
 
-// ── Borra archivos temporales subidos por el usuario ──────────
-// Limpia: cineai/faces, cineai/refs, cineai/frames, cineai/audio
-// No toca ninguna otra carpeta del bucket user-uploads
+// ── Borra archivos temporales de cineai/ en user-uploads ──────
 async function cleanupTempFiles(job) {
   const payload  = job?.payload || {};
   const imageUrl = payload.image_url;
   if (!imageUrl) return;
 
   try {
-    // Extraer el path del archivo desde la URL pública de Supabase Storage
-    // URL format: https://xxx.supabase.co/storage/v1/object/public/user-uploads/cineai/faces/xxx.jpg
     const urlObj    = new URL(imageUrl);
     const pathParts = urlObj.pathname.split("/object/public/user-uploads/");
     if (pathParts.length < 2) return;
 
-    const filePath = pathParts[1]; // "cineai/faces/xxx.jpg"
+    const filePath = pathParts[1];
 
     // Solo borrar archivos de carpetas temporales de cineai
     if (
@@ -140,7 +163,7 @@ export default async function handler(req, res) {
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
   // ── Buscar job en video_jobs ──────────────────────────────
-  // IMPORTANTE: busca en video_jobs con mode="cineai", NO en cineai_jobs
+  // Busca por provider_request_id = taskId, mode = "cineai"
   const { data: job, error: findErr } = await supabaseAdmin
     .from("video_jobs")
     .select("*")
@@ -155,7 +178,6 @@ export default async function handler(req, res) {
   }
 
   // ── Si ya terminó, devolver resultado cacheado ────────────
-  // Evita volver a consultar PiAPI si el job ya está resuelto en DB
   if (job.status === "COMPLETED" && job.result_url) {
     return res.status(200).json({
       ok:       true,
@@ -174,46 +196,46 @@ export default async function handler(req, res) {
     });
   }
 
-  // ── Consultar PiAPI ───────────────────────────────────────
+  // ── Consultar BytePlus ────────────────────────────────────
   let taskData;
   try {
-    taskData = await fetchFromPiAPI(taskId);
+    taskData = await fetchFromByteplus(taskId);
   } catch (err) {
-    console.error("[cineai/status] PiAPI poll error:", err.message);
+    console.error("[cineai/status] BytePlus poll error:", err.message);
     // Devolver processing para que el frontend siga intentando
     return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
   }
 
-  console.error("[cineai/status] PiAPI status:", taskData?.status, "output:", JSON.stringify(taskData?.output));
+  console.error("[cineai/status] BytePlus status:", taskData?.status, "id:", taskId);
 
-  // ── Mapear status de PiAPI a status interno ───────────────
+  // ── Mapear status de BytePlus a status interno ────────────
+  // BytePlus usa: "running" | "succeeded" | "failed"
   const providerStatus = taskData?.status;
   let newStatus     = "IN_PROGRESS";
   let finalVideoUrl = null;
   let errorMsg      = null;
 
-  if (providerStatus === "completed") {
-    const piApiVideoUrl = extractVideoUrl(taskData?.output);
+  if (providerStatus === "succeeded") {
+    const byteplusVideoUrl = extractVideoUrl(taskData);
 
-    if (piApiVideoUrl) {
-      // Descargar y subir al bucket "videos" para que aparezca en biblioteca
-      finalVideoUrl = await saveVideoToLibrary(userId, piApiVideoUrl, taskId);
+    if (byteplusVideoUrl) {
+      // Descargar y subir al bucket "videos" (URL de BytePlus expira en 24h)
+      finalVideoUrl = await saveVideoToLibrary(userId, byteplusVideoUrl, taskId);
       newStatus     = "COMPLETED";
-      // Borrar archivos temporales (fotos, frames, audio del usuario)
+      // Limpiar archivos temporales del usuario
       await cleanupTempFiles(job);
     } else {
-      // Completed pero sin URL — tratar como fallido
-      console.error("[cineai/status] completed but no videoUrl. Full output:", JSON.stringify(taskData?.output));
+      console.error("[cineai/status] succeeded but no videoUrl. Full response:", JSON.stringify(taskData));
       newStatus = "FAILED";
-      errorMsg  = "El video se generó pero PiAPI no devolvió la URL";
+      errorMsg  = "El video se generó pero BytePlus no devolvió la URL";
     }
 
-  } else if (providerStatus === "failed" || providerStatus === "error") {
+  } else if (providerStatus === "failed") {
     newStatus = "FAILED";
-    errorMsg  = taskData?.error?.message || taskData?.meta?.error || "Error en PiAPI";
+    errorMsg  = taskData?.error?.message || taskData?.fail_message || "Error en BytePlus";
 
   } else {
-    // pending, processing, running, queued → seguir esperando
+    // "running" u otro → seguir esperando
     newStatus = "IN_PROGRESS";
   }
 
