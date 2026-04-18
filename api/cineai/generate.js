@@ -33,12 +33,15 @@ import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 
-// ── Modelos BytePlus Seedance 2.0 Fast ───────────────────────
-// Model ID exacto confirmado desde el Playground de BytePlus ModelArk.
-const MODEL_I2V      = "dreamina-seedance-2-0-fast-260128";
-const MODEL_T2V      = "dreamina-seedance-2-0-fast-260128";
-const MODEL_FAST_I2V = "dreamina-seedance-2-0-fast-260128";
-const MODEL_FAST_T2V = "dreamina-seedance-2-0-fast-260128";
+// ── Modelos BytePlus Seedance 2.0 ─────────────────────────────
+// IDs exactos confirmados desde Foundation Models de BytePlus ModelArk.
+// fast-260128  = activado ✓ — más rápido, mismas capacidades multimodal
+// 260128       = requiere aprobación manual de ventas
+// Usamos fast para todos los modos.
+const MODEL_I2V      = "dreamina-seedance-2-0-260128";
+const MODEL_T2V      = "dreamina-seedance-2-0-260128";
+const MODEL_FAST_I2V = "dreamina-seedance-2-0-260128";
+const MODEL_FAST_T2V = "dreamina-seedance-2-0-260128";
 
 // ── Costo en Jades por duración ───────────────────────────────
 const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
