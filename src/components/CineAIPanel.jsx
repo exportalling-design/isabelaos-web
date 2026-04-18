@@ -786,16 +786,34 @@ export default function CineAIPanel() {
           ) : (
             <>
               <div
-                className={`upload-zone ${facePreview ? "has-file" : ""} ${uploadingFace ? "uploading" : ""}`}
-                onClick={() => !facePreview && faceInputRef.current?.click()}>
+                className={`upload-zone ${facePreview ? "has-file" : ""} ${uploadingFace ? "uploading" : ""}`}>
                 {facePreview ? (
                   <><div className="uz-badge">✓ foto</div><img src={facePreview} className="uz-thumb" alt="preview" /></>
                 ) : uploadingFace ? (
                   <p style={{ fontSize: 11, color: "#c8a050", letterSpacing: 2 }}>Subiendo...</p>
                 ) : (
-                  <><span style={{ fontSize: 26 }}>👤</span>
-                  <p className="uz-label">Sube tu foto para<br />aparecer en la escena</p>
-                  <p className="uz-hint">JPG / PNG</p></>
+                  <>
+                    <span style={{ fontSize: 26 }}>👤</span>
+                    <p className="uz-label">Tu foto para aparecer en la escena</p>
+                    <button
+                      type="button"
+                      onClick={() => faceInputRef.current?.click()}
+                      style={{
+                        marginTop: 8,
+                        background: "rgba(200,160,80,0.12)",
+                        border: "1px solid rgba(200,160,80,0.35)",
+                        borderRadius: 8,
+                        color: "#c8a050",
+                        fontFamily: "'Syne', sans-serif",
+                        fontSize: 12,
+                        letterSpacing: 1,
+                        padding: "8px 20px",
+                        cursor: "pointer",
+                      }}>
+                      📁 Seleccionar foto
+                    </button>
+                    <p className="uz-hint" style={{ marginTop: 6 }}>JPG / PNG</p>
+                  </>
                 )}
               </div>
               {facePreview && (
@@ -841,8 +859,7 @@ export default function CineAIPanel() {
           <div className="audio-section">
             <p className="sec-label" style={{ marginTop: 14 }}>Audio para Lip Sync (opcional)</p>
             <div
-              className={`audio-zone ${audioUrl ? "has-file" : ""} ${uploadingAudio ? "uploading" : ""}`}
-              onClick={() => !audioUrl && audioInputRef.current?.click()}>
+              className={`audio-zone ${audioUrl ? "has-file" : ""} ${uploadingAudio ? "uploading" : ""}`}>
               <span style={{ fontSize: 20, flexShrink: 0 }}>🎵</span>
               <div className="audio-zone-text">
                 {audioUrl ? (
@@ -856,6 +873,23 @@ export default function CineAIPanel() {
                   <>
                     <div className="audio-zone-label">Subir audio</div>
                     <div className="audio-zone-hint">MP3 / WAV · cualquier canción</div>
+                    <button
+                      type="button"
+                      onClick={() => audioInputRef.current?.click()}
+                      style={{
+                        marginTop: 6,
+                        background: "rgba(200,160,80,0.12)",
+                        border: "1px solid rgba(200,160,80,0.35)",
+                        borderRadius: 8,
+                        color: "#c8a050",
+                        fontFamily: "'Syne', sans-serif",
+                        fontSize: 11,
+                        letterSpacing: 1,
+                        padding: "6px 16px",
+                        cursor: "pointer",
+                      }}>
+                      📁 Seleccionar audio
+                    </button>
                   </>
                 )}
               </div>
@@ -894,8 +928,7 @@ export default function CineAIPanel() {
             <div style={{ marginTop: 10 }}>
               <div
                 className={`upload-zone ${refVideoPreview ? "has-file" : ""} ${uploadingVideo ? "uploading" : ""}`}
-                style={{ minHeight: 130, maxHeight: 170 }}
-                onClick={() => !refVideoPreview && !showExtUrlInput && videoInputRef.current?.click()}>
+                style={{ minHeight: 130, maxHeight: 170 }}>
                 {refVideoPreview ? (
                   <>
                     <div className="uz-badge">✓ referencia</div>
@@ -915,11 +948,25 @@ export default function CineAIPanel() {
                 ) : (
                   <>
                     <span style={{ fontSize: 28 }}>🎬</span>
-                    <p className="uz-label">
-                      Haz click para subir video MP4<br />
-                      <span style={{ color: "#c8a050", fontSize: 10 }}>o pega una URL abajo</span>
-                    </p>
-                    <p className="uz-hint">MP4 · máx recomendado 15s</p>
+                    <p className="uz-label">Video de referencia MP4</p>
+                    <button
+                      type="button"
+                      onClick={() => videoInputRef.current?.click()}
+                      style={{
+                        marginTop: 8,
+                        background: "rgba(200,160,80,0.12)",
+                        border: "1px solid rgba(200,160,80,0.35)",
+                        borderRadius: 8,
+                        color: "#c8a050",
+                        fontFamily: "'Syne', sans-serif",
+                        fontSize: 12,
+                        letterSpacing: 1,
+                        padding: "8px 20px",
+                        cursor: "pointer",
+                      }}>
+                      📁 Seleccionar MP4
+                    </button>
+                    <p className="uz-hint" style={{ marginTop: 6 }}>máx recomendado 15s</p>
                   </>
                 )}
               </div>
