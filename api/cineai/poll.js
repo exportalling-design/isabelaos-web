@@ -1,11 +1,6 @@
 // api/cineai/poll.js
-// ─────────────────────────────────────────────────────────────
-// Polling del estado de un job de CineAI en BytePlus ModelArk.
-// Sin ruta dinámica — recibe taskId como query param:
+// Polling sin ruta dinámica — recibe taskId como query param:
 //   GET /api/cineai/poll?taskId=cgt-xxx
-// Esto evita el problema de Vercel con rutas dinámicas [taskId]
-// cuando hay un rewrite catch-all en vercel.json.
-// ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
@@ -22,14 +17,25 @@ async function fetchFromByteplus(taskId) {
   return data;
 }
 
+// BytePlus devuelve content como OBJETO: { video_url: "https://..." }
+// NO como array. Estructura real confirmada:
+// { id, model, status: "succeeded", content: { video_url: "https://..." } }
 function extractVideoUrl(taskData) {
   if (!taskData) return null;
+
+  // Estructura real de BytePlus — content es objeto
+  if (taskData.content?.video_url) return taskData.content.video_url;
+
+  // Fallback — content como array
   if (Array.isArray(taskData.content)) {
     for (const item of taskData.content) {
       if (item.type === "video_url" && item.video_url?.url) return item.video_url.url;
+      if (item.video_url) return typeof item.video_url === "string" ? item.video_url : item.video_url.url;
     }
   }
-  return taskData.video_url || taskData.output?.video_url || taskData.output?.video || taskData.result?.url || null;
+
+  // Otros fallbacks
+  return taskData.video_url || taskData.output?.video_url || taskData.output?.video || null;
 }
 
 async function saveVideoToLibrary(userId, videoUrl, taskId) {
@@ -75,11 +81,9 @@ export default async function handler(req, res) {
   const userId = await getUserIdFromAuthHeader(req);
   if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
-  // taskId viene como query param: /api/cineai/poll?taskId=cgt-xxx
   const taskId = req.query.taskId;
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
-  // Buscar job en video_jobs
   const { data: job, error: findErr } = await supabaseAdmin
     .from("video_jobs")
     .select("*")
@@ -93,7 +97,6 @@ export default async function handler(req, res) {
     return res.status(404).json({ ok: false, error: "Job no encontrado" });
   }
 
-  // Si ya terminó, devolver resultado cacheado
   if (job.status === "COMPLETED" && job.result_url) {
     return res.status(200).json({ ok: true, status: "completed", videoUrl: job.result_url, jobId: job.id });
   }
@@ -101,7 +104,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, status: "failed", error: job.provider_error || "Error", jobId: job.id });
   }
 
-  // Consultar BytePlus
   let taskData;
   try {
     taskData = await fetchFromByteplus(taskId);
