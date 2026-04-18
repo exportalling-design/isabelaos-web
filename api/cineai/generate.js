@@ -34,14 +34,12 @@ const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 
 // ── Modelos BytePlus Seedance 2.0 Fast ───────────────────────
-// Usamos fast en todos los modos — mismas capacidades (imagen, video, audio),
-// más rápido y menos tokens. El modelo estándar requiere aprobación manual.
-// i2v = image-to-video (acepta imagen, video y audio de referencia)
-// t2v = text-to-video (solo texto o audio sin imagen)
-const MODEL_I2V      = "dreamina-seedance-2-0-fast-i2v-250924";
-const MODEL_T2V      = "dreamina-seedance-2-0-fast-t2v-250924";
-const MODEL_FAST_I2V = "dreamina-seedance-2-0-fast-i2v-250924";
-const MODEL_FAST_T2V = "dreamina-seedance-2-0-fast-t2v-250924";
+// Model IDs exactos de la documentación oficial de BytePlus ModelArk.
+// Un solo modelo maneja todos los modos (imagen, video, audio, texto).
+const MODEL_I2V      = "dreamina-seedance-2-0-260128";
+const MODEL_T2V      = "dreamina-seedance-2-0-260128";
+const MODEL_FAST_I2V = "dreamina-seedance-2-0-260128";
+const MODEL_FAST_T2V = "dreamina-seedance-2-0-260128";
 
 // ── Costo en Jades por duración ───────────────────────────────
 const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
