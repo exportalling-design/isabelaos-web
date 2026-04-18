@@ -5,25 +5,23 @@
 // Modos:
 //   t2v          → solo texto → video
 //   i2v          → foto del usuario → video animado
-//   r2v          → video de referencia → copia SOLO el movimiento, NO el fondo
+//   r2v          → video de referencia → copia SOLO el movimiento
 //   r2v+face     → video referencia + foto → movimiento con cara del usuario
 //   animate      → foto exacta animada respetando fondo y personajes originales
 //   lipsync      → foto + audio → lip sync de esa canción específica
+//   continuation → último frame + video completo anterior → continuidad perfecta
 //
-// IMPORTANTE sobre R2V y fondo:
-//   Seedance 2.0 copia el movimiento del video de referencia pero el fondo
-//   siempre viene de la imagen del usuario o del prompt. NUNCA copia el fondo
-//   del video de referencia. Esto es comportamiento del modelo, no un bug.
+// FIX CONTINUACIÓN:
+//   isContinuation=true manda imageUrl (último frame) + refVideoUrl (video completo anterior)
+//   Así Seedance mantiene atmósfera, iluminación, movimiento y estilo — no solo el frame
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }           from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader }  from "../../src/lib/getUserIdFromAuth.js";
 
 const PIAPI_URL = "https://api.piapi.ai/api/v1/task";
 
-// ── Costo en Jades por duración ───────────────────────────────
 const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
 
-// ── Celebridades y personajes bloqueados ──────────────────────
 const BLOCKED_NAMES = [
   "tom cruise","brad pitt","angelina jolie","scarlett johansson",
   "will smith","dwayne johnson","the rock","ryan reynolds",
@@ -75,10 +73,11 @@ export default async function handler(req, res) {
 
   const {
     prompt,
-    imageUrl,      // URL foto del usuario
-    refVideoUrl,   // URL video de referencia (subido o externo)
-    audioUrl,      // URL audio para lip sync
-    animateExact,  // boolean: animar foto exacta respetando escenario
+    imageUrl,         // URL foto del usuario / último frame en continuación
+    refVideoUrl,      // URL video de referencia / video completo anterior en continuación
+    audioUrl,         // URL audio para lip sync
+    animateExact,     // boolean: animar foto exacta respetando escenario
+    isContinuation,   // boolean: es continuación de clip anterior
     duration = 10,
     aspectRatio = "9:16",
     sceneMode = "tiktok",
@@ -122,40 +121,58 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: spendErr.message });
   }
 
-  // ── Construir prompt y payload ────────────────────────────
+  // ── Construir prompt y payload ─────────────────────────────
   let finalPrompt = String(prompt).trim();
   const inputExtra = {};
   let mode = "t2v";
 
-  if (animateExact && imageUrl) {
-    // Modo animar foto exacta — prompt muy específico para que respete el fondo
-    // y los personajes originales de la imagen
+  if (isContinuation && imageUrl && refVideoUrl) {
+    // ── CONTINUACIÓN PERFECTA ─────────────────────────────────
+    // último frame como imagen de inicio (ancla visual exacta)
+    // video completo anterior como @Video1 (referencia de atmósfera, luz, cámara, estilo)
+    // Esta es la técnica que usan los mejores creadores de AI video para continuidad perfecta
+    inputExtra.image_urls = [imageUrl];
+    inputExtra.video_urls = [refVideoUrl];
+    finalPrompt = `Continue this exact scene seamlessly from @Image1. Use @Video1 as full reference to maintain the same atmosphere, lighting, camera movement, color grading, and visual style throughout. The continuation must feel like an uninterrupted extension of the exact same shot with no cuts or style changes. ${finalPrompt}`;
+    mode = "continuation";
+
+  } else if (isContinuation && imageUrl && !refVideoUrl) {
+    // Fallback: solo frame (no debería pasar pero por si acaso)
+    inputExtra.image_urls = [imageUrl];
+    finalPrompt = `Continue this exact scene seamlessly from @Image1. Maintain the same atmosphere, lighting, and visual style. ${finalPrompt}`;
+    mode = "continuation_frame_only";
+
+  } else if (animateExact && imageUrl) {
     inputExtra.image_urls = [imageUrl];
     finalPrompt = `Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, scenery, and all characters exactly as they appear in the image. Do not change, replace, or add any new backgrounds or characters. Only add natural movement to the existing subjects. ${finalPrompt}`;
     mode = "animate";
+
   } else if (audioUrl && imageUrl) {
-    // Modo lip sync — foto + audio
+    // Lip sync — foto + audio
     inputExtra.image_urls = [imageUrl];
     inputExtra.audio_urls = [audioUrl];
     finalPrompt = `Lip sync the person in @Image1 to the audio in @Audio1. The person's mouth movements should match the song exactly. Keep the original background. ${finalPrompt}`;
     mode = "lipsync";
+
   } else if (audioUrl && !imageUrl) {
-    // Audio sin foto — genera personaje con lip sync
+    // Audio sin foto
     inputExtra.audio_urls = [audioUrl];
     finalPrompt = `Person lip syncing to the audio in @Audio1, mouth movements perfectly synced to the music. ${finalPrompt}`;
     mode = "lipsync";
-  } else if (refVideoUrl) {
-    // R2V — copia SOLO el movimiento, el fondo viene de la imagen o del prompt
-    // NOTA: Seedance NUNCA copia el fondo del video de referencia
+
+  } else if (refVideoUrl && imageUrl) {
+    // R2V + cara del usuario
     inputExtra.video_urls = [refVideoUrl];
-    if (imageUrl) {
-      inputExtra.image_urls = [imageUrl];
-      finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Use the person from @Image1 as the subject. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
-      mode = "r2v+face";
-    } else {
-      finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
-      mode = "r2v";
-    }
+    inputExtra.image_urls = [imageUrl];
+    finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Use the person from @Image1 as the subject. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
+    mode = "r2v+face";
+
+  } else if (refVideoUrl) {
+    // R2V solo movimiento
+    inputExtra.video_urls = [refVideoUrl];
+    finalPrompt = `Copy ONLY the body movement and choreography from @Video1. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
+    mode = "r2v";
+
   } else if (imageUrl) {
     inputExtra.image_urls = [imageUrl];
     mode = "i2v";
@@ -190,7 +207,6 @@ export default async function handler(req, res) {
       throw new Error(piTask.message || `PiAPI error ${piRes.status}`);
     }
   } catch (err) {
-    // Reembolsar Jades si PiAPI falla
     await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount:  -jadeCost,
@@ -204,7 +220,6 @@ export default async function handler(req, res) {
   const taskId = piTask.data?.task_id;
 
   if (!taskId) {
-    // Sin taskId no podemos hacer polling — reembolsar
     await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount:  -jadeCost,
@@ -230,25 +245,23 @@ export default async function handler(req, res) {
     provider_status:     "pending",
     started_at:          new Date().toISOString(),
     payload: {
-      task_id:       taskId,
-      cineai_mode:   mode,
-      scene_mode:    sceneMode,
+      task_id:          taskId,
+      cineai_mode:      mode,
+      scene_mode:       sceneMode,
       duration,
-      aspect_ratio:  aspectRatio,
-      image_url:     imageUrl    || null,
-      ref_video_url: refVideoUrl || null,
-      audio_url:     audioUrl    || null,
-      animate_exact: animateExact || false,
-      jade_cost:     jadeCost,
+      aspect_ratio:     aspectRatio,
+      image_url:        imageUrl     || null,
+      ref_video_url:    refVideoUrl  || null,
+      audio_url:        audioUrl     || null,
+      animate_exact:    animateExact  || false,
+      is_continuation:  isContinuation || false,
+      jade_cost:        jadeCost,
       ref,
     },
   });
 
   if (insertErr) {
     console.error("[cineai/generate] video_jobs insert failed:", insertErr.message);
-    // No reembolsamos aquí — el job en PiAPI ya está corriendo
-    // El usuario puede perder el video si el insert falla
-    // En producción se podría agregar un sistema de recuperación
   }
 
   console.error("[cineai/generate] OK", { userId, jobId, taskId, mode, jadeCost });
