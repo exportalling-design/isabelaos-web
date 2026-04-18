@@ -149,15 +149,15 @@ export default async function handler(req, res) {
 
   } else if (audioUrl && imageUrl) {
     // Lip sync — foto + audio
+    // NOTA: audio_urls está temporalmente desactivado en PiAPI Seedance.
+    // Se genera lip sync visualmente con la foto. El audio se agrega en edición (CapCut).
     inputExtra.image_urls = [imageUrl];
-    inputExtra.audio_urls = [audioUrl];
-    finalPrompt = `Lip sync the person in @Image1 to the audio in @Audio1. The person's mouth movements should match the song exactly. Keep the original background. ${finalPrompt}`;
+    finalPrompt = `Lip sync the person in @Image1 to music, expressive and natural mouth movements, singing performance, close-up face, studio lighting. ${finalPrompt}`;
     mode = "lipsync";
 
   } else if (audioUrl && !imageUrl) {
-    // Audio sin foto
-    inputExtra.audio_urls = [audioUrl];
-    finalPrompt = `Person lip syncing to the audio in @Audio1, mouth movements perfectly synced to the music. ${finalPrompt}`;
+    // Audio sin foto — lip sync visual sin audio_urls
+    finalPrompt = `Person lip syncing to music, expressive and natural mouth movements, singing performance. ${finalPrompt}`;
     mode = "lipsync";
 
   } else if (refVideoUrl && imageUrl) {
@@ -180,7 +180,7 @@ export default async function handler(req, res) {
 
   const piPayload = {
     model: "seedance",
-    task_type: "seedance-2-preview",
+    task_type: "seedance-2-preview-vision",
     input: {
       prompt: finalPrompt,
       duration,
