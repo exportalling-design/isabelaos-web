@@ -1,9 +1,9 @@
 {
+  "crons": [],
   "functions": {
     "api/generate-video.js": { "maxDuration": 800 }
   },
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
