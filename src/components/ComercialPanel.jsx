@@ -1,143 +1,97 @@
 // src/components/ComercialPanel.jsx
 // ─────────────────────────────────────────────────────────────
-// Panel principal de Comercial IA con 5 plantillas:
-//   1. Transición de Moda   → Seedance Omni (ropa que cambia, modelo fijo)
-//   2. Producto Estelar      → Seedance I2V  (producto lanzado + efectos)
-//   3. Desfile Mágico        → Seedance I2V  (prendas + efecto elegido + modelo)
-//   4. Explosión de Sabor    → Seedance I2V  (comida desintegrada en capas)
-//   5. Chef IA               → Seedance I2V  (chef avatar prepara el plato)
-//
-// Costo: 30 Jades por generación
-// Guardado: bucket "videos" en Supabase Storage (misma biblioteca)
+// Panel Comercial IA — BytePlus Seedance 2.0
+// Plantillas:
+//   1. Transición de Moda   → 4 casos (solo ropa / +modelo / +fondo / todo)
+//   2. Producto Estelar      → producto con efectos épicos
+//   3. Explosión de Sabor    → comida desintegrada en capas
+//   4. Chef IA               → chef preparando el plato
+//   5. Comercial Completo    → storyboard completo con narración
 // ─────────────────────────────────────────────────────────────
 import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-// ── Precios por duración (igual que CineAI) ───────────────────
-const JADE_COSTS = { 10: 35, 15: 70 };
+const JADE_COSTS = { moda: 120, producto: 120, sabor: 120, chef: 120, completo: 120 };
 
-// ── Definición de plantillas ──────────────────────────────────
 const PLANTILLAS = [
   {
-    id: "transicion_moda",
-    nombre: "Transición de Moda",
-    emoji: "👗",
-    duracion: 15,
-    descripcion: "Sube fotos de tu modelo y prendas. El modelo permanece igual y solo cambia la ropa en transición suave.",
-    colores: "from-pink-500/20 via-rose-500/10 to-purple-500/20",
-    borde: "border-pink-500/30",
-    acento: "text-pink-300",
-    boton: "bg-pink-500/20 hover:bg-pink-500/30 border-pink-400/40",
-    videoEjemplo: null, // Agregar URL cuando tengas el video de ejemplo
-    campos: {
-      modelo: { label: "📸 Foto del modelo (1 foto)", tipo: "imagen_unica", requerido: true, hint: "Foto completa del modelo de frente" },
-      prendas: { label: "👚 Fotos de prendas (2-4 prendas)", tipo: "imagen_multiple", max: 4, requerido: true, hint: "Cada prenda en fondo blanco o claro" },
-      fondo: { label: "🏖️ Fondo / escena (opcional)", tipo: "imagen_unica", requerido: false, hint: "Playa, piscina, ciudad — o déjalo en blanco para fondo IA" },
-      narracion: { label: "🎙️ Narración (opcional)", tipo: "texto", requerido: false, hint: "Texto que quieres que se escuche en el video" },
-    }
+    id:          "transicion_moda",
+    nombre:      "Transición de Moda",
+    emoji:       "👗",
+    tipo:        "moda",
+    descripcion: "Sube tus prendas y la IA genera un video fashion con tu modelo o una IA. Fondo real o inventado.",
+    colores:     "from-pink-500/20 via-rose-500/10 to-purple-500/20",
+    borde:       "border-pink-500/30",
+    acento:      "text-pink-300",
   },
   {
-    id: "producto_estelar",
-    nombre: "Producto Estelar",
-    emoji: "✨",
-    duracion: 10,
-    descripcion: "Sube la foto de tu producto. Una mano lo lanza al aire y se transforma con efectos espectaculares.",
-    colores: "from-cyan-500/20 via-blue-500/10 to-indigo-500/20",
-    borde: "border-cyan-500/30",
-    acento: "text-cyan-300",
-    boton: "bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-400/40",
-    videoEjemplo: null,
-    campos: {
-      producto: { label: "📦 Foto de tu producto", tipo: "imagen_unica", requerido: true, hint: "Cualquier producto: perfume, crema, ropa, accesorio..." },
-      efecto: { label: "✨ Efecto de transformación", tipo: "selector", opciones: [
-        { value: "splash", label: "💧 Splash — líquido y foam" },
-        { value: "petals", label: "🌸 Pétalos y flores" },
-        { value: "fire",   label: "🔥 Fuego y energía" },
-        { value: "luxury", label: "💎 Partículas doradas" },
-        { value: "smoke",  label: "🌫️ Humo y cristales" },
-      ], requerido: true },
-      narracion: { label: "🎙️ Narración (opcional)", tipo: "texto", requerido: false, hint: "Ej: Descubre el producto que transformará tu rutina" },
-    }
+    id:          "producto_estelar",
+    nombre:      "Producto Estelar",
+    emoji:       "✨",
+    tipo:        "producto",
+    descripcion: "Tu producto lanzado al aire con efectos épicos — fuego, partículas doradas, splash, cristales.",
+    colores:     "from-cyan-500/20 via-blue-500/10 to-indigo-500/20",
+    borde:       "border-cyan-500/30",
+    acento:      "text-cyan-300",
   },
   {
-    id: "desfile_magico",
-    nombre: "Desfile Mágico",
-    emoji: "🪄",
-    duracion: 15,
-    descripcion: "Sube prendas sueltas. La IA las une con un efecto mágico y hace aparecer el outfit completo en una modelo.",
-    colores: "from-violet-500/20 via-purple-500/10 to-fuchsia-500/20",
-    borde: "border-violet-500/30",
-    acento: "text-violet-300",
-    boton: "bg-violet-500/20 hover:bg-violet-500/30 border-violet-400/40",
-    videoEjemplo: null,
-    campos: {
-      prendas: { label: "👔 Fotos de prendas del outfit (2-5)", tipo: "imagen_multiple", max: 5, requerido: true, hint: "Blusa, pantalón, zapatos, accesorios — lo que tengas" },
-      efecto: { label: "🎨 Estilo de efecto mágico", tipo: "selector", opciones: [
-        { value: "aurora",     label: "🌌 Aurora — partículas de luz + humo" },
-        { value: "bloom",      label: "🌺 Bloom — flores + líquido" },
-        { value: "galaxia",    label: "🌠 Galaxia — destellos + morphing" },
-        { value: "natura",     label: "🦋 Natura — mariposas + niebla" },
-        { value: "fuego_frio", label: "❄️🔥 Fuego Frío — humo + cristales dorados" },
-      ], requerido: true },
-      fondo: { label: "🏖️ Fondo / escena (opcional)", tipo: "imagen_unica", requerido: false, hint: "Playa, resort, ciudad — o déjalo en blanco" },
-      narracion: { label: "🎙️ Narración (opcional)", tipo: "texto", requerido: false, hint: "Ej: Luce increíble con nuestra nueva colección" },
-    }
+    id:          "explosion_sabor",
+    nombre:      "Explosión de Sabor",
+    emoji:       "💥",
+    tipo:        "sabor",
+    descripcion: "Tu platillo se desintegra en capas mostrando cada ingrediente en slow motion épico.",
+    colores:     "from-orange-500/20 via-amber-500/10 to-red-500/20",
+    borde:       "border-orange-500/30",
+    acento:      "text-orange-300",
   },
   {
-    id: "explosion_sabor",
-    nombre: "Explosión de Sabor",
-    emoji: "💥",
-    duracion: 10,
-    descripcion: "Sube la foto de tu platillo. La IA lo desintegra en capas mostrando cada ingrediente flotando con efectos épicos.",
-    colores: "from-orange-500/20 via-amber-500/10 to-red-500/20",
-    borde: "border-orange-500/30",
-    acento: "text-orange-300",
-    boton: "bg-orange-500/20 hover:bg-orange-500/30 border-orange-400/40",
-    videoEjemplo: null,
-    campos: {
-      plato: { label: "🍔 Foto de tu platillo", tipo: "imagen_unica", requerido: true, hint: "Burger, taco, pizza, comida china, lo que sea" },
-      nombre_negocio: { label: "🏪 Nombre de tu negocio", tipo: "texto_corto", requerido: true, hint: "Ej: Burger Bros, Tacos El Rey, Sushi Palace" },
-      slogan: { label: "💬 Slogan o texto del video", tipo: "texto_corto", requerido: false, hint: "Ej: ¡Sabor que te conquista!" },
-      narracion: { label: "🎙️ Texto para narración ElevenLabs", tipo: "texto", requerido: false, hint: "Lo que quieres que se escuche mientras explota el plato" },
-    }
+    id:          "chef_ia",
+    nombre:      "Chef IA",
+    emoji:       "👨‍🍳",
+    tipo:        "chef",
+    descripcion: "Video cinematográfico de un chef preparando tu plato — usa tu foto o elige un avatar chef.",
+    colores:     "from-slate-500/20 via-zinc-500/10 to-neutral-500/20",
+    borde:       "border-slate-500/30",
+    acento:      "text-slate-300",
   },
   {
-    id: "chef_ia",
-    nombre: "Chef IA",
-    emoji: "👨‍🍳",
-    duracion: 15,
-    descripcion: "Sube tu foto o elige un avatar chef. La IA genera un video cinematográfico mostrando cómo preparas tu plato.",
-    colores: "from-slate-500/20 via-zinc-500/10 to-neutral-500/20",
-    borde: "border-slate-500/30",
-    acento: "text-slate-300",
-    boton: "bg-slate-500/20 hover:bg-slate-500/30 border-slate-400/40",
-    videoEjemplo: null,
-    campos: {
-      plato: { label: "🍽️ Foto de tu platillo terminado", tipo: "imagen_unica", requerido: true, hint: "La foto del plato que vas a preparar en el video" },
-      chef: { label: "👤 Tu foto (rostro) o avatar IA", tipo: "imagen_unica_o_avatar", requerido: false, hint: "Sube tu foto para que aparezcas tú, o elige un chef IA" },
-      avatar_tipo: { label: "🤖 Avatar chef (si no subes foto)", tipo: "selector", opciones: [
-        { value: "chef_hombre_latino",  label: "👨 Chef hombre latino" },
-        { value: "chef_mujer_latina",   label: "👩 Chef mujer latina" },
-        { value: "chef_hombre_barbudo", label: "🧔 Chef hombre barbudo tatuado" },
-        { value: "chef_mujer_moderna",  label: "💁‍♀️ Chef mujer moderna" },
-      ], requerido: false },
-      nombre_negocio: { label: "🏪 Nombre de tu negocio", tipo: "texto_corto", requerido: true, hint: "Ej: La Parrilla de Don Pedro" },
-      narracion: { label: "🎙️ Texto para narración", tipo: "texto", requerido: false, hint: "Ej: En La Parrilla usamos solo los mejores ingredientes" },
-    }
+    id:          "comercial_completo",
+    nombre:      "Comercial Completo",
+    emoji:       "🎬",
+    tipo:        "completo",
+    descripcion: "Storyboard de 4-7 escenas con narración en off. Para cualquier producto, servicio o marca.",
+    colores:     "from-violet-500/20 via-purple-500/10 to-fuchsia-500/20",
+    borde:       "border-violet-500/30",
+    acento:      "text-violet-300",
   },
+];
+
+const EFECTOS_PRODUCTO = [
+  { value: "golden_particles", label: "💎 Partículas doradas — lujo y elegancia" },
+  { value: "fire_energy",      label: "🔥 Fuego y energía — potencia y fuerza" },
+  { value: "liquid_splash",    label: "💧 Splash de líquido — frescura y pureza" },
+  { value: "crystal_smoke",    label: "🌫️ Humo y cristales — misterio y sofisticación" },
+  { value: "flower_petals",    label: "🌸 Pétalos y flores — naturaleza y suavidad" },
+  { value: "electric_storm",   label: "⚡ Tormenta eléctrica — tecnología e innovación" },
+];
+
+const AVATARES_CHEF = [
+  { value: "chef_hombre_latino",  label: "👨 Chef hombre latino profesional" },
+  { value: "chef_mujer_latina",   label: "👩 Chef mujer latina elegante" },
+  { value: "chef_barbudo",        label: "🧔 Chef barbudo tatuado urbano" },
+  { value: "chef_mujer_moderna",  label: "💁‍♀️ Chef mujer moderna y joven" },
 ];
 
 const ACCENTS = [
   { value: "neutro",       label: "🌎 Neutro latino" },
   { value: "guatemalteco", label: "🇬🇹 Guatemalteco" },
-  { value: "colombiano",   label: "🇨🇴 Colombiano"   },
-  { value: "mexicano",     label: "🇲🇽 Mexicano"     },
-  { value: "argentino",    label: "🇦🇷 Argentino"    },
-  { value: "español",      label: "🇪🇸 Español"      },
+  { value: "colombiano",   label: "🇨🇴 Colombiano" },
+  { value: "mexicano",     label: "🇲🇽 Mexicano" },
+  { value: "argentino",    label: "🇦🇷 Argentino" },
+  { value: "español",      label: "🇪🇸 Español" },
   { value: "ingles",       label: "🇺🇸 English (US)" },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────
 async function getAuthHeaders() {
   try {
     const { data } = await supabase.auth.getSession();
@@ -163,11 +117,11 @@ async function compressImage(file, maxWidth = 1024) {
       canvas.height = Math.round(img.height * scale);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(
-        blob => { URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error("Error comprimiendo")); },
+        blob => { URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error("Error")); },
         "image/jpeg", 0.85
       );
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Error cargando imagen")); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Error cargando")); };
     img.src = url;
   });
 }
@@ -178,43 +132,28 @@ async function prepareImage(file) {
   return { base64: b64, mimeType: "image/jpeg" };
 }
 
-// ── Subcomponente: Selector de imagen ─────────────────────────
-function ImageUploadZone({ label, hint, multiple, max = 1, onFiles, previews = [], onRemove }) {
+function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, onRemove, disabled }) {
   const ref = useRef(null);
   return (
     <div className="space-y-2">
       <label className="text-xs font-semibold text-neutral-300">{label}</label>
       {hint && <p className="text-[10px] text-neutral-500">{hint}</p>}
       <div
-        onClick={() => ref.current?.click()}
-        className="relative flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 p-5 cursor-pointer hover:border-white/40 hover:bg-white/10 transition-all min-h-[80px]"
+        onClick={() => !disabled && ref.current?.click()}
+        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 p-5 min-h-[80px] transition-all ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-white/40 hover:bg-white/10"}`}
       >
-        <input
-          ref={ref}
-          type="file"
-          accept="image/*"
-          multiple={multiple}
-          className="hidden"
-          onChange={e => {
-            const files = Array.from(e.target.files || []);
-            if (files.length) onFiles(files);
-            e.target.value = "";
-          }}
-        />
+        <input ref={ref} type="file" accept="image/*" multiple={multiple} className="hidden"
+          onChange={e => { const files = Array.from(e.target.files || []); if (files.length) onFiles(files); e.target.value = ""; }} />
         <span className="text-2xl">📷</span>
-        <span className="text-[11px] text-neutral-400">
-          {multiple ? `Subir imágenes (máx ${max})` : "Subir imagen"}
-        </span>
+        <span className="text-[11px] text-neutral-400">{multiple ? `Subir imágenes (máx ${max})` : "Subir imagen"}</span>
       </div>
       {previews.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-1">
           {previews.map((src, i) => (
             <div key={i} className="relative group">
               <img src={src} alt="" className="h-16 w-16 rounded-xl object-cover border border-white/10" />
-              <button
-                onClick={() => onRemove(i)}
-                className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-bold"
-              >×</button>
+              <button onClick={() => onRemove(i)}
+                className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-bold">×</button>
             </div>
           ))}
         </div>
@@ -223,525 +162,570 @@ function ImageUploadZone({ label, hint, multiple, max = 1, onFiles, previews = [
   );
 }
 
-// ── Subcomponente: Selector de opción ─────────────────────────
-function OptionSelector({ label, opciones, value, onChange }) {
+function SceneResult({ scene, idx }) {
+  if (!scene.ok) {
+    return (
+      <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+        <p className="text-xs text-red-400">Escena {idx + 1} — Error: {scene.error}</p>
+      </div>
+    );
+  }
   return (
-    <div className="space-y-2">
-      <label className="text-xs font-semibold text-neutral-300">{label}</label>
-      <div className="grid grid-cols-1 gap-1.5">
-        {opciones.map(op => (
-          <button
-            key={op.value}
-            onClick={() => onChange(op.value)}
-            className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] text-left transition-all ${
-              value === op.value
-                ? "border-white/40 bg-white/15 text-white"
-                : "border-white/10 bg-white/5 text-neutral-400 hover:border-white/25 hover:bg-white/10"
-            }`}
-          >
-            <span>{op.label}</span>
-          </button>
-        ))}
+    <div className="rounded-xl border border-white/10 bg-black/30 overflow-hidden">
+      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+        <span className="text-[10px] text-neutral-500">Escena {scene.scene_number}</span>
+        {scene.narrative_role && <span className="text-[9px] text-neutral-600 uppercase">{scene.narrative_role}</span>}
+      </div>
+      {scene.video_url && (
+        <video src={scene.video_url} controls className="w-full aspect-[9/16] max-h-[320px] object-contain bg-black" />
+      )}
+      <div className="px-3 py-2 flex gap-2">
+        {scene.video_url && (
+          <a href={scene.video_url} download={`escena-${scene.scene_number}.mp4`}
+            className="flex-1 text-center rounded-xl border border-white/15 py-1.5 text-[10px] text-neutral-400 hover:bg-white/10 transition-all">
+            ↓ Descargar
+          </a>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Subcomponente: Card de resultado de video ─────────────────
-function VideoResultCard({ jobId, status, videoUrl, error }) {
-  if (status === "generating") {
-    return (
-      <div className="rounded-2xl border border-white/10 bg-black/40 p-6 text-center space-y-3">
-        <div className="flex justify-center gap-1.5">
-          {[0,1,2].map(i => (
-            <span key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
-          ))}
-        </div>
-        <p className="text-sm text-neutral-400">Generando tu video...</p>
-        <p className="text-[10px] text-neutral-600">Esto puede tomar 1-3 minutos</p>
-        {jobId && <p className="text-[9px] text-neutral-700 font-mono">Job: {jobId}</p>}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-center">
-        <p className="text-xs text-red-300">{error}</p>
-      </div>
-    );
-  }
-
-  if (videoUrl) {
-    return (
-      <div className="rounded-2xl border border-white/10 bg-black/40 overflow-hidden">
-        <video src={videoUrl} controls className="w-full aspect-[9/16] max-h-[400px] object-contain bg-black" />
-        <div className="px-4 py-3 flex gap-2">
-          <a
-            href={videoUrl}
-            download="plantilla-video.mp4"
-            className="flex-1 block text-center rounded-xl border border-white/20 py-2 text-[11px] text-neutral-300 hover:bg-white/10 transition-all"
-          >
-            ↓ Descargar video
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-}
-
-// ── Componente principal ──────────────────────────────────────
 export default function ComercialPanel({ userStatus }) {
-  const [plantillaActiva, setPlantillaActiva] = useState(null);
+  const [plantilla,    setPlantilla]    = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [statusText,   setStatusText]   = useState("");
+  const [error,        setError]        = useState("");
+  const [resultado,    setResultado]    = useState(null);
 
-  // Estado de campos por plantilla
-  const [imagenes, setImagenes]     = useState({}); // { campo: [File] }
-  const [previews, setPreviews]     = useState({}); // { campo: [string] }
-  const [textos, setTextos]         = useState({}); // { campo: string }
-  const [selectores, setSelectores] = useState({}); // { campo: string }
+  // Imágenes
+  const [imgModelo,   setImgModelo]   = useState([]);
+  const [imgPrendas,  setImgPrendas]  = useState([]);
+  const [imgFondo,    setImgFondo]    = useState([]);
+  const [imgProducto, setImgProducto] = useState([]);
+  const [imgPlato,    setImgPlato]    = useState([]);
+  const [imgChef,     setImgChef]     = useState([]);
 
-  // Narración ElevenLabs
-  const [accent, setAccent]   = useState("neutro");
-  const [gender, setGender]   = useState("mujer");
+  const [prevModelo,   setPrevModelo]   = useState([]);
+  const [prevPrendas,  setPrevPrendas]  = useState([]);
+  const [prevFondo,    setPrevFondo]    = useState([]);
+  const [prevProducto, setPrevProducto] = useState([]);
+  const [prevPlato,    setPrevPlato]    = useState([]);
+  const [prevChef,     setPrevChef]     = useState([]);
 
-  // Estado de generación
-  const [loading,    setLoading]    = useState(false);
-  const [statusText, setStatusText] = useState("");
-  const [error,      setError]      = useState("");
-  const [resultado,  setResultado]  = useState(null); // { jobId, videoUrl, status }
+  // Textos y selectores
+  const [descripcion,    setDescripcion]    = useState("");
+  const [narracion,      setNarracion]      = useState("");
+  const [nombreNegocio,  setNombreNegocio]  = useState("");
+  const [efecto,         setEfecto]         = useState("golden_particles");
+  const [avatarChef,     setAvatarChef]     = useState("chef_hombre_latino");
+  const [duracionComercial, setDuracionComercial] = useState(30);
+  const [accent,         setAccent]         = useState("neutro");
+  const [gender,         setGender]         = useState("mujer");
 
   const currentJades = userStatus?.jades ?? 0;
+  const jadeCosto    = plantilla ? (JADE_COSTS[plantilla.tipo] || 120) : 120;
 
-  // ── Seleccionar plantilla ─────────────────────────────────
-  function seleccionarPlantilla(p) {
-    setPlantillaActiva(p);
-    setImagenes({});
-    setPreviews({});
-    setTextos({});
-    setSelectores({});
+  function handleFiles(setter, prevSetter, files, max = 1) {
+    const nuevos = files.slice(0, max);
+    setter(nuevos);
+    prevSetter(nuevos.map(f => URL.createObjectURL(f)));
+  }
+
+  function removeFile(setter, prevSetter, idx, current) {
+    const nuevos = current.filter((_, i) => i !== idx);
+    setter(nuevos);
+    prevSetter(nuevos.map(f => URL.createObjectURL(f)));
+  }
+
+  function seleccionar(p) {
+    setPlantilla(p);
     setError("");
     setResultado(null);
-    // Preseleccionar primera opción de selectores
-    const presel = {};
-    Object.entries(p.campos).forEach(([key, campo]) => {
-      if (campo.tipo === "selector" && campo.opciones?.length) {
-        presel[key] = campo.opciones[0].value;
-      }
-    });
-    setSelectores(presel);
+    setImgModelo([]); setImgPrendas([]); setImgFondo([]);
+    setImgProducto([]); setImgPlato([]); setImgChef([]);
+    setPrevModelo([]); setPrevPrendas([]); setPrevFondo([]);
+    setPrevProducto([]); setPrevPlato([]); setPrevChef([]);
+    setDescripcion(""); setNarracion(""); setNombreNegocio("");
   }
 
-  // ── Manejar subida de imágenes ────────────────────────────
-  function handleImages(campo, files, max = 1) {
-    const current = imagenes[campo] || [];
-    const nuevos  = [...current, ...files].slice(0, max);
-    setImagenes(prev => ({ ...prev, [campo]: nuevos }));
-    const urls = nuevos.map(f => URL.createObjectURL(f));
-    setPreviews(prev => ({ ...prev, [campo]: urls }));
-  }
-
-  function removeImage(campo, idx) {
-    const nuevos = (imagenes[campo] || []).filter((_, i) => i !== idx);
-    setImagenes(prev => ({ ...prev, [campo]: nuevos }));
-    setPreviews(prev => ({ ...prev, [campo]: nuevos.map(f => URL.createObjectURL(f)) }));
-  }
-
-  // ── Validar campos requeridos ─────────────────────────────
-  function validar() {
-    if (!plantillaActiva) return "Selecciona una plantilla.";
-    for (const [key, campo] of Object.entries(plantillaActiva.campos)) {
-      if (!campo.requerido) continue;
-      if (campo.tipo === "imagen_unica" || campo.tipo === "imagen_multiple" || campo.tipo === "imagen_unica_o_avatar") {
-        if (!(imagenes[key]?.length)) return `Falta: ${campo.label}`;
-      }
-      if (campo.tipo === "texto_corto") {
-        if (!textos[key]?.trim()) return `Falta: ${campo.label}`;
-      }
-    }
-    return null;
-  }
-
-  // ── Preparar payload y llamar al backend ──────────────────
   async function handleGenerar() {
-    const err = validar();
-    if (err) { setError(err); return; }
-    if (currentJades < (JADE_COSTS[plantillaActiva?.duracion] || 75)) {
-      setError(`Necesitas ${JADE_COSTS[plantillaActiva?.duracion] || 75} Jades para esta plantilla. Tienes ${currentJades}.`);
-      return;
+    if (!plantilla) return;
+    if (currentJades < jadeCosto) {
+      setError(`Necesitas ${jadeCosto} Jades. Tienes ${currentJades}.`); return;
     }
 
-    setError("");
-    setLoading(true);
-    setResultado({ status: "generating" });
-    setStatusText("Preparando imágenes...");
+    setError(""); setLoading(true); setResultado(null);
 
     try {
-      // Comprimir y convertir imágenes
-      const imagenesB64 = {};
-      for (const [campo, files] of Object.entries(imagenes)) {
-        if (!files?.length) continue;
-        imagenesB64[campo] = [];
-        for (const file of files) {
-          const prep = await prepareImage(file);
-          imagenesB64[campo].push(prep);
-        }
-      }
-
-      setStatusText("Enviando a generación...");
-
       const auth = await getAuthHeaders();
-      const payload = {
-        plantilla_id:  plantillaActiva.id,
-        imagenes:      imagenesB64,
-        textos,
-        selectores,
-        accent,
-        gender,
-      };
 
-      const r = await fetch("/api/plantillas-generate", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", ...auth },
-        body:    JSON.stringify(payload),
-      });
+      // ── TRANSICIÓN DE MODA ────────────────────────────────
+      if (plantilla.id === "transicion_moda") {
+        if (!imgPrendas.length) { setError("Sube al menos una prenda."); setLoading(false); return; }
 
-      const j = await r.json().catch(() => null);
+        setStatusText("Preparando imágenes...");
 
-      if (!r.ok || !j?.ok) {
-        if (j?.error === "INSUFFICIENT_JADES") {
-          setError(`Jades insuficientes. Necesitas ${PLANTILLA_COST}.`);
-          setResultado(null);
-          return;
-        }
-        throw new Error(j?.error || "Error generando video.");
+        const prendasPrep = await Promise.all(imgPrendas.map(prepareImage));
+        const modeloPrep  = imgModelo.length  ? [await prepareImage(imgModelo[0])]  : [];
+        const fondoPrep   = imgFondo.length   ? [await prepareImage(imgFondo[0])]   : [];
+
+        const caso = modeloPrep.length && fondoPrep.length ? "Modelo + Fondo (todo real)"
+          : modeloPrep.length ? "Solo modelo real"
+          : fondoPrep.length  ? "Solo fondo real"
+          : "IA inventa todo";
+
+        setStatusText(`Generando videos fashion — ${caso}...`);
+
+        const r = await fetch("/api/comercial-generate", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            plantilla_id: "transicion_moda",
+            imagenes: {
+              prendas: prendasPrep,
+              modelo:  modeloPrep,
+              fondo:   fondoPrep,
+            },
+            textos:   { narracion },
+            accent,
+            gender,
+          }),
+        });
+
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || j.detail || "Error generando");
+        setResultado(j);
+        return;
       }
 
-      setStatusText("Video en progreso — polling...");
+      // ── PRODUCTO ESTELAR ──────────────────────────────────
+      if (plantilla.id === "producto_estelar") {
+        if (!imgProducto.length) { setError("Sube la foto de tu producto."); setLoading(false); return; }
+        setStatusText("Generando video del producto...");
 
-      // Si el backend devuelve jobId (async), hacemos polling
-      if (j.jobId) {
-        setResultado({ status: "generating", jobId: j.jobId });
-        await pollJob(j.jobId, j.taskId);
-      } else if (j.videoUrl) {
-        // Respuesta sincrónica con URL directa
-        setResultado({ status: "done", videoUrl: j.videoUrl });
+        const productoPrep = await prepareImage(imgProducto[0]);
+        const r = await fetch("/api/comercial-generate", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            plantilla_id: "producto_estelar",
+            imagenes:     { producto: [productoPrep] },
+            selectores:   { efecto },
+            textos:       { narracion },
+            accent, gender,
+          }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
+        setResultado(j);
+        return;
+      }
+
+      // ── EXPLOSIÓN DE SABOR ────────────────────────────────
+      if (plantilla.id === "explosion_sabor") {
+        if (!imgPlato.length) { setError("Sube la foto de tu platillo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
+        setStatusText("Generando explosión de sabor...");
+
+        const platoPrep = await prepareImage(imgPlato[0]);
+        const r = await fetch("/api/comercial-generate", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            plantilla_id: "explosion_sabor",
+            imagenes:     { plato: [platoPrep] },
+            textos:       { narracion, nombre_negocio: nombreNegocio },
+            accent, gender,
+          }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
+        setResultado(j);
+        return;
+      }
+
+      // ── CHEF IA ───────────────────────────────────────────
+      if (plantilla.id === "chef_ia") {
+        if (!imgPlato.length) { setError("Sube la foto del platillo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
+        setStatusText("Generando video del chef...");
+
+        const platoPrep = await prepareImage(imgPlato[0]);
+        const chefPrep  = imgChef.length ? [await prepareImage(imgChef[0])] : [];
+
+        const r = await fetch("/api/comercial-generate", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            plantilla_id: "chef_ia",
+            imagenes:     { plato: [platoPrep], chef: chefPrep },
+            selectores:   { avatar_tipo: avatarChef },
+            textos:       { narracion, nombre_negocio: nombreNegocio },
+            accent, gender,
+          }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
+        setResultado(j);
+        return;
+      }
+
+      // ── COMERCIAL COMPLETO ────────────────────────────────
+      if (plantilla.id === "comercial_completo") {
+        if (!descripcion.trim()) { setError("Describe tu producto o servicio."); setLoading(false); return; }
+
+        const refImgs = [];
+        for (const f of [...imgProducto, ...imgPlato].slice(0, 3)) {
+          refImgs.push(await prepareImage(f));
+        }
+
+        setStatusText("Creando storyboard con Gemini...");
+
+        const sr = await fetch("/api/comercial-storyboard", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            description:     descripcion,
+            duration:        duracionComercial,
+            referenceImages: refImgs,
+            accent, gender,
+          }),
+        });
+        const sj = await sr.json();
+        if (!sr.ok || !sj.ok) throw new Error(sj.error || "Error en storyboard");
+
+        setStatusText(`Generando ${sj.sceneCount} escenas con Seedance 2.0...`);
+
+        const gr = await fetch("/api/comercial-generate", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({
+            storyboard:      sj.storyboard,
+            referenceImages: refImgs,
+            accent, gender,
+          }),
+        });
+        const gj = await gr.json();
+        if (!gr.ok || !gj.ok) throw new Error(gj.error || "Error generando escenas");
+        setResultado(gj);
       }
 
     } catch (e) {
-      setError(e?.message || "Ocurrió un error. Intenta de nuevo.");
-      setResultado(null);
+      setError(e.message || "Error generando. Intenta de nuevo.");
     } finally {
       setLoading(false);
       setStatusText("");
     }
   }
 
-  // ── Polling de job Seedance vía PiAPI ─────────────────────
-  async function pollJob(jobId, taskId) {
-    const TIMEOUT  = 10 * 60 * 1000; // 10 minutos
-    const INTERVAL = 10000;           // cada 10s
-    const start    = Date.now();
-    const auth     = await getAuthHeaders();
-    let intentos   = 0;
-
-    while (Date.now() - start < TIMEOUT) {
-      await new Promise(r => setTimeout(r, INTERVAL));
-      intentos++;
-      setStatusText(`Generando video... ${Math.round((Date.now() - start) / 1000)}s ⏳`);
-
-      try {
-        const r = await fetch(`/api/plantillas-status?jobId=${jobId}`, {
-          headers: auth,
-        });
-        const j = await r.json().catch(() => null);
-
-        if (j?.status === "COMPLETED" && j?.videoUrl) {
-          setResultado({ status: "done", videoUrl: j.videoUrl });
-          return;
-        }
-        if (j?.status === "FAILED") {
-          setResultado({ status: "error", error: j?.error || "El video falló." });
-          return;
-        }
-        // IN_PROGRESS — seguir esperando
-      } catch {
-        // Error de red — seguir intentando
-      }
-    }
-
-    // Timeout — pero el video puede seguir generándose en PiAPI
-    // Mostrar mensaje amigable indicando que revise biblioteca en unos minutos
-    setResultado({
-      status: "error",
-      error: "El video tardó más de lo esperado. Revisa tu biblioteca en 2-3 minutos — el video puede estar listo ahí. 📚",
-    });
-  }
-
-  const p = plantillaActiva;
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-2xl mx-auto">
 
-      {/* ══ ENCABEZADO ══ */}
+      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold text-white">Comercial IA</h2>
           <p className="mt-1 text-sm text-neutral-400">
-            Elige una plantilla, sube tus imágenes y genera un video profesional en segundos.
+            Videos publicitarios profesionales con Seedance 2.0 · BytePlus
           </p>
         </div>
         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-2 text-right">
-          <div className="text-xs text-neutral-400">Por plantilla</div>
-          <div className="text-lg font-bold text-cyan-300">35–70 Jades</div>
-          <div className="text-[10px] text-neutral-500">Según duración del video</div>
+          <div className="text-xs text-neutral-400">Costo</div>
+          <div className="text-lg font-bold text-cyan-300">120 Jades</div>
         </div>
       </div>
 
-      {/* ══ GRID DE PLANTILLAS ══ */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {PLANTILLAS.map(pl => {
-          const jadeCosto = JADE_COSTS[pl.duracion] || 75;
-          return (
-            <button
-              key={pl.id}
-              onClick={() => seleccionarPlantilla(pl)}
-              className={`relative overflow-hidden rounded-2xl border text-left transition-all group ${
-                plantillaActiva?.id === pl.id
-                  ? `${pl.borde} ring-1 ring-white/20`
-                  : "border-white/10 bg-black/30 hover:border-white/20 hover:bg-black/50"
-              }`}
-            >
-              {/* Video de ejemplo O fondo gradiente */}
-              {pl.videoEjemplo ? (
-                <div className="relative aspect-[9/16] w-full overflow-hidden">
-                  <video
-                    src={pl.videoEjemplo}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                  {/* Overlay oscuro para legibilidad */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                  {/* Info encima del video */}
-                  <div className="absolute bottom-0 left-0 right-0 p-3">
-                    <div className={`text-sm font-bold mb-0.5 ${plantillaActiva?.id === pl.id ? pl.acento : "text-white"}`}>
-                      {pl.emoji} {pl.nombre}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-neutral-300">{pl.duracion}s</span>
-                      <span className={`text-[10px] font-bold ${pl.acento}`}>{jadeCosto} Jades</span>
-                    </div>
-                  </div>
-                  {plantillaActiva?.id === pl.id && (
-                    <div className={`absolute top-2 right-2 text-[9px] font-bold ${pl.acento} bg-black/60 rounded-full px-2 py-0.5`}>
-                      ✓ Seleccionada
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Sin video — card con gradiente */
-                <div className={`relative p-4 bg-gradient-to-br ${pl.colores}`}>
-                  <div className="text-3xl mb-2">{pl.emoji}</div>
-                  <div className={`text-sm font-semibold mb-1 ${plantillaActiva?.id === pl.id ? pl.acento : "text-white"}`}>
-                    {pl.nombre}
-                  </div>
-                  <div className="text-[10px] text-neutral-400 leading-relaxed mb-3">{pl.descripcion}</div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-neutral-500">{pl.duracion}s</span>
-                    <span className={`text-[11px] font-bold ${pl.acento}`}>{jadeCosto} Jades</span>
-                  </div>
-                  {plantillaActiva?.id === pl.id && (
-                    <div className={`absolute top-3 right-3 text-[9px] font-bold ${pl.acento} bg-black/40 rounded-full px-2 py-0.5`}>
-                      ✓ Seleccionada
-                    </div>
-                  )}
-                </div>
-              )}
-            </button>
-          );
-        })}
+      {/* Grid plantillas */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {PLANTILLAS.map(p => (
+          <button key={p.id} onClick={() => seleccionar(p)}
+            className={`relative text-left rounded-2xl border p-4 transition-all bg-gradient-to-br ${p.colores} ${
+              plantilla?.id === p.id ? `${p.borde} ring-1 ring-white/20` : "border-white/10 hover:border-white/20"
+            }`}>
+            <div className="text-2xl mb-1">{p.emoji}</div>
+            <div className={`text-sm font-semibold mb-1 ${plantilla?.id === p.id ? p.acento : "text-white"}`}>
+              {p.nombre}
+            </div>
+            <div className="text-[10px] text-neutral-400 leading-relaxed">{p.descripcion}</div>
+            {plantilla?.id === p.id && (
+              <div className={`absolute top-3 right-3 text-[9px] font-bold ${p.acento} bg-black/40 rounded-full px-2 py-0.5`}>
+                ✓ Seleccionada
+              </div>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* ══ FORMULARIO DE PLANTILLA SELECCIONADA ══ */}
-      {p && (
-        <div className={`rounded-3xl border bg-gradient-to-br ${p.colores} ${p.borde} p-5 space-y-5`}>
+      {/* Formulario */}
+      {plantilla && (
+        <div className={`rounded-3xl border bg-gradient-to-br ${plantilla.colores} ${plantilla.borde} p-5 space-y-5`}>
 
-          {/* Cabecera */}
           <div className="flex items-center gap-3">
-            <span className="text-3xl">{p.emoji}</span>
+            <span className="text-3xl">{plantilla.emoji}</span>
             <div>
-              <h3 className={`font-bold ${p.acento}`}>{p.nombre}</h3>
-              <p className="text-[11px] text-neutral-400">{p.descripcion}</p>
+              <h3 className={`font-bold ${plantilla.acento}`}>{plantilla.nombre}</h3>
+              <p className="text-[11px] text-neutral-400">{plantilla.descripcion}</p>
             </div>
           </div>
 
-          {/* Campos dinámicos */}
-          <div className="grid grid-cols-1 gap-4">
-            {Object.entries(p.campos).map(([key, campo]) => {
+          {/* ── TRANSICIÓN DE MODA ── */}
+          {plantilla.id === "transicion_moda" && (
+            <div className="space-y-4">
+              {/* Indicador de caso */}
+              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-[10px] font-semibold text-neutral-300 mb-1">Modo activo:</p>
+                <p className={`text-xs font-bold ${plantilla.acento}`}>
+                  {imgModelo.length && imgFondo.length ? "✦ CASO 4 — Modelo real + Fondo real (máxima fidelidad)"
+                    : imgModelo.length ? "✦ CASO 2 — Modelo real + Fondo inventado por IA"
+                    : imgFondo.length  ? "✦ CASO 3 — Fondo real + Modelo inventado por IA"
+                    : "✦ CASO 1 — IA inventa modelo y fondo (solo tus prendas)"}
+                </p>
+              </div>
 
-              // Imagen única
-              if (campo.tipo === "imagen_unica" || campo.tipo === "imagen_unica_o_avatar") {
-                return (
-                  <ImageUploadZone
-                    key={key}
-                    label={campo.label}
-                    hint={campo.hint}
-                    multiple={false}
-                    max={1}
-                    previews={previews[key] || []}
-                    onFiles={files => handleImages(key, files, 1)}
-                    onRemove={idx => removeImage(key, idx)}
-                  />
-                );
-              }
+              <UploadZone
+                label="👚 Fotos de prendas (obligatorio, 2-4)"
+                hint="Cada prenda en fondo blanco o claro — camisas, pantalones, vestidos, etc."
+                multiple max={4}
+                previews={prevPrendas}
+                onFiles={f => handleFiles(setImgPrendas, setPrevPrendas, f, 4)}
+                onRemove={i => removeFile(setImgPrendas, setPrevPrendas, i, imgPrendas)}
+                disabled={loading}
+              />
+              <UploadZone
+                label="👤 Foto del modelo (opcional)"
+                hint="Sube una foto de la persona que vestirá la ropa. Si no subes, la IA crea un modelo."
+                multiple={false}
+                previews={prevModelo}
+                onFiles={f => handleFiles(setImgModelo, setPrevModelo, f, 1)}
+                onRemove={i => removeFile(setImgModelo, setPrevModelo, i, imgModelo)}
+                disabled={loading}
+              />
+              <UploadZone
+                label="🏖️ Foto del fondo / escena (opcional)"
+                hint="Sube una foto del lugar donde quieres el video. Si no subes, la IA inventa un fondo espectacular."
+                multiple={false}
+                previews={prevFondo}
+                onFiles={f => handleFiles(setImgFondo, setPrevFondo, f, 1)}
+                onRemove={i => removeFile(setImgFondo, setPrevFondo, i, imgFondo)}
+                disabled={loading}
+              />
+            </div>
+          )}
 
-              // Imagen múltiple
-              if (campo.tipo === "imagen_multiple") {
-                return (
-                  <ImageUploadZone
-                    key={key}
-                    label={campo.label}
-                    hint={campo.hint}
-                    multiple={true}
-                    max={campo.max || 4}
-                    previews={previews[key] || []}
-                    onFiles={files => handleImages(key, files, campo.max || 4)}
-                    onRemove={idx => removeImage(key, idx)}
-                  />
-                );
-              }
-
-              // Selector de opciones
-              if (campo.tipo === "selector") {
-                return (
-                  <OptionSelector
-                    key={key}
-                    label={campo.label}
-                    opciones={campo.opciones}
-                    value={selectores[key] || campo.opciones[0]?.value}
-                    onChange={val => setSelectores(prev => ({ ...prev, [key]: val }))}
-                  />
-                );
-              }
-
-              // Texto corto
-              if (campo.tipo === "texto_corto") {
-                return (
-                  <div key={key} className="space-y-1.5">
-                    <label className="text-xs font-semibold text-neutral-300">{campo.label}</label>
-                    {campo.hint && <p className="text-[10px] text-neutral-500">{campo.hint}</p>}
-                    <input
-                      type="text"
-                      placeholder={campo.hint || ""}
-                      value={textos[key] || ""}
-                      onChange={e => setTextos(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none"
-                    />
-                  </div>
-                );
-              }
-
-              // Texto largo (narración)
-              if (campo.tipo === "texto") {
-                return (
-                  <div key={key} className="space-y-1.5">
-                    <label className="text-xs font-semibold text-neutral-300">{campo.label}</label>
-                    {campo.hint && <p className="text-[10px] text-neutral-500">{campo.hint}</p>}
-                    <textarea
-                      placeholder={campo.hint || ""}
-                      value={textos[key] || ""}
-                      onChange={e => setTextos(prev => ({ ...prev, [key]: e.target.value }))}
-                      rows={2}
-                      className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none"
-                    />
-                  </div>
-                );
-              }
-
-              return null;
-            })}
-          </div>
-
-          {/* Narración — Acento y voz (si hay campo narracion) */}
-          {Object.values(p.campos).some(c => c.tipo === "texto" && c.label.includes("Narración")) && (
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-              <p className="text-[11px] font-semibold text-neutral-300">🎙️ Configuración de voz</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-neutral-400">Acento</label>
-                  <select
-                    value={accent}
-                    onChange={e => setAccent(e.target.value)}
-                    className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none"
-                  >
-                    {ACCENTS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-neutral-400">Voz</label>
-                  <select
-                    value={gender}
-                    onChange={e => setGender(e.target.value)}
-                    className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none"
-                  >
-                    <option value="mujer">👩 Voz femenina</option>
-                    <option value="hombre">👨 Voz masculina</option>
-                  </select>
+          {/* ── PRODUCTO ESTELAR ── */}
+          {plantilla.id === "producto_estelar" && (
+            <div className="space-y-4">
+              <UploadZone
+                label="📦 Foto de tu producto"
+                hint="Cualquier producto: perfume, crema, ropa, accesorio, electrónico..."
+                multiple={false}
+                previews={prevProducto}
+                onFiles={f => handleFiles(setImgProducto, setPrevProducto, f, 1)}
+                onRemove={i => removeFile(setImgProducto, setPrevProducto, i, imgProducto)}
+                disabled={loading}
+              />
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-neutral-300">✨ Efecto de transformación</label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {EFECTOS_PRODUCTO.map(op => (
+                    <button key={op.value} onClick={() => setEfecto(op.value)}
+                      className={`text-left rounded-xl border px-3 py-2 text-[11px] transition-all ${
+                        efecto === op.value
+                          ? "border-white/40 bg-white/15 text-white"
+                          : "border-white/10 bg-white/5 text-neutral-400 hover:border-white/25"
+                      }`}>
+                      {op.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Error */}
+          {/* ── EXPLOSIÓN DE SABOR ── */}
+          {plantilla.id === "explosion_sabor" && (
+            <div className="space-y-4">
+              <UploadZone
+                label="🍔 Foto de tu platillo"
+                hint="Burger, taco, pizza, sushi, comida guatemalteca — cualquier plato"
+                multiple={false}
+                previews={prevPlato}
+                onFiles={f => handleFiles(setImgPlato, setPrevPlato, f, 1)}
+                onRemove={i => removeFile(setImgPlato, setPrevPlato, i, imgPlato)}
+                disabled={loading}
+              />
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-300">🏪 Nombre de tu negocio</label>
+                <input type="text" value={nombreNegocio} onChange={e => setNombreNegocio(e.target.value)}
+                  placeholder="Ej: Burger Bros, Tacos El Rey..."
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none" />
+              </div>
+            </div>
+          )}
+
+          {/* ── CHEF IA ── */}
+          {plantilla.id === "chef_ia" && (
+            <div className="space-y-4">
+              <UploadZone
+                label="🍽️ Foto del platillo terminado"
+                hint="El plato que el chef va a preparar en el video"
+                multiple={false}
+                previews={prevPlato}
+                onFiles={f => handleFiles(setImgPlato, setPrevPlato, f, 1)}
+                onRemove={i => removeFile(setImgPlato, setPrevPlato, i, imgPlato)}
+                disabled={loading}
+              />
+              <UploadZone
+                label="👤 Tu foto como chef (opcional)"
+                hint="Si subes tu foto, aparecerás tú. Si no, elige un avatar chef abajo."
+                multiple={false}
+                previews={prevChef}
+                onFiles={f => handleFiles(setImgChef, setPrevChef, f, 1)}
+                onRemove={i => removeFile(setImgChef, setPrevChef, i, imgChef)}
+                disabled={loading}
+              />
+              {!imgChef.length && (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-neutral-300">🤖 Avatar chef</label>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {AVATARES_CHEF.map(av => (
+                      <button key={av.value} onClick={() => setAvatarChef(av.value)}
+                        className={`text-left rounded-xl border px-3 py-2 text-[11px] transition-all ${
+                          avatarChef === av.value
+                            ? "border-white/40 bg-white/15 text-white"
+                            : "border-white/10 bg-white/5 text-neutral-400 hover:border-white/25"
+                        }`}>
+                        {av.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-300">🏪 Nombre de tu negocio</label>
+                <input type="text" value={nombreNegocio} onChange={e => setNombreNegocio(e.target.value)}
+                  placeholder="Ej: La Parrilla de Don Pedro"
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none" />
+              </div>
+            </div>
+          )}
+
+          {/* ── COMERCIAL COMPLETO ── */}
+          {plantilla.id === "comercial_completo" && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-300">📝 Describe tu producto / servicio / marca</label>
+                <textarea value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={3}
+                  placeholder="Ej: Restaurante de mariscos en Guatemala, especialidad en ceviche y mariscos frescos, ambiente familiar..."
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none" />
+              </div>
+              <UploadZone
+                label="📸 Fotos de referencia (opcional, máx 3)"
+                hint="Fotos de tu producto, local, equipo o persona — la IA los incorpora en el comercial"
+                multiple max={3}
+                previews={prevProducto}
+                onFiles={f => handleFiles(setImgProducto, setPrevProducto, f, 3)}
+                onRemove={i => removeFile(setImgProducto, setPrevProducto, i, imgProducto)}
+                disabled={loading}
+              />
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-neutral-300">⏱️ Duración</label>
+                <div className="flex gap-2">
+                  {[30, 60].map(d => (
+                    <button key={d} onClick={() => setDuracionComercial(d)}
+                      className={`flex-1 rounded-xl border py-2 text-xs transition-all ${
+                        duracionComercial === d
+                          ? "border-white/40 bg-white/15 text-white"
+                          : "border-white/10 bg-white/5 text-neutral-400 hover:border-white/25"
+                      }`}>
+                      {d}s — {d === 30 ? "4 escenas" : "7 escenas"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Narración — para todos excepto comercial completo que la genera automático */}
+          {plantilla.id !== "comercial_completo" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-neutral-300">🎙️ Narración en off (opcional)</label>
+              <textarea value={narracion} onChange={e => setNarracion(e.target.value)} rows={2}
+                placeholder="Texto que quieres que se escuche en el video..."
+                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none" />
+            </div>
+          )}
+
+          {/* Configuración de voz */}
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <p className="text-[11px] font-semibold text-neutral-300">🎙️ Voz de narración</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-neutral-400">Acento</label>
+                <select value={accent} onChange={e => setAccent(e.target.value)}
+                  className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none">
+                  {ACCENTS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-neutral-400">Voz</label>
+                <select value={gender} onChange={e => setGender(e.target.value)}
+                  className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none">
+                  <option value="mujer">👩 Voz femenina</option>
+                  <option value="hombre">👨 Voz masculina</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           {error && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
               <p className="text-xs text-red-300">{error}</p>
             </div>
           )}
 
-          {/* Botón generar */}
-          <button
-            onClick={handleGenerar}
-            disabled={loading || currentJades < (JADE_COSTS[p.duracion] || 75)}
-            className={`w-full rounded-2xl border py-3.5 text-sm font-semibold transition-all ${p.boton} ${
-              loading || currentJades < (JADE_COSTS[p.duracion] || 75)
-                ? "opacity-40 cursor-not-allowed"
-                : "text-white cursor-pointer"
-            }`}
-          >
+          <button onClick={handleGenerar} disabled={loading || currentJades < jadeCosto}
+            className={`w-full rounded-2xl border py-3.5 text-sm font-semibold transition-all ${plantilla.borde} ${
+              loading || currentJades < jadeCosto
+                ? "opacity-40 cursor-not-allowed text-neutral-500"
+                : "bg-white/10 hover:bg-white/15 text-white cursor-pointer"
+            }`}>
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
                 {statusText || "Generando..."}
               </span>
             ) : (
-              `${p.emoji} Generar ${p.duracion}s — ${JADE_COSTS[p.duracion] || 75} Jades`
+              `${plantilla.emoji} Generar — ${jadeCosto} Jades`
             )}
           </button>
         </div>
       )}
 
-      {/* ══ RESULTADO ══ */}
+      {/* Resultados */}
       {resultado && (
-        <VideoResultCard
-          jobId={resultado.jobId}
-          status={resultado.status}
-          videoUrl={resultado.videoUrl}
-          error={resultado.error}
-        />
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="h-px flex-1 bg-white/10" />
+            <span className="text-xs text-neutral-500">
+              {resultado.success_count}/{resultado.total_scenes} escenas generadas
+            </span>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(resultado.scenes || []).map((scene, idx) => (
+              <SceneResult key={idx} scene={scene} idx={idx} />
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* ══ ESTADO VACÍO ══ */}
-      {!p && (
+      {!plantilla && (
         <div className="rounded-2xl border border-white/5 bg-black/20 py-10 text-center">
           <p className="text-neutral-600 text-sm">← Selecciona una plantilla para empezar</p>
         </div>
       )}
-
     </div>
   );
 }
