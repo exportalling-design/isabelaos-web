@@ -77,9 +77,9 @@ async function applyGridOverlay(imageUrl) {
     const height   = metadata.height || 512;
 
     // 3. Generar SVG con cuadrícula 6x6 de líneas blancas sólidas
-    const cols     = 6;
-    const rows     = 6;
-    const lineW    = 12; // grosor líneas en px
+    const cols     = 10;
+    const rows     = 10;
+    const lineW    = 16; // grosor líneas en px
     const colStep  = Math.floor(width  / cols);
     const rowStep  = Math.floor(height / rows);
 
@@ -103,7 +103,8 @@ async function applyGridOverlay(imageUrl) {
     // 4. Composite: imagen original + grid encima
     const outputBuffer = await sharp(inputBuffer)
       .composite([{ input: svg, blend: "over" }])
-      .jpeg({ quality: 90 })
+      .blur(0.8)
+      .jpeg({ quality: 88 })
       .toBuffer();
 
     // 5. Subir imagen procesada a Supabase Storage temporal
