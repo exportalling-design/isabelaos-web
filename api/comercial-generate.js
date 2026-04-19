@@ -5,7 +5,7 @@ import { supabaseAdmin }          from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
 const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
+const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-exp";
 const ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1";
 const BYTEPLUS_BASE      = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE    = `${BYTEPLUS_BASE}/contents/generations/tasks`;
