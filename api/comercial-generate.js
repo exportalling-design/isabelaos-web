@@ -307,7 +307,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: successCount > 0, ref, title: storyboard.title, style: storyboard.style, music_mood: storyboard.music_mood, call_to_action: storyboard.call_to_action, accent, gender, scenes, success_count: successCount, total_scenes: scenes.length, jade_cost: COMERCIAL_COST });
 
   } catch (e) {
-    await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -COMERCIAL_COST, p_reason: "comercial_refund_error", p_ref: ref }).catch(() => {});
+    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -COMERCIAL_COST, p_reason: "comercial_refund_error", p_ref: ref }); } catch {}
     console.error("[comercial-generate] SERVER_ERROR:", e.message);
     return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: e.message });
   }
