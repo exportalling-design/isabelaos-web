@@ -66,12 +66,14 @@ function detectBlockedContent(text) {
 
 // ── PiAPI submit ──────────────────────────────────────────────
 async function submitToPiapi({ prompt, imageUrl, duration, aspectRatio }) {
+  // IMPORTANTE: PiAPI seedance-2-preview usa image_urls (array) NO image_url
+  // El prompt debe referenciar la imagen con @image1
   const body = {
     model:     PIAPI_MODEL,
     task_type: "seedance-2-preview",
     input: {
-      prompt,
-      image_url:    imageUrl,
+      prompt:       `@image1 ${prompt}`,
+      image_urls:   [imageUrl],
       mode:         "omni_reference",
       duration,
       aspect_ratio: aspectRatio,
