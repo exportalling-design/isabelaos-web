@@ -57,6 +57,10 @@ async function saveVideoToLibrary(userId, videoUrl, taskId) {
 }
 
 async function cleanupTempFiles(job) {
+  const toDelete = [];
+  const gridTempPath = job?.payload?.grid_temp_path;
+  if (gridTempPath) toDelete.push(gridTempPath);
+  // La funcion original continua:
   const imageUrl = job?.payload?.image_url;
   if (!imageUrl) return;
   try {
@@ -64,7 +68,7 @@ async function cleanupTempFiles(job) {
     if (pathParts.length < 2) return;
     const filePath = pathParts[1];
     if (!filePath.startsWith("cineai/")) return;
-    await supabaseAdmin.storage.from("user-uploads").remove([filePath]);
+    await supabaseAdmin.storage.from("user-uploads").remove([filePath, ...(toDelete.filter(p => p !== filePath))]);
   } catch {}
 }
 
