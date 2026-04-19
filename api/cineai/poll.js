@@ -1,57 +1,44 @@
 // api/cineai/poll.js
-// ─────────────────────────────────────────────────────────────
-// Polling del estado de un job de CineAI.
-// Soporta dos proveedores según el campo `provider` en video_jobs:
-//   fal_seedance    → fal.ai queue status API
-//   byteplus_seedance → BytePlus ModelArk API
-//
 // GET /api/cineai/poll?taskId=xxx
-// ─────────────────────────────────────────────────────────────
+// Soporta 3 proveedores: piapi_seedance | fal_seedance | byteplus_seedance
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
 const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
 
-// ── Polling BytePlus ──────────────────────────────────────────
-async function pollByteplus(taskId) {
-  const r = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
-    headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
+// ── PiAPI polling ─────────────────────────────────────────────
+async function pollPiapi(taskId) {
+  const r = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
+    headers: { "x-api-key": process.env.PIAPI_KEY },
   });
   const data = await r.json();
-  if (!r.ok || data.error) {
-    throw new Error(data.error?.message || `BytePlus error ${r.status}`);
-  }
+  if (!r.ok) throw new Error(data?.message || `PiAPI error ${r.status}`);
 
-  const status   = data.status; // "running" | "succeeded" | "failed"
-  const videoUrl = data.content?.video_url || null;
+  const status   = data?.data?.status;
+  const videoUrl = data?.data?.output?.video || data?.data?.output?.video_url || data?.data?.output?.url || null;
+  const error    = data?.data?.error?.message || null;
 
   return {
-    done:     status === "succeeded",
+    done:     status === "completed",
     failed:   status === "failed",
-    videoUrl: videoUrl,
-    error:    data.error?.message || data.fail_message || null,
+    videoUrl,
+    error,
   };
 }
 
-// ── Polling fal.ai ────────────────────────────────────────────
+// ── fal.ai polling ────────────────────────────────────────────
 async function pollFal(requestId, endpoint) {
-  // fal.ai queue status: GET https://queue.fal.run/{endpoint}/requests/{requestId}/status
-  // Si no hay endpoint guardado, usamos el de referencia como fallback
   const ep = endpoint || "bytedance/seedance-2.0/fast/reference-to-video";
+
   const r = await fetch(`https://queue.fal.run/${ep}/requests/${requestId}/status`, {
     headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
   });
-
   const data = await r.json();
-  if (!r.ok) {
-    throw new Error(data?.detail || `fal.ai status error ${r.status}`);
-  }
+  if (!r.ok) throw new Error(data?.detail || `fal.ai status error ${r.status}`);
 
-  // fal.ai status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED"
   const status = data.status;
 
   if (status === "COMPLETED") {
-    // Obtener el resultado completo
     const rr = await fetch(`https://queue.fal.run/${ep}/requests/${requestId}`, {
       headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
     });
@@ -61,22 +48,35 @@ async function pollFal(requestId, endpoint) {
   }
 
   if (status === "FAILED") {
-    return {
-      done:     false,
-      failed:   true,
-      videoUrl: null,
-      error:    data?.error || "fal.ai generation failed",
-    };
+    return { done: false, failed: true, videoUrl: null, error: data?.error || "fal.ai failed" };
   }
 
-  // IN_QUEUE | IN_PROGRESS
   return { done: false, failed: false, videoUrl: null, error: null };
+}
+
+// ── BytePlus polling ──────────────────────────────────────────
+async function pollByteplus(taskId) {
+  const r = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
+    headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
+  });
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error(data.error?.message || `BytePlus error ${r.status}`);
+
+  const status   = data.status;
+  const videoUrl = data.content?.video_url || null;
+
+  return {
+    done:     status === "succeeded",
+    failed:   status === "failed",
+    videoUrl,
+    error:    data.error?.message || data.fail_message || null,
+  };
 }
 
 // ── Guardar video en Supabase Storage ────────────────────────
 async function saveVideoToLibrary(userId, videoUrl, taskId) {
   try {
-    const res    = await fetch(videoUrl);
+    const res = await fetch(videoUrl);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const path   = `${userId}/cineai_${(taskId || "").slice(0, 8)}_${Date.now()}.mp4`;
@@ -106,8 +106,6 @@ async function cleanupTempFiles(job) {
       if (parts.length >= 2 && parts[1].startsWith("cineai/")) toDelete.push(parts[1]);
     } catch {}
   }
-  const gridPath = job?.payload?.grid_temp_path;
-  if (gridPath) toDelete.push(gridPath);
   if (toDelete.length) {
     await supabaseAdmin.storage.from("user-uploads").remove(toDelete).catch(() => {});
   }
@@ -144,37 +142,31 @@ export default async function handler(req, res) {
   }
 
   // ── Resultado cacheado ────────────────────────────────────
-  if (job.status === "COMPLETED" && job.result_url) {
+  if (job.status === "COMPLETED" && job.result_url)
     return res.status(200).json({ ok: true, status: "completed", videoUrl: job.result_url, jobId: job.id });
-  }
-  if (job.status === "FAILED") {
+  if (job.status === "FAILED")
     return res.status(200).json({ ok: true, status: "failed", error: job.provider_error || "Error", jobId: job.id });
-  }
 
   // ── Detectar proveedor ────────────────────────────────────
   const provider = job.provider || "byteplus_seedance";
-  const isFal    = provider === "fal_seedance";
 
-  // ── Hacer polling al proveedor ────────────────────────────
+  // ── Polling ───────────────────────────────────────────────
   let pollResult;
   try {
-    if (isFal) {
-      // Para fal.ai necesitamos el endpoint original
-      // Lo guardamos en payload.fal_endpoint o lo inferimos del modo
-      const falEndpoint = job.payload?.fal_endpoint ||
-        (job.payload?.cineai_mode === "i2v" || job.payload?.cineai_mode === "animate"
-          ? "bytedance/seedance-2.0/fast/image-to-video"
-          : "bytedance/seedance-2.0/fast/reference-to-video");
+    if (provider === "piapi_seedance") {
+      pollResult = await pollPiapi(taskId);
+    } else if (provider === "fal_seedance") {
+      const falEndpoint = job.payload?.fal_endpoint || "bytedance/seedance-2.0/fast/reference-to-video";
       pollResult = await pollFal(taskId, falEndpoint);
     } else {
       pollResult = await pollByteplus(taskId);
     }
   } catch (err) {
-    console.error(`[cineai/poll] ${provider} poll error:`, err.message);
+    console.error(`[cineai/poll] ${provider} error:`, err.message);
     return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
   }
 
-  console.error(`[cineai/poll] ${provider} — done:${pollResult.done} failed:${pollResult.failed} taskId:${taskId}`);
+  console.error(`[cineai/poll] ${provider} done:${pollResult.done} failed:${pollResult.failed} taskId:${taskId}`);
 
   // ── Procesar resultado ────────────────────────────────────
   let newStatus     = "IN_PROGRESS";
@@ -182,31 +174,28 @@ export default async function handler(req, res) {
   let errorMsg      = null;
 
   if (pollResult.done && pollResult.videoUrl) {
-    // Descargar y guardar en Supabase Storage
     finalVideoUrl = await saveVideoToLibrary(userId, pollResult.videoUrl, taskId);
     newStatus     = "COMPLETED";
     await cleanupTempFiles(job);
-
   } else if (pollResult.done && !pollResult.videoUrl) {
     newStatus = "FAILED";
     errorMsg  = "Video generado pero el proveedor no devolvió la URL";
-
   } else if (pollResult.failed) {
     newStatus = "FAILED";
     errorMsg  = pollResult.error || "Error en el proveedor";
   }
 
   // ── Actualizar video_jobs ─────────────────────────────────
-  const updateData = {
+  const update = {
     status:          newStatus,
     provider_status: pollResult.done ? "succeeded" : pollResult.failed ? "failed" : "running",
     updated_at:      new Date().toISOString(),
   };
-  if (finalVideoUrl) updateData.result_url     = finalVideoUrl;
-  if (errorMsg)      updateData.provider_error = errorMsg;
-  if (newStatus === "COMPLETED") updateData.completed_at = new Date().toISOString();
+  if (finalVideoUrl) update.result_url     = finalVideoUrl;
+  if (errorMsg)      update.provider_error = errorMsg;
+  if (newStatus === "COMPLETED") update.completed_at = new Date().toISOString();
 
-  await supabaseAdmin.from("video_jobs").update(updateData).eq("id", job.id);
+  await supabaseAdmin.from("video_jobs").update(update).eq("id", job.id);
 
   return res.status(200).json({
     ok:       true,
