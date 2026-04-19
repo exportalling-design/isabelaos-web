@@ -1,345 +1,516 @@
 // api/comercial-generate.js
 // ─────────────────────────────────────────────────────────────
-// Pipeline completo de generación de comercial:
-//   1. Recibe el storyboard (generado en paso 1)
+// Pipeline completo de generación de comercial con BytePlus Seedance 2.0:
+//   1. Recibe el storyboard
 //   2. Por cada escena genera imagen con Gemini Image
-//   3. Convierte imagen a video con Veo3 (sin audio, sin subtítulos)
-//   4. Genera narración en off con ElevenLabs (género + acento)
+//   3. Convierte imagen a video con BytePlus Seedance 2.0
+//   4. Genera narración en off con ElevenLabs
 //   5. Devuelve clips + narración por escena
 //
-// Voces: verificadas manualmente en biblioteca ElevenLabs
-// Transiciones: pendiente RunPod FFmpeg worker
+// TRANSICIÓN DE MODA — 4 casos:
+//   CASO 1 — Solo ropa:        IA inventa modelo + fondo
+//   CASO 2 — Ropa + Modelo:    Usa modelo real, IA inventa fondo
+//   CASO 3 — Ropa + Fondo:     IA inventa modelo, usa fondo real
+//   CASO 4 — Ropa+Modelo+Fondo: Respeta todo
 // ─────────────────────────────────────────────────────────────
-import { requireUser } from "./_auth.js";
-import { createClient } from "@supabase/supabase-js";
- 
+import { supabaseAdmin }          from "../src/lib/supabaseAdmin.js";
+import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
+
 const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
 const ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1";
-const COMERCIAL_COST     = 120;
- 
-// ── Voces verificadas manualmente en ElevenLabs ───────────────
+const BYTEPLUS_BASE      = "https://ark.ap-southeast.bytepluses.com/api/v3";
+const BYTEPLUS_CREATE    = `${BYTEPLUS_BASE}/contents/generations/tasks`;
+const BYTEPLUS_MODEL     = "dreamina-seedance-2-0-260128";
+
+const COMERCIAL_COST = 120;
+
+// ── Voces ElevenLabs ──────────────────────────────────────────
 const VOICE_MAP = {
-  neutro: {
-    mujer:  "htFfPSZGJwjBv1CL0aMD", // Antonio — neutro latino
-    hombre: "htFfPSZGJwjBv1CL0aMD", // Antonio — neutro latino
-  },
-  guatemalteco: {
-    mujer:  "MbMvLOFbicjtQwgx0j2r", // Michelle — acento guatemalteco femenino
-    hombre: "htFfPSZGJwjBv1CL0aMD", // Antonio — neutro (no hay GT masculino disponible)
-  },
-  colombiano: {
-    mujer:  "qHkrJuifPpn95wK3rm2A", // Andrea — colombiana joven, cheerful and calm
-    hombre: "o2vbTbO3g4GrKUg7rehy", // Cristian Sanchez — colombiano, lively and deep
-  },
-  mexicano: {
-    mujer:  "MPAa8GSBiMLjMLVwn0Hq", // Daniela — femenina, sensual
-    hombre: "1IVWxPHWEi1qouA3cAop", // Omar — mexicano, articulate and conversational
-  },
-  argentino: {
-    mujer:  "6Mo5ciGH5nWiQacn5FYk", // Roma — argentina femenina
-    hombre: "JNcXxzrlvFDXcrGo2b47", // Franco — argentino masculino
-  },
-  español: {
-    mujer:  "qHkrJuifPpn95wK3rm2A", // Andrea (fallback castellano)
-    hombre: "o2vbTbO3g4GrKUg7rehy", // Cristian (fallback castellano)
-  },
-  ingles: {
-    mujer:  "DXFkLCBUTmvXpp2QwZjA", // Erin — profesional femenina inglés
-    hombre: "sB7vwSCyX0tQmU24cW2C", // Jon — natural authority inglés
-  },
+  neutro:       { mujer: "htFfPSZGJwjBv1CL0aMD", hombre: "htFfPSZGJwjBv1CL0aMD" },
+  guatemalteco: { mujer: "MbMvLOFbicjtQwgx0j2r", hombre: "htFfPSZGJwjBv1CL0aMD" },
+  colombiano:   { mujer: "qHkrJuifPpn95wK3rm2A", hombre: "o2vbTbO3g4GrKUg7rehy" },
+  mexicano:     { mujer: "MPAa8GSBiMLjMLVwn0Hq", hombre: "1IVWxPHWEi1qouA3cAop" },
+  argentino:    { mujer: "6Mo5ciGH5nWiQacn5FYk", hombre: "JNcXxzrlvFDXcrGo2b47" },
+  español:      { mujer: "qHkrJuifPpn95wK3rm2A", hombre: "o2vbTbO3g4GrKUg7rehy" },
+  ingles:       { mujer: "DXFkLCBUTmvXpp2QwZjA", hombre: "sB7vwSCyX0tQmU24cW2C" },
 };
- 
-function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("MISSING_SUPABASE_ENV");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-}
- 
+
 function getVoiceId(accent, gender) {
   const a = (accent || "neutro").toLowerCase().trim();
   const g = (gender || "mujer").toLowerCase().trim() === "hombre" ? "hombre" : "mujer";
   return (VOICE_MAP[a] || VOICE_MAP["neutro"])[g] || VOICE_MAP["neutro"]["mujer"];
 }
- 
-// ── Generar imagen de escena — prompt universal ───────────────
-// Funciona para cualquier categoría: ropa, comida, carros,
-// servicios, joyería, restaurantes, spas, lo que sea.
+
+// ── Subir imagen a Supabase Storage temporal ─────────────────
+// BytePlus necesita URL pública, no base64
+async function uploadImageTemp(base64, mimeType, userId) {
+  const ext  = mimeType.includes("png") ? "png" : "jpg";
+  const path = `comercial/temp/${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const buf  = Buffer.from(base64, "base64");
+
+  const { error } = await supabaseAdmin.storage
+    .from("user-uploads")
+    .upload(path, buf, { contentType: mimeType, upsert: false });
+
+  if (error) throw new Error(`Error subiendo imagen temporal: ${error.message}`);
+
+  const { data } = supabaseAdmin.storage.from("user-uploads").getPublicUrl(path);
+  return { url: data.publicUrl, path };
+}
+
+// ── Generar imagen de escena con Gemini ───────────────────────
 async function generateSceneImage(prompt, referenceImages = []) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
- 
+
   const url   = `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
   const parts = [];
- 
+
   const hasRefs = referenceImages.some(img => img?.base64);
-  for (const img of referenceImages.slice(0, 3)) {
+  for (const img of referenceImages.slice(0, 4)) {
     if (img?.base64 && img?.mimeType) {
       parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
     }
   }
- 
-  const fullPrompt = [
-    "You are a world-class advertising photographer with 20 years shooting campaigns for major global brands.",
-    "Create ONE stunning photorealistic advertisement photograph for this scene.",
-    "",
-    "=== SCENE ===",
-    prompt,
-    "",
-    "=== REFERENCE IMAGE INSTRUCTIONS ===",
-    hasRefs ? [
-      "Reference images are provided above. Apply these rules based on what they show:",
-      "",
-      "If references show CLOTHING / FASHION:",
-      "  → Show a model WEARING the exact garment(s) from the reference",
-      "  → Reproduce exactly: fabric texture, pattern, color, cut, details, stitching",
-      "  → The clothing must be indistinguishable from the reference photo",
-      "",
-      "If references show FOOD / BEVERAGES:",
-      "  → Feature the exact dish/product with professional food photography techniques",
-      "  → Steam, texture, colors, plating must match the reference",
-      "  → Use appetizing angles (slightly elevated, natural light or warm studio)",
-      "",
-      "If references show a LOCATION / STORE / RESTAURANT:",
-      "  → Use the actual space as the background/setting for the scene",
-      "  → Maintain the architectural details, decor, lighting of the real place",
-      "",
-      "If references show a PRODUCT (electronics, jewelry, car, cosmetics, etc.):",
-      "  → Feature the exact product prominently — same model, color, shape",
-      "  → Use dramatic product photography lighting: rim lights, reflections, hero angles",
-      "",
-      "If references show a PERSON / MODEL / AVATAR:",
-      "  → Maintain their exact likeness: face, skin tone, hair, distinctive features",
-      "  → Place them naturally in the scene described",
-      "",
-      "Use ALL provided reference images together to build the most accurate scene possible.",
-    ].join("\n") : "No references provided — create a premium generic commercial scene based on the description.",
-    "",
-    "=== QUALITY STANDARDS ===",
-    "• Photorealistic — must look like an actual professional photograph",
-    "• Cinematic lighting: golden hour / dramatic studio / soft natural — whatever fits",
-    "• Composition: rule of thirds, intentional depth of field, dynamic framing",
-    "• Colors: rich, vibrant, commercial-grade color grading",
-    "• Format: 9:16 vertical portrait for social media (Reels, TikTok, Stories)",
-    "• Quality level: national TV commercial / luxury brand campaign",
-    "",
-    "=== HARD PROHIBITIONS ===",
-    "• NO text, typography, logos, watermarks of any kind",
-    "• NO subtitles or captions anywhere in the image",
-    "• NO generic stock photo look — must feel like a real brand campaign",
-    "• NO AI-generation artifacts, distortions, or unrealistic proportions",
-  ].join("\n");
- 
-  parts.push({ text: fullPrompt });
- 
+
+  parts.push({ text: prompt });
+
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
-      generationConfig: {
-        responseModalities: ["TEXT", "IMAGE"],
-        temperature: 0.35,
-      },
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.3 },
     }),
   });
- 
+
   if (!r.ok) {
     const txt = await r.text();
     throw new Error(`Gemini Image error ${r.status}: ${txt.slice(0, 300)}`);
   }
- 
+
   const data    = await r.json();
   const imgPart = data?.candidates?.[0]?.content?.parts?.find(
     p => p?.inlineData?.data || p?.inline_data?.data
   );
-  if (!imgPart) throw new Error("Gemini Image no devolvió imagen para la escena.");
- 
+  if (!imgPart) throw new Error("Gemini no devolvió imagen.");
+
   const pd = imgPart.inlineData || imgPart.inline_data;
   return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
 }
- 
-// ── Convertir imagen a video con Veo3 Fast ────────────────────
-// Prompt negativo fuerte: sin subtítulos, sin texto, sin audio
-async function imageToVideoVeo3(imageBase64, imageMime, videoPrompt) {
-  const falKey = process.env.FAL_KEY;
-  if (!falKey) throw new Error("MISSING_FAL_KEY");
- 
-  const dataUrl = `data:${imageMime};base64,${imageBase64}`;
- 
-  const enhancedPrompt = [
-    videoPrompt,
-    // Calidad cinematográfica
-    "Cinematic camera movement. Professional commercial quality. Smooth intentional motion.",
-    "Sharp focus on subject. Consistent color grade throughout the clip.",
-    // Prohibiciones de texto — repetidas por importancia
-    "ABSOLUTELY NO subtitles. ABSOLUTELY NO captions. ABSOLUTELY NO text overlay.",
-    "ABSOLUTELY NO on-screen text of any kind. ABSOLUTELY NO watermarks. ABSOLUTELY NO logos.",
-    "ABSOLUTELY NO lower thirds. ABSOLUTELY NO title cards.",
-    // Prohibiciones de audio y diálogo
-    "ABSOLUTELY NO dialogue. ABSOLUTELY NO speech. ABSOLUTELY NO talking.",
-    "Silent video — voiceover will be added separately in post-production.",
-    // Prohibiciones de transiciones internas
-    "ABSOLUTELY NO internal cuts or transitions — single continuous shot only.",
-  ].join(" ");
- 
-  const r = await fetch("https://fal.run/fal-ai/veo3/image-to-video", {
-    method: "POST",
+
+// ── Convertir imagen a video con BytePlus Seedance 2.0 ────────
+async function imageToVideoByteplus(imageUrl, videoPrompt, aspectRatio = "9:16", duration = 5) {
+  const payload = {
+    model:   BYTEPLUS_MODEL,
+    content: [
+      { type: "image_url", image_url: { url: imageUrl } },
+      {
+        type: "text",
+        text: `[Image 1] ${videoPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
+      },
+    ],
+  };
+
+  const r = await fetch(BYTEPLUS_CREATE, {
+    method:  "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization:  `Key ${falKey}`,
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
     },
-    body: JSON.stringify({
-      image_url:    dataUrl,
-      prompt:       enhancedPrompt,
-      duration:     "8s",
-      aspect_ratio: "9:16",
-    }),
+    body: JSON.stringify(payload),
   });
- 
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`Veo3 error ${r.status}: ${txt.slice(0, 300)}`);
+
+  const data = await r.json();
+  if (!r.ok || data.error) {
+    throw new Error(data.error?.message || data.message || `BytePlus error ${r.status}`);
   }
- 
-  const data     = await r.json();
-  const videoUrl = data?.video?.url || data?.url || null;
-  if (!videoUrl) throw new Error("Veo3 no devolvió URL de video.");
- 
-  const videoRes    = await fetch(videoUrl);
-  if (!videoRes.ok) throw new Error("No se pudo descargar el video de Veo3.");
-  const videoBuffer = await videoRes.arrayBuffer();
-  const videoBase64 = Buffer.from(videoBuffer).toString("base64");
- 
-  return { url: videoUrl, base64: videoBase64, mimeType: "video/mp4" };
+
+  const taskId = data.id;
+  if (!taskId) throw new Error("BytePlus no devolvió task id");
+
+  // Polling hasta succeeded
+  const deadline = Date.now() + 5 * 60 * 1000; // 5 min max por clip
+  while (Date.now() < deadline) {
+    await new Promise(res => setTimeout(res, 8000));
+
+    const sr   = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
+      headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
+    });
+    const sd = await sr.json();
+
+    if (sd.status === "succeeded") {
+      const videoUrl = sd.content?.video_url;
+      if (!videoUrl) throw new Error("BytePlus succeeded pero no devolvió video_url");
+      return videoUrl;
+    }
+    if (sd.status === "failed") {
+      throw new Error(sd.error?.message || "BytePlus video generation failed");
+    }
+    // running → seguir esperando
+  }
+
+  throw new Error("Timeout: BytePlus tardó más de 5 minutos en generar el clip");
 }
- 
-// ── Generar narración en off con ElevenLabs ───────────────────
+
+// ── Guardar video en Supabase Storage biblioteca ──────────────
+async function saveVideoToLibrary(userId, videoUrl) {
+  try {
+    const res    = await fetch(videoUrl);
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const path   = `${userId}/comercial_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`;
+
+    const { error } = await supabaseAdmin.storage
+      .from("videos")
+      .upload(path, buffer, { contentType: "video/mp4", upsert: false });
+
+    if (error) throw new Error(error.message);
+
+    const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
+    return data?.publicUrl || videoUrl;
+  } catch (err) {
+    console.error("[comercial-generate] saveVideoToLibrary failed:", err.message);
+    return videoUrl;
+  }
+}
+
+// ── Generar narración ElevenLabs ──────────────────────────────
 async function generateNarration(text, accent, gender) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) {
-    console.log("[comercial] ElevenLabs no configurado — saltando narración");
-    return null;
-  }
- 
+  if (!apiKey || !text?.trim()) return null;
+
   const voiceId = getVoiceId(accent, gender);
-  console.log(`[comercial] narración — accent=${accent} gender=${gender} voiceId=${voiceId}`);
- 
+
   const r = await fetch(`${ELEVENLABS_BASE}/text-to-speech/${voiceId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
     body: JSON.stringify({
       text,
       model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability:         0.55,
-        similarity_boost:  0.80,
-        style:             0.35,
-        use_speaker_boost: true,
-      },
+      voice_settings: { stability: 0.55, similarity_boost: 0.80, style: 0.35, use_speaker_boost: true },
     }),
   });
- 
-  if (!r.ok) {
-    console.error(`[comercial] ElevenLabs error ${r.status}:`, (await r.text().catch(() => "")).slice(0, 200));
-    return null;
-  }
- 
-  const audioBuffer = await r.arrayBuffer();
-  return { base64: Buffer.from(audioBuffer).toString("base64"), mimeType: "audio/mpeg" };
+
+  if (!r.ok) return null;
+
+  const buf = await r.arrayBuffer();
+  return { base64: Buffer.from(buf).toString("base64"), mimeType: "audio/mpeg" };
 }
- 
+
+// ── Construir prompt Gemini para Transición de Moda ───────────
+function buildModaImagePrompt(prenda, idx, total, hasModelo, hasFondo, modeloDesc, fondoDesc) {
+  const casos = [];
+
+  if (hasModelo && hasFondo) {
+    // CASO 4: Respeta modelo real Y fondo real
+    casos.push(
+      `You are a world-class fashion photographer. Create a photorealistic fashion advertisement photograph.`,
+      `[Image 1] is the EXACT model/person — preserve their face, skin tone, hair, body proportions PERFECTLY.`,
+      `[Image 2] is the EXACT background/location — reproduce it exactly: architecture, lighting, atmosphere, colors.`,
+      `[Image ${idx + 3}] is the clothing item for this scene. The model must be WEARING this exact garment.`,
+      `Reproduce the garment exactly: fabric texture, pattern, color, cut, every detail must match the reference.`,
+      `Place the model naturally in the exact background shown. Maintain the real environment.`,
+    );
+  } else if (hasModelo && !hasFondo) {
+    // CASO 2: Modelo real, IA inventa fondo
+    casos.push(
+      `You are a world-class fashion photographer. Create a photorealistic fashion advertisement photograph.`,
+      `[Image 1] is the EXACT model/person — preserve their face, skin tone, hair, body proportions PERFECTLY.`,
+      `[Image 2] is the clothing item. The model must be WEARING this exact garment with perfect detail reproduction.`,
+      `Invent a stunning, aspirational background appropriate for a luxury fashion campaign.`,
+      `Background ideas: rooftop terrace at golden hour, chic boutique interior, urban street with bokeh lights, tropical resort pool.`,
+      `Scene ${idx + 1} of ${total}: vary the background to create visual progression and storytelling.`,
+    );
+  } else if (!hasModelo && hasFondo) {
+    // CASO 3: Fondo real, IA inventa modelo
+    casos.push(
+      `You are a world-class fashion photographer. Create a photorealistic fashion advertisement photograph.`,
+      `[Image 1] is the EXACT background/location — reproduce it exactly: architecture, lighting, atmosphere, all details.`,
+      `[Image 2] is the clothing item. Generate a stunning, aspirational fashion model WEARING this exact garment.`,
+      `The model: confident, professional, aspirational. Age 20-28. Ethnicity appropriate for Latin American fashion market.`,
+      `Reproduce the garment exactly: fabric texture, pattern, color, cut, every detail must match the reference.`,
+      `Place the model naturally in the exact background provided.`,
+    );
+  } else {
+    // CASO 1: Solo ropa, IA inventa todo
+    casos.push(
+      `You are a world-class fashion photographer shooting a luxury Latin American fashion campaign.`,
+      `[Image 1] is the clothing item for this scene. Create a stunning photorealistic fashion photograph.`,
+      `Generate a beautiful, aspirational model WEARING this exact garment. Age 20-28, confident, professional.`,
+      `Reproduce the garment exactly: fabric texture, pattern, color, cut, every stitch must be accurate.`,
+      `Scene ${idx + 1} of ${total}: use a different stunning location each scene to create visual variety.`,
+      `Location ideas: luxury hotel lobby, beachfront at sunset, modern city skyline, tropical garden, elegant restaurant.`,
+    );
+  }
+
+  casos.push(
+    ``,
+    `QUALITY STANDARDS:`,
+    `• Photorealistic — must look like an actual professional fashion photograph`,
+    `• Cinematic lighting: dramatic, intentional, magazine-quality`,
+    `• Full body or 3/4 shot showing the complete outfit`,
+    `• 9:16 vertical format for social media`,
+    `• Rich colors, sharp details, aspirational atmosphere`,
+    `• NO text, NO subtitles, NO watermarks, NO logos anywhere`,
+  );
+
+  return casos.join("\n");
+}
+
 // ── Handler principal ─────────────────────────────────────────
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
- 
-  try {
-    const auth = await requireUser(req);
-    if (!auth.ok) return res.status(401).json({ ok: false, error: auth.error });
-    const user = auth.user;
- 
-    const body            = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
-    const storyboard      = body?.storyboard;
-    const referenceImages = Array.isArray(body?.referenceImages) ? body.referenceImages : [];
-    const accent          = String(body?.accent || "neutro");
-    const gender          = String(body?.gender || "mujer");
- 
-    if (!storyboard?.scenes?.length) return res.status(400).json({ ok: false, error: "MISSING_STORYBOARD" });
- 
-    // Cobrar Jades
-    const sb  = getSupabaseAdmin();
-    const ref = `comercial-${Date.now()}-${Math.random().toString(36).slice(2)}`;
- 
-    const { error: spendErr } = await sb.rpc("spend_jades", {
-      p_user_id: user.id, p_amount: COMERCIAL_COST, p_reason: "comercial_completo", p_ref: ref,
-    });
- 
-    if (spendErr) {
-      if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
-        return res.status(402).json({ ok: false, error: "INSUFFICIENT_JADES", required: COMERCIAL_COST });
-      }
-      return res.status(400).json({ ok: false, error: "JADE_CHARGE_FAILED", detail: spendErr.message });
+  res.setHeader("access-control-allow-origin",  "*");
+  res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type, authorization");
+  res.setHeader("content-type",                 "application/json; charset=utf-8");
+
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST")
+    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+
+  const userId = await getUserIdFromAuthHeader(req);
+  if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+
+  const {
+    storyboard,
+    referenceImages = [],
+    accent          = "neutro",
+    gender          = "mujer",
+    // Campos específicos de Transición de Moda
+    plantilla_id,
+    imagenes = {},  // { modelo: [{base64,mimeType}], prendas: [...], fondo: [{...}] }
+  } = body;
+
+  // ── Cobrar Jades ──────────────────────────────────────────
+  const ref = `comercial-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+    p_user_id: userId,
+    p_amount:  COMERCIAL_COST,
+    p_reason:  "comercial_completo",
+    p_ref:     ref,
+  });
+
+  if (spendErr) {
+    if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
+      return res.status(402).json({ ok: false, error: "INSUFFICIENT_JADES", required: COMERCIAL_COST });
     }
- 
-    console.log(`[comercial-generate] user=${user.id} scenes=${storyboard.scenes.length} accent=${accent} gender=${gender} refs=${referenceImages.length} cost=${COMERCIAL_COST}J`);
- 
-    // Procesar escenas en paralelo
+    return res.status(400).json({ ok: false, error: spendErr.message });
+  }
+
+  try {
+    // ── MODO: TRANSICIÓN DE MODA ──────────────────────────────
+    if (plantilla_id === "transicion_moda") {
+      const prendas = imagenes.prendas || [];
+      const modelo  = imagenes.modelo  || [];
+      const fondo   = imagenes.fondo   || [];
+
+      if (!prendas.length) {
+        return res.status(400).json({ ok: false, error: "Necesitas al menos una foto de prenda" });
+      }
+
+      const hasModelo = modelo.length > 0;
+      const hasFondo  = fondo.length > 0;
+
+      console.error(`[comercial] transicion_moda — prendas=${prendas.length} modelo=${hasModelo} fondo=${hasFondo}`);
+
+      const sceneResults = [];
+
+      for (let i = 0; i < prendas.length; i++) {
+        try {
+          // Construir referencias para Gemini según el caso
+          const refs = [];
+          if (hasModelo) refs.push(modelo[0]);
+          if (hasFondo)  refs.push(fondo[0]);
+          refs.push(prendas[i]);
+
+          const prompt = buildModaImagePrompt(
+            prendas[i], i, prendas.length,
+            hasModelo, hasFondo,
+            "modelo de la referencia", "fondo de la referencia"
+          );
+
+          // Generar imagen con Gemini
+          const sceneImage = await generateSceneImage(prompt, refs);
+
+          // Subir imagen a Storage para obtener URL pública para BytePlus
+          const { url: imageUrl, path: imagePath } = await uploadImageTemp(
+            sceneImage.base64, sceneImage.mimeType, userId
+          );
+
+          // Generar video con BytePlus Seedance
+          const videoPrompt = [
+            hasModelo
+              ? "Fashion model walks forward confidently, hair flowing naturally, outfit details clearly visible."
+              : "Elegant fashion model walks confidently toward camera, outfit in perfect detail.",
+            "Smooth cinematic camera movement, slow dolly-in, golden hour rim lighting.",
+            "Commercial quality motion, natural fabric movement, aspirational atmosphere.",
+            "ABSOLUTELY NO text, NO subtitles, NO captions, NO watermarks.",
+          ].join(" ");
+
+          const byteplusVideoUrl = await imageToVideoByteplus(imageUrl, videoPrompt, "9:16", 5);
+
+          // Guardar en biblioteca
+          const libraryUrl = await saveVideoToLibrary(userId, byteplusVideoUrl);
+
+          // Limpiar imagen temporal
+          await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
+
+          // Narración si hay texto
+          const narText = body.textos?.narracion || "";
+          const narration = narText ? await generateNarration(narText, accent, gender) : null;
+
+          sceneResults.push({
+            scene_number: i + 1,
+            ok:           true,
+            image_b64:    sceneImage.base64,
+            image_mime:   sceneImage.mimeType,
+            video_url:    libraryUrl,
+            audio_b64:    narration?.base64  || null,
+            audio_mime:   narration?.mimeType || "audio/mpeg",
+          });
+
+        } catch (err) {
+          console.error(`[comercial] prenda ${i + 1} error:`, err.message);
+          sceneResults.push({ scene_number: i + 1, ok: false, error: err.message });
+        }
+      }
+
+      const successCount = sceneResults.filter(s => s.ok).length;
+      return res.status(200).json({
+        ok:            successCount > 0,
+        ref,
+        plantilla_id,
+        scenes:        sceneResults,
+        success_count: successCount,
+        total_scenes:  prendas.length,
+        jade_cost:     COMERCIAL_COST,
+      });
+    }
+
+    // ── MODO: STORYBOARD NORMAL (otros tipos de comercial) ────
+    if (!storyboard?.scenes?.length) {
+      return res.status(400).json({ ok: false, error: "MISSING_STORYBOARD" });
+    }
+
+    console.error(`[comercial-generate] storyboard — scenes=${storyboard.scenes.length} accent=${accent} gender=${gender}`);
+
     const sceneResults = await Promise.allSettled(
       storyboard.scenes.map(async (scene, idx) => {
-        console.log(`[comercial] escena ${idx + 1}/${storyboard.scenes.length}`);
- 
+        console.error(`[comercial] escena ${idx + 1}/${storyboard.scenes.length}`);
+
+        // Generar imagen
         let sceneImage = null;
-        try { sceneImage = await generateSceneImage(scene.image_prompt, referenceImages); }
-        catch (e) { console.error(`[comercial] imagen ${idx + 1}:`, e?.message); }
- 
-        let videoResult = null;
-        if (sceneImage) {
-          try { videoResult = await imageToVideoVeo3(sceneImage.base64, sceneImage.mimeType, scene.video_prompt); }
-          catch (e) { console.error(`[comercial] video ${idx + 1}:`, e?.message); }
+        try {
+          const imagePrompt = buildStoryboardImagePrompt(scene, referenceImages);
+          sceneImage = await generateSceneImage(imagePrompt, referenceImages);
+        } catch (e) {
+          console.error(`[comercial] imagen ${idx + 1}:`, e.message);
         }
- 
+
+        // Convertir a video con BytePlus
+        let videoUrl = null;
+        if (sceneImage) {
+          try {
+            const { url: imageUrl, path: imagePath } = await uploadImageTemp(
+              sceneImage.base64, sceneImage.mimeType, userId
+            );
+
+            const bp = await imageToVideoByteplus(imageUrl, scene.video_prompt, "9:16", 5);
+            videoUrl = await saveVideoToLibrary(userId, bp);
+
+            await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
+          } catch (e) {
+            console.error(`[comercial] video ${idx + 1}:`, e.message);
+          }
+        }
+
+        // Narración
         let narration = null;
         if (scene.narration) {
           try { narration = await generateNarration(scene.narration, accent, gender); }
-          catch (e) { console.error(`[comercial] narración ${idx + 1}:`, e?.message); }
+          catch (e) { console.error(`[comercial] narración ${idx + 1}:`, e.message); }
         }
- 
+
         return {
           scene_number:   scene.scene_number,
           narrative_role: scene.narrative_role || null,
           camera:         scene.camera,
           description:    scene.description,
           narration_text: scene.narration,
-          image_b64:      sceneImage?.base64   || null,
+          image_b64:      sceneImage?.base64  || null,
           image_mime:     sceneImage?.mimeType || "image/jpeg",
-          video_url:      videoResult?.url     || null,
-          video_b64:      videoResult?.base64  || null,
-          audio_b64:      narration?.base64    || null,
-          audio_mime:     narration?.mimeType  || "audio/mpeg",
-          ok: !!(videoResult?.url || videoResult?.base64),
+          video_url:      videoUrl || null,
+          audio_b64:      narration?.base64   || null,
+          audio_mime:     narration?.mimeType || "audio/mpeg",
+          ok:             !!videoUrl,
         };
       })
     );
- 
+
     const scenes       = sceneResults.map((r, idx) =>
-      r.status === "fulfilled" ? r.value : { scene_number: idx + 1, ok: false, error: r.reason?.message || "Error" }
+      r.status === "fulfilled" ? r.value : { scene_number: idx + 1, ok: false, error: r.reason?.message }
     );
     const successCount = scenes.filter(s => s.ok).length;
-    console.log(`[comercial-generate] ✅ ${successCount}/${scenes.length} escenas OK`);
- 
+
     return res.status(200).json({
-      ok: successCount > 0, ref,
-      title: storyboard.title, style: storyboard.style,
-      music_mood: storyboard.music_mood, call_to_action: storyboard.call_to_action,
-      accent, gender, scenes, success_count: successCount,
-      total_scenes: scenes.length, jade_cost: COMERCIAL_COST,
+      ok:            successCount > 0,
+      ref,
+      title:         storyboard.title,
+      style:         storyboard.style,
+      music_mood:    storyboard.music_mood,
+      call_to_action: storyboard.call_to_action,
+      accent,
+      gender,
+      scenes,
+      success_count: successCount,
+      total_scenes:  scenes.length,
+      jade_cost:     COMERCIAL_COST,
     });
- 
+
   } catch (e) {
-    console.error("[comercial-generate] SERVER_ERROR:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: String(e?.message || e) });
+    // Reembolsar Jades si hay error crítico
+    await supabaseAdmin.rpc("spend_jades", {
+      p_user_id: userId,
+      p_amount:  -COMERCIAL_COST,
+      p_reason:  "comercial_refund_error",
+      p_ref:     ref,
+    }).catch(() => {});
+
+    console.error("[comercial-generate] SERVER_ERROR:", e.message);
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: e.message });
   }
 }
- 
+
+// ── Prompt Gemini para storyboard normal ─────────────────────
+function buildStoryboardImagePrompt(scene, referenceImages) {
+  const hasRefs = referenceImages?.some(img => img?.base64);
+  return [
+    "You are a world-class advertising photographer with 20 years shooting campaigns for major global brands.",
+    "Create ONE stunning photorealistic advertisement photograph for this scene.",
+    "",
+    "=== SCENE ===",
+    scene.image_prompt,
+    "",
+    hasRefs ? [
+      "=== REFERENCE IMAGES ===",
+      "Use ALL provided reference images to build the most accurate scene possible.",
+      "If references show a PERSON: maintain their exact likeness — face, skin tone, hair.",
+      "If references show a PRODUCT: feature it prominently with exact colors, shape, details.",
+      "If references show a LOCATION: use it as the background/setting.",
+      "If references show CLOTHING: the model must be WEARING it with exact detail reproduction.",
+    ].join("\n") : "",
+    "",
+    "=== QUALITY STANDARDS ===",
+    "• Photorealistic — must look like an actual professional photograph",
+    "• Cinematic lighting appropriate for the scene mood",
+    "• 9:16 vertical format for social media",
+    "• National TV commercial / luxury brand campaign quality",
+    "• NO text, NO subtitles, NO watermarks, NO logos anywhere",
+  ].filter(Boolean).join("\n");
+}
+
 export const config = { runtime: "nodejs" };
