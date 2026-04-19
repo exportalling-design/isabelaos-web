@@ -1,26 +1,32 @@
 // api/cineai/generate.js
 // ─────────────────────────────────────────────────────────────
-// Endpoint de generación de video con Seedance 2.0 via BytePlus ModelArk
+// Routing automático entre 3 proveedores según el caso:
 //
-// FACE BYPASS — Grid Overlay:
-//   BytePlus bloquea fotos de personas reales con su detector facial.
-//   Antes de mandar cualquier imagen con rostro, le aplicamos un grid
-//   overlay 6x6 de líneas blancas sólidas que rompe los patrones de
-//   detección biométrica sin afectar la calidad del output de Seedance.
-//   El modelo sigue "viendo" el rostro y lo usa correctamente.
-//   Técnica documentada y probada por la comunidad de creadores.
+//   CON foto + audio  → fal.ai  (acepta imagen + audio, no bloquea rostros)
+//   CON foto sin audio → fal.ai  (más barato que BytePlus para rostros)
+//   CON video referencia + foto → fal.ai (reference-to-video)
+//   SIN foto, sin audio → BytePlus (ya pagado, funciona perfecto)
+//   Continuación → BytePlus (sin foto real, solo último frame)
 //
-// IMPORTANTE — continuación de escena:
-//   BytePlus NO permite mezclar imagen de primer frame con video de referencia.
-//   En modo continuación solo se manda el último frame como imagen de arranque.
+// Variables Vercel necesarias:
+//   BYTEPLUS_API_KEY  — BytePlus ModelArk
+//   FAL_KEY           — fal.ai
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
-import sharp from "sharp";
 
+// ── BytePlus ──────────────────────────────────────────────────
 const BYTEPLUS_BASE   = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
-const MODEL           = "dreamina-seedance-2-0-260128";
+const BYTEPLUS_MODEL  = "dreamina-seedance-2-0-260128";
+
+// ── fal.ai endpoints Seedance 2.0 ────────────────────────────
+const FAL_BASE = "https://fal.run";
+const FAL_ENDPOINTS = {
+  reference: "bytedance/seedance-2.0/fast/reference-to-video", // imagen + audio + video
+  image:     "bytedance/seedance-2.0/fast/image-to-video",     // solo imagen
+  text:      "bytedance/seedance-2.0/fast/text-to-video",      // solo texto
+};
 
 const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
 
@@ -52,78 +58,54 @@ function detectBlockedContent(text) {
   const lower = (text || "").toLowerCase();
   for (const name of BLOCKED_NAMES) {
     const escaped = name.replace(/[-]/g, "\\-");
-    const regex = new RegExp(`\\b${escaped}\\b`, "i");
-    if (regex.test(lower)) return name;
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(lower)) return name;
   }
   return null;
 }
 
-// ── GRID OVERLAY — bypass del detector facial de BytePlus ─────
-// Aplica una cuadrícula 6x6 de líneas blancas sólidas sobre la imagen.
-// Rompe los patrones biométricos que activan el detector de rostros reales
-// sin afectar la capacidad de Seedance de leer el rostro para el video.
-// Referencia: técnica documentada por la comunidad (línea 12px, 100% opacidad).
-async function applyGridOverlay(imageUrl) {
-  try {
-    // 1. Descargar la imagen original
-    const res = await fetch(imageUrl);
-    if (!res.ok) throw new Error(`No se pudo descargar imagen: ${res.status}`);
-    const arrayBuffer = await res.arrayBuffer();
-    const inputBuffer = Buffer.from(arrayBuffer);
+// ── Llamar a fal.ai (submit async) ───────────────────────────
+async function submitToFal(endpoint, input) {
+  const url = `${FAL_BASE}/${endpoint}`;
+  const r = await fetch(url, {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": `Key ${process.env.FAL_KEY}`,
+    },
+    body: JSON.stringify(input),
+  });
 
-    // 2. Obtener dimensiones
-    const metadata = await sharp(inputBuffer).metadata();
-    const width    = metadata.width  || 512;
-    const height   = metadata.height || 512;
-
-    // 3. Generar SVG con cuadrícula 6x6 de líneas blancas sólidas
-    const cols     = 10;
-    const rows     = 10;
-    const lineW    = 16; // grosor líneas en px
-    const colStep  = Math.floor(width  / cols);
-    const rowStep  = Math.floor(height / rows);
-
-    let svgLines = "";
-
-    // Líneas verticales
-    for (let i = 1; i < cols; i++) {
-      const x = i * colStep;
-      svgLines += `<rect x="${x}" y="0" width="${lineW}" height="${height}" fill="white"/>`;
-    }
-    // Líneas horizontales
-    for (let i = 1; i < rows; i++) {
-      const y = i * rowStep;
-      svgLines += `<rect x="0" y="${y}" width="${width}" height="${lineW}" fill="white"/>`;
-    }
-
-    const svg = Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${svgLines}</svg>`
-    );
-
-    // 4. Composite: imagen original + grid encima
-    const outputBuffer = await sharp(inputBuffer)
-      .composite([{ input: svg, blend: "over" }])
-      .blur(0.8)
-      .jpeg({ quality: 88 })
-      .toBuffer();
-
-    // 5. Subir imagen procesada a Supabase Storage temporal
-    const path = `cineai/grid/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-    const { error: uploadErr } = await supabaseAdmin.storage
-      .from("user-uploads")
-      .upload(path, outputBuffer, { contentType: "image/jpeg", upsert: false });
-
-    if (uploadErr) throw new Error(`Error subiendo imagen procesada: ${uploadErr.message}`);
-
-    const { data } = supabaseAdmin.storage.from("user-uploads").getPublicUrl(path);
-    console.error("[cineai/generate] grid overlay aplicado:", path);
-    return { url: data.publicUrl, tempPath: path };
-
-  } catch (err) {
-    // Si falla el grid, usar la URL original (BytePlus puede bloquearla, pero al menos intentamos)
-    console.error("[cineai/generate] grid overlay failed, usando imagen original:", err.message);
-    return { url: imageUrl, tempPath: null };
+  // fal.ai devuelve 200 con request_id en modo queue
+  // o devuelve el resultado directo si es sync
+  const data = await r.json();
+  if (!r.ok) {
+    throw new Error(data?.detail || data?.error || `fal.ai error ${r.status}`);
   }
+
+  // Si hay request_id es async, si hay video es sync
+  const requestId = data?.request_id || data?.requestId;
+  const videoUrl  = data?.video?.url || data?.data?.video?.url;
+
+  return { requestId, videoUrl, raw: data };
+}
+
+// ── Llamar a BytePlus ─────────────────────────────────────────
+async function submitToByteplus(content) {
+  const r = await fetch(BYTEPLUS_CREATE, {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
+    },
+    body: JSON.stringify({ model: BYTEPLUS_MODEL, content }),
+  });
+
+  const data = await r.json();
+  if (!r.ok || data.error) {
+    throw new Error(data.error?.message || data.message || `BytePlus error ${r.status}`);
+  }
+
+  return { taskId: data.id, raw: data };
 }
 
 export default async function handler(req, res) {
@@ -161,7 +143,7 @@ export default async function handler(req, res) {
   if (blocked) {
     return res.status(400).json({
       ok: false,
-      error: `"${blocked}" está bloqueado por derechos de autor. Describe un personaje original.`,
+      error: `"${blocked}" está bloqueado. Describe un personaje original.`,
       blocked: true,
     });
   }
@@ -171,6 +153,7 @@ export default async function handler(req, res) {
     ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 
+  // ── Cobrar Jades ──────────────────────────────────────────
   const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
     p_user_id: userId,
     p_amount:  jadeCost,
@@ -179,133 +162,157 @@ export default async function handler(req, res) {
   });
 
   if (spendErr) {
-    console.error("[cineai/generate] spend_jades failed:", spendErr.message);
     if ((spendErr.message || "").includes("INSUFFICIENT_JADES")) {
       return res.status(402).json({
         ok: false,
         error: "INSUFFICIENT_JADES",
-        detail: `Necesitas ${jadeCost} Jades para esta generación.`,
+        detail: `Necesitas ${jadeCost} Jades.`,
       });
     }
     return res.status(400).json({ ok: false, error: spendErr.message });
   }
 
-  // ── Aplicar grid overlay a imágenes con rostros ───────────
-  // Se aplica a TODAS las imágenes de usuario para bypassear el detector facial.
-  // Imágenes de continuación (últimos frames) también pueden tener rostros.
-  let processedImageUrl  = imageUrl  || null;
-  let gridTempPath       = null;
+  // ─────────────────────────────────────────────────────────
+  // ROUTING LOGIC
+  // CON imageUrl → fal.ai (no bloquea rostros reales)
+  // SIN imageUrl → BytePlus (ya pagado, perfecto para texto/video)
+  // Continuación → BytePlus (el último frame no tiene problema de moderación)
+  // ─────────────────────────────────────────────────────────
+  const useFal      = !!(imageUrl && !isContinuation);
+  const provider    = useFal ? "fal_seedance" : "byteplus_seedance";
+  let finalPrompt   = String(prompt).trim();
+  let mode          = "t2v";
+  let taskId        = null;   // BytePlus task id
+  let falRequestId  = null;   // fal.ai request id
+  let falVideoUrl   = null;   // fal.ai sync response (raro pero posible)
 
-  if (imageUrl) {
-    const gridResult = await applyGridOverlay(imageUrl);
-    processedImageUrl = gridResult.url;
-    gridTempPath      = gridResult.tempPath;
-  }
-
-  // ── Construir payload BytePlus ────────────────────────────
-  let finalPrompt = String(prompt).trim();
-  let mode    = "t2v";
-  let modelId = MODEL;
-  const content = [];
-
-  if (isContinuation && processedImageUrl) {
-    // CONTINUACIÓN — solo primer frame, sin video de referencia
-    content.push({ type: "image_url", image_url: { url: processedImageUrl } });
-    finalPrompt = `[Image 1] This is the last frame of the previous clip. Continue the scene seamlessly from this exact frame. Maintain the same atmosphere, lighting, color grade, camera movement style, and visual mood. The continuation must feel like an uninterrupted extension of the same shot with no style changes. ${finalPrompt}`;
-    mode = "continuation";
-
-  } else if (animateExact && processedImageUrl) {
-    content.push({ type: "image_url", image_url: { url: processedImageUrl } });
-    finalPrompt = `[Image 1] Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, scenery, and all characters exactly as they appear. Do not change, replace, or add any new backgrounds or characters. Only add natural movement to existing subjects. ${finalPrompt}`;
-    mode = "animate";
-
-  } else if (audioUrl && processedImageUrl) {
-    // LIP SYNC — foto + audio
-    content.push({ type: "image_url", image_url: { url: processedImageUrl } });
-    content.push({ type: "audio_url", audio_url: { url: audioUrl } });
-    finalPrompt = `[Image 1] Lip sync the person in this image to the audio in [Audio 1]. Mouth movements must match the song exactly. Keep the original background and lighting. ${finalPrompt}`;
-    mode = "lipsync";
-
-  } else if (audioUrl && !processedImageUrl) {
-    content.push({ type: "audio_url", audio_url: { url: audioUrl } });
-    finalPrompt = `[Audio 1] Person lip syncing to this audio, mouth movements perfectly synced to the music, expressive performance. ${finalPrompt}`;
-    mode = "lipsync_nophoto";
-
-  } else if (refVideoUrl && processedImageUrl) {
-    // R2V + CARA
-    content.push({ type: "image_url", image_url: { url: processedImageUrl } });
-    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
-    finalPrompt = `[Image 1] Use this person as the subject. [Video 1] Copy ONLY the body movement and choreography from this reference video. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
-    mode = "r2v+face";
-
-  } else if (refVideoUrl && !processedImageUrl) {
-    content.push({ type: "video_url", video_url: { url: refVideoUrl } });
-    finalPrompt = `[Video 1] Copy ONLY the body movement and choreography from this reference video. Background and environment should come from the prompt description, NOT from the reference video. ${finalPrompt}`;
-    mode = "r2v";
-
-  } else if (processedImageUrl) {
-    content.push({ type: "image_url", image_url: { url: processedImageUrl } });
-    finalPrompt = `[Image 1] ${finalPrompt}`;
-    mode = "i2v";
-
-  } else {
-    mode = "t2v";
-  }
-
-  // Texto con parámetros al final
-  content.push({
-    type: "text",
-    text: `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
-  });
-
-  const byteplusPayload = { model: modelId, content };
-
-  // ── Llamar a BytePlus ─────────────────────────────────────
-  let taskData;
   try {
-    const bpRes = await fetch(BYTEPLUS_CREATE, {
-      method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
-      },
-      body: JSON.stringify(byteplusPayload),
-    });
+    if (useFal) {
+      // ── FAL.AI — cuando hay imagen (con o sin audio/video) ──
+      const hasAudio    = !!audioUrl;
+      const hasRefVideo = !!refVideoUrl;
 
-    taskData = await bpRes.json();
+      if (hasAudio || hasRefVideo) {
+        // reference-to-video — acepta imagen + audio + video juntos
+        mode = hasAudio ? "lipsync" : "r2v+face";
+        const imageUrls = [imageUrl];
+        const videoUrls = hasRefVideo ? [refVideoUrl] : undefined;
+        const audioUrls = hasAudio    ? [audioUrl]    : undefined;
 
-    if (!bpRes.ok || taskData.error) {
-      throw new Error(taskData.error?.message || taskData.message || `BytePlus error ${bpRes.status}`);
+        let promptText = finalPrompt;
+        if (hasAudio && !hasRefVideo) {
+          promptText = `@Image1 Lip sync the person to the audio in @Audio1. Mouth movements must match exactly. Keep original background and lighting. ${finalPrompt}`;
+        } else if (hasRefVideo && !hasAudio) {
+          promptText = `@Image1 Use this person as the subject. @Video1 Copy ONLY the body movement and choreography from this reference. Background comes from the prompt, NOT from the reference video. ${finalPrompt}`;
+          mode = "r2v+face";
+        } else if (hasAudio && hasRefVideo) {
+          promptText = `@Image1 Use this person. @Video1 Copy the movement. @Audio1 Lip sync to this audio. ${finalPrompt}`;
+          mode = "r2v+face+audio";
+        }
+
+        const input = {
+          prompt:          promptText,
+          image_urls:      imageUrls,
+          aspect_ratio:    aspectRatio,
+          duration:        String(duration),
+          resolution:      "720p",
+          generate_audio:  true,
+        };
+        if (videoUrls) input.video_urls = videoUrls;
+        if (audioUrls) input.audio_urls = audioUrls;
+
+        const result = await submitToFal(FAL_ENDPOINTS.reference, input);
+        falRequestId = result.requestId;
+        falVideoUrl  = result.videoUrl;
+
+      } else if (animateExact) {
+        // image-to-video — animar foto exacta
+        mode = "animate";
+        const result = await submitToFal(FAL_ENDPOINTS.image, {
+          prompt:       `Animate this exact photo naturally. STRICTLY preserve original background, scenery and all characters. Only add natural movement to existing subjects. ${finalPrompt}`,
+          image_url:    imageUrl,
+          aspect_ratio: aspectRatio,
+          duration:     String(duration),
+          resolution:   "720p",
+          generate_audio: true,
+        });
+        falRequestId = result.requestId;
+        falVideoUrl  = result.videoUrl;
+
+      } else {
+        // image-to-video estándar — foto del usuario
+        mode = "i2v";
+        const result = await submitToFal(FAL_ENDPOINTS.image, {
+          prompt:       `@Image1 ${finalPrompt}`,
+          image_url:    imageUrl,
+          aspect_ratio: aspectRatio,
+          duration:     String(duration),
+          resolution:   "720p",
+          generate_audio: true,
+        });
+        falRequestId = result.requestId;
+        falVideoUrl  = result.videoUrl;
+      }
+
+    } else {
+      // ── BYTEPLUS — sin imagen (texto, video ref, continuación) ──
+      const content = [];
+
+      if (isContinuation && imageUrl) {
+        // Continuación — último frame como primer frame
+        content.push({ type: "image_url", image_url: { url: imageUrl } });
+        finalPrompt = `[Image 1] This is the last frame of the previous clip. Continue the scene seamlessly. Maintain same atmosphere, lighting, color grade, camera movement. ${finalPrompt}`;
+        mode = "continuation";
+
+      } else if (refVideoUrl && !imageUrl) {
+        // R2V — solo video de referencia sin cara
+        content.push({ type: "video_url", video_url: { url: refVideoUrl } });
+        finalPrompt = `[Video 1] Copy ONLY the body movement and choreography from this reference video. Background comes from the prompt. ${finalPrompt}`;
+        mode = "r2v";
+
+      } else if (audioUrl && !imageUrl) {
+        // Audio sin foto
+        content.push({ type: "audio_url", audio_url: { url: audioUrl } });
+        finalPrompt = `[Audio 1] Person lip syncing to this audio, perfectly synced, expressive. ${finalPrompt}`;
+        mode = "lipsync_nophoto";
+
+      } else {
+        // Solo texto
+        mode = "t2v";
+      }
+
+      content.push({
+        type: "text",
+        text: `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
+      });
+
+      const result = await submitToByteplus(content);
+      taskId = result.taskId;
     }
+
   } catch (err) {
-    // Limpiar imagen temporal del grid
-    if (gridTempPath) {
-      await supabaseAdmin.storage.from("user-uploads").remove([gridTempPath]).catch(() => {});
-    }
-    // Reembolsar Jades
+    // Reembolsar Jades si falla
     await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount:  -jadeCost,
-      p_reason:  "cineai_refund_byteplus_error",
+      p_reason:  "cineai_refund_error",
       p_ref:     ref,
     });
-    console.error("[cineai/generate] BytePlus error:", err.message);
+    console.error(`[cineai/generate] ${provider} error:`, err.message);
     return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
-  const taskId = taskData.id;
-  if (!taskId) {
-    if (gridTempPath) {
-      await supabaseAdmin.storage.from("user-uploads").remove([gridTempPath]).catch(() => {});
-    }
+  // ── Verificar que tenemos un ID para hacer polling ────────
+  const providerTaskId = taskId || falRequestId;
+  if (!providerTaskId && !falVideoUrl) {
     await supabaseAdmin.rpc("spend_jades", {
       p_user_id: userId,
       p_amount:  -jadeCost,
       p_reason:  "cineai_refund_no_taskid",
       p_ref:     ref,
     });
-    console.error("[cineai/generate] BytePlus no devolvió task id:", JSON.stringify(taskData));
-    return res.status(500).json({ ok: false, error: "BytePlus no devolvió task id" });
+    console.error(`[cineai/generate] no task id. provider=${provider}`);
+    return res.status(500).json({ ok: false, error: "El proveedor no devolvió task id" });
   }
 
   // ── Guardar en video_jobs ─────────────────────────────────
@@ -316,27 +323,28 @@ export default async function handler(req, res) {
   const { error: insertErr } = await supabaseAdmin.from("video_jobs").insert({
     id:                  jobId,
     user_id:             userId,
-    status:              "IN_PROGRESS",
+    status:              falVideoUrl ? "COMPLETED" : "IN_PROGRESS",
     mode:                "cineai",
     prompt:              finalPrompt,
-    provider:            "byteplus_seedance",
-    provider_request_id: taskId,
-    provider_status:     "running",
+    provider,
+    provider_request_id: providerTaskId || jobId,
+    provider_status:     falVideoUrl ? "completed" : "running",
+    result_url:          falVideoUrl || null,
     started_at:          new Date().toISOString(),
     payload: {
-      task_id:         taskId,
       cineai_mode:     mode,
       scene_mode:      sceneMode,
       duration,
       aspect_ratio:    aspectRatio,
-      model:           modelId,
       image_url:       imageUrl    || null,
       ref_video_url:   refVideoUrl || null,
       audio_url:       audioUrl    || null,
       animate_exact:   animateExact   || false,
       is_continuation: isContinuation || false,
-      grid_temp_path:  gridTempPath   || null,
       jade_cost:       jadeCost,
+      provider,
+      task_id:         taskId       || null,
+      fal_request_id:  falRequestId || null,
       ref,
     },
   });
@@ -345,9 +353,23 @@ export default async function handler(req, res) {
     console.error("[cineai/generate] video_jobs insert failed:", insertErr.message);
   }
 
-  console.error("[cineai/generate] OK", { userId, jobId, taskId, mode, modelId, jadeCost, gridApplied: !!gridTempPath });
+  console.error("[cineai/generate] OK", {
+    userId, jobId,
+    taskId: providerTaskId,
+    mode, provider, jadeCost,
+    syncVideo: !!falVideoUrl,
+  });
 
-  return res.status(200).json({ ok: true, jobId, taskId, mode, jadeCost });
+  return res.status(200).json({
+    ok:       true,
+    jobId,
+    taskId:   providerTaskId,
+    mode,
+    provider,
+    jadeCost,
+    // Si fal.ai devolvió el video directo (sync), lo mandamos ya
+    videoUrl: falVideoUrl || null,
+  });
 }
 
 export const config = { runtime: "nodejs" };
