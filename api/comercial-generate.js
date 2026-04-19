@@ -23,7 +23,7 @@ import { supabaseAdmin }          from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
 const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
+const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 const ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1";
 const BYTEPLUS_BASE      = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE    = `${BYTEPLUS_BASE}/contents/generations/tasks`;
@@ -275,74 +275,89 @@ function buildModaImagePrompt(idx, total, hasModelo, hasFondo) {
 }
 
 // ── Prompts épicos para Producto Estelar ──────────────────────
+// Gemini genera la foto de la mano lanzando el producto al aire
+// con el efecto ya aplicado en la imagen.
+// Seedance anima esa imagen — el movimiento, el efecto fluyendo, la física.
 // El producto NUNCA cambia — es el protagonista absoluto.
-// El efecto envuelve al producto sin alterarlo.
 const EFECTOS_PRODUCTO = {
   golden_particles: {
     imagePrompt: [
-      "Ultra-cinematic product hero shot. The EXACT product from [Image 1] floats centered in frame.",
-      "CRITICAL: The product must appear IDENTICAL to the reference — same shape, label, color, every detail.",
-      "Effect: thousands of luminous gold particles orbit the product in elegant spiraling streams,",
-      "like a constellation forming around it. Particles catch light and shimmer.",
-      "Background: pure black velvet void with subtle depth. Dramatic rim lighting makes the product glow.",
-      "Mood: supreme luxury, Chanel/Dior campaign level. 9:16 vertical. NO text, NO logos other than on product.",
+      "Ultra-cinematic product advertisement photograph.",
+      "A beautifully manicured hand launches the EXACT product from [Image 1] into the air.",
+      "CRITICAL: The product must be 100% identical to the reference — same shape, label, color, every detail preserved.",
+      "The product is mid-air, slightly tilted, perfectly lit.",
+      "Effect: thousands of luminous gold particles EXPLODE outward from the product in all directions —",
+      "swirling streams of gold shimmer like a constellation being born.",
+      "Background: pure black velvet void. Dramatic rim lighting makes the product glow from within.",
+      "The hand is elegantly posed at the bottom of frame, releasing the product upward.",
+      "Mood: supreme luxury — Chanel / Dior campaign level. 9:16 vertical. NO text, NO watermarks.",
     ].join(" "),
-    videoPrompt: "Product levitates slowly, golden particle streams spiral around it in mesmerizing orbits. Camera: slow push-in with subtle rotation. Golden light pulses. Cinematic slow motion. NO text.",
+    videoPrompt: "Hand dramatically releases product upward, golden particles explode and swirl in spectacular slow motion. Product rotates slowly mid-air surrounded by golden light streams. Camera: slow push-in following the product. Epic cinematic. NO text.",
   },
   fire_energy: {
     imagePrompt: [
-      "Epic cinematic product shot. The EXACT product from [Image 1] stands on a dark stage.",
+      "Epic cinematic product advertisement shot.",
+      "A strong hand dramatically launches the EXACT product from [Image 1] upward into darkness.",
       "CRITICAL: Product identical to reference — preserve all labels, colors, shape exactly.",
-      "Effect: dramatic fire bursts erupt BEHIND and AROUND the product — deep orange and blue flames —",
-      "but the product itself is pristine, untouched, illuminated by the fire's glow.",
-      "Sparks rain down. Smoke curls artistically. Background: darkness with ember particles.",
-      "Mood: power, energy, volcanic force. 9:16 vertical. Photorealistic, NO text.",
+      "The product is mid-air, caught in the moment of release.",
+      "Effect: massive fire bursts ERUPT behind and around the product — deep orange, blue and white flames —",
+      "but the product itself is pristine and untouched, illuminated dramatically by the fire's glow.",
+      "Sparks rain down like a meteor shower. Smoke curls with power and energy.",
+      "Background: total darkness punctuated by ember particles and heat shimmer.",
+      "Mood: raw power, volcanic force, unstoppable energy. 9:16 vertical. NO text.",
     ].join(" "),
-    videoPrompt: "Flames erupt dramatically behind product, sparks fly in slow motion. Product stands perfect and untouched, lit by fire glow. Epic camera: low angle push-in. NO text.",
+    videoPrompt: "Hand releases product with force, fire erupts dramatically behind it in slow motion. Sparks fly outward like meteors. Product stands perfect and untouched, glowing in fire light. Camera: low angle heroic push-in. NO text.",
   },
   liquid_splash: {
     imagePrompt: [
-      "Award-winning product photography. The EXACT product from [Image 1] emerges from a dramatic liquid splash.",
+      "Award-winning product photography for a premium brand campaign.",
+      "An elegant hand tosses the EXACT product from [Image 1] upward through a spectacular liquid splash.",
       "CRITICAL: Product completely identical to reference — label, color, shape preserved perfectly.",
-      "Effect: a crown of crystal-clear liquid explodes upward around the product base,",
-      "frozen in time. Droplets hang suspended in the air, refracting light like diamonds.",
-      "Background: pure white or soft gradient. Studio lighting, ultra-sharp detail.",
-      "Mood: freshness, purity, premium beauty brand. 9:16 vertical. NO text.",
+      "The product emerges triumphantly from a crown of crystal-clear liquid exploding in all directions.",
+      "Droplets hang suspended in the air like liquid diamonds, each refracting rainbow light.",
+      "The splash crown is perfectly symmetrical, frozen at the peak moment of impact.",
+      "Background: pure white or soft gradient. Studio lighting at 45 degrees, ultra-sharp.",
+      "Mood: freshness, purity, premium beauty — fresh energy brand. 9:16 vertical. NO text.",
     ].join(" "),
-    videoPrompt: "Liquid crown explodes around product in ultra slow motion, droplets cascade beautifully. Product perfectly still in center. Camera: slow zoom reveal. Crystal clear water physics. NO text.",
+    videoPrompt: "Hand releases product upward, liquid crown EXPLODES in ultra slow motion around it. Crystal droplets cascade outward beautifully, each one glistening. Product rises through the splash perfectly clean. Camera: slow reveal zoom. NO text.",
   },
   crystal_smoke: {
     imagePrompt: [
-      "Mysterious luxury product photograph. The EXACT product from [Image 1] sits surrounded by ethereal smoke.",
+      "Mysterious luxury product photograph for an exclusive brand.",
+      "A graceful hand releases the EXACT product from [Image 1] into a swirling cloud of ethereal smoke.",
       "CRITICAL: Product identical to reference — every label, color, shape, detail preserved.",
-      "Effect: translucent smoke wisps curl and swirl around the product like elegant spirits.",
-      "Ice crystals form on nearby surfaces. Deep purple and indigo background with subtle light rays.",
-      "Crystalline formations emerge from the base. Mood: mystery, high-end perfume campaign.",
-      "9:16 vertical. Cinematic depth of field. NO text.",
+      "The product floats mid-air surrounded by translucent smoke wisps that curl like elegant spirits.",
+      "Ice crystals form on nearby surfaces, catching light. Deep purple and indigo tones fill the background.",
+      "Crystalline formations emerge mystically from the smoke. Light rays pierce through creating god rays.",
+      "Mood: mystery, exclusivity, high-end perfume campaign — like a dark magic ritual. 9:16 vertical. NO text.",
     ].join(" "),
-    videoPrompt: "Smoke curls hauntingly around product, ice crystals shimmer and form. Light rays pierce through smoke. Camera: slow orbit around product. Mysterious atmosphere. NO text.",
+    videoPrompt: "Hand releases product into mystical smoke, wisps curl and dance around it hauntingly. Ice crystals shimmer and form in slow motion. Light rays pierce through dramatic smoke. Camera: slow orbit. NO text.",
   },
   flower_petals: {
     imagePrompt: [
-      "Editorial beauty product photography. The EXACT product from [Image 1] in a sea of flower petals.",
+      "Editorial beauty product photography for a luxury botanical brand.",
+      "A delicate hand launches the EXACT product from [Image 1] upward into a magical petal storm.",
       "CRITICAL: Product completely identical to reference — label, color, shape exact.",
-      "Effect: thousands of rose and cherry blossom petals rain down around the product,",
-      "some resting gently on nearby surfaces. Soft bokeh background of lush blooms.",
-      "Golden hour warm light creates a magical glow. Petals in motion frozen mid-fall.",
-      "Mood: natural luxury, botanical beauty, Dior Garden campaign. 9:16 vertical. NO text.",
+      "Thousands of rose and cherry blossom petals EXPLODE outward from the product in all directions,",
+      "some resting gently nearby, most swirling in a spectacular vortex of color.",
+      "Golden hour warm light creates a magical hazy glow. The petals are in full motion, frozen mid-swirl.",
+      "Background: soft bokeh of lush garden in bloom.",
+      "Mood: natural luxury, botanical magic, Dior Garden / Jo Malone campaign. 9:16 vertical. NO text.",
     ].join(" "),
-    videoPrompt: "Rose petals rain down in slow motion around product, some twirling gracefully. Warm golden light. Camera: gentle upward tilt reveal. Magical dreamy atmosphere. NO text.",
+    videoPrompt: "Hand releases product upward, rose petals EXPLODE outward in glorious slow motion, twirling in a magical vortex. Warm golden light bathes everything. Product rises through a storm of petals. Camera: gentle upward reveal. NO text.",
   },
   electric_storm: {
     imagePrompt: [
-      "Electrifying tech product photography. The EXACT product from [Image 1] at the center of an electric storm.",
+      "Electrifying tech product photography for a cutting-edge brand.",
+      "A bold hand launches the EXACT product from [Image 1] into the center of an electric storm.",
       "CRITICAL: Product identical to reference — preserve all details, label, color, shape.",
-      "Effect: electric blue lightning arcs reach toward the product from all directions",
-      "but stop just before touching it — the product is the source of the energy.",
-      "Plasma bolts, electric sparks, and energy rings surround it. Dark storm background.",
-      "Mood: innovation, technology, power — Apple/Tesla campaign level. 9:16 vertical. NO text.",
+      "Electric blue and white lightning arcs REACH TOWARD the product from all directions,",
+      "as if it is the SOURCE of the energy, drawing power from the storm.",
+      "Plasma bolts, electric sparks, and glowing energy rings surround the product in a halo of power.",
+      "Background: dark storm clouds with crackling energy. Teal and electric blue color palette.",
+      "Mood: innovation, disruption, technology — Apple launch event / Tesla Cybertruck level. 9:16 vertical. NO text.",
     ].join(" "),
-    videoPrompt: "Electric lightning arcs dramatically around product, energy pulses radiate outward. Product glows with inner power. Camera: slow dramatic push-in. Epic sound design energy. NO text.",
+    videoPrompt: "Hand releases product into electric storm, lightning arcs toward it dramatically. Energy pulses radiate outward in slow motion. Product glows with inner technological power. Camera: dramatic push-in from below. NO text.",
   },
 };
 
