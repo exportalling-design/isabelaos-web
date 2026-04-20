@@ -398,6 +398,143 @@ function buildChefPrompt(chefDesc, hasChefPhoto) {
   ].join(" ");
 }
 
+// ── Prompt de continuidad para clips 2+ de Transición de Moda ─
+// Cuando tenemos el último frame del clip anterior como referencia,
+// le decimos a Gemini que mantenga EXACTAMENTE ese escenario
+// y solo cambie la ropa.
+function buildModaImagePromptContinuity(idx, total, hasModelo, hasFondo) {
+  return [
+    "You are a world-class fashion photographer continuing a fashion lookbook shoot.",
+    "[Image 1] = LAST FRAME from previous video clip — CRITICAL: preserve EVERYTHING from this image:",
+    "the exact same model (face, skin, hair, body), the exact same background/location,",
+    "the exact same lighting and color grade, the exact same camera angle and framing.",
+    "ONLY CHANGE: the model is now wearing the new clothing from [Image 2].",
+    "[Image 2] = NEW CLOTHING ITEM — reproduce this exact garment on the model:",
+    "same fabric texture, pattern, color, cut, every detail.",
+    `This is outfit ${idx + 1} of ${total} in a fashion transition video.`,
+    "The viewer must feel like the same model is in the same place, just with a different outfit.",
+    "Full body shot, 9:16 vertical portrait. Cinematic fashion photography quality. NO text.",
+  ].join(" ");
+}
+
+// ── Extraer último frame de un video via fal FFmpeg ───────────
+// Devuelve el frame como base64 JPEG para usar como referencia
+// de continuidad en el siguiente clip de Seedance.
+async function extractLastFrame(videoUrl) {
+  const { fal } = await import("@fal-ai/client");
+  const FAL_KEY = process.env.FAL_KEY;
+  if (!FAL_KEY) throw new Error("Missing FAL_KEY");
+  fal.config({ credentials: FAL_KEY });
+
+  // fal-ai/ffmpeg-api para extraer el último frame del video
+  const result = await fal.subscribe("fal-ai/ffmpeg-api", {
+    input: {
+      commands: [{
+        command: "ffmpeg",
+        args: [
+          "-sseof", "-0.1",        // posición: 0.1s antes del final
+          "-i", videoUrl,          // input video
+          "-vframes", "1",         // solo 1 frame
+          "-f", "image2",
+          "-vcodec", "mjpeg",
+          "last_frame.jpg",
+        ],
+      }],
+      // Necesitamos el output como base64
+      output_format: "base64",
+    },
+    pollInterval: 3000,
+  });
+
+  // Extraer base64 del resultado
+  const frameB64 =
+    result?.data?.outputs?.[0]?.data ||
+    result?.outputs?.[0]?.data       ||
+    result?.data?.base64             ||
+    null;
+
+  if (!frameB64) throw new Error("extractLastFrame: no base64 en respuesta");
+  return frameB64;
+}
+
+// ── Ensamblar clips de moda con crossfade via RunPod FFmpeg ───
+// Toma los video URLs de cada clip y los une con transición
+// crossfade suave de 0.5s entre cada uno.
+async function assembleModaClips(videoUrls, userId) {
+  const RUNPOD_ENDPOINT = process.env.RUNPOD_ASSEMBLER_ENDPOINT_ID;
+  const RUNPOD_API_KEY  = process.env.RUNPOD_API_KEY || process.env.RP_API_KEY;
+
+  if (!RUNPOD_ENDPOINT || !RUNPOD_API_KEY)
+    throw new Error("RunPod assembler no configurado");
+
+  // Descargar cada clip como base64
+  console.log(`[comercial] descargando ${videoUrls.length} clips para ensamblar`);
+  const clipsB64 = await Promise.all(
+    videoUrls.map(async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Download clip failed: ${res.status}`);
+      return Buffer.from(await res.arrayBuffer()).toString("base64");
+    })
+  );
+
+  // Enviar a RunPod assembler con acción "assemble_crossfade"
+  const submitRes = await fetch(
+    `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/run`,
+    {
+      method:  "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${RUNPOD_API_KEY}` },
+      body: JSON.stringify({
+        input: {
+          action:          "assemble_crossfade",
+          clips_b64:       clipsB64,
+          crossfade_sec:   0.5,    // transición de 0.5s entre clips
+          output_format:   "mp4",
+        },
+      }),
+    }
+  );
+
+  if (!submitRes.ok) throw new Error(`RunPod submit error: ${submitRes.status}`);
+  const { id: rpJobId } = await submitRes.json();
+  if (!rpJobId) throw new Error("RunPod no devolvió job ID");
+
+  console.log(`[comercial] RunPod assembler job: ${rpJobId}`);
+
+  // Polling RunPod máx 8 min
+  const deadline = Date.now() + 8 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5000));
+    const sr = await fetch(
+      `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/status/${rpJobId}`,
+      { headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` } }
+    );
+    if (!sr.ok) continue;
+    const sd = await sr.json();
+
+    if (sd.status === "COMPLETED") {
+      const videoB64 = sd.output?.video_b64 || sd.output?.video || null;
+      const videoUrl = sd.output?.video_url || null;
+
+      if (videoB64) {
+        // Subir a biblioteca desde base64
+        const buf  = Buffer.from(videoB64, "base64");
+        const path = `${userId}/moda_transition_${Date.now()}.mp4`;
+        const { error } = await supabaseAdmin.storage
+          .from("videos")
+          .upload(path, buf, { contentType: "video/mp4", upsert: false });
+        if (error) throw new Error(error.message);
+        const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
+        return data?.publicUrl;
+      }
+      if (videoUrl) return await saveVideoToLibrary(userId, videoUrl);
+      throw new Error("RunPod COMPLETED sin video en output");
+    }
+    if (sd.status === "FAILED")    throw new Error(`RunPod FAILED: ${sd.error}`);
+    if (sd.status === "CANCELLED") throw new Error("RunPod cancelado");
+  }
+  throw new Error("Timeout RunPod assembler");
+}
+
 // ── Prompt para Storyboard ────────────────────────────────────
 function buildStoryboardImagePrompt(scene, refs) {
   return [
@@ -448,7 +585,19 @@ export default async function handler(req, res) {
 
     // ════════════════════════════════════════════════════════
     // PLANTILLA: TRANSICIÓN DE MODA
-    // Flujo: Gemini genera foto modelo+prenda → Seedance anima
+    // Flujo encadenado para transiciones suaves:
+    //
+    // Por cada prenda (secuencial, NO paralelo):
+    //   1. Gemini genera foto modelo+prenda (usando last frame del clip anterior como ref)
+    //   2. Seedance anima esa foto → clip de 5s
+    //   3. FFmpeg extrae el último frame del clip
+    //   4. Ese último frame se usa como primera referencia del siguiente clip
+    //
+    // Resultado: todos los clips comparten continuidad visual —
+    // misma modelo, mismo fondo, misma pose al corte.
+    //
+    // Al final RunPod FFmpeg une todos los clips en 1 video con
+    // transición crossfade suave entre cada prenda.
     // ════════════════════════════════════════════════════════
     if (plantilla_id === "transicion_moda") {
       const prendas = imagenes.prendas || [];
@@ -460,80 +609,142 @@ export default async function handler(req, res) {
 
       const hasModelo = modelo.length > 0;
       const hasFondo  = fondo.length  > 0;
+      const useHuman  = hasHumanFace && hasModelo;
 
-      console.log(`[comercial] transicion_moda — prendas=${prendas.length} hasModelo=${hasModelo} hasFondo=${hasFondo} hasHumanFace=${hasHumanFace}`);
+      console.log(`[comercial] transicion_moda — prendas=${prendas.length} hasModelo=${hasModelo} hasFondo=${hasFondo} useHuman=${useHuman}`);
 
-      const sceneResults = [];
+      const videoUrls   = []; // URLs de clips generados para FFmpeg
+      const tempPaths   = []; // Paths temporales para limpiar al final
+      let   lastFrameB64 = null; // Último frame del clip anterior (base64)
 
       for (let i = 0; i < prendas.length; i++) {
         try {
-          // Construir referencias para Gemini según caso
-          // Orden: modelo (si hay) → fondo (si hay) → prenda actual
-          const refs = [
-            ...(hasModelo ? [modelo[0]] : []),
-            ...(hasFondo  ? [fondo[0]]  : []),
-            prendas[i],
-          ].filter(Boolean);
+          console.log(`[comercial] prenda ${i + 1}/${prendas.length} — iniciando`);
 
-          const imagePrompt = buildModaImagePrompt(i, prendas.length, hasModelo, hasFondo);
+          // ── PASO 1: Construir referencias para Gemini ──────
+          // Prioridad: último frame del clip anterior > modelo original > fondo > prenda
+          // Si tenemos último frame, lo usamos como ancla de continuidad
+          const refs = [];
 
-          // PASO 1: Gemini genera foto realista de modelo con prenda
-          console.log(`[comercial] prenda ${i + 1} — generando imagen con Gemini`);
-          const sceneImage = await generateSceneImage(imagePrompt, refs);
+          if (lastFrameB64) {
+            // Usar último frame del clip anterior como referencia principal de continuidad
+            refs.push({ base64: lastFrameB64, mimeType: "image/jpeg" });
+          } else if (hasModelo) {
+            refs.push(modelo[0]);
+          }
 
-          // PASO 2: Subir imagen a Storage para obtener URL
+          if (hasFondo && !lastFrameB64) refs.push(fondo[0]);
+          refs.push(prendas[i]);
+
+          // Prompt adaptado según si tenemos frame anterior
+          const imagePrompt = lastFrameB64
+            ? buildModaImagePromptContinuity(i, prendas.length, hasModelo, hasFondo)
+            : buildModaImagePrompt(i, prendas.length, hasModelo, hasFondo);
+
+          // ── PASO 2: Gemini genera foto realista ────────────
+          console.log(`[comercial] prenda ${i + 1} — generando imagen Gemini`);
+          const sceneImage = await generateSceneImage(
+            imagePrompt,
+            refs.filter(Boolean)
+          );
+
+          // ── PASO 3: Subir imagen temporal ──────────────────
           const { url: imageUrl, path: imagePath } = await uploadImageTemp(
             sceneImage.base64, sceneImage.mimeType, userId
           );
+          tempPaths.push(imagePath);
 
-          // PASO 3: Seedance anima la foto
-          // Si hay modelo real → PiAPI, si no → BytePlus
-          const videoPrompt = hasModelo
-            ? "Fashion model walks confidently toward camera, hair flowing naturally, outfit perfectly visible. Cinematic dolly-in movement. Golden hour light. Fabric moves gracefully. NO text. NO subtitles."
-            : "Elegant fashion model turns and walks toward camera, showing full outfit. Smooth cinematic movement. Warm professional lighting. NO text. NO subtitles.";
+          // ── PASO 4: Seedance anima la foto ─────────────────
+          const videoPrompt = i === 0
+            ? "Fashion model stands elegantly, subtle natural movement — hair moves gently, fabric flows. Camera holds steady. Soft golden light. NO transitions, NO cuts. Single continuous shot. NO text."
+            : "Fashion model continues same pose and location, wearing new outfit — subtle natural movement, fabric flows. Camera holds same position and angle as before. Same lighting. Single continuous shot. NO text.";
 
-          console.log(`[comercial] prenda ${i + 1} — animando con Seedance (hasHumanFace=${hasHumanFace && hasModelo})`);
-          const videoUrl = await generateSceneVideo(
-            imageUrl, videoPrompt, "9:16", 5,
-            hasHumanFace && hasModelo // solo usa PiAPI si hay modelo real Y el usuario marcó el checkbox
-          );
+          console.log(`[comercial] prenda ${i + 1} — animando con Seedance`);
+          const videoUrl = await generateSceneVideo(imageUrl, videoPrompt, "9:16", 5, useHuman);
+          videoUrls.push(videoUrl);
 
-          // Guardar en biblioteca
-          const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
-
-          // Limpiar imagen temporal
-          await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
-
-          // Narración si se proporcionó
-          const narration = textos?.narracion
-            ? await generateNarration(textos.narracion, accent, gender)
-            : null;
-
-          sceneResults.push({
-            scene_number: i + 1,
-            ok:           true,
-            video_url:    libraryUrl,
-            audio_b64:    narration?.base64 || null,
-          });
+          // ── PASO 5: Extraer último frame via fal FFmpeg ────
+          // Este frame se usará como referencia del siguiente clip
+          // para garantizar continuidad visual
+          try {
+            console.log(`[comercial] prenda ${i + 1} — extrayendo último frame`);
+            lastFrameB64 = await extractLastFrame(videoUrl);
+            console.log(`[comercial] prenda ${i + 1} — último frame extraído ✅`);
+          } catch (frameErr) {
+            console.error(`[comercial] prenda ${i + 1} — extractLastFrame falló:`, frameErr.message);
+            // Si falla la extracción, usar la imagen generada por Gemini como fallback
+            lastFrameB64 = sceneImage.base64;
+          }
 
         } catch (err) {
           console.error(`[comercial] prenda ${i + 1} error:`, err.message);
-          sceneResults.push({
-            scene_number: i + 1,
-            ok:           false,
-            error:        err.message === "FACE_DETECTED" ? "FACE_DETECTED" : err.message,
+          // Si un clip falla, continuamos con los demás
+          // lastFrameB64 se mantiene del clip anterior
+        }
+      }
+
+      // Limpiar imágenes temporales
+      await supabaseAdmin.storage.from("user-uploads").remove(tempPaths).catch(() => {});
+
+      if (!videoUrls.length)
+        return res.status(500).json({ ok: false, error: "No se pudo generar ningún clip de moda." });
+
+      // ── PASO 6: Unir clips con RunPod FFmpeg ───────────────
+      // Si solo hay 1 clip, lo guardamos directamente
+      let finalVideoUrl;
+      if (videoUrls.length === 1) {
+        console.log(`[comercial] transicion_moda — 1 clip, guardando directo`);
+        finalVideoUrl = await saveVideoToLibrary(userId, videoUrls[0]);
+      } else {
+        console.log(`[comercial] transicion_moda — uniendo ${videoUrls.length} clips con FFmpeg`);
+        try {
+          finalVideoUrl = await assembleModaClips(videoUrls, userId);
+        } catch (assembleErr) {
+          console.error(`[comercial] assembleModaClips falló:`, assembleErr.message);
+          // Fallback: guardar los clips por separado
+          const savedClips = await Promise.all(
+            videoUrls.map(url => saveVideoToLibrary(userId, url))
+          );
+          // Devolver el primero como video principal y los demás como escenas
+          finalVideoUrl = savedClips[0];
+          const narration = textos?.narracion
+            ? await generateNarration(textos.narracion, accent, gender)
+            : null;
+          return res.status(200).json({
+            ok:            true,
+            ref,
+            plantilla_id,
+            assembled:     false,
+            note:          "Videos generados por separado — el ensamble falló.",
+            scenes:        savedClips.map((url, idx) => ({
+              scene_number: idx + 1, ok: true, video_url: url,
+              audio_b64: idx === 0 ? narration?.base64 || null : null,
+            })),
+            success_count: savedClips.length,
+            total_scenes:  savedClips.length,
+            jade_cost:     COMERCIAL_COST,
           });
         }
       }
 
-      const successCount = sceneResults.filter(s => s.ok).length;
+      // Narración en off (se agrega al video final ensamblado)
+      const narration = textos?.narracion
+        ? await generateNarration(textos.narracion, accent, gender)
+        : null;
+
       return res.status(200).json({
-        ok:            successCount > 0,
+        ok:            true,
         ref,
         plantilla_id,
-        scenes:        sceneResults,
-        success_count: successCount,
-        total_scenes:  prendas.length,
+        assembled:     videoUrls.length > 1,
+        scenes: [{
+          scene_number: 1,
+          ok:           true,
+          video_url:    finalVideoUrl,
+          audio_b64:    narration?.base64 || null,
+        }],
+        success_count: 1,
+        total_scenes:  1,
         jade_cost:     COMERCIAL_COST,
       });
     }
