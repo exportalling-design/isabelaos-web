@@ -178,25 +178,51 @@ export default async function handler(req, res) {
     const pendingAudio = job?.payload?.audio_url;
     const jobMode      = job?.payload?.cineai_mode;
 
-    // Si era lipsync con audio → mezclar audio con fal ffmpeg
+    // Si era lipsync con audio → sync-lipsync para sincronización perfecta de labios
     if (pendingAudio && jobMode === "lipsync") {
       try {
-        console.error("[cineai/poll] mezclando audio con video...");
-        const mergeRes  = await fetch("https://fal.run/fal-ai/ffmpeg-api/merge-audio-video", {
+        console.error("[cineai/poll] aplicando lipsync con sync-lipsync...");
+
+        // PASO 1: enviar a fal-ai/sync-lipsync (async)
+        const syncRes = await fetch("https://fal.run/fal-ai/sync-lipsync", {
           method:  "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Key ${process.env.FAL_KEY}` },
-          body: JSON.stringify({ video_url: rawVideoUrl, audio_url: pendingAudio }),
+          body: JSON.stringify({
+            video_url: rawVideoUrl,
+            audio_url: pendingAudio,
+            sync_mode: "loop", // si audio > video, repite el video
+          }),
         });
-        const mergeData = await mergeRes.json();
-        const mergedUrl = mergeData?.video?.url || mergeData?.data?.video?.url || null;
-        if (mergedUrl) {
-          rawVideoUrl = mergedUrl;
-          console.error("[cineai/poll] audio mezclado OK");
+        const syncData = await syncRes.json();
+
+        // sync-lipsync puede devolver request_id (async) o video directo
+        const requestId = syncData?.request_id || syncData?.requestId;
+        const directUrl = syncData?.video?.url || syncData?.data?.video?.url;
+
+        if (directUrl) {
+          rawVideoUrl = directUrl;
+          console.error("[cineai/poll] lipsync OK directo");
+        } else if (requestId) {
+          // Polling del lipsync
+          const deadline = Date.now() + 3 * 60 * 1000;
+          while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 5000));
+            const sr = await fetch(`https://queue.fal.run/fal-ai/sync-lipsync/requests/${requestId}`, {
+              headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
+            });
+            const sd = await sr.json();
+            if (sd.status === "COMPLETED") {
+              const syncedUrl = sd?.output?.video?.url || sd?.video?.url || null;
+              if (syncedUrl) { rawVideoUrl = syncedUrl; console.error("[cineai/poll] lipsync OK"); }
+              break;
+            }
+            if (sd.status === "FAILED") { console.error("[cineai/poll] lipsync falló, usando video mudo"); break; }
+          }
         } else {
-          console.error("[cineai/poll] merge sin URL:", JSON.stringify(mergeData));
+          console.error("[cineai/poll] sync-lipsync sin URL:", JSON.stringify(syncData));
         }
       } catch (e) {
-        console.error("[cineai/poll] merge falló, video mudo:", e.message);
+        console.error("[cineai/poll] lipsync falló, video mudo:", e.message);
       }
     }
 
