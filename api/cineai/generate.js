@@ -47,10 +47,8 @@ async function submitToFal(input) {
   });
   const data = await r.json();
   if (!r.ok) {
-    const errMsg = typeof data === "object"
-      ? (data?.detail || data?.error?.message || data?.error || data?.message || JSON.stringify(data))
-      : String(data);
-    throw new Error(`fal.ai ${r.status}: ${errMsg}`);
+    console.error("[fal] error response:", JSON.stringify(data));
+    throw new Error(`fal.ai ${r.status}: ${JSON.stringify(data)}`);
   }
   return {
     requestId: data?.request_id || data?.requestId || null,
