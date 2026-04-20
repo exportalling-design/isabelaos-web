@@ -174,7 +174,33 @@ export default async function handler(req, res) {
   let errorMsg      = null;
 
   if (pollResult.done && pollResult.videoUrl) {
-    finalVideoUrl = await saveVideoToLibrary(userId, pollResult.videoUrl, taskId);
+    let rawVideoUrl    = pollResult.videoUrl;
+    const pendingAudio = job?.payload?.audio_url;
+    const jobMode      = job?.payload?.cineai_mode;
+
+    // Si era lipsync con audio → mezclar audio con fal ffmpeg
+    if (pendingAudio && jobMode === "lipsync") {
+      try {
+        console.error("[cineai/poll] mezclando audio con video...");
+        const mergeRes  = await fetch("https://fal.run/fal-ai/ffmpeg-api/merge-audio-video", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Key ${process.env.FAL_KEY}` },
+          body: JSON.stringify({ video_url: rawVideoUrl, audio_url: pendingAudio }),
+        });
+        const mergeData = await mergeRes.json();
+        const mergedUrl = mergeData?.video?.url || mergeData?.data?.video?.url || null;
+        if (mergedUrl) {
+          rawVideoUrl = mergedUrl;
+          console.error("[cineai/poll] audio mezclado OK");
+        } else {
+          console.error("[cineai/poll] merge sin URL:", JSON.stringify(mergeData));
+        }
+      } catch (e) {
+        console.error("[cineai/poll] merge falló, video mudo:", e.message);
+      }
+    }
+
+    finalVideoUrl = await saveVideoToLibrary(userId, rawVideoUrl, taskId);
     newStatus     = "COMPLETED";
     await cleanupTempFiles(job);
   } else if (pollResult.done && !pollResult.videoUrl) {
