@@ -46,7 +46,12 @@ async function submitToFal(input) {
     body: JSON.stringify(input),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data?.detail || data?.error || data?.message || `fal.ai error ${r.status}`);
+  if (!r.ok) {
+    const errMsg = typeof data === "object"
+      ? (data?.detail || data?.error?.message || data?.error || data?.message || JSON.stringify(data))
+      : String(data);
+    throw new Error(`fal.ai ${r.status}: ${errMsg}`);
+  }
   return {
     requestId: data?.request_id || data?.requestId || null,
     videoUrl:  data?.video?.url || data?.data?.video?.url || null,
