@@ -195,13 +195,13 @@ export default async function handler(req, res) {
   const hasRefVideo = !!refVideoUrl;
 
   // Determinar proveedor
+  // BytePlus: SOLO texto puro sin imagen (t2v)
+  // fal.ai: TODO lo que tenga imagen — incluyendo continuaciones
   let provider;
-  if (!hasImage || isContinuation) {
-    provider = "byteplus_seedance";
-  } else if (hasAudio || hasRefVideo) {
-    provider = "fal_seedance";       // foto + algo más → fal.ai
+  if (!hasImage) {
+    provider = "byteplus_seedance";  // sin imagen → BytePlus
   } else {
-    provider = "piapi_seedance";     // foto sola → PiAPI
+    provider = "fal_seedance";       // cualquier imagen → fal.ai
   }
 
   let finalPrompt  = String(prompt).trim();
@@ -211,13 +211,7 @@ export default async function handler(req, res) {
   let falVideoUrl  = null;
 
   try {
-    if (provider === "piapi_seedance") {
-      // ── PiAPI — foto sola ─────────────────────────────────
-      mode = "i2v";
-      const result = await submitToPiapi({ prompt: finalPrompt, imageUrl, duration, aspectRatio });
-      taskId = result.taskId;
-
-    } else if (provider === "fal_seedance") {
+    if (provider === "fal_seedance") {
       // ── fal.ai — foto + audio y/o video ──────────────────
       if (hasAudio && !hasRefVideo) {
         mode = "lipsync";
@@ -262,17 +256,42 @@ export default async function handler(req, res) {
         });
         falRequestId = result.requestId;
         falVideoUrl  = result.videoUrl;
+
+      } else if (isContinuation) {
+        // continuación — último frame como first frame, fal.ai extiende la escena
+        mode = "continuation";
+        const contPrompt = `@Image1 This is the last frame of the previous clip. Continue the scene seamlessly from this exact frame. Maintain the same atmosphere, lighting, color grade, camera movement style and visual mood. ${finalPrompt}`;
+        const result = await submitToFal(FAL_ENDPOINTS.reference, {
+          prompt:         contPrompt,
+          image_urls:     [imageUrl],
+          aspect_ratio:   aspectRatio,
+          duration:       String(duration),
+          resolution:     "720p",
+          generate_audio: true,
+        });
+        falRequestId = result.requestId;
+        falVideoUrl  = result.videoUrl;
+
+      } else {
+        // foto sola → reference-to-video, mejor consistencia facial
+        mode = "i2v";
+        const result = await submitToFal(FAL_ENDPOINTS.reference, {
+          prompt:         `@Image1 ${finalPrompt}`,
+          image_urls:     [imageUrl],
+          aspect_ratio:   aspectRatio,
+          duration:       String(duration),
+          resolution:     "720p",
+          generate_audio: true,
+        });
+        falRequestId = result.requestId;
+        falVideoUrl  = result.videoUrl;
       }
 
     } else {
       // ── BytePlus — sin foto ───────────────────────────────
       const content = [];
 
-      if (isContinuation && imageUrl) {
-        content.push({ type: "image_url", image_url: { url: imageUrl } });
-        finalPrompt = `[Image 1] This is the last frame of the previous clip. Continue the scene seamlessly. Maintain same atmosphere, lighting, color grade, camera movement. ${finalPrompt}`;
-        mode = "continuation";
-      } else if (hasRefVideo) {
+      if (hasRefVideo) {
         content.push({ type: "video_url", video_url: { url: refVideoUrl } });
         finalPrompt = `[Video 1] Copy ONLY the body movement from this reference. Background from prompt. ${finalPrompt}`;
         mode = "r2v";
@@ -294,18 +313,14 @@ export default async function handler(req, res) {
     }
 
   } catch (err) {
-    await supabaseAdmin.rpc("spend_jades", {
-      p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_error", p_ref: ref,
-    }).catch(() => {});
+    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_error", p_ref: ref }); } catch {}
     console.error(`[cineai/generate] ${provider} error:`, err.message);
     return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
   const providerTaskId = taskId || falRequestId;
   if (!providerTaskId && !falVideoUrl) {
-    await supabaseAdmin.rpc("spend_jades", {
-      p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_no_taskid", p_ref: ref,
-    }).catch(() => {});
+    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_no_taskid", p_ref: ref }); } catch {}
     console.error(`[cineai/generate] no task id. provider=${provider}`);
     return res.status(500).json({ ok: false, error: "El proveedor no devolvió task id" });
   }
@@ -336,9 +351,7 @@ export default async function handler(req, res) {
       is_continuation: isContinuation || false,
       jade_cost:       jadeCost,
       provider,
-      fal_endpoint:    provider === "fal_seedance"
-        ? (hasAudio || hasRefVideo ? FAL_ENDPOINTS.reference : FAL_ENDPOINTS.image)
-        : null,
+      fal_endpoint:    provider === "fal_seedance" ? FAL_ENDPOINTS.reference : null,
       ref,
     },
   }).then(({ error }) => {
