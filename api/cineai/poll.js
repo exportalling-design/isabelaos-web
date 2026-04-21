@@ -128,13 +128,26 @@ export default async function handler(req, res) {
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
   // ── Buscar job ────────────────────────────────────────────
-  const { data: job, error: findErr } = await supabaseAdmin
+  // Buscar por provider_request_id primero, si no por id (jobId como fallback)
+  let { data: job, error: findErr } = await supabaseAdmin
     .from("video_jobs")
     .select("*")
     .eq("provider_request_id", taskId)
     .eq("user_id", userId)
     .eq("mode", "cineai")
     .single();
+
+  // Fallback: buscar por id del job directamente
+  if (findErr || !job) {
+    const { data: jobById } = await supabaseAdmin
+      .from("video_jobs")
+      .select("*")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("mode", "cineai")
+      .single();
+    if (jobById) { job = jobById; findErr = null; }
+  }
 
   if (findErr || !job) {
     console.error("[cineai/poll] job not found:", taskId, findErr?.message);
