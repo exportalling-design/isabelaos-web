@@ -339,9 +339,19 @@ export default function CineAIPanel() {
         throw new Error(data.error || data.detail || "Error del servidor");
       }
 
-      setCurrentTaskId(data.taskId);
+      // Usar taskId si existe, sino jobId como fallback para polling
+      const pollId = data.taskId || data.jobId;
+      setCurrentTaskId(pollId);
       setJobStatus("pending");
-      startPolling(data.taskId);
+
+      // Si fal.ai devolvió el video directamente (sync), mostrarlo ya
+      if (data.videoUrl) {
+        setVideoUrl(data.videoUrl);
+        setGenerating(false);
+        return;
+      }
+
+      startPolling(pollId);
     } catch (e) {
       setError(e.message);
       setGenerating(false);
