@@ -184,7 +184,7 @@ export default async function handler(req, res) {
         console.error("[cineai/poll] aplicando lipsync con sync-lipsync...");
 
         // PASO 1: enviar a fal-ai/sync-lipsync (async)
-        const syncRes = await fetch("https://fal.run/fal-ai/sync-lipsync", {
+        const syncRes = await fetch("https://fal.run/fal-ai/sync-lipsync/v2/pro", {
           method:  "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Key ${process.env.FAL_KEY}` },
           body: JSON.stringify({
@@ -207,7 +207,7 @@ export default async function handler(req, res) {
           const deadline = Date.now() + 3 * 60 * 1000;
           while (Date.now() < deadline) {
             await new Promise(r => setTimeout(r, 5000));
-            const sr = await fetch(`https://queue.fal.run/fal-ai/sync-lipsync/requests/${requestId}`, {
+            const sr = await fetch(`https://queue.fal.run/fal-ai/sync-lipsync/v2/pro/requests/${requestId}`, {
               headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
             });
             const sd = await sr.json();
