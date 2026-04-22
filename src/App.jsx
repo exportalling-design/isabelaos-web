@@ -1,290 +1,99 @@
-// src/App.jsx
-// ─────────────────────────────────────────────────────────────
-// App principal de IsabelaOS Studio — v5
-// CAMBIOS:
-//   - TermsAcceptanceModal al primer login (guarda en Supabase)
-//   - Botón 🌐 EN/ES en header (persiste en localStorage)
-//   - Terms.jsx y Refund.jsx conectados en /terms y /refund
-//   - Footer legal con links reales a términos y reembolsos
-//   - LegalFooter reutilizable en landing y dashboard
-// ─────────────────────────────────────────────────────────────
-import { useEffect, useState, useRef } from "react";
+// src/App.jsx — IsabelaOS Studio v6
+// Arquitectura todo-en-una-pantalla:
+// - Landing + módulos en la misma página
+// - Usuario logueado ve panel lateral de Jades + Biblioteca
+// - Sin navegación a dashboard separado
+import { useEffect, useState } from "react";
 import { useAuth }          from "./context/AuthContext";
 import { supabase }         from "./lib/supabaseClient";
 import { JADE_PACKS, COSTS } from "./lib/pricing";
 
-import ContactView              from "./components/ContactView";
-import { Img2VideoPanel }       from "./components/Img2VideoPanel";
-import LibraryView              from "./components/LibraryView";
-import AvatarStudioPanel        from "./components/AvatarStudioPanel";
-import MontajeIAPanel           from "./components/MontajeIAPanel";
-import CreatorPanel             from "./components/CreatorPanel";
-import ComercialPanel           from "./components/ComercialPanel";
-import ProductPhotoshoot        from "./components/ProductPhotoshoot";
-import CineAIPanel              from "./components/CineAIPanel";
-import Terms                    from "./components/Terms";
-import Refund                   from "./components/Refund";
-import TermsAcceptanceModal     from "./components/TermsAcceptanceModal";
-import LandingView              from "./components/LandingView";
-import { BuyJadesModal }        from "./components/BuyJadesModal";
+import ContactView          from "./components/ContactView";
+import { Img2VideoPanel }   from "./components/Img2VideoPanel";
+import LibraryView          from "./components/LibraryView";
+import AvatarStudioPanel    from "./components/AvatarStudioPanel";
+import MontajeIAPanel       from "./components/MontajeIAPanel";
+import CreatorPanel         from "./components/CreatorPanel";
+import ComercialPanel       from "./components/ComercialPanel";
+import ProductPhotoshoot    from "./components/ProductPhotoshoot";
+import CineAIPanel          from "./components/CineAIPanel";
+import Terms                from "./components/Terms";
+import Refund               from "./components/Refund";
+import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
+import LandingView          from "./components/LandingView";
+import { BuyJadesModal }    from "./components/BuyJadesModal";
 
-const DEMO_PROMPT_KEY = "isabela_demo_prompt_text2img";
-function saveDemoPrompt(p) { try { localStorage.setItem(DEMO_PROMPT_KEY, String(p || "")); } catch {} }
-function scrollToId(id) { document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
-
-async function getAuthHeadersGlobal() {
+async function getAuthHeaders() {
   try {
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token;
-    if (!token) return {};
-    return { Authorization: `Bearer ${token}` };
+    return token ? { Authorization: `Bearer ${token}` } : {};
   } catch { return {}; }
 }
 
-// ══════════════════════════════════════════════════════════════
-// FOOTER LEGAL — reutilizable en landing y dashboard
-// ══════════════════════════════════════════════════════════════
-function LegalFooter({ lang = "es", onOpenAuth, onOpenAbout, onOpenContact }) {
-  const isEs = lang === "es";
-  return (
-    <footer className="border-t border-white/10 bg-black/40 mt-8">
-      <div className="mx-auto max-w-7xl px-4 py-10">
-        <div className="grid gap-8 md:grid-cols-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-yellow-400 text-xs font-bold text-black">io</div>
-              <div><div className="text-sm font-semibold text-white">isabelaOs Studio</div><div className="text-[10px] text-neutral-400">{isEs ? "Plataforma de modelos virtuales" : "Virtual models platform"}</div></div>
-            </div>
-            <p className="mt-4 text-xs text-neutral-400 max-w-xs leading-relaxed">Stalling Technologic · Cobán, Alta Verapaz, Guatemala.</p>
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">{isEs ? "Plataforma" : "Platform"}</div>
-            <div className="space-y-2 text-xs text-neutral-400">
-              {onOpenAuth && <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenAuth}>{isEs ? "Crear cuenta" : "Create account"}</div>}
-              <div className="hover:text-white cursor-pointer transition-colors" onClick={() => scrollToId("planes")}>{isEs ? "Precios" : "Pricing"}</div>
-              {onOpenAbout && <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenAbout}>{isEs ? "Sobre nosotros" : "About us"}</div>}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">{isEs ? "Soporte" : "Support"}</div>
-            <div className="space-y-2 text-xs text-neutral-400">
-              {onOpenContact && <div className="hover:text-white cursor-pointer transition-colors" onClick={onOpenContact}>{isEs ? "Contacto" : "Contact"}</div>}
-              <div className="text-neutral-500">contacto@isabelaos.com</div>
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Legal</div>
-            <div className="space-y-2 text-xs text-neutral-400">
-              <a href="/terms"   target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">{isEs ? "Términos y Condiciones" : "Terms & Conditions"}</a>
-              <a href="/refund"  target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">{isEs ? "Política de Reembolsos" : "Refund Policy"}</a>
-              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">{isEs ? "Privacidad" : "Privacy"}</a>
-            </div>
-          </div>
-        </div>
-        <div className="mt-8 border-t border-white/10 pt-6 flex flex-wrap items-center justify-between gap-4">
-          <div className="text-[11px] text-neutral-500">© 2025 IsabelaOS · {isEs ? "Todos los derechos reservados" : "All rights reserved"}</div>
-          <div className="text-[11px] text-neutral-500">{isEs ? "Hecho con IA · GPU Power · Cobán GT" : "Made with AI · GPU Power · Cobán GT"}</div>
-        </div>
-        <div className="mt-2 text-center">
-          <p className="text-[10px] text-neutral-700">
-            {isEs ? "El uso de la plataforma implica aceptación de los Términos y Condiciones." : "Use of the platform implies acceptance of the Terms and Conditions."}
-          </p>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════
-// MODAL DE AUTENTICACIÓN
-// ══════════════════════════════════════════════════════════════
+// ── AuthModal ─────────────────────────────────────────────────
 function AuthModal({ open, onClose }) {
   const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
-  const [mode,setMode]=useState("login"); const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [loading,setLoading]=useState(false); const [error,setError]=useState("");
-  if(!open) return null;
-  const handleSubmit=async(e)=>{e.preventDefault();setError("");setLoading(true);try{if(mode==="login")await signInWithEmail(email,password);else{await signUpWithEmail(email,password);alert("Cuenta creada. Revisa tu correo.");}onClose();}catch(err){setError(err.message||String(err));}finally{setLoading(false);}};
-  const handleGoogle=async()=>{setError("");setLoading(true);try{await signInWithGoogle();onClose();}catch(err){setError(err.message||String(err));setLoading(false);}};
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm px-4">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-black/90 p-6">
-        <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-white">{mode==="login"?"Inicia sesión":"Crea tu cuenta"}</h3><button onClick={onClose} className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10">✕</button></div>
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-          <div><label className="text-xs text-neutral-300">Correo</label><input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"/></div>
-          <div><label className="text-xs text-neutral-300">Contraseña</label><input type="password" required value={password} onChange={e=>setPassword(e.target.value)} className="mt-1 w-full rounded-2xl bg-black/60 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-cyan-400"/></div>
-          {error&&<p className="text-xs text-red-400">{error}</p>}
-          <button type="submit" disabled={loading} className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-2 text-sm font-semibold text-white disabled:opacity-60">{loading?"Procesando...":mode==="login"?"Entrar":"Registrarme"}</button>
-        </form>
-        <button onClick={handleGoogle} disabled={loading} className="mt-3 w-full rounded-2xl border border-white/20 py-2 text-sm text-white hover:bg-white/10 disabled:opacity-60">Continuar con Google</button>
-        <p className="mt-3 text-center text-xs text-neutral-400">{mode==="login"?<>¿No tienes cuenta? <button type="button" onClick={()=>setMode("register")} className="text-cyan-300 underline">Regístrate aquí</button></>:<>¿Ya tienes cuenta? <button type="button" onClick={()=>setMode("login")} className="text-cyan-300 underline">Inicia sesión</button></>}</p>
-      </div>
-    </div>
-  );
-}
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-function GoogleOnlyModal({ open, onClose, onGoogle }) {
-  if(!open) return null;
-  return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm px-4">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-black/90 p-6">
-        <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-white">Regístrate con Google</h3><button onClick={onClose} className="rounded-lg px-3 py-1 text-neutral-400 hover:bg-white/10">✕</button></div>
-        <p className="mt-2 text-xs text-neutral-400">Crea tu cuenta con Google. Al entrar recibirás tus <span className="font-semibold text-white">10 jades gratis</span>.</p>
-        <button onClick={onGoogle} className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white">Registrarme con Google</button>
-        <button onClick={onClose} className="mt-3 w-full rounded-2xl border border-white/20 py-3 text-sm text-white hover:bg-white/10">Cancelar</button>
-      </div>
-    </div>
-  );
-}
+  if (!open) return null;
 
-// ══════════════════════════════════════════════════════════════
-// DASHBOARD
-// ══════════════════════════════════════════════════════════════
-function DashboardView({ lang, setLang }) {
-  const { user, isAdmin, signOut } = useAuth();
-  const [activeModule, setActiveModule] = useState(null);
-  const [buyJadesOpen, setBuyJadesOpen] = useState(false);
-  const [userStatus, setUserStatus] = useState({ loading:true, plan:null, subscription_status:"none", jades:0 });
-
-  const fetchUserStatus = async () => {
-    if(!user?.id) return;
+  const handleSubmit = async (e) => {
+    e.preventDefault(); setError(""); setLoading(true);
     try {
-      const auth = await getAuthHeadersGlobal();
-      const r    = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`,{headers:auth});
-      const data = await r.json().catch(()=>null);
-      if(!r.ok||!data?.ok) throw new Error(data?.error||"error");
-      setUserStatus({loading:false,plan:data.plan,subscription_status:data.subscription_status,jades:data.jades??0});
-    } catch { setUserStatus(p=>({...p,loading:false})); }
+      if (mode === "login") await signInWithEmail(email, password);
+      else { await signUpWithEmail(email, password); alert("Cuenta creada. Revisa tu correo."); }
+      onClose();
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setLoading(false); }
   };
 
-  useEffect(()=>{
-    if(!user?.id) return;
-    fetchUserStatus();
-    const t=setInterval(fetchUserStatus,15000);
-    return ()=>clearInterval(t);
-  },[user?.id]);
-
-  const spendJades=async({amount,reason})=>{
-    if(!user?.id) throw new Error("No user");
-    const auth=await getAuthHeadersGlobal();
-    const r=await fetch("/api/jades-spend",{method:"POST",headers:{"Content-Type":"application/json",...auth},body:JSON.stringify({user_id:user.id,amount:Number(amount),reason:reason||"spend"})});
-    const data=await r.json().catch(()=>null);
-    if(!r.ok||!data?.ok) throw new Error(data?.error||"No se pudo descontar jades.");
-    await fetchUserStatus(); return data;
+  const handleGoogle = async () => {
+    setError(""); setLoading(true);
+    try { await signInWithGoogle(); onClose(); }
+    catch (err) { setError(err.message || String(err)); setLoading(false); }
   };
-
-  const handleContact=()=>{ const s=encodeURIComponent("Soporte IsabelaOS Studio"); window.location.href=`mailto:contacto@isabelaos.com?subject=${s}`; };
-
-  const isEs = lang === "es";
-
-  const tabs = [
-    { key:"generator",  label: isEs ? "Imagen" : "Image"          },
-    { key:"img2video",  label: isEs ? "Imagen → Video" : "Image → Video" },
-    { key:"avatars",    label: isEs ? "Avatares" : "Avatars"        },
-    { key:"library",    label: isEs ? "Biblioteca" : "Library"      },
-    { key:"montaje",    label: "Montaje IA"                         },
-    { key:"comercial",  label: "🎬 Comercial IA"                   },
-    { key:"photoshoot", label: "📸 Photoshoot"                      },
-    { key:"cineai",     label: "🎥 CineAI"                          },
-  ];
 
   return (
-    <div className="min-h-screen w-full text-white" style={{background:"radial-gradient(1200px_800px_at_110%-10%,rgba(255,23,229,0.12),transparent_60%),radial-gradient(900px_600px_at-10%_0%,rgba(0,229,255,0.10),transparent_50%),#06070B"}}>
-
-      <TermsAcceptanceModal user={user} lang={lang} onAccepted={()=>{}} />
-
-      {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-xs font-bold shadow-[0_0_25px_rgba(34,211,238,0.35)]">io</div>
-            <div><div className="text-sm font-semibold leading-tight">isabelaOs <span className="text-xs text-neutral-400">Studio</span></div><div className="text-[10px] text-neutral-500">{isEs ? "Workspace del creador" : "Creator workspace"}</div></div>
-          </div>
-          <div className="flex items-center gap-2 md:gap-3 text-xs">
-            <span className="hidden lg:inline text-neutral-300">{user?.email}{isAdmin?" · admin":""}</span>
-            <button onClick={()=>setLang(lang==="es"?"en":"es")} className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10 font-semibold">
-              {lang==="es"?"🌐 EN":"🌐 ES"}
-            </button>
-            <button onClick={()=>setBuyJadesOpen(true)} className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-3 py-1.5 hover:border-cyan-400/40 hover:bg-cyan-500/5 transition-all">
-              <span className="text-base">💎</span>
-              <span className="text-[11px] text-neutral-300">Jades: <span className="font-semibold text-white">{userStatus.loading?"...":userStatus.jades??0}</span></span>
-              <span className="text-[10px] text-cyan-400/70">+ {isEs?"Comprar":"Buy"}</span>
-            </button>
-            <button onClick={handleContact} className="rounded-xl border border-white/20 px-3 py-1.5 text-xs text-white hover:bg-white/10">{isEs?"Contacto":"Contact"}</button>
-            <button onClick={signOut} className="rounded-xl border border-white/20 px-4 py-1.5 text-xs text-white hover:bg-white/10">{isEs?"Cerrar sesión":"Sign out"}</button>
-          </div>
+    <div style={{ position:"fixed",inset:0,zIndex:500,display:"grid",placeItems:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(10px)",padding:"16px" }}>
+      <div style={{ width:"100%",maxWidth:"420px",background:"#0d1017",border:"1px solid rgba(255,90,0,0.2)",borderRadius:"24px",padding:"28px" }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px" }}>
+          <h3 style={{ color:"#fff",fontFamily:"'Space Grotesk',sans-serif",fontSize:"18px",fontWeight:"700" }}>
+            {mode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
+          </h3>
+          <button onClick={onClose} style={{ background:"none",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"8px",color:"#666",padding:"4px 10px",cursor:"pointer" }}>✕</button>
         </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-4 pb-16 pt-8">
-        <section className="mb-6">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Workspace</p>
-          <h1 className="mt-2 text-2xl font-semibold text-white md:text-3xl">{isEs?"Panel del creador":"Creator dashboard"}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-neutral-400">{isEs?"Genera, revisa, descarga y administra resultados desde un solo sistema conectado a GPU.":"Generate, review, download and manage results from a single GPU-connected system."}</p>
-        </section>
-
-        {/* Tabs */}
-        <section className="mb-6">
-          <div className="no-scrollbar flex gap-2 overflow-x-auto rounded-[24px] border border-white/10 bg-black/35 p-2">
-            {tabs.map(item=>{
-              const active=activeModule===item.key;
-              return (<button key={item.key} type="button" onClick={()=>setActiveModule(active?null:item.key)} className={["whitespace-nowrap rounded-2xl px-4 py-3 text-sm font-medium transition-all",active?"bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white shadow-[0_0_30px_rgba(34,211,238,0.22)]":"bg-white/5 text-white/75 hover:bg-white/10 hover:text-white"].join(" ")}>{item.label}</button>);
-            })}
+        <form onSubmit={handleSubmit} style={{ display:"flex",flexDirection:"column",gap:"12px" }}>
+          <div>
+            <label style={{ fontSize:"12px",color:"rgba(240,236,228,0.6)",display:"block",marginBottom:"4px" }}>Correo</label>
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+              style={{ width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"12px",color:"#fff",padding:"10px 14px",fontSize:"14px",outline:"none",fontFamily:"'DM Sans',sans-serif" }} />
           </div>
-        </section>
-
-        {/* Módulo activo */}
-        {activeModule&&(
-          <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/35 p-4 md:p-6">
-            <div className="pointer-events-none absolute -inset-16 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.10),transparent_25%),radial-gradient(circle_at_top_right,rgba(236,72,153,0.10),transparent_28%)]" />
-            {activeModule==="generator"  && <CreatorPanel isDemo={false}/>}
-            {activeModule==="img2video"  && <Img2VideoPanel userStatus={userStatus} spendJades={spendJades}/>}
-            {activeModule==="avatars"    && <AvatarStudioPanel userStatus={userStatus}/>}
-            {activeModule==="library"    && <LibraryView/>}
-            {activeModule==="montaje"    && <MontajeIAPanel userStatus={userStatus}/>}
-            {activeModule==="comercial"  && <ComercialPanel userStatus={userStatus}/>}
-            {activeModule==="photoshoot" && <ProductPhotoshoot userJades={userStatus.jades??0} onJadesDeducted={async(a)=>{try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{}}}/>}
-            {activeModule==="cineai"     && <CineAIPanel/>}
-          </section>
-        )}
-
-        {/* Home cards */}
-        {!activeModule&&(
-          <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {tabs.map(item=>(
-              <button key={item.key} type="button" onClick={()=>setActiveModule(item.key)}
-                className={["group rounded-[28px] border p-6 text-left transition-all",
-                  item.key==="photoshoot"?"border-cyan-400/25 bg-cyan-500/5 hover:border-cyan-400/40"
-                  :item.key==="cineai"?"border-yellow-400/25 bg-yellow-500/5 hover:border-yellow-400/40"
-                  :"border-white/10 bg-black/35 hover:border-cyan-400/30 hover:bg-black/50"].join(" ")}>
-                <div className={["text-base font-semibold transition-colors",
-                  item.key==="photoshoot"?"text-cyan-200 group-hover:text-cyan-100"
-                  :item.key==="cineai"?"text-yellow-200 group-hover:text-yellow-100"
-                  :"text-white group-hover:text-cyan-300"].join(" ")}>{item.label}</div>
-                <div className="mt-2 text-xs text-neutral-400">
-                  {item.key==="generator"  && (isEs?"Genera imágenes con FLUX y avatares faciales":"Generate images with FLUX and facial avatars")}
-                  {item.key==="img2video"  && (isEs?"Convierte imágenes en videos con Express o Standard":"Convert images to videos with Express or Standard")}
-                  {item.key==="avatars"    && (isEs?"Crea y administra tus modelos virtuales":"Create and manage your virtual models")}
-                  {item.key==="library"    && (isEs?"Revisa y descarga todas tus generaciones":"Review and download all your generations")}
-                  {item.key==="montaje"    && (isEs?"Monta personas o productos en fondos personalizados":"Mount people or products on custom backgrounds")}
-                  {item.key==="comercial"  && (isEs?"Genera comerciales profesionales con video, voz y narración IA":"Generate professional AI commercials")}
-                  {item.key==="photoshoot" && (isEs?"Convierte fotos de productos en shoots profesionales":"Convert product photos into professional shoots")}
-                  {item.key==="cineai"     && (isEs?"Escenas cinematográficas tipo Hollywood y trends de TikTok — Seedance 2.0":"Hollywood-style cinematic scenes and TikTok trends")}
-                </div>
-                {item.key==="cineai"&&(<div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-yellow-400/20 bg-yellow-400/8 px-3 py-1 text-[10px] text-yellow-300">✦ Nuevo · Seedance 2.0 · desde 40 Jades</div>)}
-                <div className={["mt-4 text-[11px] transition-colors",item.key==="cineai"?"text-yellow-400/60 group-hover:text-yellow-400":"text-cyan-400/60 group-hover:text-cyan-400"].join(" ")}>{isEs?"Abrir módulo →":"Open module →"}</div>
-              </button>
-            ))}
-            <button type="button" onClick={()=>setBuyJadesOpen(true)} className="group rounded-[28px] border border-cyan-400/20 bg-cyan-500/5 p-6 text-left hover:border-cyan-400/40 hover:bg-cyan-500/10 transition-all">
-              <div className="flex items-center gap-2"><span className="text-2xl">💎</span><div className="text-base font-semibold text-white">{isEs?"Mis Jades":"My Jades"}</div></div>
-              <div className="mt-2 text-3xl font-bold text-cyan-300">{userStatus.loading?"...":userStatus.jades??0}</div>
-              <div className="mt-2 text-xs text-neutral-400">{isEs?"Créditos para generar imágenes y videos":"Credits to generate images and videos"}</div>
-              <div className="mt-4 text-[11px] text-cyan-400/60 group-hover:text-cyan-400 transition-colors">{isEs?"Comprar más Jades →":"Buy more Jades →"}</div>
-            </button>
-          </section>
-        )}
-      </main>
-
-      <LegalFooter lang={lang} onOpenContact={handleContact} />
-      <BuyJadesModal open={buyJadesOpen} onClose={()=>setBuyJadesOpen(false)} userId={user?.id} onSuccess={fetchUserStatus}/>
+          <div>
+            <label style={{ fontSize:"12px",color:"rgba(240,236,228,0.6)",display:"block",marginBottom:"4px" }}>Contraseña</label>
+            <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
+              style={{ width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"12px",color:"#fff",padding:"10px 14px",fontSize:"14px",outline:"none",fontFamily:"'DM Sans',sans-serif" }} />
+          </div>
+          {error && <p style={{ fontSize:"12px",color:"#f87171" }}>{error}</p>}
+          <button type="submit" disabled={loading}
+            style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:"12px",color:"#000",fontSize:"15px",fontWeight:"700",padding:"12px",cursor:"pointer",opacity:loading?0.6:1,fontFamily:"'Space Grotesk',sans-serif" }}>
+            {loading ? "Procesando..." : mode === "login" ? "Entrar" : "Registrarme"}
+          </button>
+        </form>
+        <button onClick={handleGoogle} disabled={loading}
+          style={{ marginTop:"10px",width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"12px",color:"#fff",fontSize:"14px",padding:"12px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif" }}>
+          Continuar con Google
+        </button>
+        <p style={{ marginTop:"14px",textAlign:"center",fontSize:"12px",color:"rgba(240,236,228,0.5)" }}>
+          {mode === "login"
+            ? <><span>¿No tienes cuenta? </span><button type="button" onClick={() => setMode("register")} style={{ background:"none",border:"none",color:"#ffb300",cursor:"pointer",textDecoration:"underline",fontSize:"12px" }}>Regístrate</button></>
+            : <><span>¿Ya tienes cuenta? </span><button type="button" onClick={() => setMode("login")} style={{ background:"none",border:"none",color:"#ffb300",cursor:"pointer",textDecoration:"underline",fontSize:"12px" }}>Inicia sesión</button></>}
+        </p>
+      </div>
     </div>
   );
 }
@@ -293,40 +102,101 @@ function DashboardView({ lang, setLang }) {
 // APP ROOT
 // ══════════════════════════════════════════════════════════════
 export default function App() {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, signInWithGoogle, signOut, isAdmin } = useAuth();
 
   const [lang, setLangState] = useState(() => {
     try { return localStorage.getItem("isabelaos_lang") || "es"; } catch { return "es"; }
   });
   const setLang = (l) => { try { localStorage.setItem("isabelaos_lang", l); } catch {} setLangState(l); };
 
-  const [authOpen,        setAuthOpen]        = useState(false);
-  const [landingPage,     setLandingPage]     = useState("home");
-  const [googleModalOpen, setGoogleModalOpen] = useState(false);
+  const [authOpen,      setAuthOpen]      = useState(false);
+  const [buyJadesOpen,  setBuyJadesOpen]  = useState(false);
+  const [activeModule,  setActiveModule]  = useState(null);
+  const [landingPage,   setLandingPage]   = useState("home");
+  const [jades,         setJades]         = useState(0);
+  const [jadesLoading,  setJadesLoading]  = useState(false);
 
+  // Rutas estáticas
   const path = window.location.pathname;
   if (path === "/terms")  return <Terms  lang={lang} />;
   if (path === "/refund") return <Refund lang={lang} />;
 
-  if (user) return <DashboardView lang={lang} setLang={setLang} />;
+  // Fetch jades del usuario
+  const fetchJades = async () => {
+    if (!user?.id) return;
+    setJadesLoading(true);
+    try {
+      const auth = await getAuthHeaders();
+      const r = await fetch(`/api/user-status?user_id=${encodeURIComponent(user.id)}`, { headers: auth });
+      const data = await r.json().catch(() => null);
+      if (data?.ok) setJades(data.jades ?? 0);
+    } catch {} finally { setJadesLoading(false); }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchJades();
+    const t = setInterval(fetchJades, 15000);
+    return () => clearInterval(t);
+  }, [user?.id]);
+
+  const spendJades = async ({ amount, reason }) => {
+    if (!user?.id) throw new Error("No user");
+    const auth = await getAuthHeaders();
+    const r = await fetch("/api/jades-spend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      body: JSON.stringify({ user_id: user.id, amount: Number(amount), reason: reason || "spend" }),
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.ok) throw new Error(data?.error || "No se pudo descontar jades.");
+    await fetchJades();
+    return data;
+  };
+
+  // Módulo activo renderizado
+  const renderModule = () => {
+    const userStatus = { jades, loading: jadesLoading, plan: null };
+    switch (activeModule) {
+      case "generator":  return <CreatorPanel isDemo={false} />;
+      case "img2video":  return <Img2VideoPanel userStatus={userStatus} spendJades={spendJades} />;
+      case "avatars":    return <AvatarStudioPanel userStatus={userStatus} />;
+      case "library":    return <LibraryView />;
+      case "montaje":    return <MontajeIAPanel userStatus={userStatus} />;
+      case "comercial":  return <ComercialPanel userStatus={userStatus} />;
+      case "photoshoot": return <ProductPhotoshoot userJades={jades} onJadesDeducted={async (a) => { try { await spendJades({ amount: a, reason: "product_photoshoot" }); } catch {} }} />;
+      case "cineai":     return <CineAIPanel />;
+      default:           return null;
+    }
+  };
+
+  if (landingPage === "contact") return <ContactView onBack={() => setLandingPage("home")} />;
 
   return (
     <>
-      <AuthModal open={authOpen} onClose={()=>setAuthOpen(false)} />
-      <GoogleOnlyModal open={googleModalOpen} onClose={()=>setGoogleModalOpen(false)}
-        onGoogle={async()=>{ try{await signInWithGoogle();setGoogleModalOpen(false);}catch(e){alert(e?.message||"Error.");} }} />
-      {landingPage==="home" && (
-        <LandingView
-          onOpenAuth={()    => setAuthOpen(true)}
-          onStartDemo={()   => setGoogleModalOpen(true)}
-          onOpenContact={() => setLandingPage("contact")}
-          onOpenAbout={()   => setLandingPage("about")}
-          lang={lang}
-          setLang={setLang}
-        />
-      )}
-      {landingPage==="contact" && <ContactView onBack={()=>setLandingPage("home")} />}
-      {landingPage==="about"   && <AboutView onBackHome={()=>setLandingPage("home")} lang={lang} />}
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <BuyJadesModal open={buyJadesOpen} onClose={() => setBuyJadesOpen(false)} userId={user?.id} onSuccess={fetchJades} />
+      {user && <TermsAcceptanceModal user={user} lang={lang} onAccepted={() => {}} />}
+
+      <LandingView
+        user={user}
+        jades={jades}
+        lang={lang}
+        setLang={setLang}
+        activeModule={activeModule}
+        setActiveModule={setActiveModule}
+        onOpenAuth={() => setAuthOpen(true)}
+        onStartDemo={() => {
+          if (user) setActiveModule("cineai");
+          else setAuthOpen(true);
+        }}
+        onOpenContact={() => setLandingPage("contact")}
+        onOpenAbout={() => setLandingPage("about")}
+        onSignOut={signOut}
+        onBuyJades={() => setBuyJadesOpen(true)}
+      >
+        {activeModule && renderModule()}
+      </LandingView>
     </>
   );
 }
