@@ -204,6 +204,7 @@ export default function LandingView({
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
     @keyframes shine{0%{background-position:200% center}100%{background-position:-200% center}}
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
+    @keyframes slideInRight{from{opacity:0;transform:rotateY(-20deg) rotateX(8deg) translateX(80px)}to{opacity:1;transform:rotateY(-10deg) rotateX(4deg) translateX(0)}}
     .lo-shimmer{
       background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);
       background-size:200% auto;
@@ -323,9 +324,16 @@ export default function LandingView({
           <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", filter: "blur(130px)", background: "rgba(255,179,0,.07)", bottom: -100, right: -100 }} />
         </div>
 
-        <div style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 420px", gap: 48, maxWidth: 1280, margin: "0 auto", width: "100%", alignItems: "center" }}>
-          {/* LEFT */}
-          <div style={{ animation: "fadeUp .7s ease both" }}>
+        {/* VIDEO HERO IZQUIERDA — clip de Massiel */}
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "48%", zIndex: 1, overflow: "hidden" }}>
+          <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline
+            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, transparent 60%, rgba(8,10,14,1) 100%)" }} />
+        </div>
+
+        <div style={{ position: "relative", zIndex: 2, display: "grid", gridTemplateColumns: "1fr 500px", gap: 40, maxWidth: 1280, margin: "0 auto", width: "100%", alignItems: "flex-end", paddingBottom: 40 }}>
+          {/* LEFT — copy empujado hacia abajo */}
+          <div style={{ paddingTop: 200, animation: "fadeUp .7s ease both" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 18 }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
               {isEs ? "La plataforma visual IA de LATAM" : "LATAM's AI visual production platform"}
@@ -350,10 +358,10 @@ export default function LandingView({
           </div>
 
           {/* RIGHT — Demo box 3D */}
-          <div style={{ perspective: 1200, animation: "fadeRight .8s .3s ease both" }}>
+          <div style={{ perspective: 1400 }}>
             {user ? (
               /* Panel usuario logueado */
-              <div style={{ background: "rgba(10,12,18,.94)", border: "1px solid rgba(255,90,0,.2)", borderRadius: 22, padding: 22, backdropFilter: "blur(30px)", boxShadow: "0 0 60px rgba(255,90,0,.07),0 40px 80px rgba(0,0,0,.5)", transform: "rotateY(-6deg) rotateX(2deg)" }}>
+              <div style={{ background: "rgba(8,10,16,.95)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 24, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 0 100px rgba(255,90,0,.12),-30px 30px 80px rgba(0,0,0,.6),0 50px 100px rgba(0,0,0,.7)", transform: "rotateY(-10deg) rotateX(4deg)", transition: "transform .5s", animation: "slideInRight .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${V.fire},${V.gold})`, display: "grid", placeItems: "center", fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#000", flexShrink: 0 }}>{(user?.email?.[0] || "U").toUpperCase()}</div>
                   <div>
@@ -382,7 +390,7 @@ export default function LandingView({
               </div>
             ) : (
               /* Demo box visitante */
-              <div style={{ background: "rgba(10,12,18,.92)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 22, padding: 26, backdropFilter: "blur(30px)", boxShadow: "0 0 80px rgba(255,90,0,.1),-20px 20px 60px rgba(0,0,0,.4),0 40px 80px rgba(0,0,0,.6)", transform: "rotateY(-8deg) rotateX(3deg) translateZ(0)", transformStyle: "preserve-3d", transition: "transform .4s" }}>
+              <div style={{ background: "rgba(8,10,16,.95)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 24, padding: 32, backdropFilter: "blur(40px)", boxShadow: "0 0 100px rgba(255,90,0,.15),-30px 30px 80px rgba(0,0,0,.6),0 50px 100px rgba(0,0,0,.7)", transform: "rotateY(-10deg) rotateX(4deg) translateZ(0)", transformStyle: "preserve-3d", transition: "transform .5s", animation: "slideInRight .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
                 <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
                 <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "Pruébalo ahora — 10 Jades gratis" : "Try now — 10 free Jades"}</div>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,.1)", border: "1px solid rgba(255,179,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.gold, fontWeight: 600, marginBottom: 14 }}>
@@ -424,6 +432,55 @@ export default function LandingView({
           </div>
         ))}
       </div>
+
+      {/* VIDEO MUSICAL — Massiel Carrillo */}
+      <section style={{ padding: "80px 32px", maxWidth: 1280, margin: "0 auto" }}>
+        <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 8, display: "block" }}>{isEs ? "Hecho con IsabelaOS" : "Made with IsabelaOS"}</span>
+        <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 8 }}>{isEs ? "VIDEO MUSICAL REAL CON IA" : "REAL AI MUSIC VIDEO"}</h2>
+        <p style={{ fontSize: 16, color: "rgba(240,236,228,.45)", lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>
+          {isEs ? "Produjimos el primer video musical 100% con IA para Massiel Carrillo — sin filmar ni una sola toma real. Así de poderosa es nuestra plataforma." : "We produced the first 100% AI music video for Massiel Carrillo — without filming a single real shot. This is how powerful our platform is."}
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "center" }}>
+          {/* Video */}
+          <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,90,0,.2)", boxShadow: "0 0 60px rgba(255,90,0,.1),0 40px 80px rgba(0,0,0,.5)", aspectRatio: "9/16", maxHeight: 600 }}>
+            <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline controls
+              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <div style={{ position: "absolute", top: 16, left: 16, background: "rgba(255,90,0,.9)", borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#000", letterSpacing: 1, textTransform: "uppercase" }}>
+              🎬 100% IA
+            </div>
+          </div>
+          {/* Info */}
+          <div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 20 }}>
+              ⭐ {isEs ? "Caso de éxito real" : "Real success story"}
+            </div>
+            <h3 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(28px,4vw,52px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 12 }}>
+              MASSIEL CARRILLO<br />
+              <span style={{ background: "linear-gradient(135deg,#ff5a00,#ffb300)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>"OLVÍDAME"</span>
+            </h3>
+            <p style={{ fontSize: 15, color: "rgba(240,236,228,.7)", lineHeight: 1.7, marginBottom: 24 }}>
+              {isEs ? "Video musical completamente generado con IA usando Seedance 2.0. Cada escena, el drone épico sobre la ciudad, los planos cinematográficos — todo creado desde cero con nuestra plataforma." : "Music video completely AI-generated using Seedance 2.0. Every scene, the epic city drone, the cinematic shots — all created from scratch with our platform."}
+            </p>
+            {[
+              { icon: "🎬", label: isEs?"Drone épico de ciudad":"Epic city drone", sub: "BytePlus Seedance 2.0" },
+              { icon: "💃", label: isEs?"Escenas de baile y drama":"Dance and drama scenes", sub: "fal.ai Reference-to-Video" },
+              { icon: "🎵", label: isEs?"Lip sync sincronizado":"Synchronized lip sync", sub: "Sync Lipsync v2 Pro" },
+              { icon: "📱", label: isEs?"+4,100 cuentas alcanzadas":"+4,100 accounts reached", sub: isEs?"En 24 horas de publicación":"In 24 hours of publication" },
+            ].map((f, i) => (
+              <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 14, padding: "12px 14px", background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 12 }}>
+                <span style={{ fontSize: 22, flexShrink: 0 }}>{f.icon}</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", fontFamily: "'Space Grotesk',sans-serif" }}>{f.label}</div>
+                  <div style={{ fontSize: 11, color: "#ff5a00", marginTop: 2, letterSpacing: 0.5 }}>{f.sub}</div>
+                </div>
+              </div>
+            ))}
+            <button onClick={isEs ? onStartDemo : onStartDemo} style={{ marginTop: 8, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 14, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, padding: "14px 32px", cursor: "pointer", boxShadow: "0 0 40px rgba(255,90,0,.3)" }}>
+              {isEs ? "🎬 Crear mi video musical →" : "🎬 Create my music video →"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* GALERÍA */}
       <section style={{ padding: "80px 32px", maxWidth: 1280, margin: "0 auto" }} id="galeria">
