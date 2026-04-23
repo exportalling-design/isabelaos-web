@@ -468,8 +468,8 @@ export default function LandingView({
               {isEs ? "Escenas con drones épicos, lip sync perfecto y planos cinematográficos generados 100% con Seedance 2.0. Sin filmar una sola toma real." : "Epic drone scenes, perfect lip sync and cinematic shots generated 100% with Seedance 2.0. Without filming a single real shot."}
             </p>
             {[
-              { icon: "🎬", label: isEs?"Drone épico de ciudad":"Epic city drone", sub: "BytePlus Seedance 2.0" },
-              { icon: "💃", label: isEs?"Escenas de baile y drama":"Dance and drama scenes", sub: "fal.ai Reference-to-Video" },
+              { icon: "🎬", label: isEs?"Drone épico de ciudad":"Epic city drone", sub: "Seedance 2.0" },
+              { icon: "💃", label: isEs?"Escenas de baile y drama":"Dance and drama scenes", sub: "Reference-to-Video" },
               { icon: "🎵", label: isEs?"Lip sync sincronizado":"Synchronized lip sync", sub: "Sync Lipsync v2 Pro" },
               { icon: "📱", label: isEs?"+4,100 cuentas alcanzadas":"+4,100 accounts reached", sub: isEs?"En 24 horas de publicación":"In 24 hours of publication" },
             ].map((f, i) => (
