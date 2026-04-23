@@ -204,7 +204,7 @@ export default function LandingView({
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
     @keyframes shine{0%{background-position:200% center}100%{background-position:-200% center}}
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
-    @keyframes slideInRight{from{opacity:0;transform:rotateY(-20deg) rotateX(8deg) translateX(80px)}to{opacity:1;transform:rotateY(-10deg) rotateX(4deg) translateX(0)}}
+    @keyframes floatUp{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     .lo-shimmer{
       background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);
       background-size:200% auto;
@@ -324,16 +324,17 @@ export default function LandingView({
           <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", filter: "blur(130px)", background: "rgba(255,179,0,.07)", bottom: -100, right: -100 }} />
         </div>
 
-        {/* VIDEO HERO IZQUIERDA — clip de Massiel */}
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "48%", zIndex: 1, overflow: "hidden" }}>
-          <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline
-            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, transparent 60%, rgba(8,10,14,1) 100%)" }} />
-        </div>
-
-        <div style={{ position: "relative", zIndex: 2, display: "grid", gridTemplateColumns: "1fr 500px", gap: 40, maxWidth: 1280, margin: "0 auto", width: "100%", alignItems: "flex-end", paddingBottom: 40 }}>
-          {/* LEFT — copy empujado hacia abajo */}
-          <div style={{ paddingTop: 200, animation: "fadeUp .7s ease both" }}>
+        <div style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
+          {/* LEFT — video fullheight + copy encima */}
+          <div style={{ position: "relative", overflow: "hidden" }}>
+            {/* Video de fondo izquierdo */}
+            <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            {/* Gradientes sobre el video */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(8,10,14,.2) 0%, rgba(8,10,14,.85) 100%)" }} />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(8,10,14,.5) 0%, transparent 30%, rgba(8,10,14,.6) 100%)" }} />
+            {/* Copy encima del video */}
+            <div style={{ position: "relative", zIndex: 2, padding: "60px 48px", display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 18 }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
               {isEs ? "La plataforma visual IA de LATAM" : "LATAM's AI visual production platform"}
@@ -354,14 +355,18 @@ export default function LandingView({
                 {isEs ? "Ver ejemplos reales ↓" : "See real examples ↓"}
               </button>
             </div>
-            <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades gratis</b> · {isEs ? "Sin tarjeta · Cancela cuando quieras" : "No card · Cancel anytime"}</p>
+              <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades gratis</b> · {isEs ? "Sin tarjeta · Cancela cuando quieras" : "No card · Cancel anytime"}</p>
+            </div>
           </div>
 
-          {/* RIGHT — Demo box 3D */}
-          <div style={{ perspective: 1400 }}>
+          {/* RIGHT — Demo box flotando sobre fondo oscuro */}
+          <div style={{ background: "rgba(6,7,12,.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 32px", position: "relative" }}>
+            {/* Glow de fondo */}
+            <div style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", filter: "blur(80px)", background: "rgba(255,90,0,.08)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
+            <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
             {user ? (
               /* Panel usuario logueado */
-              <div style={{ background: "rgba(8,10,16,.95)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 24, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 0 100px rgba(255,90,0,.12),-30px 30px 80px rgba(0,0,0,.6),0 50px 100px rgba(0,0,0,.7)", transform: "rotateY(-10deg) rotateX(4deg)", transition: "transform .5s", animation: "slideInRight .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
+              <div style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.2)", borderRadius: 20, padding: 24, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${V.fire},${V.gold})`, display: "grid", placeItems: "center", fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#000", flexShrink: 0 }}>{(user?.email?.[0] || "U").toUpperCase()}</div>
                   <div>
@@ -390,7 +395,7 @@ export default function LandingView({
               </div>
             ) : (
               /* Demo box visitante */
-              <div style={{ background: "rgba(8,10,16,.95)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 24, padding: 32, backdropFilter: "blur(40px)", boxShadow: "0 0 100px rgba(255,90,0,.15),-30px 30px 80px rgba(0,0,0,.6),0 50px 100px rgba(0,0,0,.7)", transform: "rotateY(-10deg) rotateX(4deg) translateZ(0)", transformStyle: "preserve-3d", transition: "transform .5s", animation: "slideInRight .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
+              <div style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 20, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
                 <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
                 <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "Pruébalo ahora — 10 Jades gratis" : "Try now — 10 free Jades"}</div>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,.1)", border: "1px solid rgba(255,179,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.gold, fontWeight: 600, marginBottom: 14 }}>
@@ -414,6 +419,7 @@ export default function LandingView({
                 <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "Sin tarjeta · Gratis para empezar" : "No card · Free to start"}</div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </section>
@@ -436,9 +442,9 @@ export default function LandingView({
       {/* VIDEO MUSICAL — Massiel Carrillo */}
       <section style={{ padding: "80px 32px", maxWidth: 1280, margin: "0 auto" }}>
         <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 8, display: "block" }}>{isEs ? "Hecho con IsabelaOS" : "Made with IsabelaOS"}</span>
-        <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 8 }}>{isEs ? "VIDEO MUSICAL REAL CON IA" : "REAL AI MUSIC VIDEO"}</h2>
+        <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 8 }}>{isEs ? "CLIPS MUSICALES 100% CON IA" : "100% AI MUSIC CLIPS"}</h2>
         <p style={{ fontSize: 16, color: "rgba(240,236,228,.45)", lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>
-          {isEs ? "Produjimos el primer video musical 100% con IA para Massiel Carrillo — sin filmar ni una sola toma real. Así de poderosa es nuestra plataforma." : "We produced the first 100% AI music video for Massiel Carrillo — without filming a single real shot. This is how powerful our platform is."}
+          {isEs ? "Escenas cinematográficas, lip sync y efectos de producción profesional generados completamente con Seedance 2.0 — sin cámaras, sin actores, sin estudio." : "Cinematic scenes, lip sync and professional production effects generated entirely with Seedance 2.0 — no cameras, no actors, no studio."}
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "center" }}>
           {/* Video */}
@@ -455,11 +461,11 @@ export default function LandingView({
               ⭐ {isEs ? "Caso de éxito real" : "Real success story"}
             </div>
             <h3 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(28px,4vw,52px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 12 }}>
-              MASSIEL CARRILLO<br />
-              <span style={{ background: "linear-gradient(135deg,#ff5a00,#ffb300)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>"OLVÍDAME"</span>
+              {isEs ? "PRODUCCIÓN" : "PRODUCTION"}<br />
+              <span style={{ background: "linear-gradient(135deg,#ff5a00,#ffb300)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>{isEs ? "CINEMATOGRÁFICA" : "CINEMATIC"}</span>
             </h3>
             <p style={{ fontSize: 15, color: "rgba(240,236,228,.7)", lineHeight: 1.7, marginBottom: 24 }}>
-              {isEs ? "Video musical completamente generado con IA usando Seedance 2.0. Cada escena, el drone épico sobre la ciudad, los planos cinematográficos — todo creado desde cero con nuestra plataforma." : "Music video completely AI-generated using Seedance 2.0. Every scene, the epic city drone, the cinematic shots — all created from scratch with our platform."}
+              {isEs ? "Escenas con drones épicos, lip sync perfecto y planos cinematográficos generados 100% con Seedance 2.0. Sin filmar una sola toma real." : "Epic drone scenes, perfect lip sync and cinematic shots generated 100% with Seedance 2.0. Without filming a single real shot."}
             </p>
             {[
               { icon: "🎬", label: isEs?"Drone épico de ciudad":"Epic city drone", sub: "BytePlus Seedance 2.0" },
