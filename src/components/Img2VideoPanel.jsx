@@ -1,7 +1,8 @@
 // src/components/Img2VideoPanel.jsx
 // ─────────────────────────────────────────────────────────────
 // Panel de Imagen → Video
-// Modos: Express (Veo3 Fast) y Standard (WAN + ElevenLabs + Latentsync)
+// Modos: Express (Veo3 Fast) y Standard (WAN + ElevenLabs + fal-ai/sync-lipsync/v2/pro)
+// Lip Sync: fal-ai/sync-lipsync/v2/pro  (video_url + audio_url → video sincronizado)
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -72,7 +73,7 @@ export function Img2VideoPanel({ userStatus }) {
   const [includeAudio,    setIncludeAudio]    = useState(false);
   const [showModuleInfo,  setShowModuleInfo]  = useState(false);
 
-  // ── ElevenLabs + Latentsync (Standard) ───────────────────────
+  // ── ElevenLabs + fal-ai/sync-lipsync/v2/pro (Standard) ───────
   const [enableLipsync,  setEnableLipsync]  = useState(false);
   const [narrationText,  setNarrationText]  = useState("");
   const [voiceAccent,    setVoiceAccent]    = useState("neutro");
@@ -148,7 +149,7 @@ export function Img2VideoPanel({ userStatus }) {
 
   function getModeDescription() {
     if (generationMode === "express") return "Modo premium con la mejor calidad de video y voz.";
-    return "Modo equilibrado para clips más largos. Incluye voz ElevenLabs + lip sync opcional.";
+    return "Modo equilibrado para clips más largos. Incluye voz ElevenLabs + lip sync con Sync Lipsync v2 Pro.";
   }
 
   function getAudioHelpText() {
@@ -158,7 +159,7 @@ export function Img2VideoPanel({ userStatus }) {
         : "Audio Layer apagado: video silencioso.";
     }
     return enableLipsync
-      ? "Voz + Lip Sync: WAN genera video mudo → ElevenLabs genera la voz → Latentsync sincroniza los labios."
+      ? "Voz + Lip Sync: WAN genera video mudo → ElevenLabs genera la voz → Sync Lipsync v2 Pro sincroniza los labios."
       : "Sin voz: el video Standard se entrega mudo.";
   }
 
@@ -275,8 +276,8 @@ export function Img2VideoPanel({ userStatus }) {
   function getExpectedSeconds() {
     const p = currentParamsRef.current || {};
     const s = Number(p.steps || 18), f = Number(p.numFrames || 129), dur = Number(p.durationSec || 8), mode = String(p.generationMode || "express");
-    // Standard tarda más por ElevenLabs + Latentsync
-    const base = mode === "express" ? 220 : (dur >= 15 ? 780 : 600);
+    // Standard con Sync Lipsync v2 Pro tarda menos que Latentsync (más eficiente en fal.ai)
+    const base = mode === "express" ? 220 : (dur >= 15 ? 700 : 520);
     return Math.max(60, Math.min(2400, base + Math.max(0,(s-18)*8) + Math.max(0,(f-129)*2)));
   }
 
@@ -295,7 +296,7 @@ export function Img2VideoPanel({ userStatus }) {
 
   function getEtaText() {
     if (generationMode === "express") return "Espera estimada: 2-4 min";
-    if (enableLipsync) return Number(durationSec) === 15 ? "Espera estimada: 8-15 min (WAN + ElevenLabs + Latentsync)" : "Espera estimada: 6-12 min (WAN + ElevenLabs + Latentsync)";
+    if (enableLipsync) return Number(durationSec) === 15 ? "Espera estimada: 7-13 min (WAN + ElevenLabs + Sync Lipsync v2 Pro)" : "Espera estimada: 5-10 min (WAN + ElevenLabs + Sync Lipsync v2 Pro)";
     return Number(durationSec) === 15 ? "Espera estimada: 4-8 min" : "Espera estimada: 3-6 min";
   }
 
@@ -328,11 +329,15 @@ export function Img2VideoPanel({ userStatus }) {
         setError(stData?.error || "La generación falló.");
         setProgress(0); stopPolling(); clearPersistedJob(); return;
       }
-      // Mostrar estado intermedio de ElevenLabs/Latentsync
+
+      // ── Estados intermedios del pipeline ──────────────────────
+      // provider_status viene de tu backend: "elevenlabs_processing" | "synclipsync_processing" | "wan_processing"
       const providerStatus = stData?.job?.provider_status || "";
       let friendlyStatus = `Estado: ${stData?.rp_status || stData?.status || "IN_PROGRESS"}`;
-      if (providerStatus === "elevenlabs_processing") friendlyStatus = "🎙️ Generando voz con ElevenLabs...";
-      if (providerStatus === "latentsync_processing") friendlyStatus = "👄 Sincronizando labios con Latentsync...";
+      if (providerStatus === "wan_processing")          friendlyStatus = "🎬 Generando video con WAN...";
+      if (providerStatus === "elevenlabs_processing")   friendlyStatus = "🎙️ Generando voz con ElevenLabs...";
+      if (providerStatus === "synclipsync_processing")  friendlyStatus = "👄 Sincronizando labios con Sync Lipsync v2 Pro...";
+
       setStatus("IN_PROGRESS"); setStatusText(friendlyStatus);
       const startedAt = stData?.job?.started_at || lastKnownJob?.started_at || null;
       if (startedAt) setProgress((p) => Math.max(p, computeProgressFromStartedAt(startedAt)));
@@ -453,11 +458,13 @@ export function Img2VideoPanel({ userStatus }) {
         motion_strength: ms, seed: getSeedForRequest(),
         image_b64: pureB64 || null, image_url: imageUrl || null,
         include_audio: generationMode === "express" ? includeAudio : false,
-        // ElevenLabs + Latentsync para Standard
+        // ElevenLabs + fal-ai/sync-lipsync/v2/pro para Standard
         narration_text: generationMode === "standard" ? narrationText.trim() : "",
         voice_accent:   voiceAccent,
         voice_gender:   voiceGender,
         enable_lipsync: generationMode === "standard" && enableLipsync,
+        // Indica al backend qué modelo de lipsync usar
+        lipsync_model:  "fal-ai/sync-lipsync/v2/pro",
       };
 
       const controller = new AbortController();
@@ -702,13 +709,15 @@ export function Img2VideoPanel({ userStatus }) {
               </div>
             )}
 
-            {/* ── Voz ElevenLabs + Latentsync para Standard ─────── */}
+            {/* ── Voz ElevenLabs + Sync Lipsync v2 Pro para Standard ── */}
             {generationMode === "standard" && (
               <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold text-white">🎙️ Voz ElevenLabs + Lip Sync</p>
-                    <p className="text-[10px] text-neutral-400 mt-0.5">WAN genera mudo → ElevenLabs agrega voz → Latentsync sincroniza labios</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">
+                      WAN genera mudo → ElevenLabs agrega voz → <span className="text-cyan-300 font-medium">Sync Lipsync v2 Pro</span> sincroniza labios
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input id="enable_lipsync" type="checkbox" checked={enableLipsync} onChange={e => setEnableLipsync(e.target.checked)} className="h-4 w-4" />
@@ -749,8 +758,17 @@ export function Img2VideoPanel({ userStatus }) {
                       </div>
                     </div>
 
+                    {/* Badge del modelo de lipsync */}
+                    <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 px-3 py-2 flex items-center gap-2">
+                      <span className="text-cyan-300 text-lg">✦</span>
+                      <div>
+                        <p className="text-[11px] font-semibold text-white">Sync Lipsync v2 Pro <span className="text-[10px] font-normal text-cyan-300">(fal.ai)</span></p>
+                        <p className="text-[10px] text-neutral-400">Alta fidelidad facial · Dientes naturales · Rasgos únicos preservados</p>
+                      </div>
+                    </div>
+
                     <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/5 px-3 py-2 text-[10px] text-yellow-200">
-                      ⏱️ El proceso toma 6-15 min: WAN genera el video → ElevenLabs crea la voz → Latentsync sincroniza los labios.
+                      ⏱️ El proceso toma 5-10 min: WAN genera el video → ElevenLabs crea la voz → Sync Lipsync v2 Pro sincroniza los labios vía fal.ai.
                     </div>
                   </>
                 )}
@@ -847,7 +865,7 @@ export function Img2VideoPanel({ userStatus }) {
               className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10">✕</button>
             <div className="pr-12">
               <h3 className="text-xl font-semibold text-white">Sobre este módulo</h3>
-              <p className="mt-1 text-sm text-neutral-300">Convierte una imagen en video con Express (Veo3) o Standard (WAN + ElevenLabs + Latentsync).</p>
+              <p className="mt-1 text-sm text-neutral-300">Convierte una imagen en video con Express (Veo3) o Standard (WAN + ElevenLabs + Sync Lipsync v2 Pro).</p>
             </div>
             <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black">
               <video src="/videoinstruvideo.mp4" controls className="h-full max-h-[420px] w-full object-contain" />
@@ -858,13 +876,16 @@ export function Img2VideoPanel({ userStatus }) {
               <p><span className="font-semibold text-white">2.</span> Elige el modo:</p>
               <div className="ml-4 space-y-1 text-[13px]">
                 <p><span className="font-semibold text-cyan-300">Express:</span> mejor calidad, voz más natural (Veo3).</p>
-                <p><span className="font-semibold text-cyan-300">Standard:</span> más económico, clips más largos, con opción de voz ElevenLabs + lip sync.</p>
+                <p><span className="font-semibold text-cyan-300">Standard:</span> más económico, clips más largos, con opción de voz ElevenLabs + lip sync de alta fidelidad.</p>
               </div>
               <p><span className="font-semibold text-white">3.</span> En Standard, activa <span className="font-semibold">Voz + Lip Sync</span> y escribe lo que debe decir el personaje.</p>
               <p><span className="font-semibold text-white">4.</span> Elige acento y género de voz.</p>
               <p><span className="font-semibold text-white">5.</span> Haz clic en Generar y espera.</p>
+              <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 px-3 py-2 text-[12px] text-cyan-200">
+                ✦ El lip sync usa <span className="font-semibold">Sync Lipsync v2 Pro</span> (fal.ai) — preserva dientes naturales y rasgos faciales únicos para un resultado más realista.
+              </div>
               <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/5 px-3 py-2 text-[12px] text-yellow-200">
-                ⏱️ Standard con Lip Sync tarda 6-15 min porque procesa WAN → ElevenLabs → Latentsync en secuencia.
+                ⏱️ Standard con Lip Sync tarda 5-10 min porque procesa WAN → ElevenLabs → Sync Lipsync v2 Pro en secuencia.
               </div>
             </div>
           </div>
