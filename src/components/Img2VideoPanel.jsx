@@ -1,3 +1,4 @@
+
 // src/components/Img2VideoPanel.jsx
 // ─────────────────────────────────────────────────────────────
 // Panel de Imagen → Video
