@@ -1,3 +1,4 @@
+
 // api/video-status.js
 // ─────────────────────────────────────────────────────────────
 // Estado de jobs de video para:
