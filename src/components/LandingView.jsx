@@ -335,7 +335,7 @@ export default function LandingView({
           <button onClick={() => setLang(isEs ? "en" : "es")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, padding: "7px 12px", cursor: "pointer", fontFamily: V.ffU }}>{isEs ? "🌐 EN" : "🌐 ES"}</button>
           {user
             ? <HoverMenu modules={MODS} onSelect={go} isEs={isEs} />
-            : <button onClick={onOpenAuth} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 10, color: "#000", fontFamily: V.ffU, fontSize: 13, fontWeight: 700, padding: "9px 20px", cursor: "pointer", boxShadow: "0 0 24px rgba(255,90,0,.3)" }}>{isEs ? "Entrar →" : "Sign in →"}</button>
+            : <button onClick={onOpenAuth} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 10, color: "#000", fontFamily: V.ffU, fontSize: 13, fontWeight: 700, padding: "9px 20px", cursor: "pointer", boxShadow: "0 0 24px rgba(255,90,0,.3)" }}>{isEs ? "Entrar" : "Sign in"}</button>
           }
         </div>
       </nav>
