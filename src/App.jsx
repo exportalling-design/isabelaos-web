@@ -1,3 +1,4 @@
+
 // src/App.jsx — IsabelaOS Studio v7
 // Arquitectura: Landing + módulos como overlay sin cambiar de página
 import { useEffect, useState, useCallback } from "react";
