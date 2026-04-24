@@ -356,7 +356,7 @@ export default function LandingView({
         <div className="lo-hero-grid" style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
           {/* LEFT — video fullheight + copy encima */}
           <div className="lo-hero-left" style={{ position: "relative", overflow: "hidden" }}>
-            {/* Video de fondo izquierdo */
+            {/* Video de fondo izquierdo */}
             <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline
               style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
             {/* Gradientes sobre el video */}
