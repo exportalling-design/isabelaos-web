@@ -136,7 +136,7 @@ function applyAudioPolicy({ mode, prompt, negativePrompt, audioLayerEnabled }) {
   const cleanPrompt   = String(prompt || "").trim();
   const cleanNegative = String(negativePrompt || "").trim();
 
-  // Standard: SIEMPRE mudo — el audio lo genera ElevenLabs + Latentsync
+  // Standard: SIEMPRE mudo — el audio lo genera ElevenLabs y el lip sync fal-ai/sync-lipsync/v2/pro
   if (mode === "standard") {
     const silentInstruction = "silent video, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no music";
     return {
@@ -219,15 +219,17 @@ export default async function handler(req, res) {
     const include_audio    = audioPolicy.resolvedIncludeAudio;
     const resolution       = getResolutionForMode({ mode: generationMode, width, height });
 
-    // Datos ElevenLabs para Standard
-    const narration_text = String(body?.narration_text || body?.prompt || "").trim();
+    // ── Datos para ElevenLabs + fal-ai/sync-lipsync/v2/pro (Standard) ──
+    const narration_text = String(body?.narration_text || "").trim();
     const voice_accent   = String(body?.voice_accent || "neutro").trim();
     const voice_gender   = String(body?.voice_gender || "mujer").trim();
     const enable_lipsync = generationMode === "standard" && !!body?.enable_lipsync;
+    // El frontend envía lipsync_model; lo guardamos para que video-status lo use
+    const lipsync_model  = String(body?.lipsync_model || "fal-ai/sync-lipsync/v2/pro").trim();
 
     jadeCost = getJadeCost({ mode: generationMode, duration: duration_s, hasAudioLayer: generationMode === "standard" ? enable_lipsync : include_audio });
 
-    console.error("[generate-img2video] START", { userId, provider, generationMode, duration_s, jadeCost, enable_lipsync, voice_accent, voice_gender });
+    console.error("[generate-img2video] START", { userId, provider, generationMode, duration_s, jadeCost, enable_lipsync, voice_accent, voice_gender, lipsync_model });
 
     ref = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
@@ -250,11 +252,12 @@ export default async function handler(req, res) {
         requested_audio_layer: requestedAudioLayer,
         resolved_duration_s: duration_s,
         resolved_resolution: resolution,
-        // Datos para ElevenLabs + Latentsync en video-status
+        // Datos para ElevenLabs + fal-ai/sync-lipsync/v2/pro en video-status
         narration_text: narration_text || "",
         voice_accent,
         voice_gender,
         enable_lipsync,
+        lipsync_model,  // "fal-ai/sync-lipsync/v2/pro"
       },
       provider,
     };
@@ -272,11 +275,17 @@ export default async function handler(req, res) {
       const providerRequestId = veoResult?.name || veoResult?.id || veoResult?.operationName || null;
       if (!providerRequestId) throw new Error("Veo did not return an operation name");
       const startedAtIso = new Date().toISOString();
-      await supabaseAdmin.from("video_jobs").update({ provider_request_id: String(providerRequestId), provider_status: "submitted", provider_raw: veoResult, status: "IN_PROGRESS", started_at: startedAtIso }).eq("id", jobId);
+      await supabaseAdmin.from("video_jobs").update({
+        provider_request_id: String(providerRequestId),
+        provider_status: "submitted",
+        provider_raw: veoResult,
+        status: "IN_PROGRESS",
+        started_at: startedAtIso,
+      }).eq("id", jobId);
       return res.status(200).json({ ok: true, job_id: jobId, provider: "google_veo", provider_request_id: providerRequestId, started_at: startedAtIso, jade_spent: jadeCost, generation_mode: "express", include_audio });
     }
 
-    // ── STANDARD (WAN mudo → ElevenLabs + Latentsync en video-status) ──
+    // ── STANDARD (WAN mudo → ElevenLabs + fal-ai/sync-lipsync/v2/pro en video-status) ──
     if (generationMode === "standard") {
       const falImageUrl = toFalImageUrl({ image_b64, image_url, imageMimeType });
       if (!falImageUrl) throw new Error("Standard mode requires image_url or image_b64");
@@ -297,18 +306,47 @@ export default async function handler(req, res) {
       const providerRequestId = falResp?.request_id || falResp?.requestId || falResp?.id || null;
       if (!providerRequestId) throw new Error("fal did not return a request id");
       const startedAtIso = new Date().toISOString();
-      await supabaseAdmin.from("video_jobs").update({ provider_request_id: String(providerRequestId), provider_status: "submitted", provider_raw: falResp, status: "IN_PROGRESS", started_at: startedAtIso }).eq("id", jobId);
-      return res.status(200).json({ ok: true, job_id: jobId, provider: "fal_wan_flash", provider_request_id: providerRequestId, started_at: startedAtIso, jade_spent: jadeCost, generation_mode: "standard", include_audio: false, enable_lipsync });
+      await supabaseAdmin.from("video_jobs").update({
+        provider_request_id: String(providerRequestId),
+        provider_status: "wan_processing",  // <-- etapa 1 del pipeline
+        provider_raw: falResp,
+        status: "IN_PROGRESS",
+        started_at: startedAtIso,
+      }).eq("id", jobId);
+      return res.status(200).json({
+        ok: true,
+        job_id: jobId,
+        provider: "fal_wan_flash",
+        provider_request_id: providerRequestId,
+        started_at: startedAtIso,
+        jade_spent: jadeCost,
+        generation_mode: "standard",
+        include_audio: false,
+        enable_lipsync,
+        lipsync_model,
+      });
     }
 
     // ── STUDIO (RunPod) ───────────────────────────────────────
     const endpointId = pickI2VEndpointId();
-    const rpInput = { mode: "i2v", job_id: jobId, user_id: userId, prompt: resolvedPrompt, negative_prompt: resolvedNegative || "", fps, num_frames, steps, guidance_scale, denoise, seed, motion_strength, duration_s, ...(aspect_ratio ? { aspect_ratio } : {}), width, height, image_b64, image_url };
+    const rpInput = {
+      mode: "i2v", job_id: jobId, user_id: userId,
+      prompt: resolvedPrompt, negative_prompt: resolvedNegative || "",
+      fps, num_frames, steps, guidance_scale, denoise, seed, motion_strength, duration_s,
+      ...(aspect_ratio ? { aspect_ratio } : {}),
+      width, height, image_b64, image_url,
+    };
     const rp = await runpodRun({ endpointId, input: rpInput });
     const providerRequestId = rp?.id || rp?.jobId || rp?.request_id || null;
     if (!providerRequestId) throw new Error("RunPod did not return a request id");
     const startedAtIso = new Date().toISOString();
-    await supabaseAdmin.from("video_jobs").update({ provider_request_id: String(providerRequestId), provider_status: "submitted", provider_raw: rp, status: "IN_PROGRESS", started_at: startedAtIso }).eq("id", jobId);
+    await supabaseAdmin.from("video_jobs").update({
+      provider_request_id: String(providerRequestId),
+      provider_status: "submitted",
+      provider_raw: rp,
+      status: "IN_PROGRESS",
+      started_at: startedAtIso,
+    }).eq("id", jobId);
     return res.status(200).json({ ok: true, job_id: jobId, provider: "runpod", provider_request_id: providerRequestId, started_at: startedAtIso, jade_spent: jadeCost, generation_mode: "studio", include_audio: false });
 
   } catch (e) {
