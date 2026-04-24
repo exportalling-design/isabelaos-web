@@ -1,3 +1,4 @@
+
 // api/generate-img2video.js
 import { fal } from "@fal-ai/client";
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
