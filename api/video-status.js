@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────────────────────
 // Estado de jobs de video para:
 // 1) Google Veo (Express)
-// 2) fal.ai WAN 2.6 Flash (Standard) → ElevenLabs + Latentsync
+// 2) fal.ai WAN 2.6 Flash (Standard) → ElevenLabs + fal-ai/sync-lipsync/v2/pro
 // 3) RunPod (Studio)
 // ─────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ const PENDING_PLACEHOLDER       = "[PENDING_EXPORT_FROM_B64]";
 
 if (FAL_KEY) fal.config({ credentials: FAL_KEY });
 
-// ── Voces ElevenLabs (mismo mapa que comercial) ───────────────
+// ── Voces ElevenLabs ──────────────────────────────────────────
 const VOICE_MAP = {
   neutro:       { mujer: "htFfPSZGJwjBv1CL0aMD", hombre: "htFfPSZGJwjBv1CL0aMD" },
   guatemalteco: { mujer: "MbMvLOFbicjtQwgx0j2r", hombre: "htFfPSZGJwjBv1CL0aMD" },
@@ -140,12 +140,12 @@ function deepFindGcsUri(obj) { if (!obj || typeof obj !== "object") return null;
 function deepFindMimeType(obj) { if (!obj || typeof obj !== "object") return null; if (typeof obj.mimeType === "string" && obj.mimeType.startsWith("video/")) return obj.mimeType; for (const k of Object.keys(obj)) { const f = deepFindMimeType(obj[k]); if (f) return f; } return null; }
 
 function extractVeoVideoPayload(op) {
-  const response  = op?.response || {};
-  const videos    = Array.isArray(response?.videos) ? response.videos : [];
+  const response   = op?.response || {};
+  const videos     = Array.isArray(response?.videos) ? response.videos : [];
   const firstVideo = videos[0] || null;
-  const directB64 = firstVideo?.bytesBase64Encoded || firstVideo?.bytesBase64 || response?.bytesBase64Encoded || response?.bytesBase64 || deepFindBase64(response) || null;
-  const mimeType  = firstVideo?.mimeType || response?.mimeType || deepFindMimeType(response) || "video/mp4";
-  const gcsUri    = firstVideo?.gcsUri || response?.gcsUri || deepFindGcsUri(response) || null;
+  const directB64  = firstVideo?.bytesBase64Encoded || firstVideo?.bytesBase64 || response?.bytesBase64Encoded || response?.bytesBase64 || deepFindBase64(response) || null;
+  const mimeType   = firstVideo?.mimeType || response?.mimeType || deepFindMimeType(response) || "video/mp4";
+  const gcsUri     = firstVideo?.gcsUri || response?.gcsUri || deepFindGcsUri(response) || null;
   return { directB64, mimeType, gcsUri, hasVideosArray: videos.length > 0, rawResponse: response };
 }
 
@@ -168,7 +168,7 @@ function extractFalVideoInfo(result) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// ElevenLabs + Latentsync (para Standard WAN)
+// ElevenLabs TTS
 // ══════════════════════════════════════════════════════════════
 
 async function generateElevenLabsAudio(text, accent, gender) {
@@ -192,25 +192,50 @@ async function generateElevenLabsAudio(text, accent, gender) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-async function applyLatentsync(videoUrl, audioBuf) {
-  if (!FAL_KEY) throw new Error("Missing FAL_KEY for Latentsync");
+// ══════════════════════════════════════════════════════════════
+// fal-ai/sync-lipsync/v2/pro  (reemplaza Latentsync)
+// Input:  video_url (URL pública del video WAN mudo)
+//         audio_url (URL del audio subido a fal storage)
+// Output: video sincronizado con lip sync de alta fidelidad
+// ══════════════════════════════════════════════════════════════
 
-  // Subir audio a fal storage
+async function applySyncLipsync(videoUrl, audioBuf, lipsyncModel = "fal-ai/sync-lipsync/v2/pro") {
+  if (!FAL_KEY) throw new Error("Missing FAL_KEY for Sync Lipsync");
+
+  fal.config({ credentials: FAL_KEY });
+
+  // Subir el audio generado por ElevenLabs a fal storage para obtener URL pública
   const audioBlob = new Blob([audioBuf], { type: "audio/mpeg" });
   const audioFile = new File([audioBlob], "narration.mp3", { type: "audio/mpeg" });
-  fal.config({ credentials: FAL_KEY });
   const audioUpload = await fal.storage.upload(audioFile);
-  const audioUrl    = audioUpload?.url || audioUpload;
+  const audioUrl    = typeof audioUpload === "string" ? audioUpload : audioUpload?.url;
 
-  console.error("[video-status] Latentsync: video_url=", videoUrl, "audio_url=", audioUrl);
+  if (!audioUrl) throw new Error("fal.storage.upload no devolvió URL de audio");
 
-  const result = await fal.subscribe("fal-ai/latentsync", {
-    input: { video_url: videoUrl, audio_url: audioUrl },
+  console.error("[video-status] Sync Lipsync v2 Pro: video_url=", videoUrl, "audio_url=", audioUrl, "model=", lipsyncModel);
+
+  // fal.subscribe espera polling automático hasta que el job termine
+  const result = await fal.subscribe(lipsyncModel, {
+    input: {
+      video_url: videoUrl,
+      audio_url: audioUrl,
+    },
     pollInterval: 3000,
+    logs: true,
+    onQueueUpdate: (update) => {
+      console.error("[video-status] Sync Lipsync status:", update?.status);
+    },
   });
 
-  const finalVideoUrl = result?.video?.url || result?.data?.video?.url || null;
-  if (!finalVideoUrl) throw new Error("Latentsync no devolvió video URL");
+  // El resultado viene en result.data.video.url o result.video.url
+  const finalVideoUrl =
+    result?.data?.video?.url ||
+    result?.video?.url       ||
+    result?.data?.video_url  ||
+    result?.video_url        ||
+    null;
+
+  if (!finalVideoUrl) throw new Error("Sync Lipsync v2 Pro no devolvió video URL");
 
   return finalVideoUrl;
 }
@@ -242,9 +267,9 @@ export default async function handler(req, res) {
     // GOOGLE VEO
     // ══════════════════════════════════════════════════════════
     if (job.provider === "google_veo") {
-      const op       = await fetchVeoOperation(job.provider_request_id);
-      const done     = !!op?.done;
-      const opError  = op?.error || null;
+      const op      = await fetchVeoOperation(job.provider_request_id);
+      const done    = !!op?.done;
+      const opError = op?.error || null;
 
       if (opError) {
         await admin.from("video_jobs").update({ status: "FAILED", provider_status: "FAILED", provider_error: safeStringify(opError), provider_reply: op, error: opError?.message || "Veo operation failed", updated_at: new Date().toISOString() }).eq("id", jobId);
@@ -283,7 +308,7 @@ export default async function handler(req, res) {
     }
 
     // ══════════════════════════════════════════════════════════
-    // FAL WAN FLASH → ElevenLabs + Latentsync
+    // FAL WAN FLASH → ElevenLabs + fal-ai/sync-lipsync/v2/pro
     // ══════════════════════════════════════════════════════════
     if (job.provider === "fal_wan_flash") {
       if (!FAL_KEY) return json(res, 500, { ok: false, error: "Missing FAL_KEY" });
@@ -291,10 +316,10 @@ export default async function handler(req, res) {
       try {
         fal.config({ credentials: FAL_KEY });
 
-        const queueStatus       = await fal.queue.status("wan/v2.6/image-to-video/flash", { requestId: String(job.provider_request_id), logs: true });
-        const normalizedStatus  = normalizeFalStatus(queueStatus?.status || queueStatus?.state);
+        const queueStatus      = await fal.queue.status("wan/v2.6/image-to-video/flash", { requestId: String(job.provider_request_id), logs: true });
+        const normalizedStatus = normalizeFalStatus(queueStatus?.status || queueStatus?.state);
 
-        console.error("[video-status] FAL status:", { jobId, status: normalizedStatus });
+        console.error("[video-status] FAL WAN status:", { jobId, status: normalizedStatus });
 
         if (normalizedStatus === "FAILED") {
           const falErr = queueStatus?.error?.message || queueStatus?.message || "fal job failed";
@@ -304,13 +329,14 @@ export default async function handler(req, res) {
         }
 
         if (normalizedStatus !== "COMPLETED") {
-          await admin.from("video_jobs").update({ status: "IN_PROGRESS", provider_status: normalizedStatus || "IN_PROGRESS", provider_reply: queueStatus, updated_at: new Date().toISOString() }).eq("id", jobId);
-          return json(res, 200, { ok: true, status: "IN_PROGRESS", rp_status: normalizedStatus, job: { ...job, provider_reply: queueStatus } });
+          // WAN todavía procesando — mantener provider_status = "wan_processing"
+          await admin.from("video_jobs").update({ status: "IN_PROGRESS", provider_status: "wan_processing", provider_reply: queueStatus, updated_at: new Date().toISOString() }).eq("id", jobId);
+          return json(res, 200, { ok: true, status: "IN_PROGRESS", rp_status: "wan_processing", job: { ...job, provider_reply: queueStatus } });
         }
 
-        // WAN terminó — obtener resultado
-        const falResult  = await fal.queue.result("wan/v2.6/image-to-video/flash", { requestId: String(job.provider_request_id) });
-        const extracted  = extractFalVideoInfo(falResult);
+        // ── WAN terminó — obtener URL del video mudo ──────────
+        const falResult = await fal.queue.result("wan/v2.6/image-to-video/flash", { requestId: String(job.provider_request_id) });
+        const extracted = extractFalVideoInfo(falResult);
 
         if (!extracted.url && !extracted.b64) {
           await admin.from("video_jobs").update({ status: "FAILED", provider_status: "FAILED", provider_reply: falResult, provider_error: safeStringify(falResult), error: "fal finished but no video payload was found", updated_at: new Date().toISOString() }).eq("id", jobId);
@@ -318,12 +344,12 @@ export default async function handler(req, res) {
           return json(res, 200, { ok: true, status: "FAILED", error: "fal finished but no video payload was found", job });
         }
 
-        // Subir video mudo de WAN a storage primero
+        // Resolver URL pública del video WAN mudo
         let wanVideoUrl = extracted.url;
         if (!wanVideoUrl && extracted.b64) {
           const buf = decodeB64ToBuffer(extracted.b64);
           if (buf?.length) {
-            const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime: extracted.mime || "video/mp4", suffix: "_raw" });
+            const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf, mime: extracted.mime || "video/mp4", suffix: "_wan_raw" });
             wanVideoUrl = finalUrl;
           }
         }
@@ -334,22 +360,21 @@ export default async function handler(req, res) {
           return json(res, 200, { ok: true, status: "FAILED", error: "No se pudo obtener URL del video WAN", job });
         }
 
-        // ── Leer parámetros de ElevenLabs del payload ─────────
+        // ── Leer parámetros del payload guardado ──────────────
         const payload        = job?.payload || {};
         const enable_lipsync = !!payload?.enable_lipsync;
         const narration_text = String(payload?.narration_text || "").trim();
         const voice_accent   = String(payload?.voice_accent || "neutro").trim();
         const voice_gender   = String(payload?.voice_gender || "mujer").trim();
+        // lipsync_model guardado por generate-img2video.js; fallback al v2/pro
+        const lipsync_model  = String(payload?.lipsync_model || "fal-ai/sync-lipsync/v2/pro").trim();
 
-        // Si no hay lipsync o no hay texto, guardar video mudo directamente
+        // ── Sin lipsync o sin texto → entregar video WAN mudo ─
         if (!enable_lipsync || !narration_text) {
           console.error("[video-status] Standard sin lipsync — guardando video WAN mudo");
           let finalBuf = null;
-          if (extracted.url) {
-            try { finalBuf = await fetchUrlToBuffer(extracted.url); } catch {}
-          } else if (extracted.b64) {
-            finalBuf = decodeB64ToBuffer(extracted.b64);
-          }
+          if (extracted.url) { try { finalBuf = await fetchUrlToBuffer(extracted.url); } catch {} }
+          else if (extracted.b64) { finalBuf = decodeB64ToBuffer(extracted.b64); }
 
           if (finalBuf?.length) {
             const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf: finalBuf, mime: extracted.mime || "video/mp4" });
@@ -358,50 +383,51 @@ export default async function handler(req, res) {
           }
         }
 
-        // ── ElevenLabs: generar audio ─────────────────────────
-        console.error("[video-status] Generando audio ElevenLabs...");
+        // ── Etapa 2: ElevenLabs TTS ───────────────────────────
+        console.error("[video-status] Generando audio con ElevenLabs...");
         await admin.from("video_jobs").update({ provider_status: "elevenlabs_processing", updated_at: new Date().toISOString() }).eq("id", jobId);
 
         const audioBuf = await generateElevenLabsAudio(narration_text, voice_accent, voice_gender);
 
         if (!audioBuf) {
-          // ElevenLabs falló — guardar video mudo de todas formas
-          console.error("[video-status] ElevenLabs falló, guardando video mudo");
-          let finalBuf = null;
-          try { finalBuf = await fetchUrlToBuffer(wanVideoUrl); } catch {}
-          if (finalBuf?.length) {
-            const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf: finalBuf, mime: "video/mp4" });
-            await admin.from("video_jobs").update({ status: "DONE", provider_status: "COMPLETED", video_url: finalUrl, provider_reply: falResult, error: null, updated_at: new Date().toISOString() }).eq("id", jobId);
-            return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl, note: "ElevenLabs failed, silent video delivered", job });
-          }
-        }
-
-        // ── Latentsync: sincronizar labios ────────────────────
-        console.error("[video-status] Aplicando Latentsync...");
-        await admin.from("video_jobs").update({ provider_status: "latentsync_processing", updated_at: new Date().toISOString() }).eq("id", jobId);
-
-        let finalVideoUrl = null;
-        try {
-          finalVideoUrl = await applyLatentsync(wanVideoUrl, audioBuf);
-        } catch (lsErr) {
-          console.error("[video-status] Latentsync falló:", lsErr?.message);
-          // Latentsync falló — entregar video WAN mudo
+          // ElevenLabs falló → entregar video WAN mudo como fallback
+          console.error("[video-status] ElevenLabs falló, entregando video mudo como fallback");
           let fallbackBuf = null;
           try { fallbackBuf = await fetchUrlToBuffer(wanVideoUrl); } catch {}
           if (fallbackBuf?.length) {
             const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf: fallbackBuf, mime: "video/mp4" });
             await admin.from("video_jobs").update({ status: "DONE", provider_status: "COMPLETED", video_url: finalUrl, provider_reply: falResult, error: null, updated_at: new Date().toISOString() }).eq("id", jobId);
-            return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl, note: "Latentsync failed, silent video delivered", job });
+            return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl, note: "ElevenLabs failed, silent video delivered", job });
           }
         }
 
-        // ── Descargar video final con lip sync y subir ────────
-        console.error("[video-status] Descargando video final con lipsync:", finalVideoUrl);
+        // ── Etapa 3: Sync Lipsync v2 Pro (fal.ai) ────────────
+        console.error("[video-status] Aplicando Sync Lipsync v2 Pro...", lipsync_model);
+        await admin.from("video_jobs").update({ provider_status: "synclipsync_processing", updated_at: new Date().toISOString() }).eq("id", jobId);
+
+        let finalVideoUrl = null;
+        try {
+          finalVideoUrl = await applySyncLipsync(wanVideoUrl, audioBuf, lipsync_model);
+        } catch (lsErr) {
+          // Sync Lipsync falló → entregar video WAN mudo como fallback
+          console.error("[video-status] Sync Lipsync v2 Pro falló:", lsErr?.message);
+          let fallbackBuf = null;
+          try { fallbackBuf = await fetchUrlToBuffer(wanVideoUrl); } catch {}
+          if (fallbackBuf?.length) {
+            const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf: fallbackBuf, mime: "video/mp4" });
+            await admin.from("video_jobs").update({ status: "DONE", provider_status: "COMPLETED", video_url: finalUrl, provider_reply: falResult, error: null, updated_at: new Date().toISOString() }).eq("id", jobId);
+            return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl, note: "Sync Lipsync failed, silent video delivered", job });
+          }
+        }
+
+        // ── Etapa 4: descargar video con lipsync y subir a Supabase ──
+        console.error("[video-status] Descargando video final con lip sync:", finalVideoUrl);
         const finalBuf = await fetchUrlToBuffer(finalVideoUrl);
         const { finalUrl } = await uploadVideoBufferToSupabase({ admin, userId, jobId, buf: finalBuf, mime: "video/mp4" });
 
         await admin.from("video_jobs").update({
-          status: "DONE", provider_status: "COMPLETED",
+          status: "DONE",
+          provider_status: "COMPLETED",
           video_url: finalUrl,
           result_url: finalVideoUrl,
           provider_reply: falResult,
@@ -412,6 +438,7 @@ export default async function handler(req, res) {
         return json(res, 200, { ok: true, status: "DONE", video_url: finalUrl, job });
 
       } catch (e) {
+        console.error("[video-status] fal_wan_flash error:", e?.message);
         await admin.from("video_jobs").update({ status: "FAILED", provider_status: "FAILED", error: e?.message || "fal status failed", provider_error: safeStringify({ message: e?.message }), updated_at: new Date().toISOString() }).eq("id", jobId);
         await refundJadesSafe({ admin, job, reason: "i2v_generation_failed" });
         return json(res, 200, { ok: true, status: "FAILED", error: e?.message || "fal status failed", job });
@@ -419,7 +446,7 @@ export default async function handler(req, res) {
     }
 
     // ══════════════════════════════════════════════════════════
-    // RUNPOD
+    // RUNPOD (Studio)
     // ══════════════════════════════════════════════════════════
     if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) return json(res, 500, { ok: false, error: "Missing RunPod env" });
 
@@ -431,8 +458,8 @@ export default async function handler(req, res) {
 
     if (!rpResp.ok) return json(res, 200, { ok: true, status: job.status, rp: rpJson, job });
 
-    const rpStatus = rpJson?.status || null;
-    const output   = rpJson?.output || null;
+    const rpStatus  = rpJson?.status || null;
+    const output    = rpJson?.output || null;
     const directUrl = output?.video_url || output?.videoUrl || null;
 
     if (rpStatus === "COMPLETED" && directUrl) {
