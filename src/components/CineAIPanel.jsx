@@ -528,18 +528,28 @@ Reference video: ${effectiveRefVideoUrl ? "Yes — Video 1 available for referen
 Audio for lip sync: ${audioUrl ? "YES — include lip sync language in prompt" : "No audio"}
 Aspect ratio: ${ratio}`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      // Llamada al backend seguro — API key de Anthropic nunca sale del servidor
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch("/api/cineai/isabela-prompt", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userMsg }],
+          answers: isabelaAnswers,
+          duration: durationSec,
+          refImagesCount: refImages.length,
+          hasVideo: !!effectiveRefVideoUrl,
+          hasAudio: !!audioUrl,
+          ratio,
         }),
       });
       const data = await res.json();
-      const text = data.content?.[0]?.text || "";
+      if (!res.ok || !data.ok) throw new Error(data.error || "Error del servidor");
+      const text = data.text || "";
       setIsabelaResult(text);
       // Extraer solo el prompt para el botón "Usar este prompt"
       // (el usuario verá el texto completo pero el botón solo copia el prompt)
