@@ -137,8 +137,14 @@ export default function CineAIPanel() {
   const [customPrompt,   setCustomPrompt]   = useState("");
 
   // Uploads
-  const [faceImageUrl,    setFaceImageUrl]    = useState(null);
-  const [facePreview,     setFacePreview]     = useState(null);
+  // Hasta 6 imágenes de referencia
+  const [refImages,       setRefImages]       = useState([]); // [{url, preview}] máx 6
+  const [uploadingImages, setUploadingImages] = useState(false);
+  // Compatibilidad: primera imagen = faceImageUrl
+  const faceImageUrl = refImages[0]?.url || null;
+  const facePreview  = refImages[0]?.preview || null;
+  const setFaceImageUrl = (url) => setRefImages(prev => prev.length ? [{ ...prev[0], url }, ...prev.slice(1)] : [{ url, preview: null }]);
+  const setFacePreview  = (preview) => setRefImages(prev => prev.length ? [{ ...prev[0], preview }, ...prev.slice(1)] : [{ url: null, preview }]);
   const [refVideoUrl,     setRefVideoUrl]     = useState(null);
   const [refVideoPreview, setRefVideoPreview] = useState(null);
   const [refVideoExtUrl,  setRefVideoExtUrl]  = useState("");
@@ -174,6 +180,14 @@ export default function CineAIPanel() {
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
   const [showExtUrlInput, setShowExtUrlInput] = useState(false);
+
+  // Asistente Isabela — generador de prompts con Claude
+  const [showIsabela,     setShowIsabela]     = useState(false);
+  const [isabelaStep,     setIsabelaStep]     = useState(0);
+  const [isabelaAnswers,  setIsabelaAnswers]  = useState({});
+  const [isabelaLoading,  setIsabelaLoading]  = useState(false);
+  const [isabelaResult,   setIsabelaResult]   = useState(null);
+  const [isabelaError,    setIsabelaError]    = useState(null);
 
   // Modales
   const [showTermsModal,   setShowTermsModal]   = useState(false);
@@ -310,6 +324,8 @@ export default function CineAIPanel() {
         bodyPayload = {
           prompt,
           imageUrl:     faceImageUrl          || null,
+          // Todas las imágenes de referencia (máx 6) → generate.js las procesa
+          refImages:    refImages.filter(i => i.url).map(i => i.url),
           refVideoUrl:  effectiveRefVideoUrl  || null,
           audioUrl:     audioUrl              || null,
           animateExact: !!(animateExact && faceImageUrl),
@@ -413,6 +429,133 @@ export default function CineAIPanel() {
     setPreviousVideoUrl(null);
     setFrameExtracted(false);
     clearInterval(pollRef.current);
+  };
+
+  // ── ASISTENTE ISABELA — genera prompt con Claude ──────────
+  const ISABELA_QUESTIONS = [
+    { key: "scene_type",   q: "¿Qué tipo de escena quieres crear?", opts: ["Escena cinematográfica (Hollywood)", "TikTok / Trend viral", "Video musical / Lip sync", "Comercial / Producto", "Otra — la describo yo"] },
+    { key: "face",         q: "¿Vas a usar tu rostro o el de alguien específico?", opts: ["Sí, mi propio rostro", "El rostro de otra persona (con permiso)", "No, sin cara específica"] },
+    { key: "consent",      q: "¿Tienes permiso para usar ese rostro en contenido generado con IA?", opts: ["Sí, tengo consentimiento", "Soy yo mismo/a"], condition: (a) => a.face === "El rostro de otra persona (con permiso)" },
+    { key: "background",   q: "¿Quieres usar una imagen de fondo o escenario específico?", opts: ["Sí, subiré una foto del lugar", "No, que la IA decida el fondo"] },
+    { key: "mood",         q: "¿Cuál es el ambiente o emoción de la escena?", opts: ["Épico / Grandioso", "Dramático / Intenso", "Romántico / Sensual", "Oscuro / Misterioso", "Alegre / Energético", "Realista / Documental"] },
+    { key: "camera",       q: "¿Qué tipo de cámara o movimiento prefieres?", opts: ["Plano fijo cinematográfico", "Travelling / Cámara en movimiento", "Drone / Vista aérea", "Cámara en mano (TikTok style)", "Close-up / Primer plano"] },
+    { key: "extra",        q: "¿Hay algo más específico que quieras en tu escena?", opts: ["Lluvia / Clima dramático", "Luces de neón / Ciudad de noche", "Luz dorada (atardecer)", "Cámara lenta (slow motion)", "Nada más, está bien así"] },
+  ];
+
+  const activeQuestions = ISABELA_QUESTIONS.filter(q => !q.condition || q.condition(isabelaAnswers));
+
+  const handleIsabelaAnswer = (key, value) => {
+    const newAnswers = { ...isabelaAnswers, [key]: value };
+    setIsabelaAnswers(newAnswers);
+    if (isabelaStep < activeQuestions.length - 1) {
+      setIsabelaStep(s => s + 1);
+    } else {
+      generateIsabelaPrompt(newAnswers);
+    }
+  };
+
+  const generateIsabelaPrompt = async (answers) => {
+    setIsabelaLoading(true);
+    setIsabelaError(null);
+    try {
+      const durationSec = duration; // 5, 10 o 15 — seleccionado por el usuario en el panel
+
+      const systemPrompt = `You are Isabela, IsabelaOS Studio's AI assistant specialized in creating Seedance 2.0 prompts following BytePlus official documentation.
+
+OFFICIAL SEEDANCE 2.0 PROMPT STRUCTURE (BytePlus docs):
+Formula: [Subject 1] + [Action/Movement 1] + [Action/Movement 2]
+Or multi-subject: [Subject 1] + [Action] + [Subject 2] + [Action]
+List elements in ORDER. Model expands from your words. Be specific and concrete.
+ALWAYS start with the subject/main action — NEVER start with camera or style.
+
+DURATION COMMAND (MANDATORY — append at very end):
+--dur 5   → 5 seconds: ONE clear single action, no cuts
+--dur 10  → 10 seconds: 1-2 actions + one camera move, optionally one cut
+--dur 15  → 15 seconds: 2-3 scenes connected with "Cut to [new scene]"
+The user selected: --dur ${durationSec} — use this EXACT command.
+
+CAMERA LANGUAGE (exact BytePlus terms — use natural language):
+surround | aerial drone | zoom in | zoom out | pan left/right | tilt up/down
+follow camera | handheld | dolly in | dolly push-in | tracking shot | static tripod
+For scene transitions: "Cut to [full description of new scene]" or "Camera cut to [scene]"
+After a cut that changes location: describe the NEW scene completely.
+
+MULTIMODAL REFERENCE SYNTAX (only include if user has uploads):
+- Images: "Reference [element] from Image 1" or "Extract [element] from Image 2"
+- Video: "Extend Video 1 backward, [new content], and connect to Video 1 at the end"
+- Combination: "Reference character from Image 1, background from Image 2, generate [action]"
+- Note: Image 1 = first uploaded photo (main subject), Image 2+ = additional references
+
+LIP SYNC (only if audio provided):
+Include: "lips moving naturally synced to audio, expressive mouth movement, close-up face moments"
+
+VISUAL STYLE MODIFIERS (add 1-2 max, only what fits the scene):
+Cinematic: film grain | cinematic color grading | anamorphic lens | shallow depth of field
+TikTok: vertical format | ring light | smooth orbit | beat-synced movement  
+Aerial: sweeping drone | bird's eye view | epic landscape reveal
+Slow motion: high-speed footage | slow motion impact | bullet time
+Night/City: neon reflections | wet pavement | volumetric fog | rim lighting
+Golden hour: warm backlight | sun flares | golden tones
+
+DURATION DEPTH GUIDE:
+--dur 5: "Woman turns to camera with intense gaze, close-up, cinematic rim light. --dur 5"
+--dur 10: "Man sprints across rooftop at sunset, tracking shot behind. Cut to close-up of face, dramatic push-in, film grain. --dur 10"  
+--dur 15: "Hero stands at cliff edge, camera pulls back revealing city below, epic orchestral. Cut to aerial drone sweeping over skyline, golden hour. Cut to close-up of determined eyes, slow zoom in. --dur 15"
+
+HARD RULES:
+- NO celebrity names, brand names, copyrighted characters (say "a young woman" not "Selena Gomez")
+- Do NOT start with camera description
+- Max 180 words for the prompt itself (not counting --dur)
+- English only for the prompt
+- Be specific: not "beautiful lighting" but "warm rim light from the left, soft shadow on the right"
+
+OUTPUT FORMAT — return EXACTLY this structure, nothing else:
+
+PROMPT:
+[Optimized English prompt ending with --dur ${durationSec}]
+
+GUÍA DE RECURSOS:
+[Spanish: specific upload instructions — which slot each photo/video goes in, what role it plays]
+
+CONSEJO ISABELA:
+[Spanish: 1 very specific tip to maximize quality for this exact scene type]`;
+
+      const userMsg = `User wants to create: ${JSON.stringify(isabelaAnswers, null, 2)}
+
+Duration selected in panel: ${durationSec} seconds → must end with --dur ${durationSec}
+Reference images uploaded: ${refImages.length} (${refImages.length > 0 ? "Image 1 = main subject" + (refImages.length > 1 ? `, Image 2-${refImages.length} = additional references` : "") : "none"})
+Reference video: ${effectiveRefVideoUrl ? "Yes — Video 1 available for reference syntax" : "No reference video"}
+Audio for lip sync: ${audioUrl ? "YES — include lip sync language in prompt" : "No audio"}
+Aspect ratio: ${ratio}`;
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userMsg }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      setIsabelaResult(text);
+      // Extraer solo el prompt para el botón "Usar este prompt"
+      // (el usuario verá el texto completo pero el botón solo copia el prompt)
+    } catch (e) {
+      setIsabelaError("Error generando prompt: " + e.message);
+    } finally {
+      setIsabelaLoading(false);
+    }
+  };
+
+  const resetIsabela = () => {
+    setIsabelaStep(0);
+    setIsabelaAnswers({});
+    setIsabelaResult(null);
+    setIsabelaError(null);
+    setIsabelaLoading(false);
   };
 
   return (
@@ -629,7 +772,23 @@ export default function CineAIPanel() {
               <p style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>Las fotos con contenido inapropiado o que violen derechos de imagen de terceros serán bloqueadas automáticamente.</p>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-              <button onClick={async () => { setShowPhotoConsent(false); if (pendingPhotoFile) { uploadToStorage(pendingPhotoFile, "cineai/faces", setFaceImageUrl, setFacePreview, setUploadingFace); setPendingPhotoFile(null); } }}
+              <button onClick={async () => {
+                  setShowPhotoConsent(false);
+                  if (pendingPhotoFile) {
+                    setUploadingImages(true);
+                    const file = pendingPhotoFile;
+                    const ext = file.name.split(".").pop();
+                    const path = \`cineai/faces/\${Date.now()}.\${ext}\`;
+                    const { error: upErr } = await supabase.storage.from("user-uploads").upload(path, file, { upsert: true });
+                    if (!upErr) {
+                      const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
+                      const preview = URL.createObjectURL(file);
+                      setRefImages(prev => [{ url: data.publicUrl, preview }, ...prev.slice(0, 5)]);
+                    }
+                    setUploadingImages(false);
+                    setPendingPhotoFile(null);
+                  }
+                }}
                 style={{ flex: 1, background: "#c8a050", border: "none", borderRadius: 10, color: "#060608", fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, letterSpacing: 3, padding: "14px", cursor: "pointer" }}>
                 ✓ ACEPTO Y SUBO LA FOTO
               </button>
@@ -669,6 +828,109 @@ export default function CineAIPanel() {
         </div>
       )}
 
+      {/* ══ MODAL ASISTENTE ISABELA ══════════════════════════ */}
+      {showIsabela && (
+        <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && setShowIsabela(false)}>
+          <div className="modal-box" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowIsabela(false)}>✕</button>
+
+            {/* Header Isabela */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#c8a050,#f0d080)", display: "grid", placeItems: "center", fontSize: 26, flexShrink: 0 }}>🤖</div>
+              <div>
+                <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 4, color: "#f0e8d0" }}>ISABELA</div>
+                <div style={{ fontSize: 11, color: "#555", letterSpacing: 1 }}>Asistente de prompts · Seedance 2.0 · IsabelaOS</div>
+              </div>
+            </div>
+
+            {!isabelaResult && !isabelaLoading && (
+              <>
+                {/* Saludo */}
+                {isabelaStep === 0 && (
+                  <div style={{ background: "rgba(200,160,80,0.06)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 12, padding: "14px 16px", marginBottom: 18, fontSize: 13, color: "#888", lineHeight: 1.7 }}>
+                    ¡Hola! Soy <strong style={{ color: "#c8a050" }}>Isabela</strong>, tu asistente de IA en IsabelaOS Studio. Voy a ayudarte a crear el prompt perfecto para Seedance 2.0 y decirte exactamente qué imágenes o videos subir y en qué orden. 🎬
+                  </div>
+                )}
+
+                {/* Pregunta actual */}
+                {(() => {
+                  const q = activeQuestions[isabelaStep];
+                  if (!q) return null;
+                  return (
+                    <div>
+                      <div style={{ fontSize: 14, color: "#ddd8cc", fontWeight: 700, marginBottom: 14, letterSpacing: 0.5 }}>
+                        {isabelaStep + 1}/{activeQuestions.length} · {q.q}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {q.opts.map(opt => (
+                          <button key={opt} onClick={() => handleIsabelaAnswer(q.key, opt)}
+                            style={{ background: "rgba(200,160,80,0.05)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 10, color: "#c8a050", fontFamily: "'Syne',sans-serif", fontSize: 13, padding: "12px 16px", cursor: "pointer", textAlign: "left", transition: "all .15s", letterSpacing: 0.5 }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(200,160,80,0.12)"; e.currentTarget.style.borderColor = "rgba(200,160,80,0.4)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(200,160,80,0.05)"; e.currentTarget.style.borderColor = "rgba(200,160,80,0.15)"; }}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                      {isabelaStep > 0 && (
+                        <button onClick={() => setIsabelaStep(s => s - 1)}
+                          style={{ marginTop: 12, background: "none", border: "none", color: "#555", fontSize: 12, cursor: "pointer", letterSpacing: 1 }}>
+                          ← Atrás
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
+            {/* Cargando */}
+            {isabelaLoading && (
+              <div style={{ textAlign: "center", padding: "30px 0" }}>
+                <div style={{ width: 32, height: 32, border: "2px solid #161616", borderTopColor: "#c8a050", borderRadius: "50%", animation: "spin 0.9s linear infinite", margin: "0 auto 16px" }} />
+                <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 18, letterSpacing: 4, color: "#c8a050" }}>GENERANDO TU PROMPT...</div>
+                <p style={{ fontSize: 12, color: "#444", marginTop: 6, letterSpacing: 1 }}>Isabela está creando el prompt perfecto para Seedance 2.0</p>
+              </div>
+            )}
+
+            {/* Resultado */}
+            {isabelaResult && !isabelaLoading && (
+              <div>
+                <div style={{ background: "rgba(80,180,100,0.06)", border: "1px solid rgba(80,180,100,0.2)", borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+                  <div style={{ fontSize: 10, letterSpacing: 3, color: "#60c870", textTransform: "uppercase", marginBottom: 10 }}>✓ Prompt generado por Isabela</div>
+                  <pre style={{ fontFamily: "'Syne',sans-serif", fontSize: 12, color: "#ddd8cc", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{isabelaResult}</pre>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={() => {
+                    // Extraer solo el prompt (entre "PROMPT:" y "GUÍA DE RECURSOS:")
+                    const text = isabelaResult;
+                    const promptMatch = text.match(/PROMPT:\n([\s\S]*?)(?:\n\nGUÍA DE RECURSOS:|\nGUÍA DE RECURSOS:|$)/);
+                    const extracted = promptMatch ? promptMatch[1].trim() : text.split("GUÍA DE RECURSOS:")[0].replace("PROMPT:","").trim();
+                    setSelectedPreset("custom");
+                    setCustomPrompt(extracted);
+                    setShowIsabela(false);
+                    resetIsabela();
+                  }} style={{ flex: 1, background: "#c8a050", border: "none", borderRadius: 10, color: "#060608", fontFamily: "'Bebas Neue',sans-serif", fontSize: 17, letterSpacing: 3, padding: "13px", cursor: "pointer" }}>
+                    ✓ USAR ESTE PROMPT
+                  </button>
+                  <button onClick={() => navigator.clipboard?.writeText(isabelaResult)}
+                    style={{ background: "rgba(200,160,80,0.08)", border: "1px solid rgba(200,160,80,0.2)", borderRadius: 10, color: "#c8a050", fontFamily: "'Syne',sans-serif", fontSize: 12, padding: "13px 18px", cursor: "pointer", letterSpacing: 1 }}>
+                    📋 Copiar
+                  </button>
+                  <button onClick={resetIsabela}
+                    style={{ background: "transparent", border: "1px solid #222", borderRadius: 10, color: "#555", fontFamily: "'Syne',sans-serif", fontSize: 12, padding: "13px 16px", cursor: "pointer" }}>
+                    ↺ Nuevo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isabelaError && (
+              <div style={{ background: "rgba(200,60,60,0.06)", border: "1px solid rgba(200,60,60,0.2)", borderRadius: 8, padding: "12px", fontSize: 12, color: "#e07070" }}>{isabelaError}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="cp-header">
         <div className="cp-header-row">
@@ -678,7 +940,13 @@ export default function CineAIPanel() {
             <p className="cp-tagline">Escenas cinematográficas y trends virales · Seedance 2.0</p>
             <div className="cp-mode-pill"><span className="cp-dot" />{modeLabel}</div>
           </div>
-          <button className="how-btn" onClick={() => setShowHowItWorks(true)}>¿Cómo funciona? →</button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            <button className="how-btn" onClick={() => { resetIsabela(); setShowIsabela(true); }}
+              style={{ background: "linear-gradient(135deg,rgba(200,160,80,0.15),rgba(200,160,80,0.08))", border: "1px solid rgba(200,160,80,0.35)", color: "#f0d080", fontWeight: 700 }}>
+              🤖 Isabela — Generar Prompt →
+            </button>
+            <button className="how-btn" onClick={() => setShowHowItWorks(true)}>¿Cómo funciona? →</button>
+          </div>
         </div>
       </div>
 
@@ -770,11 +1038,13 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* Foto del usuario + Audio */}
+        {/* Fotos de referencia — hasta 6 + Audio */}
         <div className="cp-cell">
-          <p className="sec-label">Tu foto (opcional)</p>
+          <p className="sec-label">
+            Imágenes de referencia — hasta 6 ({refImages.length}/6)
+          </p>
 
-          {/* Modo continuación — muestra frame + miniatura del video anterior */}
+          {/* Modo continuación */}
           {isContinuation && lastFrameUrl ? (
             <div className="continuation-badge">
               <img src={lastFrameUrl} alt="último frame" />
@@ -795,71 +1065,88 @@ export default function CineAIPanel() {
             </div>
           ) : (
             <>
-              <div
-                className={`upload-zone ${facePreview ? "has-file" : ""} ${uploadingFace ? "uploading" : ""}`}>
-                {facePreview ? (
-                  <><div className="uz-badge">✓ foto</div><img src={facePreview} className="uz-thumb" alt="preview" /></>
-                ) : uploadingFace ? (
-                  <p style={{ fontSize: 11, color: "#c8a050", letterSpacing: 2 }}>Subiendo...</p>
-                ) : (
-                  <>
-                    <span style={{ fontSize: 26 }}>👤</span>
-                    <p className="uz-label">Tu foto para aparecer en la escena</p>
-                    <button
-                      type="button"
-                      onClick={() => faceInputRef.current?.click()}
-                      style={{
-                        marginTop: 8,
-                        background: "rgba(200,160,80,0.12)",
-                        border: "1px solid rgba(200,160,80,0.35)",
-                        borderRadius: 8,
-                        color: "#c8a050",
-                        fontFamily: "'Syne', sans-serif",
-                        fontSize: 12,
-                        letterSpacing: 1,
-                        padding: "8px 20px",
-                        cursor: "pointer",
-                      }}>
-                      📁 Seleccionar foto
+              {/* Grid de imágenes subidas */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }}>
+                {refImages.map((img, idx) => (
+                  <div key={idx} style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(200,160,80,0.3)", aspectRatio: "1/1", background: "#0a0a0c" }}>
+                    <img src={img.preview} alt={`ref-${idx}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <div style={{ position: "absolute", top: 4, left: 6, fontSize: 9, letterSpacing: 1, color: "#c8a050", background: "rgba(6,6,8,0.8)", padding: "2px 6px", borderRadius: 4 }}>
+                      {idx === 0 ? "PRINCIPAL" : `REF ${idx + 1}`}
+                    </div>
+                    <button onClick={() => setRefImages(prev => prev.filter((_, i) => i !== idx))}
+                      style={{ position: "absolute", top: 4, right: 4, background: "rgba(200,60,60,0.8)", border: "none", borderRadius: "50%", color: "#fff", width: 20, height: 20, fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      ×
                     </button>
-                    <p className="uz-hint" style={{ marginTop: 6 }}>JPG / PNG</p>
-                  </>
+                  </div>
+                ))}
+                {/* Botón agregar (máx 6) */}
+                {refImages.length < 6 && (
+                  <div
+                    className={`upload-zone ${uploadingImages ? "uploading" : ""}`}
+                    style={{ aspectRatio: "1/1", minHeight: "auto", cursor: "pointer" }}
+                    onClick={() => faceInputRef.current?.click()}>
+                    {uploadingImages ? (
+                      <p style={{ fontSize: 10, color: "#c8a050", letterSpacing: 1 }}>Subiendo...</p>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: 22 }}>+</span>
+                        <p style={{ fontSize: 10, color: "#555", letterSpacing: 1, textAlign: "center" }}>
+                          {refImages.length === 0 ? "Agregar foto principal" : "Agregar referencia"}
+                        </p>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
-              {facePreview && (
-                <button className="remove-btn"
-                  onClick={() => { setFacePreview(null); setFaceImageUrl(null); setAnimateExact(false); }}>
-                  × quitar foto
-                </button>
-              )}
 
-              {/* Toggle animar foto exacta — solo si hay foto */}
-              {facePreview && (
+              <p style={{ fontSize: 10, color: "#444", letterSpacing: 0.5, lineHeight: 1.5, marginBottom: 8 }}>
+                📌 <strong style={{ color: "#666" }}>1ª foto</strong> = cara/sujeto principal · Las demás = referencias de ropa, fondo, estilo, ángulo
+              </p>
+
+              {/* Toggle animar foto exacta */}
+              {refImages.length > 0 && (
                 <>
                   <div className={`animate-toggle ${animateExact ? "active" : ""}`}
                     onClick={() => setAnimateExact((v) => !v)}>
                     <input type="checkbox" checked={animateExact} readOnly />
-                    <span className="animate-toggle-label">Animar foto exacta</span>
+                    <span className="animate-toggle-label">Animar foto exacta (respeta fondo original)</span>
                   </div>
                   {animateExact && (
                     <p className="animate-toggle-desc">
-                      El modelo animará tu foto respetando el fondo, escenario y personajes originales.
+                      El modelo animará la 1ª foto respetando el fondo y escenario originales.
                     </p>
                   )}
                 </>
               )}
 
-              <input ref={faceInputRef} type="file" accept="image/*" style={{ display: "none" }}
+              <input ref={faceInputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
                 onChange={async (e) => {
-                  const f = e.target.files[0];
-                  if (!f) return;
-                  const isSafe = await checkImageSafety(f);
-                  if (!isSafe) {
-                    setError("La imagen fue bloqueada por contener contenido inapropiado.");
-                    e.target.value = ""; return;
+                  const files = Array.from(e.target.files || []);
+                  if (!files.length) return;
+                  const remaining = 6 - refImages.length;
+                  const toProcess = files.slice(0, remaining);
+                  // Verificar la primera imagen con checkImageSafety
+                  if (refImages.length === 0 && toProcess[0]) {
+                    const isSafe = await checkImageSafety(toProcess[0]);
+                    if (!isSafe) { setError("Imagen bloqueada por contenido inapropiado."); e.target.value = ""; return; }
+                    setPendingPhotoFile(toProcess[0]);
+                    setShowPhotoConsent(true);
+                    e.target.value = "";
+                    return;
                   }
-                  setPendingPhotoFile(f);
-                  setShowPhotoConsent(true);
+                  // Para las demás imágenes subir directo
+                  setUploadingImages(true);
+                  for (const file of toProcess) {
+                    const ext = file.name.split(".").pop();
+                    const path = \`cineai/faces/\${Date.now()}_\${Math.random().toString(36).slice(2)}.\${ext}\`;
+                    const { error: upErr } = await supabase.storage.from("user-uploads").upload(path, file, { upsert: true });
+                    if (!upErr) {
+                      const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
+                      const preview = URL.createObjectURL(file);
+                      setRefImages(prev => prev.length < 6 ? [...prev, { url: data.publicUrl, preview }] : prev);
+                    }
+                  }
+                  setUploadingImages(false);
                   e.target.value = "";
                 }} />
             </>
