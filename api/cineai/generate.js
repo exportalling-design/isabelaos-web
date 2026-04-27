@@ -1,16 +1,21 @@
-// api/cineai/generate.js
-// ROUTING:
-//   Con imagen → fal.ai (reference-to-video/fast)
-//   Sin imagen → BytePlus (t2v)
-// PiAPI deshabilitado temporalmente
+// api/generate.js  (usado por CineAIPanel vía /api/cineai/generate que apunta aquí)
+// ─────────────────────────────────────────────────────────────
+// MIGRACIÓN COMPLETA A PIAPI — fal.ai ELIMINADO
+// Razón: fal.ai cobró $21 USD por 1 video de 15s con Seedance 2.0
+// PiAPI tiene precio fijo predecible y ya lo usamos en CineAI exitosamente
+//
+// ROUTING PiAPI:
+//   Con imagen(s) → seedance-2-preview  (i2v / r2v+face / animate / lipsync / continuation)
+//   Sin imagen    → seedance-2-preview  (t2v / r2v sin rostro)
+//   Audio lip sync→ PiAPI acepta audio directo (sin el workaround de fal.ai)
+// ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-const FAL_ENDPOINT    = "bytedance/seedance-2.0/fast/reference-to-video";
-const BYTEPLUS_BASE   = "https://ark.ap-southeast.bytepluses.com/api/v3";
-const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
-const BYTEPLUS_MODEL  = "dreamina-seedance-2-0-260128";
-const JADE_COSTS      = { 5: 40, 10: 75, 15: 110 };
+const PIAPI_URL      = "https://api.piapi.ai/api/v1/task";
+const PIAPI_MODEL    = "seedance";
+const PIAPI_TASK     = "seedance-2-preview";   // Seedance 2.0 fast — precio fijo
+const JADE_COSTS     = { 5: 40, 10: 75, 15: 110 };
 
 const BLOCKED_NAMES = [
   "tom cruise","brad pitt","angelina jolie","scarlett johansson","will smith",
@@ -39,33 +44,28 @@ function detectBlockedContent(text) {
   return null;
 }
 
-async function submitToFal(input) {
-  const r = await fetch(`https://fal.run/${FAL_ENDPOINT}`, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Key ${process.env.FAL_KEY}` },
-    body: JSON.stringify(input),
+// ── Enviar tarea a PiAPI ───────────────────────────────────────
+async function submitToPiAPI(payload) {
+  const r = await fetch(PIAPI_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.PIAPI_KEY,
+    },
+    body: JSON.stringify(payload),
   });
-  const data = await r.json();
-  if (!r.ok) {
-    console.error("[fal] error response:", JSON.stringify(data));
-    throw new Error(`fal.ai ${r.status}: ${JSON.stringify(data)}`);
-  }
-  return {
-    requestId: data?.request_id || data?.requestId || null,
-    videoUrl:  data?.video?.url || data?.data?.video?.url || null,
-  };
-}
 
-async function submitToByteplus(content) {
-  const r = await fetch(BYTEPLUS_CREATE, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
-    body: JSON.stringify({ model: BYTEPLUS_MODEL, content }),
-  });
   const data = await r.json();
-  if (!r.ok || data.error) throw new Error(data.error?.message || data.message || `BytePlus error ${r.status}`);
-  if (!data.id) throw new Error("BytePlus no devolvió task id");
-  return { taskId: data.id };
+
+  if (!r.ok || data.code !== 200) {
+    console.error("[PiAPI] error response:", JSON.stringify(data));
+    throw new Error(data.message || `PiAPI error ${r.status}`);
+  }
+
+  const taskId = data.data?.task_id;
+  if (!taskId) throw new Error("PiAPI no devolvió task_id");
+
+  return { taskId };
 }
 
 export default async function handler(req, res) {
@@ -82,9 +82,16 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const {
-    prompt, imageUrl, refVideoUrl, audioUrl,
-    animateExact, isContinuation,
-    duration = 10, aspectRatio = "9:16", sceneMode = "tiktok",
+    prompt,
+    imageUrl,           // primera imagen / último frame en continuación
+    refImages,          // array de hasta 6 URLs de imágenes de referencia
+    refVideoUrl,        // video de referencia / video anterior en continuación
+    audioUrl,           // audio para lip sync
+    animateExact,       // boolean: animar foto exacta respetando fondo
+    isContinuation,     // boolean: continuación de clip anterior
+    duration   = 10,
+    aspectRatio = "9:16",
+    sceneMode  = "tiktok",
   } = body;
 
   if (!prompt || String(prompt).trim().length < 5)
@@ -97,155 +104,173 @@ export default async function handler(req, res) {
   const jadeCost = JADE_COSTS[duration] || 75;
   const ref = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
+  // ── Descontar Jades ──────────────────────────────────────────
   const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
-    p_user_id: userId, p_amount: jadeCost, p_reason: "cineai_generate", p_ref: ref,
+    p_user_id: userId,
+    p_amount:  jadeCost,
+    p_reason:  "cineai_generate",
+    p_ref:     ref,
   });
+
   if (spendErr) {
     if ((spendErr.message || "").includes("INSUFFICIENT_JADES"))
       return res.status(402).json({ ok: false, error: "INSUFFICIENT_JADES", detail: `Necesitas ${jadeCost} Jades.` });
     return res.status(400).json({ ok: false, error: spendErr.message });
   }
 
-  const hasImage    = !!imageUrl;
-  const hasAudio    = !!audioUrl;
-  const hasRefVideo = !!refVideoUrl;
+  // ── Construir payload PiAPI ──────────────────────────────────
+  // PiAPI Seedance 2.0 acepta:
+  //   image_urls  → array de URLs de imágenes (hasta 6)
+  //   video_urls  → array de URL de video de referencia
+  //   audio_urls  → array de URL de audio (lip sync)
+  //   prompt, duration, aspect_ratio
 
-  // ROUTING: imagen → fal.ai | sin imagen → BytePlus
-  const provider = hasImage ? "fal_seedance" : "byteplus_seedance";
+  let finalPrompt = String(prompt).trim();
+  let mode        = "t2v";
+  const inputExtra = {};
 
-  let finalPrompt  = String(prompt).trim();
-  let mode         = "t2v";
-  let taskId       = null;
-  let falRequestId = null;
-  let falVideoUrl  = null;
-
-  try {
-    if (provider === "fal_seedance") {
-      // ── FAL.AI — cualquier caso con imagen ────────────────
-      const input = {
-        aspect_ratio:   aspectRatio,
-        duration:       String(duration),
-        resolution:     "720p",
-        generate_audio: true,
-      };
-
-      if (isContinuation) {
-        // Continuación — último frame como first frame
-        mode = "continuation";
-        input.image_urls = [imageUrl];
-        input.prompt = `@Image1 This is the last frame of the previous clip. Continue the scene seamlessly from this exact frame. Maintain the same atmosphere, lighting, color grade, camera movement style and visual mood. ${finalPrompt}`;
-
-      } else if (hasAudio && hasRefVideo) {
-        mode = "r2v+face+audio";
-        input.image_urls = [imageUrl];
-        input.video_urls = [refVideoUrl];
-        input.audio_urls = [audioUrl];
-        input.prompt = `@Image1 Use this person as the subject. @Video1 Copy the movement and choreography. @Audio1 Sync to this audio. ${finalPrompt}`;
-
-      } else if (hasAudio) {
-        // NO mandamos el audio a fal.ai — ByteDance bloquea música con derechos.
-        // Generamos video mudo con expresión de lip sync.
-        // El poll.js mezcla el audio encima con fal ffmpeg-api al completar.
-        mode = "lipsync";
-        input.image_urls = [imageUrl];
-        input.generate_audio = false; // video mudo para evitar bloqueo
-        input.prompt = `@Image1 The person in this image performs an emotional lip sync performance. Mouth opens and closes expressively as if singing passionately. Close-up shot, dramatic side lighting, cinematic music video quality. ${finalPrompt}`;
-
-      } else if (hasRefVideo) {
-        mode = "r2v+face";
-        input.image_urls = [imageUrl];
-        input.video_urls = [refVideoUrl];
-        input.prompt = `@Image1 Use this person as the subject. @Video1 Copy ONLY the body movement and choreography from this reference. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
-
-      } else if (animateExact) {
-        mode = "animate";
-        input.image_urls = [imageUrl];
-        input.prompt = `@Image1 Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters. Only add natural movement to existing subjects. ${finalPrompt}`;
-
-      } else {
-        // Foto sola → i2v con consistencia facial
-        mode = "i2v";
-        input.image_urls = [imageUrl];
-        input.prompt = `@Image1 ${finalPrompt}`;
-      }
-
-      const result = await submitToFal(input);
-      falRequestId = result.requestId;
-      falVideoUrl  = result.videoUrl;
-
-    } else {
-      // ── BYTEPLUS — sin imagen (texto puro, video ref sin rostro) ──
-      const content = [];
-
-      if (hasRefVideo) {
-        content.push({ type: "video_url", video_url: { url: refVideoUrl } });
-        finalPrompt = `[Video 1] Copy ONLY the body movement from this reference. Background from prompt. ${finalPrompt}`;
-        mode = "r2v";
-      } else if (hasAudio) {
-        content.push({ type: "audio_url", audio_url: { url: audioUrl } });
-        finalPrompt = `[Audio 1] Person lip syncing to this audio, perfectly synced, expressive. ${finalPrompt}`;
-        mode = "lipsync_nophoto";
-      } else {
-        mode = "t2v";
-      }
-
-      content.push({
-        type: "text",
-        text: `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
-      });
-
-      const result = await submitToByteplus(content);
-      taskId = result.taskId;
+  // Construir lista de imágenes — combinar imageUrl + refImages (deduplicar)
+  const allImages = [];
+  if (imageUrl) allImages.push(imageUrl);
+  if (Array.isArray(refImages)) {
+    for (const u of refImages) {
+      if (u && !allImages.includes(u)) allImages.push(u);
     }
+  }
+  // Máximo 6 imágenes según documentación PiAPI
+  const imageList = allImages.slice(0, 6);
 
+  if (isContinuation && imageList.length > 0 && refVideoUrl) {
+    // ── CONTINUACIÓN PERFECTA ────────────────────────────────
+    // Image1 = último frame (ancla visual exacta del punto de inicio)
+    // Video1 = clip completo anterior (referencia de atmósfera, luz, estilo)
+    mode = "continuation";
+    inputExtra.image_urls = imageList;
+    inputExtra.video_urls = [refVideoUrl];
+    finalPrompt = `Continue this exact scene seamlessly from @Image1. Use @Video1 as full reference to maintain the same atmosphere, lighting, camera movement, color grading, and visual style. The continuation must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
+
+  } else if (isContinuation && imageList.length > 0) {
+    // Continuación sin video anterior — solo frame
+    mode = "continuation_frame";
+    inputExtra.image_urls = imageList;
+    finalPrompt = `Continue this exact scene seamlessly from @Image1. Maintain the same atmosphere, lighting, and visual style. ${finalPrompt}`;
+
+  } else if (animateExact && imageList.length > 0) {
+    // Animar foto exacta respetando fondo
+    mode = "animate";
+    inputExtra.image_urls = imageList;
+    finalPrompt = `@Image1 Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters. Only add natural movement to existing subjects. ${finalPrompt}`;
+
+  } else if (audioUrl && imageList.length > 0) {
+    // Lip sync — PiAPI SÍ acepta audio directamente (ventaja sobre fal.ai)
+    mode = "lipsync";
+    inputExtra.image_urls = imageList;
+    inputExtra.audio_urls = [audioUrl];
+    const imgRefs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
+    finalPrompt = `${imgRefs} Lip sync the person to the audio in @Audio1. Mouth movements perfectly synced to the music, expressive performance, close-up moments. ${finalPrompt}`;
+
+  } else if (audioUrl && imageList.length === 0) {
+    // Audio sin foto
+    mode = "lipsync_t2v";
+    inputExtra.audio_urls = [audioUrl];
+    finalPrompt = `Person lip syncing to the audio in @Audio1. Mouth movements perfectly synced to the music. ${finalPrompt}`;
+
+  } else if (refVideoUrl && imageList.length > 0) {
+    // Video de referencia + imágenes — copiar movimiento con cara del usuario
+    mode = "r2v+face";
+    inputExtra.image_urls = imageList;
+    inputExtra.video_urls = [refVideoUrl];
+    const imgRefs = imageList.map((_, i) => `@Image${i + 1}`).join(", ");
+    finalPrompt = `Use the person from ${imgRefs} as the subject. @Video1 Copy ONLY the body movement and choreography. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
+
+  } else if (refVideoUrl && imageList.length === 0) {
+    // Video de referencia sin foto — copiar movimiento puro
+    mode = "r2v";
+    inputExtra.video_urls = [refVideoUrl];
+    finalPrompt = `@Video1 Copy ONLY the body movement and choreography from this reference. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
+
+  } else if (imageList.length > 0) {
+    // Imagen(s) sola(s) → i2v con consistencia facial
+    mode = "i2v";
+    inputExtra.image_urls = imageList;
+    const imgRefs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
+    finalPrompt = `${imgRefs} ${finalPrompt}`;
+
+  } else {
+    // Solo texto
+    mode = "t2v";
+  }
+
+  const piPayload = {
+    model:     PIAPI_MODEL,
+    task_type: PIAPI_TASK,
+    input: {
+      prompt:       finalPrompt,
+      duration,
+      aspect_ratio: aspectRatio,
+      ...inputExtra,
+    },
+  };
+
+  // ── Llamar a PiAPI ───────────────────────────────────────────
+  let taskId;
+  try {
+    const result = await submitToPiAPI(piPayload);
+    taskId = result.taskId;
   } catch (err) {
-    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_error", p_ref: ref }); } catch {}
-    console.error(`[cineai/generate] ${provider} error:`, err.message);
+    // Reembolsar Jades si PiAPI falla
+    try {
+      await supabaseAdmin.rpc("spend_jades", {
+        p_user_id: userId, p_amount: -jadeCost,
+        p_reason: "cineai_refund_piapi_error", p_ref: ref,
+      });
+    } catch {}
+    console.error("[generate] PiAPI error:", err.message);
     return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
-  const providerTaskId = taskId || falRequestId;
-  if (!providerTaskId && !falVideoUrl) {
-    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_no_taskid", p_ref: ref }); } catch {}
-    console.error(`[cineai/generate] no task id. provider=${provider}`);
-    return res.status(500).json({ ok: false, error: "El proveedor no devolvió task id" });
-  }
-
+  // ── Guardar job en Supabase ──────────────────────────────────
   const jobId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-  await supabaseAdmin.from("video_jobs").insert({
+  const { error: insertErr } = await supabaseAdmin.from("video_jobs").insert({
     id:                  jobId,
     user_id:             userId,
-    status:              falVideoUrl ? "COMPLETED" : "IN_PROGRESS",
+    status:              "IN_PROGRESS",
     mode:                "cineai",
     prompt:              finalPrompt,
-    provider,
-    provider_request_id: providerTaskId || jobId,
-    provider_status:     falVideoUrl ? "completed" : "running",
-    result_url:          falVideoUrl || null,
+    provider:            "piapi_seedance",
+    provider_request_id: taskId,
+    provider_status:     "pending",
     started_at:          new Date().toISOString(),
     payload: {
+      task_id:         taskId,
       cineai_mode:     mode,
       scene_mode:      sceneMode,
       duration,
       aspect_ratio:    aspectRatio,
-      image_url:       imageUrl    || null,
-      ref_video_url:   refVideoUrl || null,
-      audio_url:       audioUrl    || null,
-      animate_exact:   animateExact   || false,
+      image_url:       imageUrl      || null,
+      ref_images:      imageList,
+      ref_video_url:   refVideoUrl   || null,
+      audio_url:       audioUrl      || null,
+      animate_exact:   animateExact  || false,
       is_continuation: isContinuation || false,
       jade_cost:       jadeCost,
-      provider,
-      fal_endpoint:    provider === "fal_seedance" ? FAL_ENDPOINT : null,
+      provider:        "piapi_seedance",
       ref,
     },
-  }).then(({ error }) => { if (error) console.error("[cineai/generate] insert failed:", error.message); });
+  });
 
-  console.error("[cineai/generate] OK", { userId, jobId, taskId: providerTaskId, mode, provider, jadeCost });
+  if (insertErr) console.error("[generate] insert failed:", insertErr.message);
+
+  console.log("[generate] OK", { userId, jobId, taskId, mode, jadeCost, provider: "piapi_seedance" });
 
   return res.status(200).json({
-    ok: true, jobId, taskId: providerTaskId, mode, provider, jadeCost,
-    videoUrl: falVideoUrl || null,
+    ok: true,
+    jobId,
+    taskId,
+    mode,
+    jadeCost,
+    provider: "piapi_seedance",
   });
 }
 
