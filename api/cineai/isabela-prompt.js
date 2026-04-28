@@ -1,3 +1,4 @@
+
 // api/cineai/isabela-prompt.js
 // Backend seguro para Isabela — genera prompts Seedance 2.0 con Claude
 // La ANTHROPIC_API_KEY vive solo en variables de entorno de Vercel, nunca en el frontend
