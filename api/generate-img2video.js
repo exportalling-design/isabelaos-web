@@ -166,12 +166,6 @@ export default async function handler(req, res) {
 
     jadeCost = getJadeCost({ generationMode, duration, audioMode: enableLipsync ? "elevenlabs_lipsync" : audioMode });
 
-    const { data: userStatus } = await supabaseAdmin
-      .from("user_status").select("jades").eq("user_id", userId).single();
-    if ((userStatus?.jades ?? 0) < jadeCost) {
-      return res.status(400).json({ ok: false, error: `Necesitas ${jadeCost} jades para este video.` });
-    }
-
     ref = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
