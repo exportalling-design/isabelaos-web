@@ -1,184 +1,130 @@
-
 // api/generate-img2video.js
-import { fal } from "@fal-ai/client";
+// ─────────────────────────────────────────────────────────────
+// Imagen → Video usando Kling vía PiAPI
+// Modos:
+//   express  → Kling 2.1 pro 5s  (mejor calidad rápida)
+//   standard → Kling 2.1 std 10s o Kling 3.0 pro 15s
+// Audio:
+//   sin audio        → video mudo
+//   audio nativo     → Kling genera audio solo (enable_audio=true)
+//   elevenlabs+lips  → ElevenLabs TTS + Kling lip_sync (+jades)
+// ─────────────────────────────────────────────────────────────
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
-import { generateVeoVideo } from "../src/lib/veo.js";
 
-const RUNPOD_API_KEY =
-  process.env.RP_API_KEY ||
-  process.env.RUNPOD_API_KEY ||
-  process.env.VIDEO_RUNPOD_API_KEY ||
-  null;
+const PIAPI_KEY   = process.env.PIAPI_KEY || null;
+const PIAPI_BASE  = "https://api.piapi.ai/api/v1/task";
 
-const FAL_KEY = process.env.FAL_KEY || null;
-
-function pickI2VEndpointId() {
-  return (
-    process.env.IMG2VIDEO_RUNPOD_ENDPOINT_ID ||
-    process.env.VIDEO_RUNPOD_ENDPOINT_ID ||
-    process.env.VIDEO_RUNPOD_ENDPOINT ||
-    null
-  );
-}
-
-if (FAL_KEY) {
-  fal.config({ credentials: FAL_KEY });
-}
-
-async function runpodRun({ endpointId, input }) {
-  if (!RUNPOD_API_KEY) throw new Error("Missing RUNPOD_API_KEY / RP_API_KEY");
-  if (!endpointId) throw new Error("Missing I2V endpoint id env var");
-  const url = `https://api.runpod.ai/v2/${endpointId}/run`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${RUNPOD_API_KEY}` },
-    body: JSON.stringify({ input }),
-  });
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`RunPod /run failed: ${r.status} ${data?.error || data?.message || ""}`);
-  return data;
-}
-
-async function falQueueSubmit({ input }) {
-  if (!FAL_KEY) throw new Error("Missing FAL_KEY");
-  fal.config({ credentials: FAL_KEY });
-  return await fal.queue.submit("wan/v2.6/image-to-video/flash", { input });
-}
-
-function pickFinalPrompts(body) {
-  const b = body || {};
-  const finalPrompt = String(b?.finalPrompt || "").trim() || String(b?.optimizedPrompt || "").trim() || String(b?.prompt || "").trim();
-  const finalNegative = String(b?.finalNegative || "").trim() || String(b?.optimizedNegative || "").trim() || String(b?.negative_prompt || b?.negative || "").trim();
-  return { finalPrompt, finalNegative };
-}
+// URL pública de tu backend para recibir el webhook de PiAPI
+// Ej: https://isabelaos.com/api/video-webhook
+const WEBHOOK_URL = process.env.VIDEO_WEBHOOK_URL || null;
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isNum = (x) => Number.isFinite(Number(x));
 
-function inferImageMimeType(body) {
-  const explicit = String(body?.image_mime_type || body?.mimeType || body?.imageMimeType || "").trim();
-  if (explicit) return explicit;
-  const dataUrl = String(body?.image_data_url || "").trim();
-  if (dataUrl.startsWith("data:image/jpeg")) return "image/jpeg";
-  if (dataUrl.startsWith("data:image/jpg"))  return "image/jpeg";
-  if (dataUrl.startsWith("data:image/webp")) return "image/webp";
-  if (dataUrl.startsWith("data:image/png"))  return "image/png";
-  return "image/png";
-}
-
+// ── Helpers ───────────────────────────────────────────────────
 function resolveGenerationMode(body) {
-  const raw = String(body?.generation_mode || body?.mode_name || "").trim().toLowerCase();
-  if (raw === "express" || raw === "standard" || raw === "studio") return raw;
-  if (typeof body?.is_fast_mode === "boolean") return body.is_fast_mode ? "express" : "studio";
-  return "express";
+  const raw = String(body?.generation_mode || "").trim().toLowerCase();
+  if (raw === "express" || raw === "standard") return raw;
+  return "standard";
 }
 
-function normalizeDurationByMode(mode, raw) {
+function normalizeDuration(mode, raw) {
+  if (mode === "express") return 5;
   const n = Number(raw);
-  if (mode === "express") return 8;
-  if (mode === "studio")  return 5;
   if (n === 15) return 15;
-  if (n === 10) return 10;
-  if (n === 8)  return 10;
-  if (n === 5)  return 5;
   return 10;
 }
 
-function getModeProvider(mode) {
-  if (mode === "express")  return "google_veo";
-  if (mode === "standard") return "fal_wan_flash";
-  return "runpod";
-}
-
-function getSpendReason(mode, hasAudioLayer) {
-  if (mode === "express")  return hasAudioLayer ? "i2v_generate_express_audio" : "i2v_generate_express";
-  if (mode === "standard") return hasAudioLayer ? "i2v_generate_standard_audio" : "i2v_generate_standard";
-  return "i2v_generate_studio";
-}
-
-function getJadeCost({ mode, duration, hasAudioLayer }) {
-  let base = 0;
-  if (mode === "express") {
-    base = 18;
-  } else if (mode === "standard") {
-    if (duration === 15) base = 24;
-    else if (duration === 10) base = 17;
-    else base = 12;
-  } else {
-    base = 11;
+// Kling model + mode según duración y calidad
+function getKlingParams(generationMode, duration) {
+  if (generationMode === "express") {
+    // Kling 2.1 pro 5s — calidad premium rápida
+    return { model_version: "kling-v2-1", mode: "pro", duration: 5 };
   }
-  if ((mode === "express" || mode === "standard") && hasAudioLayer) base += 4;
+  if (duration === 15) {
+    // Kling 3.0 pro 15s
+    return { model_version: "kling-v3", mode: "pro", duration: 15 };
+  }
+  // Kling 2.1 std 10s — equilibrio precio/calidad
+  return { model_version: "kling-v2-1", mode: "std", duration: 10 };
+}
+
+function getJadeCost({ generationMode, duration, audioMode }) {
+  let base = 0;
+  if (generationMode === "express")         base = 15;
+  else if (duration === 15)                 base = 24;
+  else                                      base = 17;
+
+  // audio nativo de Kling (+6 jades)
+  if (audioMode === "native")               base += 6;
+  // ElevenLabs TTS + Kling lipsync (+8 jades)
+  if (audioMode === "elevenlabs_lipsync")   base += 8;
+
   return base;
 }
 
-function toFalImageUrl({ image_b64, image_url, imageMimeType }) {
-  if (image_url) return image_url;
-  if (!image_b64) return null;
-  return `data:${imageMimeType};base64,${image_b64}`;
-}
-
-function getResolutionForMode({ mode, width, height }) {
-  if (mode !== "standard") return null;
-  const w = Number(width) || 0;
-  const h = Number(height) || 0;
-  const maxSide = Math.max(w, h);
-  return maxSide >= 1000 ? "1080p" : "720p";
-}
-
-function mergeNegativePrompts(baseNegative, extraNegative) {
-  const a = String(baseNegative || "").trim();
-  const b = String(extraNegative || "").trim();
-  if (a && b) return `${a}, ${b}`;
-  return a || b || "";
-}
-
-function applyAudioPolicy({ mode, prompt, negativePrompt, audioLayerEnabled }) {
-  const cleanPrompt   = String(prompt || "").trim();
-  const cleanNegative = String(negativePrompt || "").trim();
-
-  // Standard: SIEMPRE mudo — el audio lo genera ElevenLabs y el lip sync fal-ai/sync-lipsync/v2/pro
-  if (mode === "standard") {
-    const silentInstruction = "silent video, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no music";
-    return {
-      finalPrompt:          cleanPrompt ? `${cleanPrompt}. ${silentInstruction}.` : silentInstruction,
-      finalNegative:        mergeNegativePrompts(cleanNegative, "audio, voice, speech, dialogue, talking, singing, soundtrack, music, lip sync"),
-      resolvedIncludeAudio: false,
-    };
-  }
-
-  if (mode === "studio") {
-    const silentInstruction = "silent video, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no music";
-    return {
-      finalPrompt:          cleanPrompt ? `${cleanPrompt}. ${silentInstruction}.` : silentInstruction,
-      finalNegative:        mergeNegativePrompts(cleanNegative, "audio, voice, speech, dialogue, talking, singing, soundtrack, music, lip sync"),
-      resolvedIncludeAudio: false,
-    };
-  }
-
-  // Express: respeta audioLayerEnabled
-  if (!audioLayerEnabled) {
-    const silentInstruction = "silent video only, no audio, no voice, no speech, no dialogue, no talking, no singing, no soundtrack, no ambient sound, no music";
-    return {
-      finalPrompt:          cleanPrompt ? `${cleanPrompt}. ${silentInstruction}.` : silentInstruction,
-      finalNegative:        mergeNegativePrompts(cleanNegative, "audio, voice, speech, dialogue, talking, singing, soundtrack, music, ambient sound, lip sync"),
-      resolvedIncludeAudio: false,
-    };
-  }
-
-  return { finalPrompt: cleanPrompt, finalNegative: cleanNegative, resolvedIncludeAudio: true };
+function getSpendReason(generationMode, audioMode) {
+  const suffix = audioMode === "native" ? "_audio_native"
+               : audioMode === "elevenlabs_lipsync" ? "_audio_lipsync"
+               : "";
+  return `i2v_generate_${generationMode}${suffix}`;
 }
 
 async function refundJadesSafe({ userId, amount, ref, reason }) {
   try {
-    const { error } = await supabaseAdmin.rpc("refund_jades", { p_user_id: userId, p_amount: amount, p_reason: reason, p_ref: ref });
+    const { error } = await supabaseAdmin.rpc("refund_jades", {
+      p_user_id: userId, p_amount: amount, p_reason: reason, p_ref: ref,
+    });
     if (error) console.error("[generate-img2video] refund_jades failed:", error.message);
-    else console.error("[generate-img2video] refund_jades ok:", { userId, amount, reason, ref });
-  } catch (e) {
-    console.error("[generate-img2video] refund_jades exception:", e?.message || e);
-  }
+  } catch (e) { console.error("[generate-img2video] refund_jades exception:", e?.message); }
 }
 
+// ── Llama a PiAPI Kling para generar video ────────────────────
+async function submitKlingVideo({ imageUrl, imageB64, prompt, negativePrompt, klingParams, aspectRatio, enableAudio, mimeType }) {
+  if (!PIAPI_KEY) throw new Error("Missing PIAPI_KEY");
+
+  // Construir image_url para PiAPI (acepta data URL o URL pública)
+  let finalImageUrl = imageUrl || null;
+  if (!finalImageUrl && imageB64) {
+    finalImageUrl = `data:${mimeType || "image/jpeg"};base64,${imageB64}`;
+  }
+  if (!finalImageUrl) throw new Error("Se requiere imagen para Kling I2V");
+
+  const body = {
+    model: "kling",
+    task_type: "video_generation",
+    input: {
+      prompt:          prompt || "Animate this image naturally with subtle realistic motion.",
+      negative_prompt: negativePrompt || "blurry, low quality, deformed, text, watermark",
+      image_url:       finalImageUrl,
+      duration:        klingParams.duration,
+      mode:            klingParams.mode,
+      version:         klingParams.model_version,
+      aspect_ratio:    aspectRatio || "9:16",
+      cfg_scale:       0.5,
+      ...(enableAudio ? { enable_audio: true } : {}),
+    },
+    config: {
+      service_mode: "public",
+      ...(WEBHOOK_URL ? { webhook_config: { endpoint: WEBHOOK_URL, secret: "" } } : {}),
+    },
+  };
+
+  const r = await fetch(PIAPI_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": PIAPI_KEY },
+    body: JSON.stringify(body),
+  });
+
+  const data = await r.json().catch(() => null);
+  if (!r.ok || data?.code !== 200) {
+    throw new Error(`PiAPI Kling submit failed: ${r.status} ${data?.message || JSON.stringify(data)}`);
+  }
+  return data?.data;
+}
+
+// ── Handler ───────────────────────────────────────────────────
 export default async function handler(req, res) {
   let userId = null, ref = null, jadeCost = 0, jadesCharged = false, jobId = null;
 
@@ -189,173 +135,116 @@ export default async function handler(req, res) {
     if (!userId) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { finalPrompt, finalNegative } = pickFinalPrompts(body);
 
-    if (!finalPrompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
+    const prompt         = String(body?.prompt || "").trim();
+    const negativePrompt = String(body?.negative_prompt || body?.negative || "").trim();
+    if (!prompt) return res.status(400).json({ ok: false, error: "Falta prompt" });
 
-    const image_b64  = body?.image_b64  ? String(body.image_b64) : null;
-    const image_url  = body?.image_url  ? String(body.image_url).trim() : null;
+    const image_b64  = body?.image_b64  ? String(body.image_b64)          : null;
+    const image_url  = body?.image_url  ? String(body.image_url).trim()   : null;
     if (!image_b64 && !image_url) return res.status(400).json({ ok: false, error: "Missing image_b64 or image_url" });
 
-    const imageMimeType    = inferImageMimeType(body);
-    const generationMode   = resolveGenerationMode(body);
-    const provider         = getModeProvider(generationMode);
-    const aspect_ratio     = String(body?.aspect_ratio || "").trim() || "9:16";
-    const duration_s       = normalizeDurationByMode(generationMode, body?.duration_s ?? body?.seconds ?? 8);
-    const fps              = Number(body?.fps ?? 16);
-    const num_frames       = Number(body?.num_frames ?? body?.frames ?? 48);
-    const steps            = Number(body?.steps ?? 18);
-    const guidance_scale   = clamp(Number(body?.guidance_scale ?? body?.cfg ?? 5.0), 1.0, 10.0);
-    const denoise          = clamp(Number(body?.denoise ?? body?.strength ?? 0.45), 0.2, 0.8);
-    const seed             = isNum(body?.seed) ? Number(body.seed) : 12345;
-    const motion_strength  = clamp(Number(body?.motion_strength ?? 0.6), 0.1, 1.0);
+    const mimeType       = String(body?.image_mime_type || "image/jpeg").trim();
+    const generationMode = resolveGenerationMode(body);
+    const duration       = normalizeDuration(generationMode, body?.duration_s ?? 10);
+    const aspect_ratio   = String(body?.aspect_ratio || "9:16").trim();
+    const klingParams    = getKlingParams(generationMode, duration);
 
-    const width  = body?.width  ? Number(body.width)  : aspect_ratio === "9:16" ? 576  : 832;
-    const height = body?.height ? Number(body.height) : aspect_ratio === "9:16" ? 1024 : 480;
+    // audio_mode: "none" | "native" | "elevenlabs_lipsync"
+    const audioMode      = String(body?.audio_mode || "none").trim();
+    const enableNativeAudio = audioMode === "native";
 
-    const requestedAudioLayer = !!body?.include_audio && generationMode !== "studio";
-    const audioPolicy   = applyAudioPolicy({ mode: generationMode, prompt: finalPrompt, negativePrompt: finalNegative, audioLayerEnabled: requestedAudioLayer });
-    const resolvedPrompt   = audioPolicy.finalPrompt;
-    const resolvedNegative = audioPolicy.finalNegative;
-    const include_audio    = audioPolicy.resolvedIncludeAudio;
-    const resolution       = getResolutionForMode({ mode: generationMode, width, height });
-
-    // ── Datos para ElevenLabs + fal-ai/sync-lipsync/v2/pro (Standard) ──
+    // Datos ElevenLabs + lipsync (solo si audioMode === "elevenlabs_lipsync")
     const narration_text = String(body?.narration_text || "").trim();
-    const voice_accent   = String(body?.voice_accent || "neutro").trim();
-    const voice_gender   = String(body?.voice_gender || "mujer").trim();
-    const enable_lipsync = generationMode === "standard" && !!body?.enable_lipsync;
-    // El frontend envía lipsync_model; lo guardamos para que video-status lo use
-    const lipsync_model  = String(body?.lipsync_model || "fal-ai/sync-lipsync/v2/pro").trim();
+    const voice_accent   = String(body?.voice_accent   || "neutro").trim();
+    const voice_gender   = String(body?.voice_gender   || "mujer").trim();
+    const enableLipsync  = audioMode === "elevenlabs_lipsync" && narration_text.length > 0;
 
-    jadeCost = getJadeCost({ mode: generationMode, duration: duration_s, hasAudioLayer: generationMode === "standard" ? enable_lipsync : include_audio });
+    if (audioMode === "elevenlabs_lipsync" && !narration_text) {
+      return res.status(400).json({ ok: false, error: "Escribe el texto que dirá el personaje para activar el lip sync." });
+    }
 
-    console.error("[generate-img2video] START", { userId, provider, generationMode, duration_s, jadeCost, enable_lipsync, voice_accent, voice_gender, lipsync_model });
+    jadeCost = getJadeCost({ generationMode, duration, audioMode: enableLipsync ? "elevenlabs_lipsync" : audioMode });
 
-    ref = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const { data: userStatus } = await supabaseAdmin
+      .from("user_status").select("jades").eq("user_id", userId).single();
+    if ((userStatus?.jades ?? 0) < jadeCost) {
+      return res.status(400).json({ ok: false, error: `Necesitas ${jadeCost} jades para este video.` });
+    }
+
+    ref = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
     const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
-      p_user_id: userId, p_amount: jadeCost, p_reason: getSpendReason(generationMode, enable_lipsync || include_audio), p_ref: ref,
+      p_user_id: userId, p_amount: jadeCost,
+      p_reason: getSpendReason(generationMode, enableLipsync ? "elevenlabs_lipsync" : audioMode),
+      p_ref: ref,
     });
     if (spendErr) return res.status(400).json({ ok: false, error: `Jades spend failed: ${spendErr.message}` });
     jadesCharged = true;
 
-    jobId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    jobId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
-    const jobRow = {
-      id: jobId, user_id: userId, status: "QUEUED", mode: "i2v",
-      prompt: resolvedPrompt, negative_prompt: resolvedNegative || "",
-      width, height, fps, num_frames, steps, guidance_scale,
+    // Enviar a Kling vía PiAPI
+    const klingTask = await submitKlingVideo({
+      imageUrl:      image_url,
+      imageB64:      image_b64,
+      mimeType,
+      prompt,
+      negativePrompt,
+      klingParams,
+      aspectRatio:   aspect_ratio,
+      enableAudio:   enableNativeAudio,
+    });
+
+    const providerRequestId = klingTask?.task_id || null;
+    if (!providerRequestId) throw new Error("PiAPI no devolvió task_id");
+
+    const startedAt = new Date().toISOString();
+
+    await supabaseAdmin.from("video_jobs").insert({
+      id:                   jobId,
+      user_id:              userId,
+      status:               "IN_PROGRESS",
+      mode:                 "i2v",
+      provider:             "piapi_kling",
+      provider_request_id:  providerRequestId,
+      provider_status:      "kling_processing",
+      prompt,
+      negative_prompt:      negativePrompt,
+      started_at:           startedAt,
       payload: {
-        ...(body || {}),
-        generation_mode: generationMode,
-        include_audio,
-        requested_audio_layer: requestedAudioLayer,
-        resolved_duration_s: duration_s,
-        resolved_resolution: resolution,
-        // Datos para ElevenLabs + fal-ai/sync-lipsync/v2/pro en video-status
-        narration_text: narration_text || "",
+        generation_mode:  generationMode,
+        duration,
+        audio_mode:       audioMode,
+        enable_lipsync:   enableLipsync,
+        narration_text:   enableLipsync ? narration_text : "",
         voice_accent,
         voice_gender,
-        enable_lipsync,
-        lipsync_model,  // "fal-ai/sync-lipsync/v2/pro"
+        kling_model:      klingParams.model_version,
+        kling_mode:       klingParams.mode,
+        aspect_ratio,
       },
-      provider,
-    };
+    });
 
-    const { error: insErr } = await supabaseAdmin.from("video_jobs").insert(jobRow);
-    if (insErr) {
-      await refundJadesSafe({ userId, amount: jadeCost, ref, reason: "i2v_insert_failed" });
-      return res.status(400).json({ ok: false, error: `video_jobs insert failed: ${insErr.message}` });
-    }
-
-    // ── EXPRESS (Veo) ─────────────────────────────────────────
-    if (generationMode === "express") {
-      if (!image_b64) throw new Error("Express mode requires image_b64.");
-      const veoResult = await generateVeoVideo({ prompt: resolvedPrompt, imageB64: image_b64, imageMimeType, aspectRatio: aspect_ratio, durationSeconds: duration_s });
-      const providerRequestId = veoResult?.name || veoResult?.id || veoResult?.operationName || null;
-      if (!providerRequestId) throw new Error("Veo did not return an operation name");
-      const startedAtIso = new Date().toISOString();
-      await supabaseAdmin.from("video_jobs").update({
-        provider_request_id: String(providerRequestId),
-        provider_status: "submitted",
-        provider_raw: veoResult,
-        status: "IN_PROGRESS",
-        started_at: startedAtIso,
-      }).eq("id", jobId);
-      return res.status(200).json({ ok: true, job_id: jobId, provider: "google_veo", provider_request_id: providerRequestId, started_at: startedAtIso, jade_spent: jadeCost, generation_mode: "express", include_audio });
-    }
-
-    // ── STANDARD (WAN mudo → ElevenLabs + fal-ai/sync-lipsync/v2/pro en video-status) ──
-    if (generationMode === "standard") {
-      const falImageUrl = toFalImageUrl({ image_b64, image_url, imageMimeType });
-      if (!falImageUrl) throw new Error("Standard mode requires image_url or image_b64");
-
-      const falInput = {
-        prompt: resolvedPrompt,
-        image_url: falImageUrl,
-        negative_prompt: resolvedNegative || "",
-        resolution: resolution || "1080p",
-        duration: String(duration_s),
-        enable_prompt_expansion: true,
-        multi_shots: false,
-        enable_safety_checker: true,
-        seed,
-      };
-
-      const falResp = await falQueueSubmit({ input: falInput });
-      const providerRequestId = falResp?.request_id || falResp?.requestId || falResp?.id || null;
-      if (!providerRequestId) throw new Error("fal did not return a request id");
-      const startedAtIso = new Date().toISOString();
-      await supabaseAdmin.from("video_jobs").update({
-        provider_request_id: String(providerRequestId),
-        provider_status: "wan_processing",  // <-- etapa 1 del pipeline
-        provider_raw: falResp,
-        status: "IN_PROGRESS",
-        started_at: startedAtIso,
-      }).eq("id", jobId);
-      return res.status(200).json({
-        ok: true,
-        job_id: jobId,
-        provider: "fal_wan_flash",
-        provider_request_id: providerRequestId,
-        started_at: startedAtIso,
-        jade_spent: jadeCost,
-        generation_mode: "standard",
-        include_audio: false,
-        enable_lipsync,
-        lipsync_model,
-      });
-    }
-
-    // ── STUDIO (RunPod) ───────────────────────────────────────
-    const endpointId = pickI2VEndpointId();
-    const rpInput = {
-      mode: "i2v", job_id: jobId, user_id: userId,
-      prompt: resolvedPrompt, negative_prompt: resolvedNegative || "",
-      fps, num_frames, steps, guidance_scale, denoise, seed, motion_strength, duration_s,
-      ...(aspect_ratio ? { aspect_ratio } : {}),
-      width, height, image_b64, image_url,
-    };
-    const rp = await runpodRun({ endpointId, input: rpInput });
-    const providerRequestId = rp?.id || rp?.jobId || rp?.request_id || null;
-    if (!providerRequestId) throw new Error("RunPod did not return a request id");
-    const startedAtIso = new Date().toISOString();
-    await supabaseAdmin.from("video_jobs").update({
-      provider_request_id: String(providerRequestId),
-      provider_status: "submitted",
-      provider_raw: rp,
-      status: "IN_PROGRESS",
-      started_at: startedAtIso,
-    }).eq("id", jobId);
-    return res.status(200).json({ ok: true, job_id: jobId, provider: "runpod", provider_request_id: providerRequestId, started_at: startedAtIso, jade_spent: jadeCost, generation_mode: "studio", include_audio: false });
+    return res.status(200).json({
+      ok: true,
+      job_id:          jobId,
+      provider:        "piapi_kling",
+      provider_request_id: providerRequestId,
+      started_at:      startedAt,
+      jade_spent:      jadeCost,
+      generation_mode: generationMode,
+      audio_mode:      audioMode,
+    });
 
   } catch (e) {
-    console.error("[generate-img2video] ERROR:", { message: e?.message, userId, jobId, jadeCost, jadesCharged, ref });
+    console.error("[generate-img2video] ERROR:", e?.message);
     if (jobId) {
-      try { await supabaseAdmin.from("video_jobs").update({ status: "FAILED", provider_status: "failed", provider_error: e?.message || "Server error", error: e?.message || "Server error" }).eq("id", jobId); } catch {}
+      try { await supabaseAdmin.from("video_jobs").update({ status: "FAILED", provider_status: "failed", error: e?.message }).eq("id", jobId); } catch {}
     }
-    if (jadesCharged && userId && jadeCost > 0 && ref) await refundJadesSafe({ userId, amount: jadeCost, ref, reason: "i2v_generation_failed" });
+    if (jadesCharged && userId && jadeCost > 0 && ref) {
+      await refundJadesSafe({ userId, amount: jadeCost, ref, reason: "i2v_generation_failed" });
+    }
     return res.status(500).json({ ok: false, error: e?.message || "Server error" });
   }
 }
