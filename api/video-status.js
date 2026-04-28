@@ -272,7 +272,8 @@ export default async function handler(req, res) {
     console.error("[video-status] Kling video poll:", { jobId, klingStatus });
 
     if (klingStatus === "FAILED") {
-      const errMsg = klingTask?.error?.message || klingTask?.detail || "Kling video failed";
+      const errMsg = klingTask?.error?.message || klingTask?.error?.raw_message || klingTask?.detail || JSON.stringify(klingTask?.error) || "Kling video failed";
+      console.error("[video-status] Kling FAILED detail:", JSON.stringify(klingTask?.error || klingTask));
       await admin.from("video_jobs").update({ status: "FAILED", provider_status: "FAILED", error: errMsg, updated_at: new Date().toISOString() }).eq("id", jobId);
       await refundJadesSafe({ admin, job, reason: "i2v_generation_failed" });
       return json(res, 200, { ok: true, status: "FAILED", error: errMsg, job });
