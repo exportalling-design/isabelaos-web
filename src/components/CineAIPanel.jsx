@@ -788,7 +788,7 @@ Aspect ratio: ${ratio}`;
                     setUploadingImages(true);
                     const file = pendingPhotoFile;
                     const ext = file.name.split(".").pop();
-                    const path = \`cineai/faces/\${Date.now()}.\${ext}\`;
+                    const path = `cineai/faces/${Date.now()}.${ext}`;
                     const { error: upErr } = await supabase.storage.from("user-uploads").upload(path, file, { upsert: true });
                     if (!upErr) {
                       const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
@@ -1148,7 +1148,7 @@ Aspect ratio: ${ratio}`;
                   setUploadingImages(true);
                   for (const file of toProcess) {
                     const ext = file.name.split(".").pop();
-                    const path = \`cineai/faces/\${Date.now()}_\${Math.random().toString(36).slice(2)}.\${ext}\`;
+                    const path = `cineai/faces/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
                     const { error: upErr } = await supabase.storage.from("user-uploads").upload(path, file, { upsert: true });
                     if (!upErr) {
                       const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
