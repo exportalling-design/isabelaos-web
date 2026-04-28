@@ -188,6 +188,7 @@ export default async function handler(req, res) {
       klingParams,
       aspectRatio:   aspect_ratio,
       enableAudio:   enableNativeAudio,
+      userId,
     });
 
     const providerRequestId = klingTask?.task_id || null;
