@@ -25,7 +25,7 @@ const BYTEPLUS_URL =
   "https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks";
 
 // Cambia el modelo por el correcto si BytePlus usa otro nombre
-const BYTEPLUS_MODEL = "seedance-2-0";
+const BYTEPLUS_MODEL = "dreamina-seedance-2-0-260128";
 
 // ─────────────────────────────────────────────────────────────
 // COSTOS
