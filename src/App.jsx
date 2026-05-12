@@ -1,4 +1,3 @@
-
 // src/App.jsx — IsabelaOS Studio v7
 // Arquitectura: Landing + módulos como overlay sin cambiar de página
 import { useEffect, useState, useCallback } from "react";
@@ -15,6 +14,7 @@ import CreatorPanel         from "./components/CreatorPanel";
 import ComercialPanel       from "./components/ComercialPanel";
 import ProductPhotoshoot    from "./components/ProductPhotoshoot";
 import CineAIPanel          from "./components/CineAIPanel";
+import TemplatesPanel       from "./components/TemplatesPanel";
 import Terms                from "./components/Terms";
 import Refund               from "./components/Refund";
 import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
@@ -145,15 +145,21 @@ export default function App() {
   const renderModule = () => {
     const us = { jades, loading: false, plan: null };
     switch (activeModule) {
-      case "generator":  return <CreatorPanel isDemo={false} />;
-      case "img2video":  return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
-      case "avatars":    return <AvatarStudioPanel userStatus={us} />;
-      case "library":    return <LibraryView />;
-      case "montaje":    return <MontajeIAPanel userStatus={us} />;
-      case "comercial":  return <ComercialPanel userStatus={us} />;
-      case "photoshoot": return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
-      case "cineai":     return <CineAIPanel />;
-      default:           return null;
+      case "generator":   return <CreatorPanel isDemo={false} />;
+      case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
+      case "avatars":     return <AvatarStudioPanel userStatus={us} />;
+      case "library":     return <LibraryView />;
+      case "montaje":     return <MontajeIAPanel userStatus={us} />;
+      case "comercial":   return <ComercialPanel userStatus={us} />;
+      case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
+      case "cineai":      return <CineAIPanel />;
+      case "templates":   return (
+        <TemplatesPanel
+          userJades={jades}
+          onJadesUpdate={(newJades) => setJades(newJades)}
+        />
+      );
+      default:            return null;
     }
   };
 
