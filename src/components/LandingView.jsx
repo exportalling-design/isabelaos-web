@@ -10,6 +10,7 @@
 //   ✅ Videos Comercial IA (Chef, Producto) en galería
 //   ✅ Todos los módulos en panel del usuario logueado
 //   ✅ Logo con video opcional
+//   ✅ Plantillas Épicas agregado
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
 
@@ -124,7 +125,7 @@ function ModOverlay({ title, onClose, children }) {
             background: "none", border: "none", color: "#ff5a00",
             fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600,
             cursor: "pointer",
-          }}>← {title === "library" ? "Biblioteca" : title}</button>
+          }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title}</button>
           <button onClick={onClose} style={{
             background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8, color: "rgba(240,236,228,0.5)", fontSize: 16,
@@ -161,6 +162,9 @@ export default function LandingView({
     { key: "cineai",     icon: "🎬", label: "CineAI",           color: "#ff5a00", badge: "🔥 NUEVO",
       desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face",
       vid: "/gallery/cineai-fight.mp4" },
+    { key: "templates",  icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO",
+      desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face",
+      vid: "/gallery/divine-light.mp4" },
     { key: "photoshoot", icon: "📸", label: "Photoshoot",        color: "#f59e0b", badge: "📸",
       desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds",
       vid: "/gallery/comercial-product.mp4" },
@@ -243,7 +247,7 @@ export default function LandingView({
     }
   `;
 
-  const V = { // CSS vars
+  const V = {
     fire: "#ff5a00", gold: "#ffb300",
     bg: "#080a0e", bg2: "#0d1017",
     border: "rgba(255,90,0,0.12)", border2: "rgba(255,255,255,0.07)",
@@ -254,7 +258,6 @@ export default function LandingView({
   };
 
   const s = {
-    // Helpers
     btn: (hot) => ({
       width: "100%", borderRadius: 11, fontSize: 13, fontWeight: 700,
       padding: "11px", cursor: "pointer", transition: "all .2s", marginTop: 14,
@@ -342,10 +345,8 @@ export default function LandingView({
 
       {/* HERO */}
       <section id="hero" style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", padding: "132px 32px 60px", overflow: "hidden" }}>
-        {/* BG */}
         <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
-          <AV src="/gallery/hero-bg.mp4" className="" />
-          <style>{`.lo-hv{width:100%;height:100%;object-fit:cover;opacity:.6;filter:saturate(1.2)}`}</style>
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,rgba(8,10,14,.88) 0%,rgba(8,10,14,.35) 55%,rgba(8,10,14,.92) 100%)" }} />
           <video src="/gallery/hero-bg.mp4" autoPlay muted loop playsInline
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.6, filter: "saturate(1.2) contrast(1.05)" }} />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,rgba(8,10,14,.88) 0%,rgba(8,10,14,.35) 55%,rgba(8,10,14,.92) 100%)" }} />
@@ -354,100 +355,92 @@ export default function LandingView({
         </div>
 
         <div className="lo-hero-grid" style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
-          {/* LEFT — video fullheight + copy encima */}
           <div className="lo-hero-left" style={{ position: "relative", overflow: "hidden" }}>
-            {/* Video de fondo izquierdo */}
             <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline
               style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-            {/* Gradientes sobre el video */}
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(8,10,14,.2) 0%, rgba(8,10,14,.85) 100%)" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(8,10,14,.5) 0%, transparent 30%, rgba(8,10,14,.6) 100%)" }} />
-            {/* Copy encima del video */}
             <div className="lo-hero-copy" style={{ position: "relative", zIndex: 2, padding: "60px 48px", display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 18 }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
-              {isEs ? "La plataforma visual IA de LATAM" : "LATAM's AI visual production platform"}
-            </div>
-            <h1 className="lo-hero-h1" style={{ fontFamily: V.ffD, fontSize: "clamp(52px,8vw,104px)", lineHeight: 0.92, letterSpacing: 2, color: "#fff" }}>
-              <span style={{ display: "block" }}>{isEs ? "CONVIÉRTETE EN EL" : "BECOME THE"}</span>
-              <span className="lo-shimmer" style={{ display: "block" }}>{isEs ? "PROTAGONISTA" : "PROTAGONIST"}</span>
-              <span style={{ display: "block" }}>{isEs ? "DE TU PELÍCULA" : "OF YOUR MOVIE"}</span>
-            </h1>
-            <p style={{ marginTop: 16, fontSize: 17, lineHeight: 1.7, color: "rgba(240,236,228,.75)", maxWidth: 500 }}>
-              {isEs ? "Genera escenas de Hollywood, videos musicales, comerciales y contenido viral con IA — con tu cara, tu historia, tu marca." : "Generate Hollywood scenes, music videos, commercials and viral content with AI — your face, your story, your brand."}
-            </p>
-            <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 28 }}>
-              <button onClick={user ? () => go("cineai") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
-                {isEs ? "🎬 Comenzar — Registro gratuito" : "🎬 Start — Free sign up"}
-              </button>
-              <button onClick={() => scrollTo("galeria")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, color: "#fff", fontSize: 15, padding: "16px 26px", cursor: "pointer", fontFamily: V.ffB }}>
-                {isEs ? "Ver ejemplos reales ↓" : "See real examples ↓"}
-              </button>
-            </div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 18 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
+                {isEs ? "La plataforma visual IA de LATAM" : "LATAM's AI visual production platform"}
+              </div>
+              <h1 className="lo-hero-h1" style={{ fontFamily: V.ffD, fontSize: "clamp(52px,8vw,104px)", lineHeight: 0.92, letterSpacing: 2, color: "#fff" }}>
+                <span style={{ display: "block" }}>{isEs ? "CONVIÉRTETE EN EL" : "BECOME THE"}</span>
+                <span className="lo-shimmer" style={{ display: "block" }}>{isEs ? "PROTAGONISTA" : "PROTAGONIST"}</span>
+                <span style={{ display: "block" }}>{isEs ? "DE TU PELÍCULA" : "OF YOUR MOVIE"}</span>
+              </h1>
+              <p style={{ marginTop: 16, fontSize: 17, lineHeight: 1.7, color: "rgba(240,236,228,.75)", maxWidth: 500 }}>
+                {isEs ? "Genera escenas de Hollywood, videos musicales, comerciales y contenido viral con IA — con tu cara, tu historia, tu marca." : "Generate Hollywood scenes, music videos, commercials and viral content with AI — your face, your story, your brand."}
+              </p>
+              <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 28 }}>
+                <button onClick={user ? () => go("cineai") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
+                  {isEs ? "🎬 Comenzar — Registro gratuito" : "🎬 Start — Free sign up"}
+                </button>
+                <button onClick={() => scrollTo("galeria")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, color: "#fff", fontSize: 15, padding: "16px 26px", cursor: "pointer", fontFamily: V.ffB }}>
+                  {isEs ? "Ver ejemplos reales ↓" : "See real examples ↓"}
+                </button>
+              </div>
               <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades al registrarte</b> · {isEs ? "Para generar imágenes · Sin tarjeta" : "To generate images · No credit card"}</p>
             </div>
           </div>
 
-          {/* RIGHT — Demo box flotando sobre fondo oscuro */}
           <div className="lo-hero-right" style={{ background: "rgba(6,7,12,.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 32px", position: "relative" }}>
-            {/* Glow de fondo */}
             <div style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", filter: "blur(80px)", background: "rgba(255,90,0,.08)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
             <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
-            {user ? (
-              /* Panel usuario logueado */
-              <div style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.2)", borderRadius: 20, padding: 24, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${V.fire},${V.gold})`, display: "grid", placeItems: "center", fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#000", flexShrink: 0 }}>{(user?.email?.[0] || "U").toUpperCase()}</div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#fff", fontWeight: 600, wordBreak: "break-all" }}>{user?.email}</div>
-                    <div style={{ fontSize: 10, color: V.fire, letterSpacing: 1 }}>{isEs ? "Creador activo" : "Active creator"}</div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,179,0,.06)", border: "1px solid rgba(255,179,0,.15)", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
-                  <div>
-                    <div style={{ fontFamily: V.ffD, fontSize: 28, color: V.gold, letterSpacing: 2, lineHeight: 1 }}>{jades}</div>
-                    <div style={{ fontSize: 11, color: V.muted }}>Jades</div>
-                  </div>
-                  <button onClick={onBuyJades} style={{ marginLeft: "auto", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 8, color: "#000", fontFamily: V.ffU, fontSize: 12, fontWeight: 700, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>+ {isEs ? "Comprar" : "Buy"}</button>
-                </div>
-                <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: V.muted, marginBottom: 8 }}>{isEs ? "Registrarme y crear →" : "Sign up and create →"}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
-                  {MODS.map(m => (
-                    <button key={m.key} onClick={() => go(m.key)} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,.07)"; e.currentTarget.style.color = "rgba(240,236,228,.6)"; }}>
-                      <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={onSignOut} style={{ width: "100%", background: "none", border: "1px solid rgba(255,255,255,.08)", borderRadius: 8, color: V.muted, fontFamily: V.ffU, fontSize: 12, padding: 9, cursor: "pointer" }}>{isEs ? "Cerrar sesión" : "Sign out"}</button>
-              </div>
-            ) : (
-              /* Demo box visitante */
-              <div className="lo-demo-box" style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 20, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
-                <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
-                <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "Crea con IA — 10 Jades al registrarte" : "Create with AI — 10 Jades on signup"}</div>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,.1)", border: "1px solid rgba(255,179,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.gold, fontWeight: 600, marginBottom: 14 }}>
-                  🎁 {isEs ? "10 Jades al registrarte — genera imágenes" : "10 Jades on signup — generate images"}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
-                  {MODS.slice(0, 6).map(m => (
-                    <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: "rgba(240,236,228,.5)", transition: "all .15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.08)"; e.currentTarget.style.color = V.gold; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.color = "rgba(240,236,228,.5)"; }}>
-                      {m.icon} {m.label}
+              {user ? (
+                <div style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.2)", borderRadius: 20, padding: 24, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${V.fire},${V.gold})`, display: "grid", placeItems: "center", fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#000", flexShrink: 0 }}>{(user?.email?.[0] || "U").toUpperCase()}</div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#fff", fontWeight: 600, wordBreak: "break-all" }}>{user?.email}</div>
+                      <div style={{ fontSize: 10, color: V.fire, letterSpacing: 1 }}>{isEs ? "Creador activo" : "Active creator"}</div>
                     </div>
-                  ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,179,0,.06)", border: "1px solid rgba(255,179,0,.15)", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontFamily: V.ffD, fontSize: 28, color: V.gold, letterSpacing: 2, lineHeight: 1 }}>{jades}</div>
+                      <div style={{ fontSize: 11, color: V.muted }}>Jades</div>
+                    </div>
+                    <button onClick={onBuyJades} style={{ marginLeft: "auto", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 8, color: "#000", fontFamily: V.ffU, fontSize: 12, fontWeight: 700, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>+ {isEs ? "Comprar" : "Buy"}</button>
+                  </div>
+                  <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: V.muted, marginBottom: 8 }}>{isEs ? "Mis módulos" : "My modules"}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
+                    {MODS.map(m => (
+                      <button key={m.key} onClick={() => go(m.key)} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,.07)"; e.currentTarget.style.color = "rgba(240,236,228,.6)"; }}>
+                        <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={onSignOut} style={{ width: "100%", background: "none", border: "1px solid rgba(255,255,255,.08)", borderRadius: 8, color: V.muted, fontFamily: V.ffU, fontSize: 12, padding: 9, cursor: "pointer" }}>{isEs ? "Cerrar sesión" : "Sign out"}</button>
                 </div>
-                <textarea value={demoText} onChange={e => setDemoText(e.target.value)}
-                  placeholder={isEs ? "Describe lo que quieres crear... ej: Yo como protagonista en una escena épica de noche" : "Describe what you want to create..."}
-                  style={{ width: "100%", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 11, color: "#fff", fontFamily: V.ffB, fontSize: 13, padding: "12px 14px", resize: "none", outline: "none", height: 84, marginBottom: 11 }} />
-                <button onClick={onStartDemo} style={{ width: "100%", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 11, color: "#000", fontFamily: V.ffU, fontSize: 15, fontWeight: 800, padding: 14, cursor: "pointer", boxShadow: "0 0 30px rgba(255,90,0,.3)" }}>
-                  {isEs ? "Registrarme y crear →" : "Sign up and create →"}
-                </button>
-                <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "10 Jades al registrarte · Sin tarjeta" : "10 Jades on signup · No credit card"}</div>
-              </div>
-            )}
+              ) : (
+                <div className="lo-demo-box" style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 20, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
+                  <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
+                  <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "Crea con IA — 10 Jades al registrarte" : "Create with AI — 10 Jades on signup"}</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,.1)", border: "1px solid rgba(255,179,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.gold, fontWeight: 600, marginBottom: 14 }}>
+                    🎁 {isEs ? "10 Jades al registrarte — genera imágenes" : "10 Jades on signup — generate images"}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
+                    {MODS.slice(0, 6).map(m => (
+                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: "rgba(240,236,228,.5)", transition: "all .15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.08)"; e.currentTarget.style.color = V.gold; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.color = "rgba(240,236,228,.5)"; }}>
+                        {m.icon} {m.label}
+                      </div>
+                    ))}
+                  </div>
+                  <textarea value={demoText} onChange={e => setDemoText(e.target.value)}
+                    placeholder={isEs ? "Describe lo que quieres crear... ej: Yo como protagonista en una escena épica de noche" : "Describe what you want to create..."}
+                    style={{ width: "100%", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 11, color: "#fff", fontFamily: V.ffB, fontSize: 13, padding: "12px 14px", resize: "none", outline: "none", height: 84, marginBottom: 11 }} />
+                  <button onClick={onStartDemo} style={{ width: "100%", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 11, color: "#000", fontFamily: V.ffU, fontSize: 15, fontWeight: 800, padding: 14, cursor: "pointer", boxShadow: "0 0 30px rgba(255,90,0,.3)" }}>
+                    {isEs ? "Registrarme y crear →" : "Sign up and create →"}
+                  </button>
+                  <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "10 Jades al registrarte · Sin tarjeta" : "10 Jades on signup · No credit card"}</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -458,7 +451,7 @@ export default function LandingView({
         {[
           { n: <Ctr end={4127} suffix="+" />, l: isEs ? "Cuentas alcanzadas" : "Accounts reached" },
           { n: "< 3s",  l: isEs ? "Tiempo de generación" : "Generation time" },
-          { n: "8+",    l: isEs ? "Módulos de producción" : "Production modules" },
+          { n: "9+",    l: isEs ? "Módulos de producción" : "Production modules" },
           { n: "100%",  l: isEs ? "Hecho en Guatemala 🇬🇹" : "Made in Guatemala 🇬🇹" },
         ].map((item, i) => (
           <div key={i} style={{ padding: "32px 24px", textAlign: "center", borderRight: i < 3 ? `1px solid ${V.border2}` : "none" }}>
@@ -468,7 +461,38 @@ export default function LandingView({
         ))}
       </div>
 
-      {/* VIDEO MUSICAL — Massiel Carrillo */}
+      {/* PLANTILLAS ÉPICAS — Banner destacado */}
+      <section style={{ padding: "60px 32px 0", maxWidth: 1280, margin: "0 auto" }}>
+        <div onClick={() => user ? go("templates") : onOpenAuth()} style={{
+          background: "linear-gradient(135deg,rgba(200,169,110,0.08),rgba(200,169,110,0.03))",
+          border: "1px solid rgba(200,169,110,0.25)", borderRadius: 20,
+          padding: "32px 36px", cursor: "pointer", transition: "all .3s",
+          display: "flex", alignItems: "center", gap: 32, overflow: "hidden", position: "relative",
+        }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(200,169,110,0.5)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(200,169,110,0.25)"; e.currentTarget.style.transform = "none"; }}>
+          <div style={{ position: "absolute", right: -40, top: -40, width: 200, height: 200, borderRadius: "50%", background: "rgba(200,169,110,0.05)", filter: "blur(40px)", pointerEvents: "none" }} />
+          <div style={{ fontSize: 48, flexShrink: 0 }}>⚡</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{ fontFamily: V.ffU, fontSize: 20, fontWeight: 800, color: "#fff" }}>
+                {isEs ? "Plantillas Épicas" : "Epic Templates"}
+              </div>
+              <div style={{ background: "#C8A96E", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1, borderRadius: 5, padding: "3px 8px", textTransform: "uppercase" }}>NUEVO</div>
+            </div>
+            <div style={{ fontSize: 14, color: "rgba(240,236,228,0.6)", lineHeight: 1.6 }}>
+              {isEs
+                ? "Ponté en escenas cinematográficas épicas ya generadas. Sube tu foto → la IA te pone en la escena. Confrontación Divina · La Última Pelea · Victoria's Secret"
+                : "Place yourself in pre-built epic cinematic scenes. Upload your photo → AI puts you in the scene. Divine Confrontation · The Last Fight · Victoria's Secret"}
+            </div>
+          </div>
+          <div style={{ background: "#C8A96E", color: "#000", borderRadius: 12, padding: "12px 24px", fontFamily: V.ffU, fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {isEs ? "Ver plantillas →" : "See templates →"}
+          </div>
+        </div>
+      </section>
+
+      {/* VIDEO MUSICAL */}
       <section style={{ padding: "80px 32px", maxWidth: 1280, margin: "0 auto" }}>
         <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 8, display: "block" }}>{isEs ? "Hecho con IsabelaOS" : "Made with IsabelaOS"}</span>
         <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 8 }}>{isEs ? "CLIPS MUSICALES 100% CON IA" : "100% AI MUSIC CLIPS"}</h2>
@@ -476,7 +500,6 @@ export default function LandingView({
           {isEs ? "Escenas cinematográficas, lip sync y efectos de producción profesional generados completamente con Seedance 2.0 — sin cámaras, sin actores, sin estudio." : "Cinematic scenes, lip sync and professional production effects generated entirely with Seedance 2.0 — no cameras, no actors, no studio."}
         </p>
         <div className="lo-musical-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "center" }}>
-          {/* Video */}
           <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,90,0,.2)", boxShadow: "0 0 60px rgba(255,90,0,.1),0 40px 80px rgba(0,0,0,.5)", aspectRatio: "9/16", maxHeight: 600 }}>
             <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline controls
               style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -484,7 +507,6 @@ export default function LandingView({
               🎬 100% IA
             </div>
           </div>
-          {/* Info */}
           <div>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 20 }}>
               ⭐ {isEs ? "Caso de éxito real" : "Real success story"}
@@ -510,7 +532,7 @@ export default function LandingView({
                 </div>
               </div>
             ))}
-            <button onClick={isEs ? onStartDemo : onStartDemo} style={{ marginTop: 8, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 14, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, padding: "14px 32px", cursor: "pointer", boxShadow: "0 0 40px rgba(255,90,0,.3)" }}>
+            <button onClick={onStartDemo} style={{ marginTop: 8, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 14, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, padding: "14px 32px", cursor: "pointer", boxShadow: "0 0 40px rgba(255,90,0,.3)" }}>
               {isEs ? "🎬 Crear con Seedance 2.0 →" : "🎬 Create with Seedance 2.0 →"}
             </button>
           </div>
@@ -524,7 +546,7 @@ export default function LandingView({
         <p style={{ fontSize: 16, color: V.muted, lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>{isEs ? "Sin actores. Sin cámaras. Sin estudio. Solo tu visión y nuestra IA." : "No actors. No cameras. No studio. Just your vision and our AI."}</p>
         <div className="lo-gal-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
           {GAL.map((v, i) => (
-            <div key={i} onClick={() => user ? go("cineai") : onStartDemo()} style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${V.border2}`, cursor: "pointer", aspectRatio: v.wide ? "16/9" : "9/16", gridColumn: v.wide ? "span 2" : "auto", className: v.wide ? "lo-gal-wide" : "", transition: "transform .3s,border-color .3s" }}
+            <div key={i} onClick={() => user ? go("cineai") : onStartDemo()} style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${V.border2}`, cursor: "pointer", aspectRatio: v.wide ? "16/9" : "9/16", gridColumn: v.wide ? "span 2" : "auto", transition: "transform .3s,border-color .3s" }}
               onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.02)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.4)"; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = V.border2; }}>
               <video src={v.src} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
