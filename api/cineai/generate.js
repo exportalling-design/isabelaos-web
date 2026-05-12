@@ -1,102 +1,56 @@
 // api/generate.js
 // ─────────────────────────────────────────────────────────────
-// CineAI Hybrid Routing System
+// ROUTING DEFINITIVO:
+//   Con foto de persona  → PiAPI   (Seedance 2.0 fast, acepta image_urls)
+//   Sin foto (solo IA)   → BytePlus (Seedance 2.0, texto puro o video ref)
 //
-// TEXT ONLY (T2V)
-//   → BYTEPLUS SEEDANCE
-//
-// IMAGE / VIDEO / AUDIO / CONTINUATION
-//   → PIAPI SEEDANCE
+// Regla simple: imageUrl presente = PiAPI | sin imageUrl = BytePlus
 // ─────────────────────────────────────────────────────────────
-
-import { supabaseAdmin } from "../../src/lib/supabaseAdmin.js";
+import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-// ─────────────────────────────────────────────────────────────
-// PROVIDERS
-// ─────────────────────────────────────────────────────────────
-
-const PIAPI_URL = "https://api.piapi.ai/api/v1/task";
+// PiAPI — con foto de persona
+const PIAPI_URL   = "https://api.piapi.ai/api/v1/task";
 const PIAPI_MODEL = "seedance";
-const PIAPI_TASK = "seedance-2-preview";
+const PIAPI_TASK  = "seedance-2-preview";
 
-// Cambia esto por el endpoint oficial que uses en BytePlus
-const BYTEPLUS_URL =
-  "https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks";
+// BytePlus — sin foto, solo IA genera todo
+const BYTEPLUS_BASE   = "https://ark.ap-southeast.bytepluses.com/api/v3";
+const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
+const BYTEPLUS_MODEL  = "dreamina-seedance-2-0-260128";
 
-// Cambia el modelo por el correcto si BytePlus usa otro nombre
-const BYTEPLUS_MODEL = "dreamina-seedance-2-0-260128";
-
-// ─────────────────────────────────────────────────────────────
-// COSTOS
-// ─────────────────────────────────────────────────────────────
-
-const JADE_COSTS = {
-  5: 40,
-  10: 75,
-  15: 110,
-};
-
-// ─────────────────────────────────────────────────────────────
-// BLOQUEO DE PERSONAJES / CELEBRIDADES
-// ─────────────────────────────────────────────────────────────
+const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
 
 const BLOCKED_NAMES = [
-  "tom cruise",
-  "brad pitt",
-  "angelina jolie",
-  "scarlett johansson",
-  "will smith",
-  "dwayne johnson",
-  "the rock",
-  "ryan reynolds",
-  "zendaya",
-  "bad bunny",
-  "taylor swift",
-  "beyonce",
-  "rihanna",
-  "elon musk",
-  "donald trump",
-  "messi",
-  "cristiano ronaldo",
-  "spiderman",
-  "batman",
-  "superman",
-  "iron man",
-  "thor",
-  "hulk",
-  "harry potter",
-  "disney",
-  "marvel",
-  "pixar",
-  "dc comics",
+  "tom cruise","brad pitt","angelina jolie","scarlett johansson","will smith",
+  "dwayne johnson","the rock","ryan reynolds","chris evans","chris hemsworth",
+  "robert downey","zendaya","bad bunny","benito martinez","j balvin","ozuna",
+  "daddy yankee","maluma","shakira","jennifer lopez","j.lo","taylor swift",
+  "beyoncé","beyonce","rihanna","drake","nicki minaj","cardi b","ariana grande",
+  "billie eilish","harry styles","ed sheeran","justin bieber","selena gomez",
+  "elon musk","jeff bezos","mark zuckerberg","donald trump","joe biden","obama",
+  "kim kardashian","kanye west","ye","messi","cristiano ronaldo","ronaldo",
+  "neymar","lebron james","michael jordan","kobe bryant","spider-man","spiderman",
+  "batman","superman","iron man","ironman","thor","hulk","captain america",
+  "black widow","darth vader","grogu","baby yoda","yoda","luke skywalker",
+  "han solo","shrek","sonic","pikachu","mario","mickey mouse","spongebob",
+  "esponja","patrick star","bugs bunny","harry potter","hermione","voldemort",
+  "gandalf","frodo","james bond","jack sparrow","indiana jones","optimus prime",
+  "megatron","godzilla","king kong","bruce lee","bruce willis","jackie chan",
+  "disney","marvel","pixar","warner","dc comics","netflix",
 ];
 
 function detectBlockedContent(text) {
   const lower = (text || "").toLowerCase();
-
   for (const name of BLOCKED_NAMES) {
-    const regex = new RegExp(
-      `\\b${name.replace(/[-]/g, "\\-")}\\b`,
-      "i"
-    );
-
-    if (regex.test(lower)) {
-      return name;
-    }
+    if (new RegExp(`\\b${name.replace(/[-]/g,"\\-")}\\b`, "i").test(lower)) return name;
   }
-
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────
-// PIAPI
-// ─────────────────────────────────────────────────────────────
-
+// ── PiAPI — para cualquier caso CON foto de persona ───────────
 async function submitToPiAPI(payload) {
-  console.log("[PIAPI] Sending request...");
-
-  const response = await fetch(PIAPI_URL, {
+  const r = await fetch(PIAPI_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -104,521 +58,223 @@ async function submitToPiAPI(payload) {
     },
     body: JSON.stringify(payload),
   });
-
-  const data = await response.json();
-
-  console.log("[PIAPI] Response:", JSON.stringify(data));
-
-  if (!response.ok || data.code !== 200) {
-    throw new Error(
-      data?.error?.message ||
-        data?.message ||
-        `PiAPI error ${response.status}`
-    );
+  const data = await r.json();
+  if (!r.ok || data.code !== 200) {
+    console.error("[PiAPI] error:", JSON.stringify(data));
+    throw new Error(data.message || `PiAPI error ${r.status}`);
   }
-
-  const taskId = data?.data?.task_id;
-
-  if (!taskId) {
-    throw new Error("PiAPI no devolvió task_id");
-  }
-
-  return {
-    provider: "piapi",
-    taskId,
-  };
+  const taskId = data.data?.task_id;
+  if (!taskId) throw new Error("PiAPI no devolvió task_id");
+  return { taskId, provider: "piapi_seedance" };
 }
 
-// ─────────────────────────────────────────────────────────────
-// BYTEPLUS
-// ─────────────────────────────────────────────────────────────
-
-async function submitToBytePlus(payload) {
-  console.log("[BYTEPLUS] Sending request...");
-
-  const response = await fetch(BYTEPLUS_URL, {
+// ── BytePlus — para cualquier caso SIN foto (IA pura) ─────────
+async function submitToByteplus(contentArr) {
+  const r = await fetch(BYTEPLUS_CREATE, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.BYTEPLUS_API_KEY}`,
+      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ model: BYTEPLUS_MODEL, content: contentArr }),
   });
-
-  const data = await response.json();
-
-  console.log("[BYTEPLUS] Response:", JSON.stringify(data));
-
-  if (!response.ok) {
-    throw new Error(
-      data?.error?.message ||
-        data?.message ||
-        `BytePlus error ${response.status}`
-    );
-  }
-
-  const taskId =
-    data?.id ||
-    data?.task_id ||
-    data?.data?.id;
-
-  if (!taskId) {
-    throw new Error("BytePlus no devolvió task_id");
-  }
-
-  return {
-    provider: "byteplus",
-    taskId,
-  };
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error(data.error?.message || data.message || `BytePlus error ${r.status}`);
+  if (!data.id) throw new Error("BytePlus no devolvió task id");
+  return { taskId: data.id, provider: "byteplus_seedance" };
 }
 
-// ─────────────────────────────────────────────────────────────
-// MAIN HANDLER
-// ─────────────────────────────────────────────────────────────
-
 export default async function handler(req, res) {
-  // ───────────────────────────────────────────────────────────
-  // HEADERS
-  // ───────────────────────────────────────────────────────────
-
-  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-origin",  "*");
   res.setHeader("access-control-allow-methods", "POST, OPTIONS");
-  res.setHeader(
-    "access-control-allow-headers",
-    "content-type, authorization"
-  );
+  res.setHeader("access-control-allow-headers", "content-type, authorization");
+  res.setHeader("content-type",                 "application/json; charset=utf-8");
 
-  res.setHeader(
-    "content-type",
-    "application/json; charset=utf-8"
-  );
-
-  // ───────────────────────────────────────────────────────────
-
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({
-      ok: false,
-      error: "METHOD_NOT_ALLOWED",
-    });
-  }
-
-  // ───────────────────────────────────────────────────────────
-  // AUTH
-  // ───────────────────────────────────────────────────────────
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST")    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
 
   const userId = await getUserIdFromAuthHeader(req);
+  if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
-  if (!userId) {
-    return res.status(401).json({
-      ok: false,
-      error: "UNAUTHORIZED",
-    });
-  }
-
-  // ───────────────────────────────────────────────────────────
-  // BODY
-  // ───────────────────────────────────────────────────────────
-
-  const body =
-    typeof req.body === "string"
-      ? JSON.parse(req.body)
-      : req.body || {};
-
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const {
     prompt,
-    imageUrl,
-    refImages,
-    refVideoUrl,
-    audioUrl,
-    animateExact,
-    isContinuation,
-    duration = 10,
+    imageUrl,        // primera imagen / último frame en continuación
+    refImages,       // array de hasta 6 URLs adicionales
+    refVideoUrl,     // video de referencia / clip anterior en continuación
+    audioUrl,        // audio para lip sync
+    animateExact,    // animar foto exacta respetando fondo
+    isContinuation,  // continuación de clip anterior
+    duration    = 10,
     aspectRatio = "9:16",
-    sceneMode = "tiktok",
+    sceneMode   = "tiktok",
   } = body;
 
-  // ───────────────────────────────────────────────────────────
-  // VALIDACIONES
-  // ───────────────────────────────────────────────────────────
-
-  if (!prompt || String(prompt).trim().length < 5) {
-    return res.status(400).json({
-      ok: false,
-      error: "PROMPT_TOO_SHORT",
-    });
-  }
+  if (!prompt || String(prompt).trim().length < 5)
+    return res.status(400).json({ ok: false, error: "El prompt es muy corto" });
 
   const blocked = detectBlockedContent(prompt);
-
-  if (blocked) {
-    return res.status(400).json({
-      ok: false,
-      error: `"${blocked}" está bloqueado.`,
-      blocked: true,
-    });
-  }
-
-  // ───────────────────────────────────────────────────────────
-  // COSTO
-  // ───────────────────────────────────────────────────────────
+  if (blocked)
+    return res.status(400).json({ ok: false, error: `"${blocked}" está bloqueado.`, blocked: true });
 
   const jadeCost = JADE_COSTS[duration] || 75;
+  const ref = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-  const ref =
-    globalThis.crypto?.randomUUID?.() ||
-    `${Date.now()}-${Math.random()}`;
-
-  // ───────────────────────────────────────────────────────────
-  // COBRAR JADES
-  // ───────────────────────────────────────────────────────────
-
-  const { error: spendErr } =
-    await supabaseAdmin.rpc("spend_jades", {
-      p_user_id: userId,
-      p_amount: jadeCost,
-      p_reason: "cineai_generate",
-      p_ref: ref,
-    });
-
-  if (spendErr) {
-    if (
-      (spendErr.message || "").includes(
-        "INSUFFICIENT_JADES"
-      )
-    ) {
-      return res.status(402).json({
-        ok: false,
-        error: "INSUFFICIENT_JADES",
-        detail: `Necesitas ${jadeCost} Jades.`,
-      });
-    }
-
-    return res.status(400).json({
-      ok: false,
-      error: spendErr.message,
-    });
-  }
-
-  // ───────────────────────────────────────────────────────────
-  // IMÁGENES
-  // ───────────────────────────────────────────────────────────
-
-  const allImages = [];
-
-  if (imageUrl) {
-    allImages.push(imageUrl);
-  }
-
-  if (Array.isArray(refImages)) {
-    for (const img of refImages) {
-      if (img && !allImages.includes(img)) {
-        allImages.push(img);
-      }
-    }
-  }
-
-  const imageList = allImages.slice(0, 6);
-
-  // ───────────────────────────────────────────────────────────
-  // DETECTAR PROVIDER
-  // ───────────────────────────────────────────────────────────
-
-  const isPureText =
-    !imageUrl &&
-    !refVideoUrl &&
-    !audioUrl &&
-    imageList.length === 0;
-
-  const provider = isPureText
-    ? "byteplus"
-    : "piapi";
-
-  let mode = "t2v";
-
-  console.log("[ROUTING]", {
-    provider,
-    isPureText,
+  // ── Descontar Jades ──────────────────────────────────────────
+  const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+    p_user_id: userId, p_amount: jadeCost,
+    p_reason: "cineai_generate", p_ref: ref,
   });
+  if (spendErr) {
+    if ((spendErr.message || "").includes("INSUFFICIENT_JADES"))
+      return res.status(402).json({ ok: false, error: "INSUFFICIENT_JADES", detail: `Necesitas ${jadeCost} Jades.` });
+    return res.status(400).json({ ok: false, error: spendErr.message });
+  }
 
-  // ───────────────────────────────────────────────────────────
-  // GENERACIÓN
-  // ───────────────────────────────────────────────────────────
+  // ── ROUTING: ¿hay foto de persona? ───────────────────────────
+  const hasPerson = !!imageUrl;  // cualquier foto = PiAPI
+  const hasRefVideo = !!refVideoUrl;
+  const hasAudio    = !!audioUrl;
 
-  let taskId;
+  // Construir lista completa de imágenes (imageUrl + refImages adicionales)
+  const allImages = [];
+  if (imageUrl) allImages.push(imageUrl);
+  if (Array.isArray(refImages)) {
+    for (const u of refImages) {
+      if (u && !allImages.includes(u)) allImages.push(u);
+    }
+  }
+  const imageList = allImages.slice(0, 6); // máx 6 según PiAPI docs
+
   let finalPrompt = String(prompt).trim();
+  let mode        = "t2v";
+  let taskId      = null;
+  let provider    = null;
 
   try {
-    // ========================================================
-    // BYTEPLUS — SOLO TEXTO
-    // ========================================================
+    if (hasPerson) {
+      // ════════════════════════════════════════════════════════
+      // CON FOTO → PIAPI
+      // ════════════════════════════════════════════════════════
+      const inputExtra = { image_urls: imageList };
 
-    if (provider === "byteplus") {
-      const bytePayload = {
-        model: BYTEPLUS_MODEL,
-
-        content: [
-          {
-            type: "text",
-            text: finalPrompt,
-          },
-        ],
-
-        duration,
-        aspect_ratio: aspectRatio,
-      };
-
-      const result =
-        await submitToBytePlus(bytePayload);
-
-      taskId = result.taskId;
-    }
-
-    // ========================================================
-    // PIAPI — MULTIMODAL
-    // ========================================================
-
-    else {
-      const inputExtra = {};
-
-      // ───────────────────────────────────────────────────────
-      // CONTINUATION
-      // ───────────────────────────────────────────────────────
-
-      if (
-        isContinuation &&
-        imageList.length > 0 &&
-        refVideoUrl
-      ) {
+      if (isContinuation && hasRefVideo) {
         mode = "continuation";
-
-        inputExtra.image_urls = imageList;
         inputExtra.video_urls = [refVideoUrl];
+        finalPrompt = `Continue this exact scene seamlessly from @Image1. Use @Video1 as full reference to maintain the same atmosphere, lighting, camera movement, color grading and visual style. Must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
 
-        finalPrompt =
-          `Continue this exact scene seamlessly from @Image1. ` +
-          `Use @Video1 as full reference. ` +
-          finalPrompt;
-      }
+      } else if (isContinuation) {
+        mode = "continuation_frame";
+        finalPrompt = `Continue this exact scene seamlessly from @Image1. Maintain the same atmosphere, lighting and visual style. ${finalPrompt}`;
 
-      // ───────────────────────────────────────────────────────
-      // ANIMATE EXACT
-      // ───────────────────────────────────────────────────────
-
-      else if (
-        animateExact &&
-        imageList.length > 0
-      ) {
+      } else if (animateExact) {
         mode = "animate";
+        finalPrompt = `@Image1 Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters exactly as they appear. Only add natural movement to existing subjects. ${finalPrompt}`;
 
-        inputExtra.image_urls = imageList;
-
-        finalPrompt =
-          `@Image1 Animate this exact photo naturally. ` +
-          `Preserve background and composition. ` +
-          finalPrompt;
-      }
-
-      // ───────────────────────────────────────────────────────
-      // LIPSYNC
-      // ───────────────────────────────────────────────────────
-
-      else if (
-        audioUrl &&
-        imageList.length > 0
-      ) {
+      } else if (hasAudio) {
         mode = "lipsync";
-
-        inputExtra.image_urls = imageList;
         inputExtra.audio_urls = [audioUrl];
+        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
+        finalPrompt = `${refs} Lip sync the person to the audio in @Audio1. Mouth movements perfectly synced to the music, expressive performance. ${finalPrompt}`;
 
-        finalPrompt =
-          `@Image1 Lip sync perfectly to @Audio1. ` +
-          finalPrompt;
-      }
-
-      // ───────────────────────────────────────────────────────
-      // VIDEO REFERENCE + FACE
-      // ───────────────────────────────────────────────────────
-
-      else if (
-        refVideoUrl &&
-        imageList.length > 0
-      ) {
+      } else if (hasRefVideo) {
         mode = "r2v+face";
-
-        inputExtra.image_urls = imageList;
         inputExtra.video_urls = [refVideoUrl];
+        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(", ");
+        finalPrompt = `Use the person from ${refs} as the subject. @Video1 Copy ONLY the body movement and choreography. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
 
-        finalPrompt =
-          `Use @Image1 as the main character. ` +
-          `Copy ONLY movement from @Video1. ` +
-          finalPrompt;
-      }
-
-      // ───────────────────────────────────────────────────────
-      // IMAGE TO VIDEO
-      // ───────────────────────────────────────────────────────
-
-      else if (imageList.length > 0) {
+      } else {
+        // Foto sola → imagen a video con cara del usuario
         mode = "i2v";
-
-        inputExtra.image_urls = imageList;
-
-        finalPrompt =
-          `@Image1 ${finalPrompt}`;
+        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
+        finalPrompt = `${refs} ${finalPrompt}`;
       }
 
-      // ───────────────────────────────────────────────────────
-      // PIAPI PAYLOAD
-      // ───────────────────────────────────────────────────────
-
-      const piPayload = {
-        model: PIAPI_MODEL,
-
+      const result = await submitToPiAPI({
+        model:     PIAPI_MODEL,
         task_type: PIAPI_TASK,
-
         input: {
-          prompt: finalPrompt,
+          prompt:       finalPrompt,
           duration,
           aspect_ratio: aspectRatio,
           ...inputExtra,
         },
-      };
+      });
+      taskId   = result.taskId;
+      provider = result.provider;
 
-      const result =
-        await submitToPiAPI(piPayload);
+    } else {
+      // ════════════════════════════════════════════════════════
+      // SIN FOTO → BYTEPLUS (IA genera todo)
+      // ════════════════════════════════════════════════════════
+      const contentArr = [];
 
-      taskId = result.taskId;
+      if (hasRefVideo) {
+        // Video de referencia sin rostro → copiar movimiento puro
+        mode = "r2v";
+        contentArr.push({ type: "video_url", video_url: { url: refVideoUrl } });
+        finalPrompt = `[Video 1] Copy ONLY the body movement from this reference. Background from prompt. ${finalPrompt}`;
+      } else {
+        // Texto puro → BytePlus genera todo con IA
+        mode = "t2v";
+      }
+
+      contentArr.push({
+        type: "text",
+        text: `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
+      });
+
+      const result = await submitToByteplus(contentArr);
+      taskId   = result.taskId;
+      provider = result.provider;
     }
+
   } catch (err) {
-    console.error("[GENERATE ERROR]", err);
-
-    // ─────────────────────────────────────────────────────────
-    // REEMBOLSO
-    // ─────────────────────────────────────────────────────────
-
+    // Reembolsar Jades si el proveedor falla
     try {
       await supabaseAdmin.rpc("spend_jades", {
-        p_user_id: userId,
-        p_amount: -jadeCost,
-        p_reason: "cineai_refund_error",
-        p_ref: ref,
+        p_user_id: userId, p_amount: -jadeCost,
+        p_reason: "cineai_refund_error", p_ref: ref,
       });
-    } catch (refundErr) {
-      console.error(
-        "[REFUND ERROR]",
-        refundErr
-      );
-    }
-
-    return res.status(500).json({
-      ok: false,
-      error: err.message,
-      refunded: true,
-    });
+    } catch {}
+    console.error(`[generate] ${provider || "?"} error:`, err.message);
+    return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
-  // ───────────────────────────────────────────────────────────
-  // GUARDAR JOB
-  // ───────────────────────────────────────────────────────────
+  // ── Guardar job ──────────────────────────────────────────────
+  const jobId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-  const jobId =
-    globalThis.crypto?.randomUUID?.() ||
-    `${Date.now()}-${Math.random()}`;
-
-  const { error: insertErr } =
-    await supabaseAdmin
-      .from("video_jobs")
-      .insert({
-        id: jobId,
-
-        user_id: userId,
-
-        status: "IN_PROGRESS",
-
-        mode: "cineai",
-
-        provider,
-
-        provider_request_id: taskId,
-
-        provider_status: "pending",
-
-        prompt: finalPrompt,
-
-        started_at: new Date().toISOString(),
-
-        payload: {
-          task_id: taskId,
-
-          provider,
-
-          cineai_mode: mode,
-
-          scene_mode: sceneMode,
-
-          duration,
-
-          aspect_ratio: aspectRatio,
-
-          image_url: imageUrl || null,
-
-          ref_images: imageList,
-
-          ref_video_url:
-            refVideoUrl || null,
-
-          audio_url: audioUrl || null,
-
-          animate_exact:
-            animateExact || false,
-
-          is_continuation:
-            isContinuation || false,
-
-          jade_cost: jadeCost,
-
-          ref,
-        },
-      });
-
-  if (insertErr) {
-    console.error(
-      "[INSERT ERROR]",
-      insertErr.message
-    );
-  }
-
-  // ───────────────────────────────────────────────────────────
-  // SUCCESS
-  // ───────────────────────────────────────────────────────────
-
-  console.log("[GENERATE OK]", {
+  await supabaseAdmin.from("video_jobs").insert({
+    id:                  jobId,
+    user_id:             userId,
+    status:              "IN_PROGRESS",
+    mode:                "cineai",
+    prompt:              finalPrompt,
     provider,
-    mode,
-    taskId,
-    jobId,
-  });
+    provider_request_id: taskId,
+    provider_status:     "pending",
+    started_at:          new Date().toISOString(),
+    payload: {
+      task_id:         taskId,
+      cineai_mode:     mode,
+      scene_mode:      sceneMode,
+      duration,
+      aspect_ratio:    aspectRatio,
+      image_url:       imageUrl     || null,
+      ref_images:      imageList,
+      ref_video_url:   refVideoUrl  || null,
+      audio_url:       audioUrl     || null,
+      animate_exact:   animateExact  || false,
+      is_continuation: isContinuation || false,
+      jade_cost:       jadeCost,
+      provider,
+      ref,
+    },
+  }).then(({ error }) => { if (error) console.error("[generate] insert failed:", error.message); });
 
-  return res.status(200).json({
-    ok: true,
+  console.log("[generate] OK", { userId, jobId, taskId, mode, provider, jadeCost });
 
-    provider,
-
-    mode,
-
-    taskId,
-
-    jobId,
-
-    jadeCost,
-  });
+  return res.status(200).json({ ok: true, jobId, taskId, mode, provider, jadeCost });
 }
 
-export const config = {
-  runtime: "nodejs",
-};
+export const config = { runtime: "nodejs" };
