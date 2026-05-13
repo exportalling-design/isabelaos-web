@@ -1,65 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-// ── CANVAS PROFILE SHEET ───────────────────────────────────────────────────
-async function createProfileSheetCanvas(imageFile) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(imageFile);
-    img.onload = () => {
-      try {
-        const cellW = 300, cellH = 360, margin = 20, labelH = 30;
-        const canvasW = 2 * cellW + 3 * margin;
-        const canvasH = 2 * (cellH + labelH) + 3 * margin;
-        const canvas = document.createElement("canvas");
-        canvas.width = canvasW; canvas.height = canvasH;
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvasW, canvasH);
-        const views = [
-          { col: 0, row: 0, label: "FRONT",    flip: false, shiftX: 0    },
-          { col: 1, row: 0, label: "3/4 L",    flip: false, shiftX: 0.12 },
-          { col: 0, row: 1, label: "PROFILE L", flip: false, shiftX: 0.25 },
-          { col: 1, row: 1, label: "3/4 R",     flip: true,  shiftX: 0.12 },
-        ];
-        views.forEach(({ col, row, label, flip, shiftX }) => {
-          const cx = margin + col * (cellW + margin);
-          const cy = margin + row * (cellH + labelH + margin);
-          ctx.save(); ctx.beginPath(); ctx.rect(cx, cy, cellW, cellH); ctx.clip();
-          const imgAR = img.width / img.height, cellAR = cellW / cellH;
-          let dW, dH;
-          if (imgAR > cellAR) { dH = cellH; dW = dH * imgAR; } else { dW = cellW; dH = dW / imgAR; }
-          let ox = cx + (cellW - dW) / 2 + dW * shiftX;
-          const oy = cy + (cellH - dH) / 2;
-          if (flip) { ctx.translate(cx + cellW, 0); ctx.scale(-1, 1); ox = -(ox - cx) - dW + cx; }
-          ctx.drawImage(img, ox, oy, dW, dH); ctx.restore();
-          ctx.strokeStyle = "#e0e0e0"; ctx.lineWidth = 1; ctx.strokeRect(cx, cy, cellW, cellH);
-          ctx.fillStyle = "#444"; ctx.font = "bold 11px Arial"; ctx.textAlign = "center";
-          ctx.fillText(label, cx + cellW / 2, cy + cellH + 20);
-        });
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-        URL.revokeObjectURL(url);
-        resolve({ base64: dataUrl.split(",")[1], mimeType: "image/jpeg" });
-      } catch (err) { URL.revokeObjectURL(url); reject(err); }
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Image load failed")); };
-    img.src = url;
-  });
-}
-
 const TEMPLATES = [
   { id: "divineLight", emoji: "⚡", label: { es: "Confrontación Divina", en: "Divine Confrontation" }, tag: { es: "ÉPICO", en: "EPIC" }, description: { es: "Enfrenta a Dios como ser de luz. Tormenta. Tsunami. Redención.", en: "Confront God as a being of light. Storm. Tsunami. Redemption." }, video: "/gallery/divine-light.mp4", accent: "#4A90E2", hasDialogLang: true, genderOptions: [{ value: "male", icon: "👨", label: { es: "Soy Hombre", en: "I'm a Man" } }, { value: "female", icon: "👩", label: { es: "Soy Mujer", en: "I'm a Woman" } }], slots: { male: ["protagonist"], female: ["protagonist"] } },
   { id: "divineHuman", emoji: "🙏", label: { es: "Dios Entre Nosotros", en: "God Among Us" }, tag: { es: "VIRAL", en: "VIRAL" }, description: { es: "Dios como ser humano real. Túnica blanca. La misma tormenta.", en: "God as a real human. White robe. Same storm." }, video: "/gallery/divine-human.mp4", accent: "#E8B84B", hasDialogLang: true, genderOptions: [{ value: "male", icon: "👨", label: { es: "Soy Hombre", en: "I'm a Man" } }, { value: "female", icon: "👩", label: { es: "Soy Mujer", en: "I'm a Woman" } }], slots: { male: ["protagonist"], female: ["protagonist"] } },
-  { id: "coupleDisaster", emoji: "💔", label: { es: "La Última Pelea", en: "The Last Fight" }, tag: { es: "DRAMA", en: "DRAMA" }, description: { es: "Pareja en acantilado. Meteorito. Tsunami los separa.", en: "Couple on cliff. Meteor. Tsunami separates them." }, video: "/gallery/couple-disaster.mp4", accent: "#E05C8A", hasDialogLang: true, genderOptions: [{ value: "female", icon: "👩", label: { es: "Soy la Mujer", en: "I'm the Woman" }, sub: { es: "Hombre inventado por IA", en: "AI-generated man" } }, { value: "male", icon: "👨", label: { es: "Soy el Hombre", en: "I'm the Man" }, sub: { es: "Mujer inventada por IA", en: "AI-generated woman" } }, { value: "both", icon: "👫", label: { es: "Somos los Dos", en: "We're Both" }, sub: { es: "2 fotos de rostro", en: "2 face photos" } }], slots: { female: ["protagonist"], male: ["protagonist"], both: ["man", "woman"] } },
+  { id: "coupleDisaster", emoji: "💔", label: { es: "La Última Pelea", en: "The Last Fight" }, tag: { es: "DRAMA", en: "DRAMA" }, description: { es: "Pareja en acantilado. Meteorito. Tsunami los separa.", en: "Couple on cliff. Meteor. Tsunami separates them." }, video: "/gallery/couple-disaster.mp4", accent: "#E05C8A", hasDialogLang: true, genderOptions: [{ value: "female", icon: "👩", label: { es: "Soy la Mujer", en: "I'm the Woman" }, sub: { es: "Hombre inventado por IA", en: "AI-generated man" } }, { value: "male", icon: "👨", label: { es: "Soy el Hombre", en: "I'm the Man" }, sub: { es: "Mujer inventada por IA", en: "AI-generated woman" } }, { value: "both", icon: "👫", label: { es: "Somos los Dos", en: "We're Both" }, sub: { es: "2 fotos por persona", en: "2 photos per person" } }], slots: { female: ["protagonist"], male: ["protagonist"], both: ["man", "woman"] } },
   { id: "victoriasSecret", emoji: "👙", label: { es: "Victoria's Secret", en: "Victoria's Secret" }, tag: { es: "LUJO", en: "LUXURY" }, description: { es: "Campaña de moda de lujo. Playa tropical. Solo mujer.", en: "Luxury fashion campaign. Tropical beach. Women only." }, video: "/gallery/victorias-secret.mp4", accent: "#C8A96E", hasDialogLang: false, genderOptions: null, slots: { female: ["protagonist"] } },
 ];
 
-const SLOT_LABELS = { protagonist: { es: "Tu foto de rostro", en: "Your face photo" }, man: { es: "Foto del Hombre", en: "Man's photo" }, woman: { es: "Foto de la Mujer", en: "Woman's photo" } };
+const SLOT_LABELS = { protagonist: { es: "Tu foto", en: "Your photo" }, man: { es: "Foto del Hombre", en: "Man's photo" }, woman: { es: "Foto de la Mujer", en: "Woman's photo" } };
 
 function fileToBase64(file) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
 }
 
-function UploadZone({ label, hint, onChange, preview, accent, height = 150 }) {
+// ── UPLOAD ZONE ────────────────────────────────────────────────────────────
+function UploadZone({ label, hint, onChange, preview, accent, height = 140 }) {
   const ref = useRef();
   const [drag, setDrag] = useState(false);
   const onDrop = useCallback((e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) onChange(f); }, [onChange]);
@@ -69,37 +25,17 @@ function UploadZone({ label, hint, onChange, preview, accent, height = 150 }) {
       <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => e.target.files[0] && onChange(e.target.files[0])} />
       {preview ? (
         <><img src={preview} alt="" style={{ width: "100%", height, objectFit: "cover", display: "block" }} />
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "8px 12px", background: "linear-gradient(transparent,rgba(0,0,0,0.85))", fontSize: 11, color: accent, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>✓ {label} — clic para cambiar</div></>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "8px 12px", background: "linear-gradient(transparent,rgba(0,0,0,0.85))", fontSize: 11, color: accent, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>✓ {label}</div></>
       ) : (
-        <><div style={{ fontSize: 28, marginBottom: 6, opacity: 0.5 }}>📸</div>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 3 }}>{label}</div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textAlign: "center", maxWidth: 180, lineHeight: 1.5, padding: "0 12px" }}>{hint}</div></>
+        <><div style={{ fontSize: 24, marginBottom: 6, opacity: 0.5 }}>📸</div>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 12, fontWeight: 700, color: "#fff", marginBottom: 3, textAlign: "center", padding: "0 8px" }}>{label}</div>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", textAlign: "center", maxWidth: 160, lineHeight: 1.5, padding: "0 10px" }}>{hint}</div></>
       )}
     </div>
   );
 }
 
-function ProfileBox({ slot, accent, lang }) {
-  if (slot.generatingProfile) return (
-    <div style={{ border: `2px dashed ${accent}66`, borderRadius: 14, minHeight: 150, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, background: `${accent}08` }}>
-      <div style={{ fontSize: 28, animation: "spin 1s linear infinite" }}>⚙️</div>
-      <div style={{ fontSize: 11, color: accent, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>{lang === "es" ? "Generando hoja..." : "Generating sheet..."}</div>
-    </div>
-  );
-  if (slot.profilePreview) return (
-    <div style={{ borderRadius: 14, overflow: "hidden", border: `1.5px solid ${accent}66` }}>
-      <img src={slot.profilePreview} alt="Reference sheet" style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />
-      <div style={{ padding: "7px 10px", background: "rgba(0,0,0,0.8)", fontSize: 11, color: accent, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>✓ {lang === "es" ? "Hoja de referencia lista" : "Reference sheet ready"}</div>
-    </div>
-  );
-  return (
-    <div style={{ border: "2px dashed rgba(255,255,255,0.08)", borderRadius: 14, minHeight: 150, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-      <div style={{ fontSize: 26, opacity: 0.15 }}>🎭</div>
-      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", textAlign: "center", padding: "0 12px", lineHeight: 1.5 }}>{lang === "es" ? "Se genera al subir tu foto" : "Generated on upload"}</div>
-    </div>
-  );
-}
-
+// ── GALLERY CARD ───────────────────────────────────────────────────────────
 function GalleryCard({ tmpl, lang, onClick }) {
   const vRef = useRef();
   return (
@@ -110,10 +46,6 @@ function GalleryCard({ tmpl, lang, onClick }) {
       <video ref={vRef} src={tmpl.video} muted playsInline loop preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg,rgba(0,0,0,0.92) 0%,rgba(0,0,0,0.2) 50%,transparent 100%)" }} />
       <div style={{ position: "absolute", top: 12, left: 12, background: tmpl.accent, color: "#000", fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 9, letterSpacing: 1.5, padding: "4px 8px", borderRadius: 6 }}>{tmpl.tag[lang]}</div>
-      <div style={{ position: "absolute", top: 12, right: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-        {tmpl.genderOptions ? tmpl.genderOptions.map((g) => (<div key={g.value} style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", fontSize: 10, fontFamily: "'Syne',sans-serif", fontWeight: 600, color: "rgba(255,255,255,0.85)", padding: "3px 7px", borderRadius: 6, whiteSpace: "nowrap" }}>{g.icon} {g.label[lang]}</div>))
-        : <div style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)", fontSize: 10, fontFamily: "'Syne',sans-serif", fontWeight: 600, color: "rgba(255,255,255,0.85)", padding: "3px 7px", borderRadius: 6 }}>👩 {lang === "es" ? "Solo Mujer" : "Women Only"}</div>}
-      </div>
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px 14px 14px" }}>
         <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, marginBottom: 5, lineHeight: 1.2 }}>{tmpl.emoji} {tmpl.label[lang]}</div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.5, marginBottom: 12 }}>{tmpl.description[lang]}</div>
@@ -123,20 +55,68 @@ function GalleryCard({ tmpl, lang, onClick }) {
   );
 }
 
+// ── PERSON UPLOAD BLOCK ────────────────────────────────────────────────────
+// Cada persona sube 2 fotos: frontal + perfil lateral
+function PersonUploadBlock({ slotKey, slotLabel, faceData, profileData, onFaceUpload, onProfileUpload, accent, lang }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {slotLabel && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginBottom: 10, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>{slotLabel}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {/* Foto frontal */}
+        <div>
+          <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
+            {lang === "es" ? "📸 Foto frontal" : "📸 Front photo"}
+          </div>
+          <UploadZone
+            label={lang === "es" ? "Foto de frente" : "Front photo"}
+            hint={lang === "es" ? "Mirando directo a la cámara" : "Looking straight at camera"}
+            onChange={onFaceUpload}
+            preview={faceData?.preview}
+            accent={accent}
+          />
+          {faceData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
+        </div>
+        {/* Foto de perfil lateral */}
+        <div>
+          <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
+            {lang === "es" ? "🔄 Foto de perfil" : "🔄 Profile photo"}
+          </div>
+          <UploadZone
+            label={lang === "es" ? "Foto lateral" : "Side photo"}
+            hint={lang === "es" ? "Rostro de lado (90° o 45°)" : "Face from the side (90° or 45°)"}
+            onChange={onProfileUpload}
+            preview={profileData?.preview}
+            accent={accent}
+          />
+          {profileData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
+        </div>
+      </div>
+      {/* Tip */}
+      <div style={{ marginTop: 8, fontSize: 10, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px", lineHeight: 1.6 }}>
+        💡 {lang === "es"
+          ? "Mejor resultado: ambas fotos con buena luz, sin lentes, sin filtros, fondo simple."
+          : "Best result: both photos with good lighting, no glasses, no filters, simple background."}
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN ───────────────────────────────────────────────────────────────────
 export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
   const [lang, setLang] = useState("es");
-  const [dialogLang, setDialogLang] = useState("es"); // idioma del diálogo en el video
+  const [dialogLang, setDialogLang] = useState("es");
   const [view, setView] = useState("gallery");
   const [selectedId, setSelectedId] = useState(null);
   const [genderVariant, setGenderVariant] = useState(null);
   const [quality, setQuality] = useState("480");
-  const emptySlot = () => ({ file: null, preview: null, profileData: null, profilePreview: null, generatingProfile: false });
+
+  // Cada slot tiene: face (frontal) y profile (lateral)
+  const emptySlot = () => ({ face: null, profile: null });
   const [slots, setSlots] = useState({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() });
+
   const [bodyFile, setBodyFile] = useState(null);
   const [bodyPreview, setBodyPreview] = useState(null);
-  const [bodyProfileData, setBodyProfileData] = useState(null);
-  const [bodyProfilePreview, setBodyProfilePreview] = useState(null);
-  const [generatingBodyProfile, setGeneratingBodyProfile] = useState(false);
+
   const [step, setStep] = useState("idle");
   const [taskId, setTaskId] = useState(null);
   const [pollCount, setPollCount] = useState(0);
@@ -146,10 +126,12 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
   const tmpl = TEMPLATES.find((t) => t.id === selectedId);
   const accent = tmpl?.accent || "#C8A96E";
   const jadeCost = quality === "720" ? 60 : 30;
+
   const activeSlotKeys = () => { if (!tmpl || !genderVariant) return []; return tmpl.slots[genderVariant] || []; };
-  const allProfilesReady = activeSlotKeys().every((k) => slots[k]?.profileData !== null && !slots[k]?.generatingProfile);
-  const anyGenerating = activeSlotKeys().some((k) => slots[k]?.generatingProfile) || generatingBodyProfile;
-  const canGenerate = allProfilesReady && !anyGenerating && step === "idle" && userJades >= jadeCost;
+
+  // Puede generar si todos los slots activos tienen al menos la foto frontal
+  const allReady = activeSlotKeys().every((k) => slots[k]?.face?.file);
+  const canGenerate = allReady && step === "idle" && userJades >= jadeCost;
 
   const callApi = async (route, body) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -159,40 +141,9 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
     return json;
   };
 
-  const generateProfile = async (slotKey, file, preview) => {
-    try {
-      const canvasSheet = await createProfileSheetCanvas(file);
-      const canvasPreview = `data:${canvasSheet.mimeType};base64,${canvasSheet.base64}`;
-      setSlots((prev) => ({ ...prev, [slotKey]: { ...prev[slotKey], profileData: canvasSheet, profilePreview: canvasPreview, generatingProfile: false } }));
-      try {
-        const b64 = await fileToBase64(file);
-        const json = await callApi("generate-profile", { faceBase64: b64, faceMime: file.type, isFace: true });
-        if (json.profile) {
-          const geminiPreview = `data:${json.profile.mimeType};base64,${json.profile.base64}`;
-          setSlots((prev) => ({ ...prev, [slotKey]: { ...prev[slotKey], profileData: json.profile, profilePreview: geminiPreview } }));
-        }
-      } catch {}
-    } catch {
-      const b64 = await fileToBase64(file).catch(() => null);
-      setSlots((prev) => ({ ...prev, [slotKey]: { ...prev[slotKey], profileData: b64 ? { base64: b64, mimeType: file.type } : null, profilePreview: b64 ? preview : null, generatingProfile: false } }));
-    }
-  };
-
-  const handleFaceUpload = async (slotKey, file) => {
+  const setSlotPhoto = (slotKey, photoType, file) => {
     const preview = URL.createObjectURL(file);
-    setSlots((prev) => ({ ...prev, [slotKey]: { file, preview, profileData: null, profilePreview: null, generatingProfile: true } }));
-    setErrorMsg("");
-    await generateProfile(slotKey, file, preview);
-  };
-
-  const handleBodyUpload = async (file) => {
-    setBodyFile(file); setBodyPreview(URL.createObjectURL(file)); setBodyProfileData(null); setBodyProfilePreview(null); setGeneratingBodyProfile(true);
-    try {
-      const canvasSheet = await createProfileSheetCanvas(file);
-      setBodyProfileData(canvasSheet); setBodyProfilePreview(`data:${canvasSheet.mimeType};base64,${canvasSheet.base64}`);
-      try { const b64 = await fileToBase64(file); const json = await callApi("generate-profile", { faceBase64: b64, faceMime: file.type, isFace: false }); if (json.profile) { setBodyProfileData(json.profile); setBodyProfilePreview(`data:${json.profile.mimeType};base64,${json.profile.base64}`); } } catch {}
-    } catch { const b64 = await fileToBase64(file).catch(() => null); if (b64) { setBodyProfileData({ base64: b64, mimeType: file.type }); setBodyProfilePreview(URL.createObjectURL(file)); } }
-    finally { setGeneratingBodyProfile(false); }
+    setSlots((prev) => ({ ...prev, [slotKey]: { ...prev[slotKey], [photoType]: { file, preview } } }));
   };
 
   const handleGenerate = async () => {
@@ -200,14 +151,33 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
     setStep("submitting"); setErrorMsg(""); setVideoUrl(null);
     try {
       const pSlot = slots.protagonist, mSlot = slots.man, wSlot = slots.woman;
+
+      let faceBase64, faceMime, profileBase64 = null, profileMime = null;
+      let face2Base64 = null, face2Mime = null, profile2Base64 = null, profile2Mime = null;
       const bodyB64 = bodyFile ? await fileToBase64(bodyFile) : null;
-      let faceBase64, faceMime, profileBase64, profileMime, face2Base64 = null, face2Mime = null, profile2Base64 = null, profile2Mime = null;
+
       if (genderVariant === "both") {
-        faceBase64 = await fileToBase64(mSlot.file); faceMime = mSlot.file.type; profileBase64 = mSlot.profileData.base64; profileMime = mSlot.profileData.mimeType;
-        face2Base64 = await fileToBase64(wSlot.file); face2Mime = wSlot.file.type; profile2Base64 = wSlot.profileData.base64; profile2Mime = wSlot.profileData.mimeType;
-      } else { faceBase64 = await fileToBase64(pSlot.file); faceMime = pSlot.file.type; profileBase64 = pSlot.profileData.base64; profileMime = pSlot.profileData.mimeType; }
-      const json = await callApi("submit-video", { templateId: selectedId, lang: dialogLang, quality, genderVariant, faceBase64, faceMime, profileBase64, profileMime, face2Base64, face2Mime, profile2Base64, profile2Mime, bodyBase64: bodyB64, bodyMime: bodyFile?.type || null });
-      setTaskId(json.taskId); onJadesUpdate?.(userJades - json.jadeCost); setStep("polling"); setPollCount(0);
+        faceBase64 = await fileToBase64(mSlot.face.file); faceMime = mSlot.face.file.type;
+        if (mSlot.profile?.file) { profileBase64 = await fileToBase64(mSlot.profile.file); profileMime = mSlot.profile.file.type; }
+        face2Base64 = await fileToBase64(wSlot.face.file); face2Mime = wSlot.face.file.type;
+        if (wSlot.profile?.file) { profile2Base64 = await fileToBase64(wSlot.profile.file); profile2Mime = wSlot.profile.file.type; }
+      } else {
+        faceBase64 = await fileToBase64(pSlot.face.file); faceMime = pSlot.face.file.type;
+        if (pSlot.profile?.file) { profileBase64 = await fileToBase64(pSlot.profile.file); profileMime = pSlot.profile.file.type; }
+      }
+
+      const json = await callApi("submit-video", {
+        templateId: selectedId, lang: dialogLang, quality, genderVariant,
+        faceBase64, faceMime,
+        profileBase64, profileMime,
+        face2Base64, face2Mime,
+        profile2Base64, profile2Mime,
+        bodyBase64: bodyB64, bodyMime: bodyFile?.type || null,
+      });
+
+      setTaskId(json.taskId);
+      onJadesUpdate?.(userJades - json.jadeCost);
+      setStep("polling"); setPollCount(0);
     } catch (e) { setErrorMsg(e.message); setStep("error"); }
   };
 
@@ -223,7 +193,12 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
     return () => clearInterval(iv);
   }, [step, taskId]);
 
-  const resetAll = () => { setView("gallery"); setSelectedId(null); setGenderVariant(null); setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() }); setBodyFile(null); setBodyPreview(null); setBodyProfileData(null); setBodyProfilePreview(null); setStep("idle"); setTaskId(null); setVideoUrl(null); setErrorMsg(""); };
+  const resetAll = () => {
+    setView("gallery"); setSelectedId(null); setGenderVariant(null);
+    setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() });
+    setBodyFile(null); setBodyPreview(null);
+    setStep("idle"); setTaskId(null); setVideoUrl(null); setErrorMsg("");
+  };
 
   const STYLES = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@300;400;500&display=swap'); @keyframes spin { to { transform: rotate(360deg); } }`;
 
@@ -239,21 +214,10 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
         </div>
       </div>
 
-      {/* ── AVISO IMPORTANTE ── */}
+      {/* Aviso referencia */}
       <div style={{ margin: "16px 20px 0", background: "rgba(255,200,0,0.06)", border: "1px solid rgba(255,200,0,0.2)", borderRadius: 14, padding: "14px 16px" }}>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 12, fontWeight: 700, color: "#ffcc00", marginBottom: 4 }}>
-          ⚠️ {lang === "es" ? "Los videos de muestra son referencias visuales" : "Sample videos are visual references"}
-        </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
-          {lang === "es"
-            ? "La IA nunca genera dos videos exactamente iguales. Los videos que ves son ejemplos del estilo y escena que se generará, pero el resultado siempre será único. Tu rostro será el protagonista."
-            : "AI never generates two identical videos. The videos shown are examples of the style and scene that will be generated, but the result will always be unique. Your face will be the protagonist."}
-        </div>
-      </div>
-
-      <div style={{ margin: "12px 20px 0", background: "linear-gradient(135deg,rgba(200,169,110,0.1),rgba(200,169,110,0.03))", border: "1px solid rgba(200,169,110,0.2)", borderRadius: 14, padding: "14px 16px" }}>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{lang === "es" ? "✨ Elige una escena → sube tu foto → la IA te pone en ella" : "✨ Choose a scene → upload your photo → AI places you in it"}</div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.6 }}>{lang === "es" ? "La IA genera una hoja de referencia de personaje con tu rostro y la usa para colocarte en la escena." : "AI generates a character reference sheet from your face and uses it to place you in the scene."}</div>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 12, fontWeight: 700, color: "#ffcc00", marginBottom: 4 }}>⚠️ {lang === "es" ? "Los videos de muestra son referencias visuales" : "Sample videos are visual references"}</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>{lang === "es" ? "La IA nunca genera dos videos exactamente iguales. Los videos que ves son ejemplos del estilo y escena. Tu rostro será el protagonista y el resultado siempre será único." : "AI never generates two identical videos. The videos shown are style examples. Your face will be the protagonist and the result will always be unique."}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "16px 20px 0" }}>
@@ -294,7 +258,8 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
           <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>{stepNum++} · {lang === "es" ? "¿Quién eres en la escena?" : "Who are you in the scene?"}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {tmpl.genderOptions.map((g) => (
-              <div key={g.value} onClick={() => { setGenderVariant(g.value); setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() }); }} style={{ flex: 1, minWidth: 90, border: `1.5px solid ${genderVariant === g.value ? accent : "rgba(255,255,255,0.1)"}`, borderRadius: 12, padding: "12px 10px", cursor: "pointer", textAlign: "center", background: genderVariant === g.value ? `${accent}18` : "rgba(255,255,255,0.03)", transition: "all 0.2s" }}>
+              <div key={g.value} onClick={() => { setGenderVariant(g.value); setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() }); }}
+                style={{ flex: 1, minWidth: 90, border: `1.5px solid ${genderVariant === g.value ? accent : "rgba(255,255,255,0.1)"}`, borderRadius: 12, padding: "12px 10px", cursor: "pointer", textAlign: "center", background: genderVariant === g.value ? `${accent}18` : "rgba(255,255,255,0.03)", transition: "all 0.2s" }}>
                 <div style={{ fontSize: 24, marginBottom: 4 }}>{g.icon}</div>
                 <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 12 }}>{g.label[lang]}</div>
                 {g.sub && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{g.sub[lang]}</div>}
@@ -304,27 +269,30 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
         </div>
       )}
 
-      {/* Step: Face uploads */}
+      {/* Step: Fotos */}
       {genderVariant && (
         <div style={{ padding: "20px 20px 0" }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>{stepNum++} · {lang === "es" ? "Foto(s) de rostro" : "Face photo(s)"}</div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
-            📌 {lang === "es" ? "Foto frontal · Sin lentes · Sin accesorios · Sin filtros · Buena iluminación · Fondo simple" : "Front photo · No glasses · No accessories · No filters · Good lighting · Simple background"}
+          <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>
+            {stepNum++} · {lang === "es" ? "Tus fotos de rostro" : "Your face photos"}
           </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+            {lang === "es"
+              ? "📌 Sube 2 fotos: una de frente y una de perfil (lado). Esto ayuda a la IA a reconocer mejor tu rostro. Sin lentes · Sin filtros · Buena iluminación"
+              : "📌 Upload 2 photos: one front-facing and one profile (side). This helps AI recognize your face better. No glasses · No filters · Good lighting"}
+          </div>
+
           {currentSlots.map((slotKey) => (
-            <div key={slotKey} style={{ marginBottom: 16 }}>
-              {currentSlots.length > 1 && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>{SLOT_LABELS[slotKey][lang]}</div>}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: 6 }}>{lang === "es" ? "Tu foto" : "Your photo"}</div>
-                  <UploadZone label={lang === "es" ? "Subir foto de rostro" : "Upload face photo"} hint={lang === "es" ? "Foto frontal clara sin lentes" : "Clear front photo, no glasses"} onChange={(f) => handleFaceUpload(slotKey, f)} preview={slots[slotKey].preview} accent={accent} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: 6 }}>{lang === "es" ? "Hoja de referencia" : "Reference sheet"}</div>
-                  <ProfileBox slot={slots[slotKey]} accent={accent} lang={lang} />
-                </div>
-              </div>
-            </div>
+            <PersonUploadBlock
+              key={slotKey}
+              slotKey={slotKey}
+              slotLabel={currentSlots.length > 1 ? SLOT_LABELS[slotKey][lang] : null}
+              faceData={slots[slotKey].face}
+              profileData={slots[slotKey].profile}
+              onFaceUpload={(f) => setSlotPhoto(slotKey, "face", f)}
+              onProfileUpload={(f) => setSlotPhoto(slotKey, "profile", f)}
+              accent={accent}
+              lang={lang}
+            />
           ))}
         </div>
       )}
@@ -332,15 +300,12 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
       {/* Step: Dialog language */}
       {genderVariant && tmpl?.hasDialogLang && (
         <div style={{ padding: "0 20px" }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>{stepNum++} · {lang === "es" ? "¿En qué idioma hablan en el video?" : "What language do they speak in the video?"}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>{stepNum++} · {lang === "es" ? "¿En qué idioma hablan?" : "What language do they speak?"}</div>
           <div style={{ display: "flex", gap: 10 }}>
-            {[
-              { value: "es", flag: "🇪🇸", label: { es: "Español", en: "Spanish" }, sub: { es: "Los personajes hablan en español", en: "Characters speak in Spanish" } },
-              { value: "en", flag: "🇺🇸", label: { es: "Inglés", en: "English" }, sub: { es: "Los personajes hablan en inglés", en: "Characters speak in English" } },
-            ].map((o) => (
+            {[{ value: "es", flag: "🇪🇸", label: { es: "Español", en: "Spanish" }, sub: { es: "Diálogo en español", en: "Dialogue in Spanish" } }, { value: "en", flag: "🇺🇸", label: { es: "Inglés", en: "English" }, sub: { es: "Diálogo en inglés", en: "Dialogue in English" } }].map((o) => (
               <div key={o.value} onClick={() => setDialogLang(o.value)} style={{ flex: 1, border: `1.5px solid ${dialogLang === o.value ? accent : "rgba(255,255,255,0.1)"}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", background: dialogLang === o.value ? `${accent}14` : "rgba(255,255,255,0.03)", transition: "all 0.2s", textAlign: "center" }}>
-                <div style={{ fontSize: 24, marginBottom: 4 }}>{o.flag}</div>
-                <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 13, marginBottom: 3 }}>{o.label[lang]}</div>
+                <div style={{ fontSize: 22, marginBottom: 4 }}>{o.flag}</div>
+                <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{o.label[lang]}</div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{o.sub[lang]}</div>
               </div>
             ))}
@@ -348,21 +313,15 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
         </div>
       )}
 
-      {/* Step: Body (optional) */}
+      {/* Step: Body optional */}
       {genderVariant && (
         <div style={{ padding: "20px 20px 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: accent, textTransform: "uppercase", letterSpacing: 1.5 }}>{stepNum++} · {lang === "es" ? "Ref. de cuerpo" : "Body reference"}</div>
             <div style={{ fontSize: 9, background: "rgba(255,255,255,0.07)", borderRadius: 5, padding: "2px 7px", color: "rgba(255,255,255,0.3)" }}>{lang === "es" ? "Opcional" : "Optional"}</div>
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 8, lineHeight: 1.5 }}>🎽 {lang === "es" ? "Solo proporciones. La IA NO usará la misma ropa." : "Proportions only. AI will NOT copy the clothing."}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <UploadZone label={lang === "es" ? "Foto de cuerpo" : "Body photo"} hint={lang === "es" ? "Solo proporciones — ropa diferente" : "Proportions only — different clothes"} onChange={handleBodyUpload} preview={bodyPreview} accent={accent} height={120} />
-            <div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: 6 }}>{lang === "es" ? "Hoja de cuerpo" : "Body sheet"}</div>
-              <ProfileBox slot={{ generatingProfile: generatingBodyProfile, profilePreview: bodyProfilePreview, profileData: bodyProfileData }} accent={accent} lang={lang} />
-            </div>
-          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 8 }}>🎽 {lang === "es" ? "Solo proporciones. La IA NO usará la misma ropa." : "Proportions only. AI will NOT copy the clothing."}</div>
+          <UploadZone label={lang === "es" ? "Foto de cuerpo" : "Body photo"} hint={lang === "es" ? "Solo proporciones — ropa diferente en el video" : "Proportions only — different clothes in video"} onChange={(f) => { setBodyFile(f); setBodyPreview(URL.createObjectURL(f)); }} preview={bodyPreview} accent={accent} height={110} />
         </div>
       )}
 
@@ -417,10 +376,10 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
       {step !== "done" && genderVariant && (
         <div style={{ padding: "18px 20px 0" }}>
           <button onClick={handleGenerate} disabled={!canGenerate} style={{ width: "100%", background: canGenerate ? `linear-gradient(135deg,${accent},${accent}cc)` : "rgba(255,255,255,0.06)", color: canGenerate ? "#000" : "rgba(255,255,255,0.2)", border: "none", borderRadius: 14, padding: "18px", fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 15, cursor: canGenerate ? "pointer" : "not-allowed", transition: "all 0.2s" }}>
-            {step === "submitting" ? (lang === "es" ? "⏳ Enviando..." : "⏳ Submitting...") : anyGenerating ? (lang === "es" ? "⚙️ Preparando referencias..." : "⚙️ Preparing references...") : `✨ ${lang === "es" ? "Generar Mi Video · 15 seg" : "Generate My Video · 15 sec"} · ${jadeCost} 💎`}
+            {step === "submitting" ? (lang === "es" ? "⏳ Enviando..." : "⏳ Submitting...") : `✨ ${lang === "es" ? "Generar Mi Video · 15 seg" : "Generate My Video · 15 sec"} · ${jadeCost} 💎`}
           </button>
-          {!currentSlots.some((k) => slots[k]?.file) && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 8 }}>{lang === "es" ? "↑ Sube tu foto de rostro primero" : "↑ Upload your face photo first"}</div>}
-          {allProfilesReady && userJades < jadeCost && <div style={{ fontSize: 11, color: "#ff8080", textAlign: "center", marginTop: 8 }}>{lang === "es" ? `Necesitas ${jadeCost} 💎 · Tienes ${userJades}` : `Need ${jadeCost} 💎 · Have ${userJades}`}</div>}
+          {!allReady && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 8 }}>{lang === "es" ? "↑ Sube al menos la foto frontal para continuar" : "↑ Upload at least the front photo to continue"}</div>}
+          {allReady && userJades < jadeCost && <div style={{ fontSize: 11, color: "#ff8080", textAlign: "center", marginTop: 8 }}>{lang === "es" ? `Necesitas ${jadeCost} 💎 · Tienes ${userJades}` : `Need ${jadeCost} 💎 · Have ${userJades}`}</div>}
         </div>
       )}
       {!genderVariant && tmpl?.genderOptions && <div style={{ padding: "16px 20px 0", fontSize: 12, color: "rgba(255,255,255,0.3)", textAlign: "center" }}>{lang === "es" ? "↑ Selecciona quién eres en la escena para continuar" : "↑ Select who you are in the scene to continue"}</div>}
