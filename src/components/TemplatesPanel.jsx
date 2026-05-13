@@ -152,12 +152,23 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
   const allReady = activeSlotKeys().every((k) => slots[k]?.face?.file);
   const canGenerate = allReady && step === "idle" && userJades >= jadeCost;
 
-  const callApi = async (route, body) => {
+  const getToken = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`/api/templates/${route}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+    return session?.access_token;
+  };
+
+  const callApi = async (route, body) => {
+    const token = await getToken();
+    const res = await fetch(`/api/templates/${route}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || "Error");
     return json;
+  };
+
+  // Sube imagen a Supabase Storage via API y retorna URL pública
+  const uploadImage = async (base64, mimeType, label) => {
+    const json = await callApi("upload-image", { imageBase64: base64, mimeType, label });
+    return json.url;
   };
 
   const setSlotPhoto = (slotKey, photoType, file) => {
@@ -171,27 +182,39 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
     try {
       const pSlot = slots.protagonist, mSlot = slots.man, wSlot = slots.woman;
 
-      let faceBase64, faceMime, profileBase64 = null, profileMime = null;
-      let face2Base64 = null, face2Mime = null, profile2Base64 = null, profile2Mime = null;
-      const bodyB64 = bodyFile ? await fileToBase64(bodyFile) : null;
+      // 1. Subir imágenes a Supabase Storage → obtener URLs públicas
+      let faceUrl, profileUrl = null, face2Url = null, profile2Url = null, bodyUrl = null;
 
       if (genderVariant === "both") {
-        faceBase64 = await fileToBase64(mSlot.face.file); faceMime = mSlot.face.file.type;
-        if (mSlot.profile?.file) { profileBase64 = await fileToBase64(mSlot.profile.file); profileMime = mSlot.profile.file.type; }
-        face2Base64 = await fileToBase64(wSlot.face.file); face2Mime = wSlot.face.file.type;
-        if (wSlot.profile?.file) { profile2Base64 = await fileToBase64(wSlot.profile.file); profile2Mime = wSlot.profile.file.type; }
+        const mFaceB64 = await fileToBase64(mSlot.face.file);
+        faceUrl = await uploadImage(mFaceB64, mSlot.face.file.type, "face1");
+        if (mSlot.profile?.file) {
+          const mProfB64 = await fileToBase64(mSlot.profile.file);
+          profileUrl = await uploadImage(mProfB64, mSlot.profile.file.type, "profile1");
+        }
+        const wFaceB64 = await fileToBase64(wSlot.face.file);
+        face2Url = await uploadImage(wFaceB64, wSlot.face.file.type, "face2");
+        if (wSlot.profile?.file) {
+          const wProfB64 = await fileToBase64(wSlot.profile.file);
+          profile2Url = await uploadImage(wProfB64, wSlot.profile.file.type, "profile2");
+        }
       } else {
-        faceBase64 = await fileToBase64(pSlot.face.file); faceMime = pSlot.face.file.type;
-        if (pSlot.profile?.file) { profileBase64 = await fileToBase64(pSlot.profile.file); profileMime = pSlot.profile.file.type; }
+        const faceB64 = await fileToBase64(pSlot.face.file);
+        faceUrl = await uploadImage(faceB64, pSlot.face.file.type, "face1");
+        if (pSlot.profile?.file) {
+          const profB64 = await fileToBase64(pSlot.profile.file);
+          profileUrl = await uploadImage(profB64, pSlot.profile.file.type, "profile1");
+        }
+      }
+      if (bodyFile) {
+        const bodyB64 = await fileToBase64(bodyFile);
+        bodyUrl = await uploadImage(bodyB64, bodyFile.type, "body");
       }
 
+      // 2. Enviar URLs a PiAPI via backend
       const json = await callApi("submit-video", {
         templateId: selectedId, lang: dialogLang, quality, genderVariant,
-        faceBase64, faceMime,
-        profileBase64, profileMime,
-        face2Base64, face2Mime,
-        profile2Base64, profile2Mime,
-        bodyBase64: bodyB64, bodyMime: bodyFile?.type || null,
+        faceUrl, profileUrl, face2Url, profile2Url, bodyUrl,
       });
 
       setTaskId(json.taskId);
