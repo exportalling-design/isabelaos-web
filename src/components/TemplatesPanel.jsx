@@ -10,8 +10,27 @@ const TEMPLATES = [
 
 const SLOT_LABELS = { protagonist: { es: "Tu foto", en: "Your photo" }, man: { es: "Foto del Hombre", en: "Man's photo" }, woman: { es: "Foto de la Mujer", en: "Woman's photo" } };
 
-function fileToBase64(file) {
-  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
+// Comprime imagen a max 800px y calidad 85% antes de convertir a base64
+// Reduce el tamaño del payload para no superar límites de PiAPI
+function fileToBase64(file, maxSize = 800, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        URL.revokeObjectURL(url);
+        resolve(dataUrl.split(",")[1]);
+      } catch (err) { URL.revokeObjectURL(url); reject(err); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Failed to load image")); };
+    img.src = url;
+  });
 }
 
 // ── UPLOAD ZONE ────────────────────────────────────────────────────────────
