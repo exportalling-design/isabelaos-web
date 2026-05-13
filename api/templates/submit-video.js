@@ -178,35 +178,10 @@ function getPrompt(templateId, genderVariant, lang) {
   return p;
 }
 
-// ── Subir imagen a ImgBB → URL limpia que PiAPI acepta ───────────────────
-// ImgBB no bloquea personas reales, URLs directas sin headers problemáticos
-async function uploadToImgBB(base64, label) {
-  const apiKey = process.env.IMGBB_API_KEY;
-  if (!apiKey) throw new Error("MISSING_IMGBB_API_KEY — agrega IMGBB_API_KEY en Vercel");
-
-  const form = new URLSearchParams();
-  form.append("key", apiKey);
-  form.append("image", base64);
-  form.append("name", `isabelaos-${label}-${Date.now()}`);
-  form.append("expiration", "3600"); // expira en 1 hora — solo se usa para PiAPI
-
-  const res = await fetch("https://api.imgbb.com/1/upload", {
-    method: "POST",
-    body: form,
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`ImgBB upload failed (${label}): ${err.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  if (!data.success) throw new Error(`ImgBB error (${label}): ${data.error?.message || "unknown"}`);
-
-  const url = data.data?.url;
-  if (!url) throw new Error(`ImgBB no URL for ${label}`);
-  console.log(`[submit-video] ImgBB OK (${label}): ${url.slice(0,60)}`);
-  return url;
+// Imágenes se envían como data URLs base64 directamente a PiAPI
+// (mismo comportamiento que subir desde PiAPI Workspace)
+function toDataUrl(base64, mimeType) {
+  return `data:${mimeType};base64,${base64}`;
 }
 
 export default async function handler(req, res) {
@@ -256,36 +231,31 @@ export default async function handler(req, res) {
     console.log(`[submit-video] Uploading images for user ${userId} template=${templateId}`);
 
     // Foto frontal obligatoria + foto de perfil lateral opcional (subida por el usuario)
-    const faceUrl = await uploadToImgBB(faceBase64, "face1");
-    const references = [{ url: faceUrl, tag: "character" }];
+    const references = [{ url: toDataUrl(faceBase64, faceMime), tag: "character" }];
 
     // Foto de perfil lateral (imagen2) — si el usuario la subió
     if (profileBase64 && profileMime) {
-      const profileUrl = await uploadToImgBB(profileBase64, "profile1");
-      references.push({ url: profileUrl, tag: "character" });
+      references.push({ url: toDataUrl(profileBase64, profileMime), tag: "character" });
     }
 
     // Segunda persona para variante "both"
     if (face2Base64 && face2Mime) {
-      const face2Url = await uploadToImgBB(face2Base64, "face2");
-      references.push({ url: face2Url, tag: "character" });
+      references.push({ url: toDataUrl(face2Base64, face2Mime), tag: "character" });
       if (profile2Base64 && profile2Mime) {
-        const profile2Url = await uploadToImgBB(profile2Base64, "profile2");
-        references.push({ url: profile2Url, tag: "character" });
+        references.push({ url: toDataUrl(profile2Base64, profile2Mime), tag: "character" });
       }
     }
 
     let promptText = getPrompt(templateId, genderVariant, lang);
 
     if (bodyBase64 && bodyMime) {
-      const bodyUrl = await uploadToImgBB(bodyBase64, "body");
-      references.push({ url: bodyUrl, tag: "style" });
+      references.push({ url: toDataUrl(bodyBase64, bodyMime), tag: "style" });
       promptText += "\n\n[BODY REFERENCE: Use ONLY for body proportions. Do NOT copy the clothing — use completely different scene-appropriate clothing.]";
     }
 
     console.log(`[submit-video] Sending ${references.length} URLs to PiAPI Seedance 2 Fast`);
 
-    // ── PiAPI — Seedance 2 Fast — Omni Reference ─────────────────────────────
+    // ── PiAPI — Kling Omni Reference (acepta personas reales vía API) ────────
     const piRes = await fetch("https://api.piapi.ai/api/v1/task", {
       method: "POST",
       headers: {
@@ -293,15 +263,15 @@ export default async function handler(req, res) {
         "x-api-key": process.env.PIAPI_KEY,
       },
       body: JSON.stringify({
-        model:     "seedance",
-        task_type: "seedance-2-fast",
+        model:     "kling",
+        task_type: "video_generation",
         input: {
           prompt:       promptText,
           mode:         "omni_reference",
-          image_urls:   references.map((r) => r.url),
-          duration:     15,
+          references:   references.map((r) => ({ url: r.url, tag: "character" })),
+          duration:     10,
           aspect_ratio: "9:16",
-          resolution:   quality === "720" ? "720p" : "480p",
+          quality:      quality === "720" ? "high" : "standard",
         },
       }),
     });
