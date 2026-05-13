@@ -7,10 +7,10 @@ import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 const JADE_COST = { "480": 30, "720": 60 };
 
 // ── NOTAS DE REFERENCIA ────────────────────────────────────────────────────
-const R1_EN = "The main character's face and appearance must EXACTLY match the provided reference images (image1 = front face, image2 = multi-angle profile sheet). Maintain consistent identity throughout all shots.";
-const R1_ES = "El rostro del personaje principal debe coincidir EXACTAMENTE con las imágenes de referencia proporcionadas (imagen1 = rostro frontal, imagen2 = hoja de perfiles multi-ángulo). Mantener identidad consistente en todos los planos.";
-const R2_EN = "The MAN's face must match image1 (front face) and image2 (profile sheet). The WOMAN's face must match image3 (front face) and image4 (profile sheet). Maintain consistent identity throughout all shots for both characters.";
-const R2_ES = "El rostro del HOMBRE debe coincidir con imagen1 (rostro frontal) e imagen2 (hoja de perfiles). El rostro de la MUJER debe coincidir con imagen3 e imagen4. Mantener identidad consistente en todos los planos para ambos personajes.";
+const R1_EN = "The main character's face and appearance must EXACTLY match the provided reference image (image1 = front face photo). Preserve exact skin tone, eye shape, nose, lips, hair and all facial features. Maintain consistent identity throughout all shots.";
+const R1_ES = "El rostro del personaje principal debe coincidir EXACTAMENTE con la imagen de referencia proporcionada (imagen1 = foto frontal del rostro). Preservar tono de piel, forma de ojos, nariz, labios, cabello y todos los rasgos faciales. Mantener identidad consistente en todos los planos.";
+const R2_EN = "The MAN's face must match image1 (front face photo). The WOMAN's face must match image2 (front face photo). Preserve exact facial features for both characters. Maintain consistent identity throughout all shots.";
+const R2_ES = "El rostro del HOMBRE debe coincidir con imagen1 (foto frontal). El rostro de la MUJER debe coincidir con imagen2 (foto frontal). Preservar rasgos faciales exactos para ambos personajes. Mantener identidad consistente en todos los planos.";
 
 // ── PROMPTS ORIGINALES COMPLETOS ───────────────────────────────────────────
 const PROMPTS = {
@@ -255,21 +255,24 @@ export default async function handler(req, res) {
     // ── Subir imágenes → URLs ────────────────────────────────────────────────
     console.log(`[submit-video] Uploading images for user ${userId} template=${templateId}`);
 
-    const faceUrl    = await uploadToImgBB(faceBase64, "face1");
-    const profileUrl = await uploadToImgBB(profileBase64, "profile1");
+    // Foto frontal obligatoria + foto de perfil lateral opcional (subida por el usuario)
+    const faceUrl = await uploadToImgBB(faceBase64, "face1");
+    const references = [{ url: faceUrl, tag: "character" }];
 
-    const references = [
-      { url: faceUrl,    tag: "character" },
-      { url: profileUrl, tag: "character" },
-    ];
+    // Foto de perfil lateral (imagen2) — si el usuario la subió
+    if (profileBase64 && profileMime) {
+      const profileUrl = await uploadToImgBB(profileBase64, "profile1");
+      references.push({ url: profileUrl, tag: "character" });
+    }
 
+    // Segunda persona para variante "both"
     if (face2Base64 && face2Mime) {
       const face2Url = await uploadToImgBB(face2Base64, "face2");
       references.push({ url: face2Url, tag: "character" });
-    }
-    if (profile2Base64 && profile2Mime) {
-      const profile2Url = await uploadToImgBB(profile2Base64, "profile2");
-      references.push({ url: profile2Url, tag: "character" });
+      if (profile2Base64 && profile2Mime) {
+        const profile2Url = await uploadToImgBB(profile2Base64, "profile2");
+        references.push({ url: profile2Url, tag: "character" });
+      }
     }
 
     let promptText = getPrompt(templateId, genderVariant, lang);
