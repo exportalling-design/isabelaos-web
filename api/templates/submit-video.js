@@ -178,21 +178,35 @@ function getPrompt(templateId, genderVariant, lang) {
   return p;
 }
 
-// ── Subir imagen base64 a Supabase Storage → URL pública ──────────────────
-async function uploadToStorage(base64, mimeType, userId, label) {
-  const ext = mimeType.includes("png") ? "png" : "jpg";
-  const filename = `templates/${userId}/${Date.now()}-${label}.${ext}`;
-  const buffer = Buffer.from(base64, "base64");
+// ── Subir imagen a ImgBB → URL limpia que PiAPI acepta ───────────────────
+// ImgBB no bloquea personas reales, URLs directas sin headers problemáticos
+async function uploadToImgBB(base64, label) {
+  const apiKey = process.env.IMGBB_API_KEY;
+  if (!apiKey) throw new Error("MISSING_IMGBB_API_KEY — agrega IMGBB_API_KEY en Vercel");
 
-  const { error } = await supabaseAdmin.storage
-    .from("generations")
-    .upload(filename, buffer, { contentType: mimeType, upsert: false });
+  const form = new URLSearchParams();
+  form.append("key", apiKey);
+  form.append("image", base64);
+  form.append("name", `isabelaos-${label}-${Date.now()}`);
+  form.append("expiration", "3600"); // expira en 1 hora — solo se usa para PiAPI
 
-  if (error) throw new Error(`Storage upload failed (${label}): ${error.message}`);
+  const res = await fetch("https://api.imgbb.com/1/upload", {
+    method: "POST",
+    body: form,
+  });
 
-  const { data: pub } = supabaseAdmin.storage.from("generations").getPublicUrl(filename);
-  if (!pub?.publicUrl) throw new Error(`No public URL for ${label}`);
-  return pub.publicUrl;
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`ImgBB upload failed (${label}): ${err.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  if (!data.success) throw new Error(`ImgBB error (${label}): ${data.error?.message || "unknown"}`);
+
+  const url = data.data?.url;
+  if (!url) throw new Error(`ImgBB no URL for ${label}`);
+  console.log(`[submit-video] ImgBB OK (${label}): ${url.slice(0,60)}`);
+  return url;
 }
 
 export default async function handler(req, res) {
@@ -241,8 +255,8 @@ export default async function handler(req, res) {
     // ── Subir imágenes → URLs ────────────────────────────────────────────────
     console.log(`[submit-video] Uploading images for user ${userId} template=${templateId}`);
 
-    const faceUrl    = await uploadToStorage(faceBase64,    faceMime,    userId, "face1");
-    const profileUrl = await uploadToStorage(profileBase64, profileMime, userId, "profile1");
+    const faceUrl    = await uploadToImgBB(faceBase64, "face1");
+    const profileUrl = await uploadToImgBB(profileBase64, "profile1");
 
     const references = [
       { url: faceUrl,    tag: "character" },
@@ -250,18 +264,18 @@ export default async function handler(req, res) {
     ];
 
     if (face2Base64 && face2Mime) {
-      const face2Url = await uploadToStorage(face2Base64, face2Mime, userId, "face2");
+      const face2Url = await uploadToImgBB(face2Base64, "face2");
       references.push({ url: face2Url, tag: "character" });
     }
     if (profile2Base64 && profile2Mime) {
-      const profile2Url = await uploadToStorage(profile2Base64, profile2Mime, userId, "profile2");
+      const profile2Url = await uploadToImgBB(profile2Base64, "profile2");
       references.push({ url: profile2Url, tag: "character" });
     }
 
     let promptText = getPrompt(templateId, genderVariant, lang);
 
     if (bodyBase64 && bodyMime) {
-      const bodyUrl = await uploadToStorage(bodyBase64, bodyMime, userId, "body");
+      const bodyUrl = await uploadToImgBB(bodyBase64, "body");
       references.push({ url: bodyUrl, tag: "style" });
       promptText += "\n\n[BODY REFERENCE: Use ONLY for body proportions. Do NOT copy the clothing — use completely different scene-appropriate clothing.]";
     }
