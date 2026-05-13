@@ -282,7 +282,7 @@ export default async function handler(req, res) {
           prompt:       promptText,
           mode:         "omni_reference",
           image_urls:   references.map((r) => r.url),
-          duration:     5,
+          duration:     15,
           aspect_ratio: "9:16",
           resolution:   quality === "720" ? "720p" : "480p",
         },
