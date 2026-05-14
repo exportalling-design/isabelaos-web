@@ -59,7 +59,7 @@ function GalleryCard({ tmpl, lang, onClick }) {
   const vRef = useRef();
   return (
     <div onClick={onClick} onMouseEnter={() => vRef.current?.play()} onMouseLeave={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; } }}
-      style={{ position: "relative", borderRadius: 16, overflow: "hidden", cursor: "pointer", aspectRatio: "9/16", background: "#080808", border: "1px solid rgba(255,255,255,0.08)", transition: "transform 0.25s, box-shadow 0.25s" }}
+      style={{ position: "relative", borderRadius: 16, overflow: "hidden", cursor: "pointer", aspectRatio: "21/9", background: "#080808", border: "1px solid rgba(255,255,255,0.08)", transition: "transform 0.25s, box-shadow 0.25s" }}
       onMouseOver={(e) => { e.currentTarget.style.transform = "scale(1.03)"; e.currentTarget.style.boxShadow = `0 20px 60px ${tmpl.accent}55`; }}
       onMouseOut={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
       <video ref={vRef} src={tmpl.video} muted playsInline loop preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -262,7 +262,7 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "16px 20px 0" }}>
         {TEMPLATES.map((t) => (<GalleryCard key={t.id} tmpl={t} lang={lang} onClick={() => { setSelectedId(t.id); setGenderVariant(t.genderOptions ? null : "female"); setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() }); setView("generate"); }} />))}
       </div>
-      <div style={{ padding: "14px 20px 0", fontSize: 10, color: "rgba(255,255,255,0.18)", textAlign: "center" }}>{lang === "es" ? "Hover para previsualizar · 15 segundos · 9:16" : "Hover to preview · 15 seconds · 9:16"}</div>
+      <div style={{ padding: "14px 20px 0", fontSize: 10, color: "rgba(255,255,255,0.18)", textAlign: "center" }}>{lang === "es" ? "Hover para previsualizar · 15 segundos · 21:9 Cinemascope" : "Hover to preview · 15 seconds · 21:9 Cinemascope"}</div>
     </div>
   );
 
@@ -415,7 +415,7 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
       {step !== "done" && genderVariant && (
         <div style={{ padding: "18px 20px 0" }}>
           <button onClick={handleGenerate} disabled={!canGenerate} style={{ width: "100%", background: canGenerate ? `linear-gradient(135deg,${accent},${accent}cc)` : "rgba(255,255,255,0.06)", color: canGenerate ? "#000" : "rgba(255,255,255,0.2)", border: "none", borderRadius: 14, padding: "18px", fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 15, cursor: canGenerate ? "pointer" : "not-allowed", transition: "all 0.2s" }}>
-            {step === "submitting" ? (lang === "es" ? "⏳ Enviando..." : "⏳ Submitting...") : `✨ ${lang === "es" ? "Generar Mi Video · 15 seg" : "Generate My Video · 15 sec"} · ${jadeCost} 💎`}
+            {step === "submitting" ? (lang === "es" ? "⏳ Enviando..." : "⏳ Submitting...") : `✨ ${lang === "es" ? "Generar Mi Video · 21:9 · 15 seg" : "Generate My Video · 21:9 · 15 sec"} · ${jadeCost} 💎`}
           </button>
           {!allReady && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 8 }}>{lang === "es" ? "↑ Sube al menos la foto frontal para continuar" : "↑ Upload at least the front photo to continue"}</div>}
           {allReady && userJades < jadeCost && <div style={{ fontSize: 11, color: "#ff8080", textAlign: "center", marginTop: 8 }}>{lang === "es" ? `Necesitas ${jadeCost} 💎 · Tienes ${userJades}` : `Need ${jadeCost} 💎 · Have ${userJades}`}</div>}
