@@ -1,20 +1,18 @@
-// api/generate.js
+// api/cineai/generate.js
 // ─────────────────────────────────────────────────────────────
 // ROUTING DEFINITIVO:
-//   Con foto de persona  → PiAPI   (Seedance 2.0 fast, acepta image_urls)
+//   Con foto de persona  → EvoLink (Seedance 2.0 fast-image-to-video)
+//                          Soporta rostros reales desde Abril 2026
 //   Sin foto (solo IA)   → BytePlus (Seedance 2.0, texto puro o video ref)
-//
-// Regla simple: imageUrl presente = PiAPI | sin imageUrl = BytePlus
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-// PiAPI — con foto de persona
-const PIAPI_URL   = "https://api.piapi.ai/api/v1/task";
-const PIAPI_MODEL = "seedance";
-const PIAPI_TASK  = "seedance-2-preview";
+// EvoLink — con foto de persona
+const EVOLINK_BASE  = "https://api.evolink.ai/v1/videos/generations";
+const EVOLINK_MODEL = "seedance-2.0-fast-image-to-video";
 
-// BytePlus — sin foto, solo IA genera todo
+// BytePlus — sin foto, IA genera todo
 const BYTEPLUS_BASE   = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 const BYTEPLUS_MODEL  = "dreamina-seedance-2-0-260128";
@@ -48,32 +46,46 @@ function detectBlockedContent(text) {
   return null;
 }
 
-// ── PiAPI — para cualquier caso CON foto de persona ───────────
-async function submitToPiAPI(payload) {
-  const r = await fetch(PIAPI_URL, {
-    method: "POST",
+// ── EvoLink — CON foto de persona ─────────────────────────────
+async function submitToEvoLink({ imageUrls, prompt, duration, aspectRatio }) {
+  const body = {
+    model:          EVOLINK_MODEL,
+    prompt,
+    image_urls:     imageUrls.slice(0, 2), // EvoLink max 2 imágenes
+    duration:       Math.min(Number(duration) || 10, 10), // max 10s estable
+    aspect_ratio:   aspectRatio,
+    quality:        "720p",
+    generate_audio: true,
+  };
+
+  console.log(`[generate] EvoLink submit model=${body.model} images=${body.image_urls.length} duration=${body.duration}`);
+
+  const r = await fetch(EVOLINK_BASE, {
+    method:  "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.PIAPI_KEY,
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
+
   const data = await r.json();
-  if (!r.ok || data.code !== 200) {
-    console.error("[PiAPI] error:", JSON.stringify(data));
-    throw new Error(data.message || `PiAPI error ${r.status}`);
+  console.log(`[generate] EvoLink response status=${data.status} id=${data.id} error=${data.error?.message || "none"}`);
+
+  if (!r.ok || data.error) {
+    throw new Error(data.error?.message || data.message || `EvoLink error ${r.status}: ${JSON.stringify(data).slice(0, 200)}`);
   }
-  const taskId = data.data?.task_id;
-  if (!taskId) throw new Error("PiAPI no devolvió task_id");
-  return { taskId, provider: "piapi_seedance" };
+  const taskId = data.id;
+  if (!taskId) throw new Error("EvoLink no devolvió task id");
+  return { taskId, provider: "evolink_seedance" };
 }
 
-// ── BytePlus — para cualquier caso SIN foto (IA pura) ─────────
+// ── BytePlus — SIN foto (IA pura) ─────────────────────────────
 async function submitToByteplus(contentArr) {
   const r = await fetch(BYTEPLUS_CREATE, {
-    method: "POST",
+    method:  "POST",
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type":  "application/json",
       "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
     },
     body: JSON.stringify({ model: BYTEPLUS_MODEL, content: contentArr }),
@@ -99,12 +111,12 @@ export default async function handler(req, res) {
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const {
     prompt,
-    imageUrl,        // primera imagen / último frame en continuación
-    refImages,       // array de hasta 6 URLs adicionales
-    refVideoUrl,     // video de referencia / clip anterior en continuación
-    audioUrl,        // audio para lip sync
-    animateExact,    // animar foto exacta respetando fondo
-    isContinuation,  // continuación de clip anterior
+    imageUrl,       // foto principal del usuario
+    refImages,      // URLs adicionales de referencia
+    refVideoUrl,    // video de referencia
+    audioUrl,       // audio para lip sync
+    animateExact,   // animar foto exacta respetando fondo
+    isContinuation, // continuación de clip anterior
     duration    = 10,
     aspectRatio = "9:16",
     sceneMode   = "tiktok",
@@ -131,20 +143,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: spendErr.message });
   }
 
-  // ── ROUTING: ¿hay foto de persona? ───────────────────────────
-  const hasPerson = !!imageUrl;  // cualquier foto = PiAPI
+  const hasPerson   = !!imageUrl;
   const hasRefVideo = !!refVideoUrl;
-  const hasAudio    = !!audioUrl;
 
-  // Construir lista completa de imágenes (imageUrl + refImages adicionales)
+  // Lista de imágenes (principal + adicionales, máx 6 internamente)
   const allImages = [];
   if (imageUrl) allImages.push(imageUrl);
   if (Array.isArray(refImages)) {
-    for (const u of refImages) {
-      if (u && !allImages.includes(u)) allImages.push(u);
-    }
+    for (const u of refImages) if (u && !allImages.includes(u)) allImages.push(u);
   }
-  const imageList = allImages.slice(0, 6); // máx 6 según PiAPI docs
+  const imageList = allImages.slice(0, 6);
 
   let finalPrompt = String(prompt).trim();
   let mode        = "t2v";
@@ -154,51 +162,32 @@ export default async function handler(req, res) {
   try {
     if (hasPerson) {
       // ════════════════════════════════════════════════════════
-      // CON FOTO → PIAPI
+      // CON FOTO → EVOLINK Seedance 2.0 fast-image-to-video
+      // EvoLink soporta rostros reales - no hay content restriction
       // ════════════════════════════════════════════════════════
-      const inputExtra = { image_urls: imageList };
 
       if (isContinuation && hasRefVideo) {
         mode = "continuation";
-        inputExtra.video_urls = [refVideoUrl];
-        finalPrompt = `Continue this exact scene seamlessly from @Image1. Use @Video1 as full reference to maintain the same atmosphere, lighting, camera movement, color grading and visual style. Must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
-
+        finalPrompt = `Continue this exact scene seamlessly from the first frame image. Maintain the same atmosphere, lighting, camera movement, color grading and visual style. Must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
       } else if (isContinuation) {
         mode = "continuation_frame";
-        finalPrompt = `Continue this exact scene seamlessly from @Image1. Maintain the same atmosphere, lighting and visual style. ${finalPrompt}`;
-
+        finalPrompt = `Continue this exact scene seamlessly from the first frame image. Maintain the same atmosphere, lighting and visual style. ${finalPrompt}`;
       } else if (animateExact) {
         mode = "animate";
-        finalPrompt = `@Image1 Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters exactly as they appear. Only add natural movement to existing subjects. ${finalPrompt}`;
-
-      } else if (hasAudio) {
-        mode = "lipsync";
-        inputExtra.audio_urls = [audioUrl];
-        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
-        finalPrompt = `${refs} Lip sync the person to the audio in @Audio1. Mouth movements perfectly synced to the music, expressive performance. ${finalPrompt}`;
-
+        finalPrompt = `Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters exactly as they appear. Only add natural movement to existing subjects. ${finalPrompt}`;
       } else if (hasRefVideo) {
         mode = "r2v+face";
-        inputExtra.video_urls = [refVideoUrl];
-        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(", ");
-        finalPrompt = `Use the person from ${refs} as the subject. @Video1 Copy ONLY the body movement and choreography. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
-
+        finalPrompt = `The person in @image1 is the subject. Copy ONLY the body movement and choreography from the reference. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
       } else {
-        // Foto sola → imagen a video con cara del usuario
         mode = "i2v";
-        const refs = imageList.map((_, i) => `@Image${i + 1}`).join(" ");
-        finalPrompt = `${refs} ${finalPrompt}`;
+        finalPrompt = `@image1 ${finalPrompt}`;
       }
 
-      const result = await submitToPiAPI({
-        model:     PIAPI_MODEL,
-        task_type: PIAPI_TASK,
-        input: {
-          prompt:       finalPrompt,
-          duration,
-          aspect_ratio: aspectRatio,
-          ...inputExtra,
-        },
+      const result = await submitToEvoLink({
+        imageUrls:   imageList,
+        prompt:      finalPrompt,
+        duration,
+        aspectRatio,
       });
       taskId   = result.taskId;
       provider = result.provider;
@@ -210,12 +199,10 @@ export default async function handler(req, res) {
       const contentArr = [];
 
       if (hasRefVideo) {
-        // Video de referencia sin rostro → copiar movimiento puro
         mode = "r2v";
         contentArr.push({ type: "video_url", video_url: { url: refVideoUrl } });
         finalPrompt = `[Video 1] Copy ONLY the body movement from this reference. Background from prompt. ${finalPrompt}`;
       } else {
-        // Texto puro → BytePlus genera todo con IA
         mode = "t2v";
       }
 
@@ -273,7 +260,6 @@ export default async function handler(req, res) {
   }).then(({ error }) => { if (error) console.error("[generate] insert failed:", error.message); });
 
   console.log("[generate] OK", { userId, jobId, taskId, mode, provider, jadeCost });
-
   return res.status(200).json({ ok: true, jobId, taskId, mode, provider, jadeCost });
 }
 
