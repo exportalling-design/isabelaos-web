@@ -1,4 +1,5 @@
 // api/templates/poll-video.js
+// Polling para EvoLink Seedance 2.0
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
@@ -16,28 +17,39 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const { taskId } = body;
-
   if (!taskId) return res.status(400).json({ ok: false, error: "Missing taskId" });
 
   try {
-    const piRes = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
-      headers: { "x-api-key": process.env.PIAPI_KEY },
+    // EvoLink poll endpoint
+    const evolinkRes = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
+      headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
     });
 
-    const data = await piRes.json();
-    const status   = data.data?.status   || data.status;
-    const videoUrl = data.data?.output?.video_url || data.output?.video_url || null;
+    const data = await evolinkRes.json();
 
-    // Update DB if done
-    if (status === "completed" || status === "succeed") {
+    // EvoLink status: pending | processing | completed | failed
+    const status = data.status || "pending";
+
+    // Video URL en EvoLink
+    const videoUrl =
+      data.result?.video_url ||
+      data.result?.url       ||
+      data.video_url         ||
+      data.output?.video_url ||
+      null;
+
+    console.log(`[poll-video] taskId=${taskId} status=${status} videoUrl=${videoUrl ? "✓" : "null"}`);
+
+    if (status === "completed" && videoUrl) {
       await supabaseAdmin
         .from("video_jobs")
         .update({ status: "COMPLETED", provider_status: "completed", output_url: videoUrl })
         .eq("provider_request_id", taskId);
     } else if (status === "failed" || status === "error") {
+      const errMsg = data.error?.message || data.message || "EvoLink generation failed";
       await supabaseAdmin
         .from("video_jobs")
-        .update({ status: "FAILED", provider_status: "failed" })
+        .update({ status: "FAILED", provider_status: "failed", error: errMsg })
         .eq("provider_request_id", taskId);
     }
 
