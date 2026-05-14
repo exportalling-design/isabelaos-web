@@ -225,44 +225,45 @@ export default async function handler(req, res) {
 
     console.log(`[submit-video] user=${userId} template=${templateId} gender=${genderVariant} images=${imageUrls.length}`);
 
-    // ── Seedance 2 Fast — Omni Reference ──────────────────────────────────
-    const piRes = await fetch("https://api.piapi.ai/api/v1/task", {
+    // ── EvoLink — Seedance 2.0 Fast — Image to Video ──────────────────────
+    // EvoLink soporta rostros reales via API desde Abril 2026
+    const evolinkRes = await fetch("https://api.evolink.ai/v1/videos/generations", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": process.env.PIAPI_KEY },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
+      },
       body: JSON.stringify({
-        model:     "seedance",
-        task_type: "seedance-2-fast",
-        input: {
-          prompt:       promptText,
-          mode:         "omni_reference",
-          image_urls:   imageUrls,
-          duration:     15,
-          aspect_ratio: "9:16",
-          resolution:   quality === "720" ? "720p" : "480p",
-        },
+        model:        "seedance-2.0-fast-image-to-video",
+        prompt:       promptText,
+        image_urls:   imageUrls,
+        duration:     15,
+        aspect_ratio: "9:16",
+        quality:      quality === "720" ? "720p" : "480p",
+        generate_audio: true,
       }),
     });
 
-    const piData = await piRes.json();
-    console.log(`[submit-video] Seedance response code=${piData.code} taskId=${piData.data?.task_id}`);
+    const evolinkData = await evolinkRes.json();
+    console.log(`[submit-video] EvoLink response status=${evolinkData.status} id=${evolinkData.id}`);
 
-    if (!piRes.ok || (piData.code && piData.code !== 200)) {
-      throw new Error(piData.message || `PiAPI error ${piRes.status}: ${JSON.stringify(piData).slice(0,200)}`);
+    if (!evolinkRes.ok || evolinkData.error) {
+      throw new Error(evolinkData.error?.message || evolinkData.message || `EvoLink error ${evolinkRes.status}: ${JSON.stringify(evolinkData).slice(0,200)}`);
     }
 
-    const taskId = piData.data?.task_id;
-    if (!taskId) throw new Error("PiAPI no devolvió task_id");
+    const taskId = evolinkData.id;
+    if (!taskId) throw new Error("EvoLink no devolvió task id");
 
     const jobId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     await supabaseAdmin.from("video_jobs").insert({
       id: jobId, user_id: userId, status: "IN_PROGRESS", mode: "template",
-      prompt: promptText.slice(0, 500), provider: "piapi_seedance2fast",
+      prompt: promptText.slice(0, 500), provider: "evolink_seedance2fast",
       provider_request_id: taskId, provider_status: "pending",
       started_at: new Date().toISOString(),
       payload: { task_id: taskId, template_id: templateId, gender_variant: genderVariant, quality, jade_cost: jadeCost, ref },
     });
 
-    console.log(`[submit-video] OK jobId=${jobId} taskId=${taskId}`);
+    console.log(`[submit-video] EvoLink OK jobId=${jobId} taskId=${taskId}`);
     return res.status(200).json({ ok: true, jobId, taskId, jadeCost });
 
   } catch (err) {
