@@ -224,10 +224,22 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
     if (step !== "polling" || !taskId) return;
     const iv = setInterval(async () => {
       try {
-        const json = await callApi("poll-video", { taskId }); setPollCount((c) => c + 1);
-        if (json.status === "completed" || json.status === "succeed") { setVideoUrl(json.videoUrl); setStep("done"); clearInterval(iv); }
-        else if (json.status === "failed" || json.status === "error") throw new Error(lang === "es" ? "La generación falló" : "Generation failed");
-      } catch (e) { setErrorMsg(e.message); setStep("error"); clearInterval(iv); }
+        const json = await callApi("poll-video", { taskId });
+        setPollCount((c) => c + 1);
+        console.log("[poll] status=", json.status, "videoUrl=", json.videoUrl);
+        if ((json.status === "completed" || json.status === "succeed") && json.videoUrl) {
+          setVideoUrl(json.videoUrl);
+          setStep("done");
+          clearInterval(iv);
+        } else if (json.status === "failed" || json.status === "error") {
+          throw new Error(json.error || (lang === "es" ? "La generación falló" : "Generation failed"));
+        }
+        // status === "processing" || "pending" → seguir esperando
+      } catch (e) {
+        setErrorMsg(e.message || (lang === "es" ? "Error de conexión" : "Connection error"));
+        setStep("error");
+        clearInterval(iv);
+      }
     }, 6000);
     return () => clearInterval(iv);
   }, [step, taskId]);
