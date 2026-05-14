@@ -280,7 +280,7 @@ export default async function handler(req, res) {
         prompt:         promptText,
         image_urls:     imageUrls,
         duration:       15,
-        aspect_ratio:   "9:16",
+        aspect_ratio:   "21:9",
         quality:        quality === "720" ? "720p" : "480p",
         generate_audio: true,
       }),
