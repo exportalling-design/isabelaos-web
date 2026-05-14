@@ -211,16 +211,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    // URLs → image_urls array para Seedance Omni Reference
-    const imageUrls = [faceUrl];
-    if (profileUrl) imageUrls.push(profileUrl);
-    if (face2Url)   imageUrls.push(face2Url);
-    if (profile2Url) imageUrls.push(profile2Url);
+    // EvoLink fast-image-to-video acepta máximo 2 imágenes:
+    // 1 imagen = first-frame animation
+    // 2 imágenes = first-frame (frontal) + last-frame (perfil) → mejor consistencia de identidad
+    // Para variante "both" (2 personas): enviamos las 2 fotos frontales (una por persona)
+    let imageUrls;
+    if (genderVariant === "both") {
+      // 2 personas: foto frontal del hombre + foto frontal de la mujer
+      imageUrls = [faceUrl, face2Url].filter(Boolean);
+    } else {
+      // 1 persona: foto frontal + foto de perfil lateral (si existe)
+      imageUrls = [faceUrl, profileUrl].filter(Boolean);
+    }
+    // Máximo 2 imágenes según especificaciones de EvoLink
+    imageUrls = imageUrls.slice(0, 2);
 
     let promptText = getPrompt(templateId, genderVariant, lang);
     if (bodyUrl) {
-      imageUrls.push(bodyUrl);
-      promptText += "\n\n[BODY REFERENCE: Use ONLY for body proportions. Do NOT copy the clothing — use completely different scene-appropriate clothing.]";
+      promptText += "\n\n[BODY PROPORTIONS REFERENCE: Use the body proportions suggested by the scene description. Do NOT copy any clothing from reference images — use completely different scene-appropriate clothing as described in the prompt.]";
     }
 
     console.log(`[submit-video] user=${userId} template=${templateId} gender=${genderVariant} images=${imageUrls.length}`);
@@ -234,9 +242,10 @@ export default async function handler(req, res) {
         "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
       },
       body: JSON.stringify({
-        // reference-to-video: soporta múltiples imágenes de referencia con @image1, @image2
-        // Es el modelo correcto para identidad facial — fast-image-to-video solo acepta 1-2 imágenes sin referencias
-        model:          "seedance-2.0-fast-reference-to-video",
+        // fast-image-to-video: acepta 1-2 imágenes (frontal + perfil lateral)
+        // 1 imagen = first-frame animation, 2 imágenes = first+last frame
+        // Soporta rostros reales en EvoLink desde Abril 2026
+        model:          "seedance-2.0-fast-image-to-video",
         prompt:         promptText,
         image_urls:     imageUrls,
         duration:       15,
