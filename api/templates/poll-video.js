@@ -26,16 +26,19 @@ export default async function handler(req, res) {
     });
 
     const data = await evolinkRes.json();
+    console.log(`[poll-video] EvoLink raw response:`, JSON.stringify(data).slice(0, 300));
 
     // EvoLink status: pending | processing | completed | failed
     const status = data.status || "pending";
 
-    // Video URL en EvoLink
+    // Según docs oficiales EvoLink: video URL viene en results[] array
     const videoUrl =
-      data.result?.video_url ||
-      data.result?.url       ||
-      data.video_url         ||
-      data.output?.video_url ||
+      data.results?.[0]?.url        ||
+      data.results?.[0]?.video_url  ||
+      data.result?.url              ||
+      data.result?.video_url        ||
+      data.video_url                ||
+      data.output?.video_url        ||
       null;
 
     console.log(`[poll-video] taskId=${taskId} status=${status} videoUrl=${videoUrl ? "✓" : "null"}`);
