@@ -81,7 +81,6 @@ function PersonUploadBlock({ slotKey, slotLabel, faceData, profileData, onFaceUp
     <div style={{ marginBottom: 20 }}>
       {slotLabel && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginBottom: 10, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>{slotLabel}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {/* Foto frontal */}
         <div>
           <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
             {lang === "es" ? "📸 Foto frontal" : "📸 Front photo"}
@@ -95,10 +94,9 @@ function PersonUploadBlock({ slotKey, slotLabel, faceData, profileData, onFaceUp
           />
           {faceData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
         </div>
-        {/* Foto de perfil lateral */}
         <div>
           <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
-            {lang === "es" ? "🔄 Foto de perfil" : "🔄 Profile photo"}
+            {lang === "es" ? "🔄 Foto de perfil" : "🔄 Side profile"}
           </div>
           <UploadZone
             label={lang === "es" ? "Foto lateral" : "Side photo"}
@@ -110,11 +108,10 @@ function PersonUploadBlock({ slotKey, slotLabel, faceData, profileData, onFaceUp
           {profileData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
         </div>
       </div>
-      {/* Tip */}
       <div style={{ marginTop: 8, fontSize: 10, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px", lineHeight: 1.6 }}>
         💡 {lang === "es"
-          ? "Mejor resultado: ambas fotos con buena luz, sin lentes, sin filtros, fondo simple."
-          : "Best result: both photos with good lighting, no glasses, no filters, simple background."}
+          ? "Sin lentes · Sin filtros · Buena iluminación · Fondo simple. La IA genera expresiones emocionales intensas."
+          : "No glasses · No filters · Good lighting · Simple background. AI generates intense emotional expressions."}
       </div>
     </div>
   );
@@ -319,8 +316,8 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
             {lang === "es"
-              ? "📌 Sube 2 fotos: una de frente y una de perfil (lado). Esto ayuda a la IA a reconocer mejor tu rostro. Sin lentes · Sin filtros · Buena iluminación"
-              : "📌 Upload 2 photos: one front-facing and one profile (side). This helps AI recognize your face better. No glasses · No filters · Good lighting"}
+              ? "📌 Sube 2 fotos: frontal y perfil lateral. Más referencias = mejor identidad. Sin lentes · Sin filtros · Buena iluminación"
+              : "📌 Upload 2 photos: front and side profile. More references = better identity. No glasses · No filters · Good lighting"}
           </div>
 
           {currentSlots.map((slotKey) => (
