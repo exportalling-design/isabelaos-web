@@ -255,6 +255,13 @@ export default async function handler(req, res) {
     }
     imageUrls = imageUrls.slice(0, 2);
 
+    // Parámetros por plantilla:
+    // Drama → 21:9 Cinemascope épico, 10s
+    // Victoria's Secret → 9:16 vertical Instagram, 10s
+    const isDrama = ["divineLight", "divineHuman", "coupleDisaster"].includes(templateId);
+    const videoAspectRatio = isDrama ? "21:9" : "9:16";
+    const videoDuration    = 10;
+
     let promptText = getPrompt(templateId, genderVariant, lang);
     if (bodyUrl) {
       imageUrls.push(bodyUrl);
@@ -279,8 +286,9 @@ export default async function handler(req, res) {
         model:          "seedance-2.0-fast-image-to-video",
         prompt:         promptText,
         image_urls:     imageUrls,
-        duration:       15,
-        aspect_ratio:   "21:9",
+        // duration set dynamically above
+        aspect_ratio:   videoAspectRatio,
+        duration:       videoDuration,
         quality:        quality === "720" ? "720p" : "480p",
         generate_audio: true,
       }),
