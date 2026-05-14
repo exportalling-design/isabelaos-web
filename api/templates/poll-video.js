@@ -27,11 +27,16 @@ async function uploadToStorage(buf, userId, jobId) {
   return data.publicUrl;
 }
 
-// Extrae video URL de la respuesta de EvoLink — cubre todas las rutas posibles
+// Extrae video URL de la respuesta de EvoLink
+// EvoLink devuelve results como array de strings directos: ["https://files.evolink.ai/...mp4"]
 function extractEvoLinkVideoUrl(data) {
+  // results es array de strings — el primero es la URL del video
+  if (Array.isArray(data?.results) && data.results.length > 0) {
+    const first = data.results[0];
+    if (typeof first === "string" && first.startsWith("http")) return first;
+    if (typeof first === "object") return first?.url || first?.video_url || null;
+  }
   return (
-    data?.results?.[0]?.url        ||
-    data?.results?.[0]?.video_url  ||
     data?.result?.url              ||
     data?.result?.video_url        ||
     data?.output?.video_url        ||
