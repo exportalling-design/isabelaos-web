@@ -79,13 +79,19 @@ export default async function handler(req, res) {
     });
 
     const data = await evolinkRes.json();
-    console.log(`[poll-video] EvoLink taskId=${taskId} status=${data.status} raw=${JSON.stringify(data).slice(0, 400)}`);
-
     const status = data.status || "pending";
+    console.log(`[poll-video] EvoLink taskId=${taskId} status=${status} progress=${data.progress}`);
+
+    // Si EvoLink devuelve error HTTP
+    if (!evolinkRes.ok) {
+      console.error(`[poll-video] EvoLink HTTP error ${evolinkRes.status}:`, JSON.stringify(data).slice(0, 300));
+      return res.status(200).json({ ok: true, status: "processing" }); // retry
+    }
 
     // ── 3. Si falló ─────────────────────────────────────────────
     if (status === "failed" || status === "error") {
       const errMsg = data.error?.message || data.message || "EvoLink generation failed";
+      console.error(`[poll-video] EvoLink FAILED:`, errMsg);
       await supabaseAdmin
         .from("video_jobs")
         .update({ status: "FAILED", provider_status: "failed", error: errMsg })
@@ -95,7 +101,7 @@ export default async function handler(req, res) {
 
     // ── 4. Si todavía procesando ────────────────────────────────
     if (status !== "completed" && status !== "succeed") {
-      return res.status(200).json({ ok: true, status: "processing" });
+      return res.status(200).json({ ok: true, status: "processing", progress: data.progress || 0 });
     }
 
     // ── 5. Completado — extraer URL del video ───────────────────
