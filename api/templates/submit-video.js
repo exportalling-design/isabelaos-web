@@ -6,10 +6,10 @@ import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
 const JADE_COST = { "480": 30, "720": 60 };
 
-const R1_EN = "The main character's face and appearance must EXACTLY match the provided reference images (image1 = front face photo, image2 = side profile photo). Preserve exact skin tone, eye shape, nose, lips, hair and all facial features. Maintain consistent identity throughout all shots.";
-const R1_ES = "El rostro del personaje principal debe coincidir EXACTAMENTE con las imágenes de referencia (imagen1 = foto frontal del rostro, imagen2 = foto de perfil lateral). Preservar tono de piel exacto, forma de ojos, nariz, labios, cabello y todos los rasgos faciales. Mantener identidad consistente en todos los planos.";
-const R2_EN = "The MAN's face must match image1 (front face) and image2 (side profile). The WOMAN's face must match image3 (front face) and image4 (side profile). Maintain consistent identity for both characters throughout all shots.";
-const R2_ES = "El rostro del HOMBRE debe coincidir con imagen1 (frontal) e imagen2 (perfil lateral). El rostro de la MUJER debe coincidir con imagen3 e imagen4. Mantener identidad consistente para ambos personajes en todos los planos.";
+const R1_EN = "@image1 is the front face reference of the main character. @image2 is the side profile reference. The character's face must EXACTLY match these references — preserve exact skin tone, eye shape, nose, lips, hair and all facial features throughout all shots.";
+const R1_ES = "@image1 es la foto frontal de referencia del personaje principal. @image2 es el perfil lateral. El rostro del personaje debe coincidir EXACTAMENTE con estas referencias — preservar tono de piel, forma de ojos, nariz, labios, cabello y todos los rasgos faciales en todos los planos.";
+const R2_EN = "@image1 is the front face of the MAN. @image2 is the side profile of the MAN. @image3 is the front face of the WOMAN. @image4 is the side profile of the WOMAN. Maintain consistent identity for both characters throughout all shots.";
+const R2_ES = "@image1 es el rostro frontal del HOMBRE. @image2 es el perfil lateral del HOMBRE. @image3 es el rostro frontal de la MUJER. @image4 es el perfil lateral de la MUJER. Mantener identidad consistente para ambos personajes en todos los planos.";
 
 const PROMPTS = {
 
@@ -234,12 +234,14 @@ export default async function handler(req, res) {
         "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
       },
       body: JSON.stringify({
-        model:        "seedance-2.0-fast-image-to-video",
-        prompt:       promptText,
-        image_urls:   imageUrls,
-        duration:     15,
-        aspect_ratio: "9:16",
-        quality:      quality === "720" ? "720p" : "480p",
+        // reference-to-video: soporta múltiples imágenes de referencia con @image1, @image2
+        // Es el modelo correcto para identidad facial — fast-image-to-video solo acepta 1-2 imágenes sin referencias
+        model:          "seedance-2.0-fast-reference-to-video",
+        prompt:         promptText,
+        image_urls:     imageUrls,
+        duration:       15,
+        aspect_ratio:   "9:16",
+        quality:        quality === "720" ? "720p" : "480p",
         generate_audio: true,
       }),
     });
