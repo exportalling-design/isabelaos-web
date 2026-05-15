@@ -86,19 +86,17 @@ function ViralPopup({ onClose, onGoTemplates, isEs }) {
         {/* Content */}
         <div style={{ padding: "22px 26px 26px" }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 10 }}>
-            {isEs ? "¿Quieres aparecer en este video?" : "Want to appear in this video?"}
+            Want to appear in this video?
           </div>
           <p style={{ fontSize: 13, color: "rgba(240,236,228,0.6)", lineHeight: 1.7, marginBottom: 18 }}>
-            {isEs
-              ? "Ya puedes recrear esta escena épica subiendo únicamente tu foto. La IA te pone como protagonista. Disponible ahora en Plantillas Épicas."
-              : "You can now recreate this epic scene by uploading just your photo. AI places you as the protagonist. Available now in Epic Templates."}
+            You can now recreate this epic scene by uploading just your photo. AI places you as the protagonist in seconds. Available now in Epic Templates — free to try with your 10 Jades.
           </p>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={onGoTemplates} style={{ flex: 1, background: "linear-gradient(135deg,#C8A96E,#e8c97a)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
-              ⚡ {isEs ? "Ir a Plantillas" : "Go to Templates"}
+              ⚡ Try Epic Templates →
             </button>
             <button onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "14px", cursor: "pointer" }}>
-              {isEs ? "Ver más tarde" : "Maybe later"}
+              Maybe later
             </button>
           </div>
         </div>
@@ -118,18 +116,18 @@ function WelcomeToast({ isEs, onDismiss, onGoGenerator }) {
       <div style={{ fontSize: 28, flexShrink: 0 }}>🎉</div>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
-          {isEs ? "¡Bienvenido! Tienes 10 Jades" : "Welcome! You have 10 Jades"}
+          Welcome! You have 10 free Jades
         </div>
         <div style={{ fontSize: 12, color: "rgba(240,236,228,0.55)", lineHeight: 1.5 }}>
-          {isEs ? "Úsalos creando imágenes en el módulo Imagen IA." : "Use them to create images in the AI Image module."}
+          Use them now to generate AI images — no credit card needed.
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
         <button onClick={onGoGenerator} style={{ background: "#C8A96E", border: "none", borderRadius: 8, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 11, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-          🖼️ {isEs ? "Crear imagen" : "Create image"}
+          🖼️ Create image now
         </button>
         <button onClick={onDismiss} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>
-          {isEs ? "Cerrar" : "Dismiss"}
+          Dismiss
         </button>
       </div>
     </div>
