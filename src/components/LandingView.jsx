@@ -1,31 +1,19 @@
 // src/components/LandingView.jsx — IsabelaOS Studio v7
-// FIXES COMPLETOS:
-//   ✅ Barra superior Seedance 2.0 de esquina a esquina
-//   ✅ Demo box efecto 3D perspectiva desde esquina
-//   ✅ Shimmer/luz en letras PROTAGONISTA
-//   ✅ Todos los videos autoplay sin hover
-//   ✅ Videos 9:16 correctamente encuadrados
-//   ✅ Módulos como overlay sobre la página (sin nueva página)
-//   ✅ Menú lateral desplegable solo al hover
-//   ✅ Videos Comercial IA (Chef, Producto) en galería
-//   ✅ Todos los módulos en panel del usuario logueado
-//   ✅ Logo con video opcional
-//   ✅ Plantillas Épicas agregado
+// PATCHES:
+//   ✅ Popup viral divine-light.mp4 al entrar
+//   ✅ Globo 🌐 visible en mobile (fuera de lo-nav-links-desktop)  
+//   ✅ Toast de bienvenida 10 Jades al registrarse
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
 
 function scrollTo(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
-
-// Video con autoplay real
 function AV({ src, className }) {
   const r = useRef(null);
   useEffect(() => { r.current?.play().catch(() => {}); }, []);
   return <video ref={r} src={src} className={className} muted loop playsInline autoPlay />;
 }
-
-// Contador animado
 function Ctr({ end, suffix = "" }) {
   const [n, setN] = useState(0);
   const ref = useRef(null);
@@ -48,44 +36,18 @@ function Ctr({ end, suffix = "" }) {
   }, [end]);
   return <span ref={ref}>{n.toLocaleString()}{suffix}</span>;
 }
-
-// Menú hover
 function HoverMenu({ modules, onSelect, isEs }) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ position: "relative" }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}>
-      <button style={{
-        display: "flex", alignItems: "center", gap: 6,
-        background: "rgba(255,90,0,0.1)", border: "1px solid rgba(255,90,0,0.25)",
-        borderRadius: 9, padding: "7px 13px", cursor: "pointer",
-        color: "#ffb300", fontFamily: "'Space Grotesk',sans-serif",
-        fontSize: 13, fontWeight: 600, transition: "all .2s",
-      }}>
+    <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,90,0,0.1)", border: "1px solid rgba(255,90,0,0.25)", borderRadius: 9, padding: "7px 13px", cursor: "pointer", color: "#ffb300", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 600, transition: "all .2s" }}>
         ☰ <span style={{ fontSize: 11 }}>{isEs ? "Módulos" : "Modules"}</span>
       </button>
-      <div style={{
-        position: "absolute", top: "calc(100% + 8px)", right: 0,
-        background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)",
-        borderRadius: 14, padding: 8, minWidth: 200,
-        backdropFilter: "blur(30px)",
-        opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)",
-        pointerEvents: open ? "all" : "none", transition: "all .2s",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100,
-      }}>
+      <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 200, backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
         {modules.map(m => (
-          <button key={m.key} onClick={() => { onSelect(m.key); setOpen(false); }}
-            style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              background: "none", border: "none", color: "rgba(240,236,228,0.75)",
-              fontFamily: "'Space Grotesk',sans-serif", fontSize: 13,
-              padding: "9px 12px", cursor: "pointer", borderRadius: 8,
-              transition: "all .15s", textAlign: "left",
-            }}
+          <button key={m.key} onClick={() => { onSelect(m.key); setOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", color: "rgba(240,236,228,0.75)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "9px 12px", cursor: "pointer", borderRadius: 8, transition: "all .15s", textAlign: "left" }}
             onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.75)"; }}
-          >
+            onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.75)"; }}>
             <span style={{ fontSize: 16 }}>{m.icon}</span> {m.label}
           </button>
         ))}
@@ -93,46 +55,82 @@ function HoverMenu({ modules, onSelect, isEs }) {
     </div>
   );
 }
-
-// Overlay módulo
 function ModOverlay({ title, onClose, children }) {
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
-  }, []);
+  useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
   return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{
-      position: "fixed", inset: 0, zIndex: 500,
-      background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center",
-      padding: "96px 16px 16px", overflowY: "auto",
-      animation: "moIn .3s ease",
-    }}>
-      <div style={{
-        width: "100%", maxWidth: 1200, flexShrink: 0,
-        background: "#0d1017", border: "1px solid rgba(255,90,0,0.15)",
-        borderRadius: 24, overflow: "hidden",
-        animation: "moPIn .3s ease",
-      }}>
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)",
-          background: "rgba(255,90,0,0.05)", position: "sticky", top: 0,
-          backdropFilter: "blur(20px)", zIndex: 10,
-        }}>
-          <button onClick={onClose} style={{
-            display: "flex", alignItems: "center", gap: 8,
-            background: "none", border: "none", color: "#ff5a00",
-            fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600,
-            cursor: "pointer",
-          }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title}</button>
-          <button onClick={onClose} style={{
-            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, color: "rgba(240,236,228,0.5)", fontSize: 16,
-            padding: "4px 12px", cursor: "pointer",
-          }}>✕</button>
+    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "96px 16px 16px", overflowY: "auto", animation: "moIn .3s ease" }}>
+      <div style={{ width: "100%", maxWidth: 1200, flexShrink: 0, background: "#0d1017", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 24, overflow: "hidden", animation: "moPIn .3s ease" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,90,0,0.05)", position: "sticky", top: 0, backdropFilter: "blur(20px)", zIndex: 10 }}>
+          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#ff5a00", fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title}</button>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "rgba(240,236,228,0.5)", fontSize: 16, padding: "4px 12px", cursor: "pointer" }}>✕</button>
         </div>
         <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── POPUP VIRAL ─────────────────────────────────────────────────────────────
+function ViralPopup({ onClose, onGoTemplates, isEs }) {
+  useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.9)", backdropFilter: "blur(16px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", animation: "moIn .35s ease" }}>
+      <div style={{ width: "100%", maxWidth: 500, background: "#0a0c12", border: "1px solid rgba(200,169,110,0.4)", borderRadius: 24, overflow: "hidden", animation: "moPIn .4s ease", boxShadow: "0 0 100px rgba(200,169,110,0.2), 0 40px 80px rgba(0,0,0,0.8)" }}>
+        {/* Video */}
+        <div style={{ position: "relative", aspectRatio: "21/9", overflow: "hidden" }}>
+          <video src="/gallery/divine-light.mp4" autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, #0a0c12 100%)" }} />
+          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 34, height: 34, cursor: "pointer", color: "#fff", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>✕</button>
+          <div style={{ position: "absolute", top: 12, left: 12, background: "#C8A96E", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase" }}>⚡ NUEVO</div>
+        </div>
+        {/* Content */}
+        <div style={{ padding: "22px 26px 26px" }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 10 }}>
+            {isEs ? "¿Quieres aparecer en este video?" : "Want to appear in this video?"}
+          </div>
+          <p style={{ fontSize: 13, color: "rgba(240,236,228,0.6)", lineHeight: 1.7, marginBottom: 18 }}>
+            {isEs
+              ? "Ya puedes recrear esta escena épica subiendo únicamente tu foto. La IA te pone como protagonista. Disponible ahora en Plantillas Épicas."
+              : "You can now recreate this epic scene by uploading just your photo. AI places you as the protagonist. Available now in Epic Templates."}
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onGoTemplates} style={{ flex: 1, background: "linear-gradient(135deg,#C8A96E,#e8c97a)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
+              ⚡ {isEs ? "Ir a Plantillas" : "Go to Templates"}
+            </button>
+            <button onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "14px", cursor: "pointer" }}>
+              {isEs ? "Ver más tarde" : "Maybe later"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── WELCOME TOAST ────────────────────────────────────────────────────────────
+function WelcomeToast({ isEs, onDismiss, onGoGenerator }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 8000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 8000, width: "calc(100% - 32px)", maxWidth: 460, background: "linear-gradient(135deg,rgba(13,16,23,0.98),rgba(13,16,23,0.95))", border: "1px solid rgba(200,169,110,0.4)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 20px 60px rgba(0,0,0,0.7)", display: "flex", alignItems: "center", gap: 14, animation: "moPIn .4s ease" }}>
+      <div style={{ fontSize: 28, flexShrink: 0 }}>🎉</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
+          {isEs ? "¡Bienvenido! Tienes 10 Jades" : "Welcome! You have 10 Jades"}
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(240,236,228,0.55)", lineHeight: 1.5 }}>
+          {isEs ? "Úsalos creando imágenes en el módulo Imagen IA." : "Use them to create images in the AI Image module."}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+        <button onClick={onGoGenerator} style={{ background: "#C8A96E", border: "none", borderRadius: 8, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 11, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          🖼️ {isEs ? "Crear imagen" : "Create image"}
+        </button>
+        <button onClick={onDismiss} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>
+          {isEs ? "Cerrar" : "Dismiss"}
+        </button>
       </div>
     </div>
   );
@@ -146,6 +144,32 @@ export default function LandingView({
   const isEs = lang === "es";
   const [scrolled, setScrolled] = useState(false);
   const [demoText, setDemoText] = useState("");
+  const [showViralPopup, setShowViralPopup] = useState(false);
+  const [showWelcomeToast, setShowWelcomeToast] = useState(false);
+  const prevUser = useRef(null);
+
+  // Popup viral — 1.5s después de entrar, solo una vez por sesión
+  useEffect(() => {
+    const shown = sessionStorage.getItem("viralPopupShown");
+    if (!shown) {
+      const t = setTimeout(() => {
+        setShowViralPopup(true);
+        sessionStorage.setItem("viralPopupShown", "1");
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // Toast de bienvenida — cuando el usuario se acaba de registrar (user aparece por primera vez)
+  useEffect(() => {
+    if (user && !prevUser.current) {
+      // Verificar si es registro nuevo: created_at dentro de los últimos 2 minutos
+      const createdAt = user.created_at ? new Date(user.created_at).getTime() : 0;
+      const isNewUser = Date.now() - createdAt < 2 * 60 * 1000;
+      if (isNewUser) setShowWelcomeToast(true);
+    }
+    prevUser.current = user;
+  }, [user]);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 50);
@@ -159,37 +183,19 @@ export default function LandingView({
   }, [setActiveModule]);
 
   const MODS = [
-    { key: "cineai",     icon: "🎬", label: "CineAI",           color: "#ff5a00", badge: "🔥 NUEVO",
-      desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face",
-      vid: "/gallery/cineai-fight.mp4" },
-    { key: "templates",  icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO",
-      desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face",
-      vid: "/gallery/divine-light.mp4" },
-    { key: "photoshoot", icon: "📸", label: "Photoshoot",        color: "#f59e0b", badge: "📸",
-      desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds",
-      vid: "/gallery/comercial-product.mp4" },
-    { key: "avatars",    icon: "👤", label: isEs?"Avatares":"Avatars", color: "#a855f7", badge: "👤",
-      desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face",
-      vid: "/gallery/avatar-demo.mp4" },
-    { key: "comercial",  icon: "🎙️", label: "Comercial IA",      color: "#10b981", badge: "🎙️",
-      desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice",
-      vid: "/gallery/comercial-chef.mp4" },
-    { key: "montaje",    icon: "✨", label: "Montaje IA",         color: "#f43f5e", badge: "✨",
-      desc: isEs ? "Personas y productos en cualquier escenario" : "People and products in any scenario",
-      vid: "/gallery/montaje-demo.mp4" },
-    { key: "generator",  icon: "🖼️", label: isEs?"Imagen IA":"AI Image", color: "#06b6d4", badge: "🖼️",
-      desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX",
-      vid: null },
-    { key: "img2video",  icon: "🎥", label: "Imagen → Video",    color: "#8b5cf6", badge: "🎥",
-      desc: isEs ? "Convierte tus fotos en videos" : "Convert your photos to videos",
-      vid: null },
-    { key: "library",    icon: "📂", label: isEs?"Biblioteca":"Library", color: "#64748b", badge: "📂",
-      desc: isEs ? "Tus creaciones guardadas" : "Your saved creations",
-      vid: null },
+    { key: "cineai",     icon: "🎬", label: "CineAI",           color: "#ff5a00", badge: "🔥 NUEVO", desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
+    { key: "templates",  icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO", desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face", vid: "/gallery/divine-light.mp4" },
+    { key: "photoshoot", icon: "📸", label: "Photoshoot",        color: "#f59e0b", badge: "📸", desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds", vid: "/gallery/comercial-product.mp4" },
+    { key: "avatars",    icon: "👤", label: isEs?"Avatares":"Avatars", color: "#a855f7", badge: "👤", desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face", vid: "/gallery/avatar-demo.mp4" },
+    { key: "comercial",  icon: "🎙️", label: "Comercial IA",      color: "#10b981", badge: "🎙️", desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice", vid: "/gallery/comercial-chef.mp4" },
+    { key: "montaje",    icon: "✨", label: "Montaje IA",         color: "#f43f5e", badge: "✨", desc: isEs ? "Personas y productos en cualquier escenario" : "People and products in any scenario", vid: "/gallery/montaje-demo.mp4" },
+    { key: "generator",  icon: "🖼️", label: isEs?"Imagen IA":"AI Image", color: "#06b6d4", badge: "🖼️", desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX", vid: null },
+    { key: "img2video",  icon: "🎥", label: "Imagen → Video",    color: "#8b5cf6", badge: "🎥", desc: isEs ? "Convierte tus fotos en videos" : "Convert your photos to videos", vid: null },
+    { key: "library",    icon: "📂", label: isEs?"Biblioteca":"Library", color: "#64748b", badge: "📂", desc: isEs ? "Tus creaciones guardadas" : "Your saved creations", vid: null },
   ];
 
   const GAL = [
-    { src: "/gallery/hero-bg.mp4",           tag: "🎬 CineAI",    label: isEs?"Drone ciudad noche":"City drone night",   wide: true },
+    { src: "/gallery/hero-bg.mp4",           tag: "🎬 CineAI",    label: isEs?"Drone ciudad noche":"City drone night", wide: true },
     { src: "/gallery/cineai-fight.mp4",      tag: "🎬 CineAI",    label: isEs?"Escena épica":"Epic scene" },
     { src: "/gallery/cineai-drama.mp4",      tag: "🎬 CineAI",    label: isEs?"Drama cinematográfico":"Cinematic drama" },
     { src: "/gallery/cineai-rain.mp4",       tag: "🎬 CineAI",    label: isEs?"Mujer bajo la lluvia":"Woman in rain" },
@@ -209,15 +215,7 @@ export default function LandingView({
     @keyframes shine{0%{background-position:200% center}100%{background-position:-200% center}}
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
     @keyframes floatUp{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-    .lo-shimmer{
-      background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);
-      background-size:200% auto;
-      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-      animation:shine 3s linear infinite;
-      filter:drop-shadow(0 0 20px rgba(255,90,0,.3));
-    }
-
-    /* ── RESPONSIVE MOBILE ── */
+    .lo-shimmer{background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:shine 3s linear infinite;filter:drop-shadow(0 0 20px rgba(255,90,0,.3));}
     @media(max-width:900px){
       .lo-hero-grid{grid-template-columns:1fr!important;min-height:auto!important;}
       .lo-hero-left{min-height:60vh;}
@@ -247,30 +245,34 @@ export default function LandingView({
     }
   `;
 
-  const V = {
-    fire: "#ff5a00", gold: "#ffb300",
-    bg: "#080a0e", bg2: "#0d1017",
-    border: "rgba(255,90,0,0.12)", border2: "rgba(255,255,255,0.07)",
-    text: "#f0ece4", muted: "rgba(240,236,228,0.45)",
-    ffD: "'Bebas Neue',sans-serif",
-    ffB: "'DM Sans',sans-serif",
-    ffU: "'Space Grotesk',sans-serif",
-  };
-
-  const s = {
-    btn: (hot) => ({
-      width: "100%", borderRadius: 11, fontSize: 13, fontWeight: 700,
-      padding: "11px", cursor: "pointer", transition: "all .2s", marginTop: 14,
-      fontFamily: V.ffU,
-      ...(hot
-        ? { background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", color: "#000", boxShadow: `0 0 24px rgba(255,90,0,.3)` }
-        : { background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.12)", color: "#fff" })
-    }),
-  };
+  const V = { fire:"#ff5a00",gold:"#ffb300",bg:"#080a0e",bg2:"#0d1017",border:"rgba(255,90,0,0.12)",border2:"rgba(255,255,255,0.07)",text:"#f0ece4",muted:"rgba(240,236,228,0.45)",ffD:"'Bebas Neue',sans-serif",ffB:"'DM Sans',sans-serif",ffU:"'Space Grotesk',sans-serif" };
+  const s = { btn:(hot)=>({width:"100%",borderRadius:11,fontSize:13,fontWeight:700,padding:"11px",cursor:"pointer",transition:"all .2s",marginTop:14,fontFamily:V.ffU,...(hot?{background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",color:"#000",boxShadow:`0 0 24px rgba(255,90,0,.3)`}:{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.12)",color:"#fff"})}) };
 
   return (
     <div style={{ fontFamily: V.ffB, background: V.bg, color: V.text, overflowX: "hidden", minHeight: "100vh" }}>
       <style>{CSS}</style>
+
+      {/* POPUP VIRAL */}
+      {showViralPopup && (
+        <ViralPopup
+          isEs={isEs}
+          onClose={() => setShowViralPopup(false)}
+          onGoTemplates={() => {
+            setShowViralPopup(false);
+            if (user) go("templates");
+            else onOpenAuth();
+          }}
+        />
+      )}
+
+      {/* WELCOME TOAST */}
+      {showWelcomeToast && (
+        <WelcomeToast
+          isEs={isEs}
+          onDismiss={() => setShowWelcomeToast(false)}
+          onGoGenerator={() => { setShowWelcomeToast(false); go("generator"); }}
+        />
+      )}
 
       {/* OVERLAY MÓDULO */}
       {activeModule && children && (
@@ -280,66 +282,50 @@ export default function LandingView({
       )}
 
       {/* BARRA SEEDANCE */}
-      <div
-        onClick={() => user ? go("cineai") : onOpenAuth()}
-        style={{
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 300,
-          height: 36, display: "flex", alignItems: "center", justifyContent: "center",
-          background: "linear-gradient(90deg,#1a0800,#2e1300,#1a0800)",
-          borderBottom: "1px solid rgba(255,90,0,.3)",
-          cursor: "pointer", overflow: "hidden",
-        }}
-      >
-        <div style={{ position: "absolute", top: 0, width: "40%", height: "100%",
-          background: "linear-gradient(90deg,transparent,rgba(255,179,0,.15),transparent)",
-          animation: "seedSlide 3s infinite", left: "-100%" }} />
-        <div className="lo-seedbar-text" style={{ fontFamily: V.ffU, fontSize: 12, fontWeight: 700, letterSpacing: 2,
-          color: V.gold, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, zIndex: 1 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
-          <span style={{ background: "rgba(255,90,0,.2)", border: "1px solid rgba(255,90,0,.4)", borderRadius: 4, padding: "2px 8px", fontSize: 10, color: V.fire }}>NUEVO</span>
-          {isEs ? "⚡ SEEDANCE 2.0 YA DISPONIBLE EN ISABELAOS" : "⚡ SEEDANCE 2.0 NOW AVAILABLE ON ISABELAOS"}
-          <span style={{ background: "rgba(255,90,0,.2)", border: "1px solid rgba(255,90,0,.4)", borderRadius: 4, padding: "2px 8px", fontSize: 10, color: V.fire }}>→</span>
+      <div onClick={() => user ? go("cineai") : onOpenAuth()} style={{ position:"fixed",top:0,left:0,right:0,zIndex:300,height:36,display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(90deg,#1a0800,#2e1300,#1a0800)",borderBottom:"1px solid rgba(255,90,0,.3)",cursor:"pointer",overflow:"hidden" }}>
+        <div style={{ position:"absolute",top:0,width:"40%",height:"100%",background:"linear-gradient(90deg,transparent,rgba(255,179,0,.15),transparent)",animation:"seedSlide 3s infinite",left:"-100%" }} />
+        <div className="lo-seedbar-text" style={{ fontFamily:V.ffU,fontSize:12,fontWeight:700,letterSpacing:2,color:V.gold,textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,zIndex:1 }}>
+          <span style={{ width:6,height:6,borderRadius:"50%",background:V.fire,animation:"blink 1.5s infinite" }} />
+          <span style={{ background:"rgba(255,90,0,.2)",border:"1px solid rgba(255,90,0,.4)",borderRadius:4,padding:"2px 8px",fontSize:10,color:V.fire }}>NUEVO</span>
+          {isEs?"⚡ SEEDANCE 2.0 YA DISPONIBLE EN ISABELAOS":"⚡ SEEDANCE 2.0 NOW AVAILABLE ON ISABELAOS"}
+          <span style={{ background:"rgba(255,90,0,.2)",border:"1px solid rgba(255,90,0,.4)",borderRadius:4,padding:"2px 8px",fontSize:10,color:V.fire }}>→</span>
         </div>
       </div>
 
       {/* NAV */}
-      <nav style={{
-        position: "fixed", top: 36, left: 0, right: 0, zIndex: 200,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 32px", height: 60, transition: "all .3s",
-        ...(scrolled ? { background: "rgba(8,10,14,.94)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,.07)" } : {}),
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => scrollTo("hero")}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 9, overflow: "hidden",
-            background: `linear-gradient(135deg,${V.fire},${V.gold})`,
-            display: "grid", placeItems: "center", position: "relative",
-            boxShadow: `0 0 20px rgba(255,90,0,.4)`,
-          }}>
-            <video src="/gallery/logo.mp4" autoPlay muted loop playsInline
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
-              onError={e => e.target.style.display = "none"} />
-            <span style={{ fontFamily: V.ffU, fontSize: 13, fontWeight: 700, color: "#000", position: "relative", zIndex: 1 }}>io</span>
+      <nav style={{ position:"fixed",top:36,left:0,right:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",height:60,transition:"all .3s",...(scrolled?{background:"rgba(8,10,14,.94)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(255,255,255,.07)"}:{}) }}>
+        {/* LOGO */}
+        <div style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer",flexShrink:0 }} onClick={() => scrollTo("hero")}>
+          <div style={{ width:36,height:36,borderRadius:9,overflow:"hidden",background:`linear-gradient(135deg,${V.fire},${V.gold})`,display:"grid",placeItems:"center",position:"relative",boxShadow:`0 0 20px rgba(255,90,0,.4)`,flexShrink:0 }}>
+            <video src="/gallery/logo.mp4" autoPlay muted loop playsInline style={{ position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover" }} onError={e=>e.target.style.display="none"} />
+            <span style={{ fontFamily:V.ffU,fontSize:13,fontWeight:700,color:"#000",position:"relative",zIndex:1 }}>io</span>
           </div>
-          <div>
-            <div style={{ fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#fff" }}>isabelaOs Studio</div>
-            <div style={{ fontSize: 10, color: V.muted, letterSpacing: 1 }}>{isEs ? "Plataforma IA" : "AI Platform"}</div>
+          <div className="lo-nav-links-desktop">
+            <div style={{ fontFamily:V.ffU,fontSize:15,fontWeight:700,color:"#fff" }}>isabelaOs Studio</div>
+            <div style={{ fontSize:10,color:V.muted,letterSpacing:1 }}>{isEs?"Plataforma IA":"AI Platform"}</div>
           </div>
         </div>
-        <div className="lo-nav-links-desktop" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {["galeria", "planes"].map(id => (
-            <button key={id} onClick={() => scrollTo(id)} style={{
-              background: "none", border: "none", color: "rgba(240,236,228,.6)",
-              fontFamily: V.ffU, fontSize: 13, padding: "7px 13px",
-              cursor: "pointer", borderRadius: 8, transition: "all .2s",
-            }}>{id === "galeria" ? (isEs ? "Galería" : "Gallery") : (isEs ? "Planes" : "Plans")}</button>
+
+        {/* DESKTOP: galeria, planes, contacto + globo + modules (hidden on mobile) */}
+        <div className="lo-nav-links-desktop" style={{ display:"flex",alignItems:"center",gap:8 }}>
+          {["galeria","planes"].map(id=>(
+            <button key={id} onClick={()=>scrollTo(id)} style={{ background:"none",border:"none",color:"rgba(240,236,228,.6)",fontFamily:V.ffU,fontSize:13,padding:"7px 13px",cursor:"pointer",borderRadius:8,transition:"all .2s" }}>
+              {id==="galeria"?(isEs?"Galería":"Gallery"):(isEs?"Planes":"Plans")}
+            </button>
           ))}
-          <button onClick={onOpenContact} style={{ background: "none", border: "none", color: "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 13, padding: "7px 13px", cursor: "pointer", borderRadius: 8 }}>{isEs ? "Contacto" : "Contact"}</button>
-          <button onClick={() => setLang(isEs ? "en" : "es")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, padding: "7px 12px", cursor: "pointer", fontFamily: V.ffU }}>{isEs ? "🌐 EN" : "🌐 ES"}</button>
-          {user
-            ? <HoverMenu modules={MODS} onSelect={go} isEs={isEs} />
-            : <button onClick={onOpenAuth} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 10, color: "#000", fontFamily: V.ffU, fontSize: 13, fontWeight: 700, padding: "9px 20px", cursor: "pointer", boxShadow: "0 0 24px rgba(255,90,0,.3)" }}>{isEs ? "Entrar" : "Sign in"}</button>
-          }
+          <button onClick={onOpenContact} style={{ background:"none",border:"none",color:"rgba(240,236,228,.6)",fontFamily:V.ffU,fontSize:13,padding:"7px 13px",cursor:"pointer",borderRadius:8 }}>{isEs?"Contacto":"Contact"}</button>
+          <button onClick={()=>setLang(isEs?"en":"es")} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#fff",fontSize:12,fontWeight:700,padding:"7px 12px",cursor:"pointer",fontFamily:V.ffU }}>
+            {isEs?"🌐 EN":"🌐 ES"}
+          </button>
+          {user?<HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>:<button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)" }}>{isEs?"Entrar":"Sign in"}</button>}
+        </div>
+
+        {/* MOBILE: globo + entrar/módulos — SIEMPRE VISIBLE en todos los tamaños */}
+        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+          <button onClick={()=>setLang(isEs?"en":"es")} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,padding:"7px 12px",cursor:"pointer",fontFamily:V.ffU,flexShrink:0 }}>
+            {isEs?"🌐 EN":"🌐 ES"}
+          </button>
+          {user?<HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>:<button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:12,fontWeight:700,padding:"8px 14px",cursor:"pointer",whiteSpace:"nowrap" }}>{isEs?"Entrar":"Sign in"}</button>}
         </div>
       </nav>
 
@@ -353,11 +339,9 @@ export default function LandingView({
           <div style={{ position: "absolute", width: 700, height: 700, borderRadius: "50%", filter: "blur(140px)", background: "rgba(255,90,0,.1)", top: -200, left: -150 }} />
           <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", filter: "blur(130px)", background: "rgba(255,179,0,.07)", bottom: -100, right: -100 }} />
         </div>
-
         <div className="lo-hero-grid" style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
           <div className="lo-hero-left" style={{ position: "relative", overflow: "hidden" }}>
-            <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(8,10,14,.2) 0%, rgba(8,10,14,.85) 100%)" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(8,10,14,.5) 0%, transparent 30%, rgba(8,10,14,.6) 100%)" }} />
             <div className="lo-hero-copy" style={{ position: "relative", zIndex: 2, padding: "60px 48px", display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
@@ -384,7 +368,6 @@ export default function LandingView({
               <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades al registrarte</b> · {isEs ? "Para generar imágenes · Sin tarjeta" : "To generate images · No credit card"}</p>
             </div>
           </div>
-
           <div className="lo-hero-right" style={{ background: "rgba(6,7,12,.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 32px", position: "relative" }}>
             <div style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", filter: "blur(80px)", background: "rgba(255,90,0,.08)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
             <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
@@ -463,27 +446,18 @@ export default function LandingView({
 
       {/* PLANTILLAS ÉPICAS — Banner destacado */}
       <section style={{ padding: "60px 32px 0", maxWidth: 1280, margin: "0 auto" }}>
-        <div onClick={() => user ? go("templates") : onOpenAuth()} style={{
-          background: "linear-gradient(135deg,rgba(200,169,110,0.08),rgba(200,169,110,0.03))",
-          border: "1px solid rgba(200,169,110,0.25)", borderRadius: 20,
-          padding: "32px 36px", cursor: "pointer", transition: "all .3s",
-          display: "flex", alignItems: "center", gap: 32, overflow: "hidden", position: "relative",
-        }}
+        <div onClick={() => user ? go("templates") : onOpenAuth()} style={{ background: "linear-gradient(135deg,rgba(200,169,110,0.08),rgba(200,169,110,0.03))", border: "1px solid rgba(200,169,110,0.25)", borderRadius: 20, padding: "32px 36px", cursor: "pointer", transition: "all .3s", display: "flex", alignItems: "center", gap: 32, overflow: "hidden", position: "relative" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(200,169,110,0.5)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(200,169,110,0.25)"; e.currentTarget.style.transform = "none"; }}>
           <div style={{ position: "absolute", right: -40, top: -40, width: 200, height: 200, borderRadius: "50%", background: "rgba(200,169,110,0.05)", filter: "blur(40px)", pointerEvents: "none" }} />
           <div style={{ fontSize: 48, flexShrink: 0 }}>⚡</div>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <div style={{ fontFamily: V.ffU, fontSize: 20, fontWeight: 800, color: "#fff" }}>
-                {isEs ? "Plantillas Épicas" : "Epic Templates"}
-              </div>
+              <div style={{ fontFamily: V.ffU, fontSize: 20, fontWeight: 800, color: "#fff" }}>{isEs ? "Plantillas Épicas" : "Epic Templates"}</div>
               <div style={{ background: "#C8A96E", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1, borderRadius: 5, padding: "3px 8px", textTransform: "uppercase" }}>NUEVO</div>
             </div>
             <div style={{ fontSize: 14, color: "rgba(240,236,228,0.6)", lineHeight: 1.6 }}>
-              {isEs
-                ? "Ponté en escenas cinematográficas épicas ya generadas. Sube tu foto → la IA te pone en la escena. Confrontación Divina · La Última Pelea · Victoria's Secret"
-                : "Place yourself in pre-built epic cinematic scenes. Upload your photo → AI puts you in the scene. Divine Confrontation · The Last Fight · Victoria's Secret"}
+              {isEs ? "Ponté en escenas cinematográficas épicas ya generadas. Sube tu foto → la IA te pone en la escena. Confrontación Divina · La Última Pelea · Victoria's Secret" : "Place yourself in pre-built epic cinematic scenes. Upload your photo → AI puts you in the scene. Divine Confrontation · The Last Fight · Victoria's Secret"}
             </div>
           </div>
           <div style={{ background: "#C8A96E", color: "#000", borderRadius: 12, padding: "12px 24px", fontFamily: V.ffU, fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -496,28 +470,16 @@ export default function LandingView({
       <section style={{ padding: "80px 32px", maxWidth: 1280, margin: "0 auto" }}>
         <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 8, display: "block" }}>{isEs ? "Hecho con IsabelaOS" : "Made with IsabelaOS"}</span>
         <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 8 }}>{isEs ? "CLIPS MUSICALES 100% CON IA" : "100% AI MUSIC CLIPS"}</h2>
-        <p style={{ fontSize: 16, color: "rgba(240,236,228,.45)", lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>
-          {isEs ? "Escenas cinematográficas, lip sync y efectos de producción profesional generados completamente con Seedance 2.0 — sin cámaras, sin actores, sin estudio." : "Cinematic scenes, lip sync and professional production effects generated entirely with Seedance 2.0 — no cameras, no actors, no studio."}
-        </p>
+        <p style={{ fontSize: 16, color: "rgba(240,236,228,.45)", lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>{isEs ? "Escenas cinematográficas, lip sync y efectos de producción profesional generados completamente con Seedance 2.0 — sin cámaras, sin actores, sin estudio." : "Cinematic scenes, lip sync and professional production effects generated entirely with Seedance 2.0 — no cameras, no actors, no studio."}</p>
         <div className="lo-musical-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "center" }}>
           <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,90,0,.2)", boxShadow: "0 0 60px rgba(255,90,0,.1),0 40px 80px rgba(0,0,0,.5)", aspectRatio: "9/16", maxHeight: 600 }}>
-            <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline controls
-              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            <div style={{ position: "absolute", top: 16, left: 16, background: "rgba(255,90,0,.9)", borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#000", letterSpacing: 1, textTransform: "uppercase" }}>
-              🎬 100% IA
-            </div>
+            <video src="/gallery/massiel-clip.mp4" autoPlay muted loop playsInline controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <div style={{ position: "absolute", top: 16, left: 16, background: "rgba(255,90,0,.9)", borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#000", letterSpacing: 1, textTransform: "uppercase" }}>🎬 100% IA</div>
           </div>
           <div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 20 }}>
-              ⭐ {isEs ? "Caso de éxito real" : "Real success story"}
-            </div>
-            <h3 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(28px,4vw,52px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 12 }}>
-              {isEs ? "PRODUCCIÓN" : "PRODUCTION"}<br />
-              <span style={{ background: "linear-gradient(135deg,#ff5a00,#ffb300)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>{isEs ? "CINEMATOGRÁFICA" : "CINEMATIC"}</span>
-            </h3>
-            <p style={{ fontSize: 15, color: "rgba(240,236,228,.7)", lineHeight: 1.7, marginBottom: 24 }}>
-              {isEs ? "Escenas con drones épicos, lip sync perfecto y planos cinematográficos generados 100% con Seedance 2.0. Sin filmar una sola toma real." : "Epic drone scenes, perfect lip sync and cinematic shots generated 100% with Seedance 2.0. Without filming a single real shot."}
-            </p>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: "#ff5a00", fontWeight: 700, marginBottom: 20 }}>⭐ {isEs ? "Caso de éxito real" : "Real success story"}</div>
+            <h3 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: "clamp(28px,4vw,52px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 12 }}>{isEs ? "PRODUCCIÓN" : "PRODUCTION"}<br /><span style={{ background: "linear-gradient(135deg,#ff5a00,#ffb300)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>{isEs ? "CINEMATOGRÁFICA" : "CINEMATIC"}</span></h3>
+            <p style={{ fontSize: 15, color: "rgba(240,236,228,.7)", lineHeight: 1.7, marginBottom: 24 }}>{isEs ? "Escenas con drones épicos, lip sync perfecto y planos cinematográficos generados 100% con Seedance 2.0. Sin filmar una sola toma real." : "Epic drone scenes, perfect lip sync and cinematic shots generated 100% with Seedance 2.0. Without filming a single real shot."}</p>
             {[
               { icon: "🎬", label: isEs?"Drone épico de ciudad":"Epic city drone", sub: "BytePlus Seedance 2.0" },
               { icon: "💃", label: isEs?"Escenas de baile y drama":"Dance and drama scenes", sub: "fal.ai Reference-to-Video" },
@@ -532,9 +494,7 @@ export default function LandingView({
                 </div>
               </div>
             ))}
-            <button onClick={onStartDemo} style={{ marginTop: 8, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 14, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, padding: "14px 32px", cursor: "pointer", boxShadow: "0 0 40px rgba(255,90,0,.3)" }}>
-              {isEs ? "🎬 Crear con Seedance 2.0 →" : "🎬 Create with Seedance 2.0 →"}
-            </button>
+            <button onClick={onStartDemo} style={{ marginTop: 8, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 14, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, padding: "14px 32px", cursor: "pointer", boxShadow: "0 0 40px rgba(255,90,0,.3)" }}>{isEs ? "🎬 Crear con Seedance 2.0 →" : "🎬 Create with Seedance 2.0 →"}</button>
           </div>
         </div>
       </section>
@@ -596,8 +556,8 @@ export default function LandingView({
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 40 }}>{isEs ? "3 PASOS Y LISTO" : "3 STEPS DONE"}</h2>
         <div className="lo-how-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 2, background: V.border2, borderRadius: 18, overflow: "hidden" }}>
           {[
-            { n: "01", icon: "📸", t: isEs?"Sube tu foto":"Upload photo",         d: isEs?"La IA aprende tu cara en segundos":"AI learns your face in seconds" },
-            { n: "02", icon: "✍️", t: isEs?"Describe la escena":"Describe scene",  d: isEs?"Hollywood, TikTok, comercial — lo que imagines":"Hollywood, TikTok, commercial — anything" },
+            { n: "01", icon: "📸", t: isEs?"Sube tu foto":"Upload photo", d: isEs?"La IA aprende tu cara en segundos":"AI learns your face in seconds" },
+            { n: "02", icon: "✍️", t: isEs?"Describe la escena":"Describe scene", d: isEs?"Hollywood, TikTok, comercial — lo que imagines":"Hollywood, TikTok, commercial — anything" },
             { n: "03", icon: "🎬", t: isEs?"Descarga y publica":"Download & share", d: isEs?"Listo en menos de 3 minutos":"Ready in under 3 minutes" },
           ].map((s, i) => (
             <div key={i} style={{ background: V.bg2, padding: "36px 28px", position: "relative", overflow: "hidden" }}>
@@ -651,19 +611,10 @@ export default function LandingView({
                 <div style={{ fontFamily: V.ffD, fontSize: 50, color: "#fff", lineHeight: 1, letterSpacing: 2 }}>${p.price_usd}</div>
                 <div style={{ fontSize: 12, color: V.muted, marginBottom: 4 }}>USD</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: V.gold, marginBottom: 16, fontFamily: V.ffU }}>{p.jades} Jades</div>
-                {[
-                  `${p.jades} ${isEs ? "imágenes" : "images"}`,
-                  `${Math.floor(p.jades / (COSTS?.vid_express_8s || 40))} videos CineAI`,
-                  `${Math.floor(p.jades / 20)} ${isEs ? "sesiones Photo" : "Photo sessions"}`,
-                  isEs ? "Sin vencimiento" : "Never expire",
-                ].map((f, i) => (
-                  <div key={i} style={{ display: "flex", gap: 7, fontSize: 12, color: "rgba(240,236,228,.7)", marginBottom: 7, alignItems: "center" }}>
-                    <span style={{ color: V.fire, fontSize: 11, flexShrink: 0 }}>✓</span>{f}
-                  </div>
+                {[`${p.jades} ${isEs?"imágenes":"images"}`,`${Math.floor(p.jades/(COSTS?.vid_express_8s||40))} videos CineAI`,`${Math.floor(p.jades/20)} ${isEs?"sesiones Photo":"Photo sessions"}`,isEs?"Sin vencimiento":"Never expire"].map((f,i)=>(
+                  <div key={i} style={{ display:"flex",gap:7,fontSize:12,color:"rgba(240,236,228,.7)",marginBottom:7,alignItems:"center" }}><span style={{ color:V.fire,fontSize:11,flexShrink:0 }}>✓</span>{f}</div>
                 ))}
-                <button onClick={user ? onBuyJades : onOpenAuth} style={s.btn(hot)}>
-                  {isEs ? "Comprar" : "Buy"} {p.label}
-                </button>
+                <button onClick={user ? onBuyJades : onOpenAuth} style={s.btn(hot)}>{isEs?"Comprar":"Buy"} {p.label}</button>
               </div>
             );
           })}
@@ -695,15 +646,15 @@ export default function LandingView({
             <p style={{ fontSize: 12, color: V.muted, lineHeight: 1.7 }}>Stalling Technologic · Cobán, Alta Verapaz, Guatemala 🇬🇹</p>
           </div>
           {[
-            { title: isEs?"Plataforma":"Platform", links: [{ l: isEs?"Crear cuenta":"Create account", fn: onOpenAuth }, { l: isEs?"Precios":"Pricing", fn: () => scrollTo("planes") }, { l: isEs?"Sobre nosotros":"About us", fn: onOpenAbout }] },
-            { title: isEs?"Soporte":"Support", links: [{ l: isEs?"Contacto":"Contact", fn: onOpenContact }, { l: "contacto@isabelaos.com", fn: null }] },
-            { title: "Legal", links: [{ l: isEs?"Términos":"Terms", href: "/terms" }, { l: isEs?"Reembolsos":"Refunds", href: "/refund" }, { l: isEs?"Privacidad":"Privacy", href: "/privacy" }] },
-          ].map((col, i) => (
+            { title: isEs?"Plataforma":"Platform", links: [{ l: isEs?"Crear cuenta":"Create account", fn: onOpenAuth },{ l: isEs?"Precios":"Pricing", fn: ()=>scrollTo("planes") },{ l: isEs?"Sobre nosotros":"About us", fn: onOpenAbout }] },
+            { title: isEs?"Soporte":"Support", links: [{ l: isEs?"Contacto":"Contact", fn: onOpenContact },{ l: "contacto@isabelaos.com", fn: null }] },
+            { title: "Legal", links: [{ l: isEs?"Términos":"Terms", href: "/terms" },{ l: isEs?"Reembolsos":"Refunds", href: "/refund" },{ l: isEs?"Privacidad":"Privacy", href: "/privacy" }] },
+          ].map((col,i)=>(
             <div key={i}>
-              <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "rgba(255,255,255,.35)", marginBottom: 12 }}>{col.title}</div>
-              {col.links.map((lnk, j) => lnk.href
-                ? <a key={j} href={lnk.href} target="_blank" style={{ display: "block", fontSize: 12, color: V.muted, marginBottom: 9, textDecoration: "none", transition: "color .2s" }} onMouseEnter={e => e.target.style.color = "#fff"} onMouseLeave={e => e.target.style.color = V.muted}>{lnk.l}</a>
-                : <button key={j} onClick={lnk.fn} style={{ display: "block", fontSize: 12, color: V.muted, marginBottom: 9, background: "none", border: "none", cursor: lnk.fn ? "pointer" : "text", padding: 0, fontFamily: V.ffB, transition: "color .2s" }} onMouseEnter={e => lnk.fn && (e.target.style.color = "#fff")} onMouseLeave={e => e.target.style.color = V.muted}>{lnk.l}</button>
+              <div style={{ fontSize:10,letterSpacing:3,textTransform:"uppercase",color:"rgba(255,255,255,.35)",marginBottom:12 }}>{col.title}</div>
+              {col.links.map((lnk,j)=>lnk.href
+                ?<a key={j} href={lnk.href} target="_blank" style={{ display:"block",fontSize:12,color:V.muted,marginBottom:9,textDecoration:"none",transition:"color .2s" }} onMouseEnter={e=>e.target.style.color="#fff"} onMouseLeave={e=>e.target.style.color=V.muted}>{lnk.l}</a>
+                :<button key={j} onClick={lnk.fn} style={{ display:"block",fontSize:12,color:V.muted,marginBottom:9,background:"none",border:"none",cursor:lnk.fn?"pointer":"text",padding:0,fontFamily:V.ffB,transition:"color .2s" }} onMouseEnter={e=>lnk.fn&&(e.target.style.color="#fff")} onMouseLeave={e=>e.target.style.color=V.muted}>{lnk.l}</button>
               )}
             </div>
           ))}
