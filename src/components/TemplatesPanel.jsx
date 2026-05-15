@@ -57,12 +57,23 @@ function UploadZone({ label, hint, onChange, preview, accent, height = 140 }) {
 // ── GALLERY CARD ───────────────────────────────────────────────────────────
 function GalleryCard({ tmpl, lang, onClick }) {
   const vRef = useRef();
+  const [playing, setPlaying] = useState(false);
   return (
-    <div onClick={onClick} onMouseEnter={() => vRef.current?.play()} onMouseLeave={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; } }}
-      style={{ position: "relative", borderRadius: 16, overflow: "hidden", cursor: "pointer", aspectRatio: "21/9", background: "#080808", border: "1px solid rgba(255,255,255,0.08)", transition: "transform 0.25s, box-shadow 0.25s" }}
+    <div onClick={onClick}
+      onMouseEnter={() => { vRef.current?.play(); setPlaying(true); }}
+      onMouseLeave={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; setPlaying(false); } }}
+      onTouchStart={() => { vRef.current?.play(); setPlaying(true); }}
+      onTouchEnd={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; setPlaying(false); } }}
+      style={{ position: "relative", borderRadius: 16, overflow: "hidden", cursor: "pointer", aspectRatio: "9/16", background: "#080808", border: "1px solid rgba(255,255,255,0.08)", transition: "transform 0.25s, box-shadow 0.25s" }}
       onMouseOver={(e) => { e.currentTarget.style.transform = "scale(1.03)"; e.currentTarget.style.boxShadow = `0 20px 60px ${tmpl.accent}55`; }}
       onMouseOut={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
-      <video ref={vRef} src={tmpl.video} muted playsInline loop preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      <video ref={vRef} src={tmpl.video} muted playsInline loop preload="auto"
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      {!playing && (
+        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 2, pointerEvents: "none" }}>
+          <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>▶</div>
+        </div>
+      )}
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg,rgba(0,0,0,0.92) 0%,rgba(0,0,0,0.2) 50%,transparent 100%)" }} />
       <div style={{ position: "absolute", top: 12, left: 12, background: tmpl.accent, color: "#000", fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 9, letterSpacing: 1.5, padding: "4px 8px", borderRadius: 6 }}>{tmpl.tag[lang]}</div>
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px 14px 14px" }}>
@@ -245,11 +256,19 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
   if (view === "gallery") return (
     <div style={{ fontFamily: "'Inter',sans-serif", color: "#fff", paddingBottom: 60 }}>
       <style>{STYLES}</style>
-      <div style={{ padding: "28px 20px 0", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div><div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 800 }}>🎬 {lang === "es" ? "Plantillas Épicas" : "Epic Templates"}</div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 3 }}>{lang === "es" ? "Ponté en escenas cinematográficas de IA" : "Place yourself in AI cinematic scenes"}</div></div>
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.07)", borderRadius: 10, padding: 3, gap: 2 }}>
-          {["es", "en"].map((l) => (<button key={l} onClick={() => setLang(l)} style={{ background: lang === l ? "#C8A96E" : "transparent", color: lang === l ? "#000" : "rgba(255,255,255,0.45)", border: "none", borderRadius: 7, padding: "5px 12px", fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>{l === "es" ? "🇪🇸 ES" : "🇺🇸 EN"}</button>))}
+      <div style={{ padding: "20px 20px 0" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>🎬 {lang === "es" ? "Plantillas Épicas" : "Epic Templates"}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 3 }}>{lang === "es" ? "Ponté en escenas de IA" : "Place yourself in AI scenes"}</div>
+          </div>
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.07)", borderRadius: 10, padding: 3, gap: 2, flexShrink: 0 }}>
+            {["es", "en"].map((l) => (
+              <button key={l} onClick={() => setLang(l)} style={{ background: lang === l ? "#C8A96E" : "transparent", color: lang === l ? "#000" : "rgba(255,255,255,0.45)", border: "none", borderRadius: 7, padding: "6px 14px", fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 12, cursor: "pointer", minWidth: 48 }}>
+                {l === "es" ? "🇪🇸 ES" : "🇺🇸 EN"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -259,7 +278,7 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>{lang === "es" ? "La IA nunca genera dos videos exactamente iguales. Los videos que ves son ejemplos del estilo y escena. Tu rostro será el protagonista y el resultado siempre será único." : "AI never generates two identical videos. The videos shown are style examples. Your face will be the protagonist and the result will always be unique."}</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "16px 20px 0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, padding: "16px 20px 0" }}>
         {TEMPLATES.map((t) => (<GalleryCard key={t.id} tmpl={t} lang={lang} onClick={() => { setSelectedId(t.id); setGenderVariant(t.genderOptions ? null : "female"); setSlots({ protagonist: emptySlot(), man: emptySlot(), woman: emptySlot() }); setView("generate"); }} />))}
       </div>
       <div style={{ padding: "14px 20px 0", fontSize: 10, color: "rgba(255,255,255,0.18)", textAlign: "center" }}>{lang === "es" ? "Hover para previsualizar · 15 segundos · 21:9 Cinemascope" : "Hover to preview · 15 seconds · 21:9 Cinemascope"}</div>
