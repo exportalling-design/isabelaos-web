@@ -76,42 +76,27 @@ function GalleryCard({ tmpl, lang, onClick }) {
 
 // ── PERSON UPLOAD BLOCK ────────────────────────────────────────────────────
 // Cada persona sube 2 fotos: frontal + perfil lateral
-function PersonUploadBlock({ slotKey, slotLabel, faceData, profileData, onFaceUpload, onProfileUpload, accent, lang }) {
+function PersonUploadBlock({ slotKey, slotLabel, faceData, onFaceUpload, accent, lang }) {
   return (
     <div style={{ marginBottom: 20 }}>
       {slotLabel && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginBottom: 10, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>{slotLabel}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
-            {lang === "es" ? "📸 Foto frontal" : "📸 Front photo"}
-          </div>
-          <UploadZone
-            label={lang === "es" ? "Foto de frente" : "Front photo"}
-            hint={lang === "es" ? "Mirando directo a la cámara" : "Looking straight at camera"}
-            onChange={onFaceUpload}
-            preview={faceData?.preview}
-            accent={accent}
-          />
-          {faceData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
+      <UploadZone
+        label={lang === "es" ? "📸 Foto frontal de tu rostro" : "📸 Front face photo"}
+        hint={lang === "es" ? "Mirando a la cámara · Sin lentes · Sin filtros · Buena luz · Fondo simple" : "Looking at camera · No glasses · No filters · Good lighting · Simple background"}
+        onChange={onFaceUpload}
+        preview={faceData?.preview}
+        accent={accent}
+        height={200}
+      />
+      {faceData?.preview && (
+        <div style={{ fontSize: 10, color: accent, textAlign: "center", marginTop: 6, fontFamily: "'Syne',sans-serif", fontWeight: 700 }}>
+          ✓ {lang === "es" ? "Foto lista" : "Photo ready"}
         </div>
-        <div>
-          <div style={{ fontSize: 10, color: accent, marginBottom: 6, fontFamily: "'Syne',sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
-            {lang === "es" ? "🔄 Foto de perfil" : "🔄 Side profile"}
-          </div>
-          <UploadZone
-            label={lang === "es" ? "Foto lateral" : "Side photo"}
-            hint={lang === "es" ? "Rostro de lado (90° o 45°)" : "Face from the side (90° or 45°)"}
-            onChange={onProfileUpload}
-            preview={profileData?.preview}
-            accent={accent}
-          />
-          {profileData?.preview && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>✓ {lang === "es" ? "Cargada" : "Uploaded"}</div>}
-        </div>
-      </div>
+      )}
       <div style={{ marginTop: 8, fontSize: 10, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px", lineHeight: 1.6 }}>
         💡 {lang === "es"
-          ? "Sin lentes · Sin filtros · Buena iluminación · Fondo simple. La IA genera expresiones emocionales intensas."
-          : "No glasses · No filters · Good lighting · Simple background. AI generates intense emotional expressions."}
+          ? "1 foto frontal clara. Sin lentes · Sin filtros · Buena iluminación · Fondo simple."
+          : "1 clear front photo. No glasses · No filters · Good lighting · Simple background."}
       </div>
     </div>
   );
@@ -231,6 +216,9 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
           setVideoUrl(json.videoUrl);
           setStep("done");
           clearInterval(iv);
+        } else if ((json.status === "completed" || json.status === "succeed") && !json.videoUrl) {
+          // EvoLink terminó pero todavía guardando en Storage — seguir esperando
+          console.log("[poll] completed but no videoUrl yet, waiting for storage...");
         } else if (json.status === "failed" || json.status === "error") {
           throw new Error(json.error || (lang === "es" ? "La generación falló" : "Generation failed"));
         }
@@ -328,8 +316,8 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.6, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
             {lang === "es"
-              ? "📌 Sube 2 fotos: frontal y perfil lateral. Más referencias = mejor identidad. Sin lentes · Sin filtros · Buena iluminación"
-              : "📌 Upload 2 photos: front and side profile. More references = better identity. No glasses · No filters · Good lighting"}
+              ? "📌 Sube 1 foto frontal clara. La IA genera el movimiento y las expresiones. Sin lentes · Sin filtros · Buena iluminación"
+              : "📌 Upload 1 clear front photo. AI generates the movement and expressions. No glasses · No filters · Good lighting"}
           </div>
 
           {currentSlots.map((slotKey) => (
@@ -338,9 +326,7 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
               slotKey={slotKey}
               slotLabel={currentSlots.length > 1 ? SLOT_LABELS[slotKey][lang] : null}
               faceData={slots[slotKey].face}
-              profileData={slots[slotKey].profile}
               onFaceUpload={(f) => setSlotPhoto(slotKey, "face", f)}
-              onProfileUpload={(f) => setSlotPhoto(slotKey, "profile", f)}
               accent={accent}
               lang={lang}
             />
@@ -404,7 +390,7 @@ export default function TemplatesPanel({ userJades = 0, onJadesUpdate }) {
         <div style={{ margin: "14px 20px 0", background: `${accent}0a`, border: `1px solid ${accent}33`, borderRadius: 14, padding: "20px", textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 10, animation: "spin 2s linear infinite" }}>🎬</div>
           <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 14, fontWeight: 800, color: accent, marginBottom: 4 }}>{lang === "es" ? "Generando tu video..." : "Generating your video..."}</div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 14 }}>{lang === "es" ? "Puede tomar 3–8 minutos · 15 segundos" : "May take 3–8 minutes · 15 seconds"} · {pollCount * 6}s</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 14 }}>{lang === "es" ? "Puede tomar 3–8 minutos · 10 segundos · guardando video..." : "May take 3–8 minutes · 10 seconds · saving video..."} · {pollCount * 6}s</div>
           <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: 8, height: 4, overflow: "hidden" }}><div style={{ height: "100%", background: accent, borderRadius: 8, width: `${Math.min((pollCount / 80) * 100, 90)}%`, transition: "width 0.6s" }} /></div>
         </div>
       )}
