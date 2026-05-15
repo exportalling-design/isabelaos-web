@@ -246,14 +246,18 @@ export default async function handler(req, res) {
     // Enviamos todas las referencias disponibles (máx 2 por limitación de EvoLink):
     // 1 persona: frontal + perfil lateral → mejor identidad
     // 2 personas (both): frontal hombre + frontal mujer
+    // Solo 1 foto frontal por persona.
+    // Con 2 imágenes EvoLink las trata como first-frame + last-frame,
+    // causando que las fotos aparezcan literalmente al inicio y final del video.
+    // Con 1 imagen hace animación libre — el personaje se mueve naturalmente.
     let imageUrls;
     if (genderVariant === "both") {
+      // 2 personas: foto frontal de cada uno (máx 2 en total)
       imageUrls = [faceUrl, face2Url].filter(Boolean);
     } else {
-      // frontal + perfil — máximo 2 imágenes según docs EvoLink
-      imageUrls = [faceUrl, profileUrl].filter(Boolean);
+      // 1 persona: SOLO foto frontal — sin perfil lateral
+      imageUrls = [faceUrl].filter(Boolean);
     }
-    imageUrls = imageUrls.slice(0, 2);
 
     // Parámetros por plantilla:
     // Drama → 21:9 Cinemascope épico, 10s
