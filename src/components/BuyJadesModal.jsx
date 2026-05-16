@@ -33,7 +33,7 @@ const COUNTRIES = [
 // PayPal recibe el price_usd directamente del pack seleccionado
 const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
-export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
+export function BuyJadesModal({ open, onClose, userId, onSuccess, lang = "es" }) {
   const [selectedPack, setSelectedPack]   = useState("popular");
   const [paymentMethod, setPaymentMethod] = useState("card"); // "card" | "paypal"
   const [step,          setStep]          = useState("form");
@@ -250,7 +250,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-white">Comprar Jades</h2>
+            <h2 className="text-lg font-semibold text-white">Buy Jades</h2>
             <p className="mt-1 text-xs text-neutral-400">1 Jade ≈ $0.10 USD · Sin suscripción</p>
           </div>
           <button onClick={handleClose} disabled={step === "loading" || step === "iframe" || step === "validating"} className="rounded-xl border border-white/15 px-3 py-1.5 text-xs text-neutral-400 hover:bg-white/10 disabled:opacity-40">✕</button>
@@ -261,9 +261,9 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
           <div className="mt-10 text-center space-y-4">
             <div className="text-4xl animate-pulse">💳</div>
             <p className="text-sm text-white font-semibold">
-              {step === "loading" ? "Iniciando pago seguro..." : step === "iframe" ? "Verificando dispositivo..." : "Confirmando pago con el banco..."}
+              {lang === "es" ? (step === "loading" ? "Iniciando pago seguro..." : step === "iframe" ? "Verificando dispositivo..." : "Confirmando pago con el banco...") : (step === "loading" ? "Starting secure payment..." : step === "iframe" ? "Verifying device..." : "Confirming payment with bank...")}
             </p>
-            <p className="text-xs text-neutral-400">No cierres esta ventana</p>
+            <p className="text-xs text-neutral-400">{lang === "es" ? "No cierres esta ventana" : "Do not close this window"}</p>
             <div className="flex justify-center gap-1 mt-4">
               {[0,1,2,3,4].map(i => (<div key={i} className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />))}
             </div>
@@ -274,15 +274,15 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
         {step === "challenge" && challengeData && (
           <div className="mt-6 space-y-4">
             <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 px-4 py-3">
-              <p className="text-xs font-semibold text-yellow-300">🔐 Verificación del banco requerida</p>
-              <p className="mt-1 text-xs text-neutral-400">Tu banco solicita confirmar la transacción.</p>
+              <p className="text-xs font-semibold text-yellow-300">🔐 {lang === "es" ? "Verificación del banco requerida" : "Bank verification required"}</p>
+              <p className="mt-1 text-xs text-neutral-400">{lang === "es" ? "Tu banco solicita confirmar la transacción." : "Your bank requires transaction confirmation."}</p>
             </div>
             <iframe name="stepUpIframe" id="step_up_iframe" height="500" width="100%" style={{ border: "none", borderRadius: "16px", background: "#fff" }} />
             <form id="step_up_form" method="POST" target="stepUpIframe" action={challengeData.stepUpUrl} style={{ display: "none" }}>
               <input type="hidden" name="JWT" value={challengeData.accessToken} />
               <input type="hidden" name="MD"  value={challengeData.id_transaction || ""} />
             </form>
-            <p className="text-center text-[11px] text-neutral-500">Ingresa el código que te envió tu banco</p>
+            <p className="text-center text-[11px] text-neutral-500">{lang === "es" ? "Ingresa el código que te envió tu banco" : "Enter the code sent by your bank"}</p>
           </div>
         )}
 
@@ -311,10 +311,10 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
 
             {/* What you get */}
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-[11px] text-neutral-300">
-              <div className="font-semibold text-white">Con {pack.jades} Jades:</div>
+              <div className="font-semibold text-white">{lang === "es" ? "Con" : "With"} {pack.jades} Jades:</div>
               <div className="mt-2 space-y-1">
-                <div>· <span className="font-semibold text-white">{pack.jades}</span> imágenes sin avatar</div>
-                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 2)}</span> imágenes con avatar</div>
+                <div>· <span className="font-semibold text-white">{pack.jades}</span> {lang === "es" ? "imágenes sin avatar" : "images without avatar"}</div>
+                <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 2)}</span> {lang === "es" ? "imágenes con avatar" : "images with avatar"}</div>
                 <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / COSTS.vid_express_8s)}</span> videos Express 8s</div>
                 <div>· <span className="font-semibold text-white">{Math.floor(pack.jades / 40)}</span> videos CineAI 5s</div>
               </div>
@@ -322,13 +322,13 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
 
             {/* ── PAYMENT METHOD SELECTOR ── */}
             <div className="mt-5">
-              <p className="text-xs font-semibold text-neutral-400 mb-3 uppercase tracking-wider">Método de pago</p>
+              <p className="text-xs font-semibold text-neutral-400 mb-3 uppercase tracking-wider">{lang === "es" ? "Método de pago" : "Payment method"}</p>
               <div className="grid grid-cols-2 gap-3">
                 {/* Pagadito — Latinoamérica */}
                 <button type="button" onClick={() => setPaymentMethod("card")}
                   className={`rounded-2xl border p-3 text-left transition ${paymentMethod === "card" ? "border-cyan-400 bg-cyan-500/10" : "border-white/10 bg-black/40 hover:bg-black/50"}`}>
                   <div className="text-lg mb-1">💳</div>
-                  <div className="text-xs font-bold text-white">Tarjeta</div>
+                  <div className="text-xs font-bold text-white">{lang === "es" ? "Tarjeta" : "Card"}</div>
                   <div className="text-[10px] text-neutral-400 mt-0.5">Visa · Mastercard</div>
                   <div className="text-[10px] text-cyan-400 mt-1">LatAm</div>
                 </button>
@@ -338,7 +338,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                   <div className="text-lg mb-1">🌐</div>
                   <div className="text-xs font-bold text-white">PayPal</div>
                   <div className="text-[10px] text-neutral-400 mt-0.5">India · USA · Europa</div>
-                  <div className="text-[10px] text-yellow-400 mt-1">Internacional</div>
+                  <div className="text-[10px] text-yellow-400 mt-1">{lang === "es" ? "Internacional" : "International"}</div>
                 </button>
               </div>
             </div>
@@ -349,10 +349,10 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                 <div className="rounded-2xl border border-yellow-400/20 bg-yellow-500/5 p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-yellow-400 font-bold text-sm">PayPal</span>
-                    <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-2 py-0.5 rounded-full">Internacional</span>
+                    <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-2 py-0.5 rounded-full">{lang === "es" ? "Internacional" : "International"}</span>
                   </div>
                   <p className="text-xs text-neutral-400 mb-4">
-                    Paga de forma segura con tu cuenta PayPal o tarjeta internacional. Disponible en India, EE.UU., Europa y más de 200 países.
+                    {lang === "es" ? "Paga de forma segura con tu cuenta PayPal o tarjeta internacional. Disponible en India, EE.UU., Europa y más de 200 países." : "Pay securely with your PayPal account or international card. Available in India, USA, Europe and 200+ countries."}
                   </p>
                   {ppError && (
                     <div className="mb-3 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{ppError}</div>
@@ -365,7 +365,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                   {/* PayPal button container */}
                   <div ref={paypalBtnRef} id="paypal-button-container" />
                   <p className="mt-3 text-center text-[10px] text-neutral-500">
-                    Procesado de forma segura por PayPal · ${pack.price_usd} USD · {pack.jades} Jades
+                    {lang === "es" ? "Procesado de forma segura por PayPal" : "Securely processed by PayPal"} · ${pack.price_usd} USD · {pack.jades} Jades
                   </p>
                 </div>
               </div>
@@ -374,7 +374,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
             {/* ── CARD FORM (Pagadito) ── */}
             {paymentMethod === "card" && (
               <form onSubmit={handlePay} className="mt-5 space-y-3">
-                <div className="text-xs font-semibold text-white">Pagar ${pack.price_usd} USD · Pack {pack.label}</div>
+                <div className="text-xs font-semibold text-white">{lang === "es" ? "Pagar" : "Pay"} ${pack.price_usd} USD · Pack {pack.label}</div>
 
                 {[
                   { label: "Nombre en tarjeta",     key: "cardHolderName", ph: "Como aparece en la tarjeta" },
@@ -389,7 +389,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                   </div>
                 ))}
 
-                <div className="border-t border-white/10 pt-3 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Datos del titular</div>
+                <div className="border-t border-white/10 pt-3 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">{lang === "es" ? "Datos del titular" : "Cardholder info"}</div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -430,7 +430,7 @@ export function BuyJadesModal({ open, onClose, userId, onSuccess }) {
                 )}
 
                 <button type="submit" className="w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 py-3 text-sm font-semibold text-white hover:opacity-90 transition-all">
-                  Pagar ${pack.price_usd} · {pack.jades} Jades
+                  {lang === "es" ? "Pagar" : "Pay"} ${pack.price_usd} · {pack.jades} Jades
                 </button>
               </form>
             )}
