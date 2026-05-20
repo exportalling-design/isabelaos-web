@@ -1,114 +1,101 @@
 // api/cineai/poll.js
 // GET /api/cineai/poll?taskId=xxx
-// Soporta 3 proveedores: piapi_seedance | fal_seedance | byteplus_seedance
+// ─────────────────────────────────────────────────────────────
+// DOS proveedores únicamente:
+//   evolink_seedance  → con foto de persona (EvoLink)
+//   byteplus_seedance → sin foto, IA pura (BytePlus)
+//
+// Sin fal.ai. Sin PiAPI. Solo EvoLink y BytePlus.
+// ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-const BYTEPLUS_BASE = "https://ark.ap-southeast.bytepluses.com/api/v3";
-
-// ── PiAPI polling ─────────────────────────────────────────────
-async function pollPiapi(taskId) {
-  const r = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
-    headers: { "x-api-key": process.env.PIAPI_KEY },
+// ── EvoLink polling ───────────────────────────────────────────
+async function pollEvolink(taskId) {
+  const r = await fetch(`https://api.evolink.ai/v1/videos/generations/${taskId}`, {
+    headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data?.message || `PiAPI error ${r.status}`);
+  if (!r.ok) throw new Error(data?.message || `EvoLink error ${r.status}`);
 
-  const status   = data?.data?.status;
-  const videoUrl = data?.data?.output?.video || data?.data?.output?.video_url || data?.data?.output?.url || null;
-  const error    = data?.data?.error?.message || null;
+  // EvoLink status: "pending" | "processing" | "succeeded" | "failed"
+  const status   = data.status;
+  const videoUrl = data.video_url || data.output?.video_url || data.url || null;
+  const error    = data.error?.message || data.error || null;
+
+  console.error(`[poll] EvoLink status:${status} video:${videoUrl ? "yes" : "no"} id:${taskId}`);
 
   return {
-    done:     status === "completed",
-    failed:   status === "failed",
+    done:   status === "succeeded",
+    failed: status === "failed",
     videoUrl,
     error,
   };
 }
 
-// ── fal.ai polling ────────────────────────────────────────────
-async function pollFal(requestId, endpoint) {
-  const ep = endpoint || "bytedance/seedance-2.0/fast/reference-to-video";
-
-  const r = await fetch(`https://queue.fal.run/${ep}/requests/${requestId}/status`, {
-    headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
-  });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data?.detail || `fal.ai status error ${r.status}`);
-
-  const status = data.status;
-
-  if (status === "COMPLETED") {
-    const rr = await fetch(`https://queue.fal.run/${ep}/requests/${requestId}`, {
-      headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
-    });
-    const result = await rr.json();
-    const videoUrl = result?.video?.url || result?.data?.video?.url || null;
-    return { done: true, failed: false, videoUrl, error: null };
-  }
-
-  if (status === "FAILED") {
-    return { done: false, failed: true, videoUrl: null, error: data?.error || "fal.ai failed" };
-  }
-
-  return { done: false, failed: false, videoUrl: null, error: null };
-}
-
 // ── BytePlus polling ──────────────────────────────────────────
 async function pollByteplus(taskId) {
-  const r = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
-    headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
-  });
+  const r = await fetch(
+    `https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks/${taskId}`,
+    { headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` } }
+  );
   const data = await r.json();
   if (!r.ok || data.error) throw new Error(data.error?.message || `BytePlus error ${r.status}`);
 
-  const status   = data.status;
-  const videoUrl = data.content?.video_url || null;
+  // BytePlus status: "running" | "succeeded" | "failed"
+  const status = data.status;
+
+  // Extraer URL — estructura: content[].type="video_url", content[].video_url.url
+  let videoUrl = null;
+  if (Array.isArray(data.content)) {
+    for (const item of data.content) {
+      if (item.type === "video_url" && item.video_url?.url) { videoUrl = item.video_url.url; break; }
+      if (item.type === "video_url" && typeof item.video_url === "string") { videoUrl = item.video_url; break; }
+      if (item.url) { videoUrl = item.url; break; }
+    }
+  }
+  videoUrl = videoUrl || data.video_url || data.result?.video_url || data.output?.video_url || null;
+
+  console.error(`[poll] BytePlus status:${status} video:${videoUrl ? "yes" : "no"} id:${taskId}`);
 
   return {
-    done:     status === "succeeded",
-    failed:   status === "failed",
+    done:   status === "succeeded",
+    failed: status === "failed",
     videoUrl,
-    error:    data.error?.message || data.fail_message || null,
+    error:  data.error?.message || data.fail_message || null,
   };
 }
 
-// ── Guardar video en Supabase Storage ────────────────────────
-async function saveVideoToLibrary(userId, videoUrl, taskId) {
+// ── Guardar video en Supabase Storage (permanente) ────────────
+async function saveVideo(userId, videoUrl, taskId) {
   try {
     const res = await fetch(videoUrl);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const path   = `${userId}/cineai_${(taskId || "").slice(0, 8)}_${Date.now()}.mp4`;
-
     const { error } = await supabaseAdmin.storage
       .from("videos")
       .upload(path, buffer, { contentType: "video/mp4", upsert: false });
-
     if (error) throw new Error(error.message);
-
     const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
-    console.error("[cineai/poll] saved:", path);
+    console.error("[poll] video saved:", path);
     return data?.publicUrl || videoUrl;
   } catch (err) {
-    console.error("[cineai/poll] saveVideoToLibrary failed:", err.message);
-    return videoUrl;
+    console.error("[poll] saveVideo failed:", err.message);
+    return videoUrl; // fallback: URL original (expira pero el usuario la ve ahora)
   }
 }
 
 // ── Limpiar archivos temporales ───────────────────────────────
-async function cleanupTempFiles(job) {
-  const toDelete = [];
+async function cleanup(job) {
   const imageUrl = job?.payload?.image_url;
-  if (imageUrl) {
-    try {
-      const parts = new URL(imageUrl).pathname.split("/object/public/user-uploads/");
-      if (parts.length >= 2 && parts[1].startsWith("cineai/")) toDelete.push(parts[1]);
-    } catch {}
-  }
-  if (toDelete.length) {
-    await supabaseAdmin.storage.from("user-uploads").remove(toDelete).catch(() => {});
-  }
+  if (!imageUrl) return;
+  try {
+    const parts = new URL(imageUrl).pathname.split("/object/public/user-uploads/");
+    if (parts.length >= 2 && parts[1].startsWith("cineai/")) {
+      await supabaseAdmin.storage.from("user-uploads").remove([parts[1]]).catch(() => {});
+    }
+  } catch {}
 }
 
 export default async function handler(req, res) {
@@ -128,29 +115,26 @@ export default async function handler(req, res) {
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
   // ── Buscar job ────────────────────────────────────────────
-  // Buscar por provider_request_id primero, si no por id (jobId como fallback)
-  let { data: job, error: findErr } = await supabaseAdmin
-    .from("video_jobs")
-    .select("*")
-    .eq("provider_request_id", taskId)
-    .eq("user_id", userId)
-    .eq("mode", "cineai")
-    .single();
+  let job = null;
 
-  // Fallback: buscar por id del job directamente
-  if (findErr || !job) {
-    const { data: jobById } = await supabaseAdmin
-      .from("video_jobs")
-      .select("*")
+  // 1. Por provider_request_id (taskId real del proveedor)
+  const { data: j1 } = await supabaseAdmin
+    .from("video_jobs").select("*")
+    .eq("provider_request_id", taskId)
+    .eq("user_id", userId).eq("mode", "cineai").single();
+  if (j1) job = j1;
+
+  // 2. Por id del job (jobId como fallback)
+  if (!job) {
+    const { data: j2 } = await supabaseAdmin
+      .from("video_jobs").select("*")
       .eq("id", taskId)
-      .eq("user_id", userId)
-      .eq("mode", "cineai")
-      .single();
-    if (jobById) { job = jobById; findErr = null; }
+      .eq("user_id", userId).eq("mode", "cineai").single();
+    if (j2) job = j2;
   }
 
-  if (findErr || !job) {
-    console.error("[cineai/poll] job not found:", taskId, findErr?.message);
+  if (!job) {
+    console.error("[poll] job not found:", taskId);
     return res.status(404).json({ ok: false, error: "Job no encontrado" });
   }
 
@@ -160,107 +144,58 @@ export default async function handler(req, res) {
   if (job.status === "FAILED")
     return res.status(200).json({ ok: true, status: "failed", error: job.provider_error || "Error", jobId: job.id });
 
-  // ── Detectar proveedor ────────────────────────────────────
-  const provider = job.provider || "byteplus_seedance";
+  // ── Polling según proveedor ───────────────────────────────
+  const provider     = job.provider || "byteplus_seedance";
+  const providerTask = job.provider_request_id || taskId;
 
-  // ── Polling ───────────────────────────────────────────────
-  let pollResult;
+  let result;
   try {
-    if (provider === "piapi_seedance") {
-      pollResult = await pollPiapi(taskId);
-    } else if (provider === "fal_seedance") {
-      const falEndpoint = job.payload?.fal_endpoint || "bytedance/seedance-2.0/fast/reference-to-video";
-      pollResult = await pollFal(taskId, falEndpoint);
+    if (provider === "evolink_seedance") {
+      result = await pollEvolink(providerTask);
     } else {
-      pollResult = await pollByteplus(taskId);
+      // byteplus_seedance — default
+      result = await pollByteplus(providerTask);
     }
   } catch (err) {
-    console.error(`[cineai/poll] ${provider} error:`, err.message);
+    console.error(`[poll] ${provider} error:`, err.message);
+    // No fallar — seguir intentando en el próximo poll
     return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
   }
-
-  console.error(`[cineai/poll] ${provider} done:${pollResult.done} failed:${pollResult.failed} taskId:${taskId}`);
 
   // ── Procesar resultado ────────────────────────────────────
   let newStatus     = "IN_PROGRESS";
   let finalVideoUrl = null;
   let errorMsg      = null;
 
-  if (pollResult.done && pollResult.videoUrl) {
-    let rawVideoUrl    = pollResult.videoUrl;
-    const pendingAudio = job?.payload?.audio_url;
-    const jobMode      = job?.payload?.cineai_mode;
-
-    // Si era lipsync con audio → sync-lipsync para sincronización perfecta de labios
-    if (pendingAudio && jobMode === "lipsync") {
-      try {
-        console.error("[cineai/poll] aplicando lipsync con sync-lipsync...");
-
-        // PASO 1: enviar a fal-ai/sync-lipsync (async)
-        const syncRes = await fetch("https://fal.run/fal-ai/sync-lipsync/v2/pro", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Key ${process.env.FAL_KEY}` },
-          body: JSON.stringify({
-            video_url: rawVideoUrl,
-            audio_url: pendingAudio,
-            sync_mode: "loop", // si audio > video, repite el video
-          }),
-        });
-        const syncData = await syncRes.json();
-
-        // sync-lipsync puede devolver request_id (async) o video directo
-        const requestId = syncData?.request_id || syncData?.requestId;
-        const directUrl = syncData?.video?.url || syncData?.data?.video?.url;
-
-        if (directUrl) {
-          rawVideoUrl = directUrl;
-          console.error("[cineai/poll] lipsync OK directo");
-        } else if (requestId) {
-          // Polling del lipsync
-          const deadline = Date.now() + 3 * 60 * 1000;
-          while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 5000));
-            const sr = await fetch(`https://queue.fal.run/fal-ai/sync-lipsync/v2/pro/requests/${requestId}`, {
-              headers: { "Authorization": `Key ${process.env.FAL_KEY}` },
-            });
-            const sd = await sr.json();
-            if (sd.status === "COMPLETED") {
-              const syncedUrl = sd?.output?.video?.url || sd?.video?.url || null;
-              if (syncedUrl) { rawVideoUrl = syncedUrl; console.error("[cineai/poll] lipsync OK"); }
-              break;
-            }
-            if (sd.status === "FAILED") { console.error("[cineai/poll] lipsync falló, usando video mudo"); break; }
-          }
-        } else {
-          console.error("[cineai/poll] sync-lipsync sin URL:", JSON.stringify(syncData));
-        }
-      } catch (e) {
-        console.error("[cineai/poll] lipsync falló, video mudo:", e.message);
-      }
-    }
-
-    finalVideoUrl = await saveVideoToLibrary(userId, rawVideoUrl, taskId);
+  if (result.done && result.videoUrl) {
+    // Video listo — guardar permanentemente en Supabase Storage
+    finalVideoUrl = await saveVideo(userId, result.videoUrl, providerTask);
     newStatus     = "COMPLETED";
-    await cleanupTempFiles(job);
-  } else if (pollResult.done && !pollResult.videoUrl) {
+    await cleanup(job);
+
+  } else if (result.done && !result.videoUrl) {
+    // El proveedor dice done pero sin URL — error
+    console.error(`[poll] done=true but no videoUrl. provider:${provider} taskId:${providerTask}`);
     newStatus = "FAILED";
     errorMsg  = "Video generado pero el proveedor no devolvió la URL";
-  } else if (pollResult.failed) {
-    newStatus = "FAILED";
-    errorMsg  = pollResult.error || "Error en el proveedor";
-  }
 
-  // ── Actualizar video_jobs ─────────────────────────────────
-  const update = {
+  } else if (result.failed) {
+    newStatus = "FAILED";
+    errorMsg  = result.error || `Error en ${provider}`;
+  }
+  // else: sigue procesando
+
+  // ── Actualizar DB ─────────────────────────────────────────
+  const upd = {
     status:          newStatus,
-    provider_status: pollResult.done ? "succeeded" : pollResult.failed ? "failed" : "running",
+    provider_status: result.done ? "succeeded" : result.failed ? "failed" : "running",
     updated_at:      new Date().toISOString(),
   };
-  if (finalVideoUrl) update.result_url     = finalVideoUrl;
-  if (errorMsg)      update.provider_error = errorMsg;
-  if (newStatus === "COMPLETED") update.completed_at = new Date().toISOString();
+  if (finalVideoUrl)             upd.result_url     = finalVideoUrl;
+  if (errorMsg)                  upd.provider_error = errorMsg;
+  if (newStatus === "COMPLETED") upd.completed_at   = new Date().toISOString();
 
-  await supabaseAdmin.from("video_jobs").update(update).eq("id", job.id);
+  await supabaseAdmin.from("video_jobs").update(upd).eq("id", job.id);
 
   return res.status(200).json({
     ok:       true,
