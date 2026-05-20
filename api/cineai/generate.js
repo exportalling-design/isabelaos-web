@@ -25,7 +25,10 @@ const BYTEPLUS_MODEL = "dreamina-seedance-2-0-260128";
 // Aspect ratios válidos EvoLink
 const VALID_RATIOS = ["16:9","9:16","1:1","4:3","3:4","21:9","adaptive"];
 
-const JADE_COSTS = { 5: 40, 10: 75, 15: 110 };
+const JADE_COSTS = {
+  "480p": { 5: 22, 10: 42, 15: 63  },
+  "720p": { 5: 40, 10: 75, 15: 110 },
+};
 
 const BLOCKED_NAMES = [
   "tom cruise","brad pitt","angelina jolie","scarlett johansson","will smith",
@@ -77,6 +80,7 @@ export default async function handler(req, res) {
     isContinuation,
     duration    = 5,
     aspectRatio = "9:16",
+    quality     = "480p",
     sceneMode   = "tiktok",
   } = body;
 
@@ -89,7 +93,8 @@ export default async function handler(req, res) {
 
   const dur   = Math.min(Math.max(Number(duration) || 5, 4), 15);
   const ratio = VALID_RATIOS.includes(aspectRatio) ? aspectRatio : "9:16";
-  const jadeCost = JADE_COSTS[dur] || JADE_COSTS[5];
+  const q = quality === "720p" ? "720p" : "480p";
+  const jadeCost = (JADE_COSTS[q] || JADE_COSTS["480p"])[dur] || (JADE_COSTS[q] || JADE_COSTS["480p"])[5];
   const ref = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
   // ── Descontar Jades ANTES ─────────────────────────────────
@@ -155,7 +160,7 @@ export default async function handler(req, res) {
         model:          EVOLINK_MODEL,
         prompt:         finalPrompt,
         duration:       dur,
-        quality:        "720p",
+        quality:        (quality === "720p" ? "720p" : "480p"),
         aspect_ratio:   ratio,
         generate_audio: true,
         image_urls:     imageList,                        // siempre presente (hay foto)
@@ -226,7 +231,7 @@ export default async function handler(req, res) {
     provider_status: "pending", started_at: new Date().toISOString(),
     payload: {
       task_id: taskId, cineai_mode: mode, scene_mode: sceneMode,
-      duration: dur, aspect_ratio: ratio,
+      duration: dur, aspect_ratio: ratio, quality: (quality === "720p" ? "720p" : "480p"),
       image_url: imageUrl || null, image_list: imageList,
       ref_video_url: refVideoUrl || null, audio_url: audioUrl || null,
       animate_exact: animateExact || false, is_continuation: isContinuation || false,
