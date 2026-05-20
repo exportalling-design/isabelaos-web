@@ -1,18 +1,14 @@
 // api/cineai/generate.js
 // ─────────────────────────────────────────────────────────────
-// ROUTING DEFINITIVO:
-//   Con foto de persona  → EvoLink (Seedance 2.0 fast-image-to-video)
-//                          Soporta rostros reales desde Abril 2026
-//   Sin foto (solo IA)   → BytePlus (Seedance 2.0, texto puro o video ref)
+// ROUTING:
+//   Con foto → EvoLink Seedance 2.0 fast-image-to-video
+//   Sin foto → BytePlus Seedance 2.0
 // ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-// EvoLink — con foto de persona
-const EVOLINK_BASE  = "https://api.evolink.ai/v1/videos/generations";
-const EVOLINK_MODEL = "seedance-2.0-fast-image-to-video";
-
-// BytePlus — sin foto, IA genera todo
+const EVOLINK_BASE    = "https://api.evolink.ai/v1/videos/generations";
+const EVOLINK_MODEL   = "seedance-2.0-fast-image-to-video";
 const BYTEPLUS_BASE   = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 const BYTEPLUS_MODEL  = "dreamina-seedance-2-0-260128";
@@ -46,48 +42,31 @@ function detectBlockedContent(text) {
   return null;
 }
 
-// ── EvoLink — CON foto de persona ─────────────────────────────
 async function submitToEvoLink({ imageUrls, prompt, duration, aspectRatio }) {
   const body = {
     model:          EVOLINK_MODEL,
     prompt,
-    image_urls:     imageUrls.slice(0, 2), // EvoLink max 2 imágenes
-    duration:       Math.min(Number(duration) || 10, 10), // max 10s estable
+    image_urls:     imageUrls.slice(0, 2),
+    duration:       Math.min(Number(duration) || 10, 10),
     aspect_ratio:   aspectRatio,
     quality:        "720p",
     generate_audio: true,
   };
-
-  console.log(`[generate] EvoLink submit model=${body.model} images=${body.image_urls.length} duration=${body.duration}`);
-
   const r = await fetch(EVOLINK_BASE, {
-    method:  "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
-    },
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
     body: JSON.stringify(body),
   });
-
   const data = await r.json();
-  console.log(`[generate] EvoLink response status=${data.status} id=${data.id} error=${data.error?.message || "none"}`);
-
-  if (!r.ok || data.error) {
-    throw new Error(data.error?.message || data.message || `EvoLink error ${r.status}: ${JSON.stringify(data).slice(0, 200)}`);
-  }
-  const taskId = data.id;
-  if (!taskId) throw new Error("EvoLink no devolvió task id");
-  return { taskId, provider: "evolink_seedance" };
+  if (!r.ok || data.error) throw new Error(data.error?.message || data.message || `EvoLink error ${r.status}`);
+  if (!data.id) throw new Error("EvoLink no devolvió task id");
+  return { taskId: data.id, provider: "evolink_seedance" };
 }
 
-// ── BytePlus — SIN foto (IA pura) ─────────────────────────────
 async function submitToByteplus(contentArr) {
   const r = await fetch(BYTEPLUS_CREATE, {
-    method:  "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
-    },
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
     body: JSON.stringify({ model: BYTEPLUS_MODEL, content: contentArr }),
   });
   const data = await r.json();
@@ -110,16 +89,9 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const {
-    prompt,
-    imageUrl,       // foto principal del usuario
-    refImages,      // URLs adicionales de referencia
-    refVideoUrl,    // video de referencia
-    audioUrl,       // audio para lip sync
-    animateExact,   // animar foto exacta respetando fondo
-    isContinuation, // continuación de clip anterior
-    duration    = 10,
-    aspectRatio = "9:16",
-    sceneMode   = "tiktok",
+    prompt, imageUrl, refImages, refVideoUrl, audioUrl,
+    animateExact, isContinuation,
+    duration = 10, aspectRatio = "9:16", sceneMode = "tiktok",
   } = body;
 
   if (!prompt || String(prompt).trim().length < 5)
@@ -132,10 +104,8 @@ export default async function handler(req, res) {
   const jadeCost = JADE_COSTS[duration] || 75;
   const ref = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-  // ── Descontar Jades ──────────────────────────────────────────
   const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
-    p_user_id: userId, p_amount: jadeCost,
-    p_reason: "cineai_generate", p_ref: ref,
+    p_user_id: userId, p_amount: jadeCost, p_reason: "cineai_generate", p_ref: ref,
   });
   if (spendErr) {
     if ((spendErr.message || "").includes("INSUFFICIENT_JADES"))
@@ -146,7 +116,6 @@ export default async function handler(req, res) {
   const hasPerson   = !!imageUrl;
   const hasRefVideo = !!refVideoUrl;
 
-  // Lista de imágenes (principal + adicionales, máx 6 internamente)
   const allImages = [];
   if (imageUrl) allImages.push(imageUrl);
   if (Array.isArray(refImages)) {
@@ -161,11 +130,7 @@ export default async function handler(req, res) {
 
   try {
     if (hasPerson) {
-      // ════════════════════════════════════════════════════════
-      // CON FOTO → EVOLINK Seedance 2.0 fast-image-to-video
-      // EvoLink soporta rostros reales - no hay content restriction
-      // ════════════════════════════════════════════════════════
-
+      // ── CON FOTO → EVOLINK ─────────────────────────────────
       if (isContinuation && hasRefVideo) {
         mode = "continuation";
         finalPrompt = `Continue this exact scene seamlessly from the first frame image. Maintain the same atmosphere, lighting, camera movement, color grading and visual style. Must feel like an uninterrupted extension of the same shot. ${finalPrompt}`;
@@ -174,30 +139,22 @@ export default async function handler(req, res) {
         finalPrompt = `Continue this exact scene seamlessly from the first frame image. Maintain the same atmosphere, lighting and visual style. ${finalPrompt}`;
       } else if (animateExact) {
         mode = "animate";
-        finalPrompt = `Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters exactly as they appear. Only add natural movement to existing subjects. ${finalPrompt}`;
+        finalPrompt = `Animate this exact photo naturally with subtle realistic motion. STRICTLY preserve the original background, environment, and all characters. Only add natural movement to existing subjects. ${finalPrompt}`;
       } else if (hasRefVideo) {
         mode = "r2v+face";
-        finalPrompt = `The person in @image1 is the subject. Copy ONLY the body movement and choreography from the reference. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
+        finalPrompt = `The person in @image1 is the subject. Copy ONLY the body movement from the reference. Background from the prompt, NOT from the reference video. ${finalPrompt}`;
       } else {
         mode = "i2v";
         finalPrompt = `@image1 ${finalPrompt}`;
       }
 
-      const result = await submitToEvoLink({
-        imageUrls:   imageList,
-        prompt:      finalPrompt,
-        duration,
-        aspectRatio,
-      });
+      const result = await submitToEvoLink({ imageUrls: imageList, prompt: finalPrompt, duration, aspectRatio });
       taskId   = result.taskId;
       provider = result.provider;
 
     } else {
-      // ════════════════════════════════════════════════════════
-      // SIN FOTO → BYTEPLUS (IA genera todo)
-      // ════════════════════════════════════════════════════════
+      // ── SIN FOTO → BYTEPLUS ────────────────────────────────
       const contentArr = [];
-
       if (hasRefVideo) {
         mode = "r2v";
         contentArr.push({ type: "video_url", video_url: { url: refVideoUrl } });
@@ -205,7 +162,6 @@ export default async function handler(req, res) {
       } else {
         mode = "t2v";
       }
-
       contentArr.push({
         type: "text",
         text: `${finalPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p`,
@@ -217,45 +173,27 @@ export default async function handler(req, res) {
     }
 
   } catch (err) {
-    // Reembolsar Jades si el proveedor falla
     try {
       await supabaseAdmin.rpc("spend_jades", {
-        p_user_id: userId, p_amount: -jadeCost,
-        p_reason: "cineai_refund_error", p_ref: ref,
+        p_user_id: userId, p_amount: -jadeCost, p_reason: "cineai_refund_error", p_ref: ref,
       });
     } catch {}
     console.error(`[generate] ${provider || "?"} error:`, err.message);
     return res.status(500).json({ ok: false, error: "Error generando video. Jades reembolsados." });
   }
 
-  // ── Guardar job ──────────────────────────────────────────────
   const jobId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
   await supabaseAdmin.from("video_jobs").insert({
-    id:                  jobId,
-    user_id:             userId,
-    status:              "IN_PROGRESS",
-    mode:                "cineai",
-    prompt:              finalPrompt,
-    provider,
-    provider_request_id: taskId,
-    provider_status:     "pending",
-    started_at:          new Date().toISOString(),
+    id: jobId, user_id: userId, status: "IN_PROGRESS", mode: "cineai",
+    prompt: finalPrompt, provider, provider_request_id: taskId,
+    provider_status: "pending", started_at: new Date().toISOString(),
     payload: {
-      task_id:         taskId,
-      cineai_mode:     mode,
-      scene_mode:      sceneMode,
-      duration,
-      aspect_ratio:    aspectRatio,
-      image_url:       imageUrl     || null,
-      ref_images:      imageList,
-      ref_video_url:   refVideoUrl  || null,
-      audio_url:       audioUrl     || null,
-      animate_exact:   animateExact  || false,
-      is_continuation: isContinuation || false,
-      jade_cost:       jadeCost,
-      provider,
-      ref,
+      task_id: taskId, cineai_mode: mode, scene_mode: sceneMode,
+      duration, aspect_ratio: aspectRatio, image_url: imageUrl || null,
+      ref_images: imageList, ref_video_url: refVideoUrl || null,
+      audio_url: audioUrl || null, animate_exact: animateExact || false,
+      is_continuation: isContinuation || false, jade_cost: jadeCost, provider, ref,
     },
   }).then(({ error }) => { if (error) console.error("[generate] insert failed:", error.message); });
 
