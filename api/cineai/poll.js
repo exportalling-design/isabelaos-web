@@ -18,7 +18,14 @@ async function pollEvolink(taskId) {
   return {
     done:     data.status === "succeeded",
     failed:   data.status === "failed",
-    videoUrl: data.video_url || data.output?.video_url || null,
+    videoUrl: (
+      data.video_url                          ||
+      data.output?.video_url                  ||
+      data.videos?.[0]?.url                   ||
+      data.result?.video_url                  ||
+      data.data?.video_url                    ||
+      null
+    ),
     error:    data.error?.message || data.error || null,
     rawData:  data,
   };
