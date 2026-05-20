@@ -9,7 +9,14 @@ async function pollEvolink(taskId) {
   const data = await r.json();
   console.error("[status] EvoLink raw:", JSON.stringify(data).slice(0, 400));
   if (!r.ok) throw new Error(data?.message || `EvoLink error ${r.status}`);
-  return { done: data.status === "succeeded", failed: data.status === "failed", videoUrl: data.video_url || data.output?.video_url || null, error: data.error?.message || null, rawData: data };
+  return { done: data.status === "succeeded", failed: data.status === "failed", videoUrl: (
+      data.video_url                          ||
+      data.output?.video_url                  ||
+      data.videos?.[0]?.url                   ||
+      data.result?.video_url                  ||
+      data.data?.video_url                    ||
+      null
+    ), error: data.error?.message || null, rawData: data };
 }
 
 async function pollByteplus(taskId) {
