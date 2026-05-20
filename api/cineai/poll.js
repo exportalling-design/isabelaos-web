@@ -16,14 +16,18 @@ async function pollEvolink(taskId) {
   console.error("[poll] EvoLink raw:", JSON.stringify(data).slice(0, 400));
   if (!r.ok) throw new Error(data?.message || `EvoLink error ${r.status}`);
   return {
-    done:     data.status === "succeeded",
+    done:     data.status === "succeeded" || data.status === "completed",
     failed:   data.status === "failed",
     videoUrl: (
       data.video_url                          ||
       data.output?.video_url                  ||
+      data.output?.videos?.[0]?.url           ||
+      data.output?.url                        ||
       data.videos?.[0]?.url                   ||
       data.result?.video_url                  ||
+      data.result?.url                        ||
       data.data?.video_url                    ||
+      data.url                                ||
       null
     ),
     error:    data.error?.message || data.error || null,
