@@ -38,15 +38,22 @@ const PRESETS = {
 };
 
 const DURATIONS = [
-  { value: 5,  label: "5s",  jades: 40  },
-  { value: 10, label: "10s", jades: 75  },
-  { value: 15, label: "15s", jades: 110 },
+  { value: 5,  label: "5s",  jades480: 22,  jades720: 40  },
+  { value: 10, label: "10s", jades480: 42,  jades720: 75  },
+  { value: 15, label: "15s", jades480: 63,  jades720: 110 },
+];
+
+const QUALITIES = [
+  { value: "480p", label: "480p", desc: "Más rápido · Menos costo" },
+  { value: "720p", label: "720p", desc: "Alta calidad · Standard"  },
 ];
 
 const RATIOS = [
-  { value: "9:16", label: "9:16", desc: "TikTok / Reels" },
-  { value: "16:9", label: "16:9", desc: "Cine / YouTube"  },
-  { value: "1:1",  label: "1:1",  desc: "Instagram"       },
+  { value: "9:16", label: "9:16", desc: "TikTok / Reels"  },
+  { value: "16:9", label: "16:9", desc: "Cine / YouTube"   },
+  { value: "1:1",  label: "1:1",  desc: "Instagram"        },
+  { value: "4:3",  label: "4:3",  desc: "Clásico"          },
+  { value: "21:9", label: "21:9", desc: "Ultra ancho"       },
 ];
 
 const BLOCKED_PREVIEW = [
@@ -158,6 +165,7 @@ export default function CineAIPanel() {
   const [animateExact, setAnimateExact] = useState(false);
   const [duration,     setDuration]     = useState(10);
   const [ratio,        setRatio]        = useState("9:16");
+  const [quality,      setQuality]      = useState("480p");
 
   // Estado del job
   const [generating,     setGenerating]     = useState(false);
@@ -204,7 +212,8 @@ export default function CineAIPanel() {
 
   const currentPresets = PRESETS[activeMode];
   const preset   = currentPresets.find((p) => p.id === selectedPreset) || currentPresets[0];
-  const jadeCost = DURATIONS.find((d) => d.value === duration)?.jades || 75;
+  const durObj   = DURATIONS.find((d) => d.value === duration);
+  const jadeCost = quality === "480p" ? (durObj?.jades480 || 42) : (durObj?.jades720 || 75);
 
   const getFinalPrompt = () => {
     if (selectedPreset === "custom") return customPrompt;
@@ -263,7 +272,7 @@ export default function CineAIPanel() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        const res  = await fetch(`/api/cineai/poll?taskId=${taskId}`, {
+        const res  = await fetch(`/api/cineai/status/${taskId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -318,6 +327,7 @@ export default function CineAIPanel() {
           isContinuation: true,
           duration,
           aspectRatio:    ratio,
+          quality,
           sceneMode:      activeMode,
         };
       } else {
@@ -332,6 +342,7 @@ export default function CineAIPanel() {
           isContinuation: false,
           duration,
           aspectRatio:  ratio,
+          quality,
           sceneMode:    activeMode,
         };
       }
@@ -577,10 +588,10 @@ Aspect ratio: ${ratio}`;
 
         .cp-header{padding:32px 26px 20px;border-bottom:1px solid #111;position:relative;overflow:hidden;}
         .cp-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,80,0.3),transparent);}
-        .cp-eyebrow{font-size:10px;letter-spacing:4px;color:#333;text-transform:uppercase;margin-bottom:4px;}
+        .cp-eyebrow{font-size:10px;letter-spacing:4px;color:#666;text-transform:uppercase;margin-bottom:4px;}
         .cp-title{font-family:'Bebas Neue',sans-serif;font-size:48px;letter-spacing:8px;line-height:1;color:#f0e8d0;}
         .cp-title em{color:#c8a050;font-style:normal;}
-        .cp-tagline{font-size:11px;color:#444;letter-spacing:1px;margin-top:6px;}
+        .cp-tagline{font-size:11px;color:#888;letter-spacing:1px;margin-top:6px;}
         .cp-header-row{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;}
         .cp-mode-pill{display:inline-flex;align-items:center;gap:6px;margin-top:12px;background:rgba(200,160,80,0.07);border:1px solid rgba(200,160,80,0.18);border-radius:20px;padding:5px 14px;font-size:11px;color:#c8a050;letter-spacing:1px;}
         .cp-dot{width:6px;height:6px;border-radius:50%;background:#c8a050;animation:blink 2s infinite;}
@@ -588,12 +599,12 @@ Aspect ratio: ${ratio}`;
         .how-btn{background:rgba(200,160,80,0.08);border:1px solid rgba(200,160,80,0.2);border-radius:8px;color:#c8a050;font-family:'Syne',sans-serif;font-size:12px;padding:8px 16px;cursor:pointer;letter-spacing:1px;white-space:nowrap;transition:all 0.15s;margin-top:12px;}
         .how-btn:hover{background:rgba(200,160,80,0.15);}
 
-        .blocked-banner-top{background:rgba(200,60,60,0.07);border-bottom:1px solid rgba(200,60,60,0.15);padding:10px 26px;font-size:12px;color:#e07070;display:flex;align-items:center;gap:10px;line-height:1.5;}
+        .blocked-banner-top{background:rgba(200,60,60,0.07);border-bottom:1px solid rgba(200,60,60,0.15);padding:10px 26px;font-size:12px;color:#f08080;display:flex;align-items:center;gap:10px;line-height:1.5;}
         .blocked-banner-top strong{color:#f09090;}
 
         .mode-selector{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111;}
-        .mode-btn{padding:16px 22px;background:transparent;border:none;cursor:pointer;text-align:left;transition:all 0.15s;border-bottom:3px solid transparent;color:#444;}
-        .mode-btn:hover{background:rgba(255,255,255,0.02);color:#888;}
+        .mode-btn{padding:16px 22px;background:transparent;border:none;cursor:pointer;text-align:left;transition:all 0.15s;border-bottom:3px solid transparent;color:#666;}
+        .mode-btn:hover{background:rgba(255,255,255,0.02);color:#aaa;}
         .mode-btn.active{color:#f0e8d0;border-bottom-color:#c8a050;background:rgba(200,160,80,0.03);}
         .mode-btn:disabled{opacity:0.4;cursor:not-allowed;}
         .mode-btn-icon{font-size:22px;display:block;margin-bottom:3px;}
@@ -603,25 +614,25 @@ Aspect ratio: ${ratio}`;
         .cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#0e0e0e;}
         .cp-cell{background:#060608;padding:20px 24px;}
         .cp-cell-full{grid-column:1/-1;}
-        .sec-label{font-size:9px;letter-spacing:4px;text-transform:uppercase;color:#2e2e2e;margin-bottom:14px;display:flex;align-items:center;gap:10px;}
+        .sec-label{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#555;margin-bottom:14px;display:flex;align-items:center;gap:10px;}
         .sec-label::after{content:'';flex:1;height:1px;background:#111;}
 
         .preset-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
-        .preset-btn{background:#0a0a0c;border:1px solid #161616;border-radius:8px;padding:12px 4px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:#333;}
-        .preset-btn:hover{border-color:#2a2820;color:#777;}
+        .preset-btn{background:#0a0a0c;border:1px solid #222;border-radius:8px;padding:12px 4px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:#666;}
+        .preset-btn:hover{border-color:#3a3020;color:#aaa;}
         .preset-btn.active{border-color:#c8a050;background:rgba(200,160,80,0.05);color:#c8a050;}
         .preset-btn:disabled{opacity:0.4;cursor:not-allowed;}
         .pi{font-size:20px;display:block;margin-bottom:4px;}
         .pn{font-size:9px;letter-spacing:2px;text-transform:uppercase;}
 
         .upload-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;position:relative;}
-        .upload-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.02);}
+        .upload-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.03);}
         .upload-zone.has-file{border-style:solid;border-color:#2a2820;}
         .upload-zone.uploading{border-color:rgba(200,160,80,0.4);animation:pb 1s infinite;}
         @keyframes pb{50%{border-color:rgba(200,160,80,0.1);}}
         .uz-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;border:2px solid #c8a050;}
         .uz-video-thumb{width:auto;max-width:100%;max-height:110px;border-radius:6px;border:2px solid #c8a050;object-fit:contain;background:#000;display:block;margin:0 auto;}
-        .uz-label{font-size:11px;color:#333;line-height:1.5;}
+        .uz-label{font-size:11px;color:#888;line-height:1.5;}
         .uz-hint{font-size:10px;color:#c8a050;letter-spacing:1px;}
         .uz-badge{position:absolute;top:6px;right:6px;background:rgba(200,160,80,0.12);border:1px solid rgba(200,160,80,0.25);border-radius:4px;font-size:8px;color:#c8a050;padding:2px 6px;letter-spacing:1px;text-transform:uppercase;}
         .remove-btn{background:none;border:none;color:#803030;font-size:10px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;padding:4px 0;font-family:'Syne',sans-serif;}
@@ -646,7 +657,7 @@ Aspect ratio: ${ratio}`;
         .animate-toggle.active .animate-toggle-label{color:#c8a050;}
         .animate-toggle-desc{font-size:10px;color:#444;margin-left:26px;margin-top:4px;letter-spacing:0.5px;line-height:1.4;}
 
-        .r2v-notice{background:rgba(100,150,255,0.05);border:1px solid rgba(100,150,255,0.15);border-radius:8px;padding:8px 12px;font-size:11px;color:#7090e0;margin-top:8px;line-height:1.5;}
+        .r2v-notice{background:rgba(100,150,255,0.07);border:1px solid rgba(100,150,255,0.2);border-radius:8px;padding:8px 12px;font-size:11px;color:#90aaff;margin-top:8px;line-height:1.5;}
 
         .ext-url-toggle{font-size:11px;color:#c8a050;cursor:pointer;letter-spacing:1px;margin-top:8px;display:inline-block;text-decoration:underline;}
         .ext-url-input{width:100%;background:#0a0a0c;border:1px solid #1e1e1e;border-radius:8px;color:#ddd8cc;font-family:'Syne',sans-serif;font-size:12px;padding:10px 13px;outline:none;margin-top:8px;transition:border-color 0.2s;}
@@ -671,8 +682,8 @@ Aspect ratio: ${ratio}`;
         .blocked-banner{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.18);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;line-height:1.5;margin-top:10px;display:flex;gap:8px;}
 
         .toggle-row{display:flex;gap:6px;}
-        .toggle-btn{flex:1;background:#0a0a0c;border:1px solid #161616;border-radius:8px;padding:12px 6px;cursor:pointer;text-align:center;transition:all 0.15s;color:#333;}
-        .toggle-btn:hover{border-color:#2a2820;color:#777;}
+        .toggle-btn{flex:1;background:#0a0a0c;border:1px solid #222;border-radius:8px;padding:12px 6px;cursor:pointer;text-align:center;transition:all 0.15s;color:#777;}
+        .toggle-btn:hover{border-color:#3a3020;color:#bbb;}
         .toggle-btn.active{border-color:#c8a050;background:rgba(200,160,80,0.05);color:#c8a050;}
         .toggle-btn:disabled{opacity:0.4;cursor:not-allowed;}
         .tm{display:block;font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:2px;}
@@ -699,7 +710,7 @@ Aspect ratio: ${ratio}`;
         @keyframes db{0%,100%{transform:translateY(0);opacity:0.3}50%{transform:translateY(-5px);opacity:1}}
         .result-video{width:100%;max-height:420px;border-radius:10px;background:#000;margin-bottom:14px;}
         .result-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
-        .ra-btn{background:transparent;border:1px solid #1e1e1e;border-radius:8px;color:#666;font-family:'Syne',sans-serif;font-size:12px;padding:10px 18px;cursor:pointer;transition:all 0.15s;letter-spacing:1px;text-decoration:none;display:inline-block;}
+        .ra-btn{background:transparent;border:1px solid #2e2e2e;border-radius:8px;color:#999;font-family:'Syne',sans-serif;font-size:12px;padding:10px 18px;cursor:pointer;transition:all 0.15s;letter-spacing:1px;text-decoration:none;display:inline-block;}
         .ra-btn:hover{border-color:#c8a050;color:#c8a050;}
         .ra-btn.gold{background:#c8a050;color:#060608;border-color:#c8a050;font-weight:700;}
         .ra-btn.gold:hover{background:#d4aa5a;}
@@ -715,7 +726,7 @@ Aspect ratio: ${ratio}`;
         .modal-item{display:flex;gap:12px;margin-bottom:18px;}
         .modal-icon{font-size:22px;flex-shrink:0;margin-top:2px;}
         .modal-item-title{font-size:13px;font-weight:700;color:#f0e8d0;margin-bottom:4px;letter-spacing:1px;}
-        .modal-item-desc{font-size:12px;color:#666;line-height:1.6;}
+        .modal-item-desc{font-size:12px;color:#888;line-height:1.6;}
 
         .fs-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;}
         .fs-close{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:50%;color:#fff;font-size:20px;width:44px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
@@ -725,8 +736,17 @@ Aspect ratio: ${ratio}`;
         @media(max-width:600px){
           .cp-grid{grid-template-columns:1fr;}
           .cp-cell-full,.result-cell,.cta-cell{grid-column:1;}
-          .cp-title{font-size:36px;}
+          .cp-title{font-size:32px;letter-spacing:5px;}
+          .cp-tagline{font-size:12px;}
           .preset-grid{grid-template-columns:repeat(2,1fr);}
+          .sec-label{font-size:11px;}
+          .modal-box{padding:18px;}
+          .mode-btn-label{font-size:14px;}
+          .jade-num{font-size:22px;}
+          .gen-btn{font-size:18px;padding:14px;}
+          .cp-header{padding:20px 16px 16px;}
+          .cp-cell{padding:16px 16px;}
+          .blocked-banner-top{padding:8px 16px;font-size:11px;}
         }
       `}</style>
 
@@ -1364,19 +1384,34 @@ Aspect ratio: ${ratio}`;
               <button key={d.value} className={`toggle-btn ${duration === d.value ? "active" : ""}`}
                 onClick={() => setDuration(d.value)} disabled={generating}>
                 <span className="tm">{d.label}</span>
-                <span className="ts">{d.jades} Jades</span>
+                <span className="ts">{quality === "480p" ? d.jades480 : d.jades720} Jades</span>
               </button>
             ))}
           </div>
+          {/* Selector de calidad */}
+          <p className="sec-label" style={{ marginTop: 14 }}>Calidad de video</p>
+          <div className="toggle-row">
+            {QUALITIES.map((q) => (
+              <button key={q.value} className={`toggle-btn ${quality === q.value ? "active" : ""}`}
+                onClick={() => setQuality(q.value)} disabled={generating}>
+                <span className="tm">{q.label}</span>
+                <span className="ts">{q.desc}</span>
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 10, color: "#444", letterSpacing: 0.5, marginTop: 8, lineHeight: 1.5 }}>
+            💡 480p = ${quality === "480p" ? "~$0.055/s" : "$0.075/s"} · 720p = ${quality === "720p" ? "~$0.161/s" : "$0.161/s"} en EvoLink. Con 480p podés generar el doble de videos.
+          </p>
         </div>
 
         {/* Formato */}
         <div className="cp-cell">
-          <p className="sec-label">Formato</p>
-          <div className="toggle-row">
+          <p className="sec-label">Formato de video</p>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
             {RATIOS.map((r) => (
               <button key={r.value} className={`toggle-btn ${ratio === r.value ? "active" : ""}`}
-                onClick={() => setRatio(r.value)} disabled={generating}>
+                onClick={() => setRatio(r.value)} disabled={generating}
+                style={{ flexShrink: 0, minWidth: 72 }}>
                 <span className="tm">{r.label}</span>
                 <span className="ts">{r.desc}</span>
               </button>
