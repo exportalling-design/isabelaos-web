@@ -1,22 +1,19 @@
 // api/comercial-generate.js
-// FIXES:
-//   ✅ seedance-2-fast en lugar de seedance-2-preview
-//   ✅ transicion_moda, chef_ia → SIEMPRE PiAPI (Gemini siempre genera personas)
-//   ✅ producto_estelar, explosion_sabor → BytePlus (sin personas)
-//   ✅ comercial_completo → routing por hasHumanFace como estaba
+// ROUTING: con personas → EvoLink | sin personas → BytePlus
+// Si BytePlus bloquea por rostro → error FACE_DETECTED → frontend muestra mensaje
 import { supabaseAdmin }          from "../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
 const GEMINI_API_BASE    = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-exp";
 const ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1";
 const BYTEPLUS_BASE      = "https://ark.ap-southeast.bytepluses.com/api/v3";
 const BYTEPLUS_CREATE    = `${BYTEPLUS_BASE}/contents/generations/tasks`;
 const BYTEPLUS_MODEL     = "dreamina-seedance-2-0-260128";
-const PIAPI_URL          = "https://api.piapi.ai/api/v1/task";
+const EVOLINK_URL        = "https://api.evolink.ai/v1/videos/generations";
+const EVOLINK_MODEL      = "seedance-2.0-fast-reference-to-video";
 const COMERCIAL_COST     = 120;
 
-// ── Voces ElevenLabs ──────────────────────────────────────────
 const VOICE_MAP = {
   neutro:       { mujer: "htFfPSZGJwjBv1CL0aMD", hombre: "htFfPSZGJwjBv1CL0aMD" },
   guatemalteco: { mujer: "MbMvLOFbicjtQwgx0j2r", hombre: "htFfPSZGJwjBv1CL0aMD" },
@@ -27,24 +24,19 @@ const VOICE_MAP = {
   ingles:       { mujer: "DXFkLCBUTmvXpp2QwZjA", hombre: "sB7vwSCyX0tQmU24cW2C" },
 };
 function getVoiceId(a, g) {
-  return (VOICE_MAP[(a || "neutro").toLowerCase()] || VOICE_MAP.neutro)[
-    (g || "mujer").toLowerCase() === "hombre" ? "hombre" : "mujer"
-  ];
+  return (VOICE_MAP[(a||"neutro").toLowerCase()] || VOICE_MAP.neutro)[(g||"mujer").toLowerCase() === "hombre" ? "hombre" : "mujer"];
 }
 
-// ── Upload imagen temporal → URL pública ──────────────────────
 async function uploadImageTemp(base64, mimeType, userId) {
   const ext  = mimeType.includes("png") ? "png" : "jpg";
   const path = `comercial/temp/${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-  const { error } = await supabaseAdmin.storage
-    .from("user-uploads")
+  const { error } = await supabaseAdmin.storage.from("user-uploads")
     .upload(path, Buffer.from(base64, "base64"), { contentType: mimeType, upsert: false });
   if (error) throw new Error(`Error subiendo imagen: ${error.message}`);
   const { data } = supabaseAdmin.storage.from("user-uploads").getPublicUrl(path);
   return { url: data.publicUrl, path };
 }
 
-// ── Gemini Image ──────────────────────────────────────────────
 async function generateSceneImage(prompt, referenceImages = []) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
@@ -53,54 +45,36 @@ async function generateSceneImage(prompt, referenceImages = []) {
     if (img?.base64 && img?.mimeType)
       parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
   parts.push({ text: prompt });
-  const r = await fetch(
-    `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.3 },
-      }),
-    }
-  );
+  const r = await fetch(`${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.3 } }),
+  });
   if (!r.ok) throw new Error(`Gemini error ${r.status}`);
   const data    = await r.json();
-  const imgPart = data?.candidates?.[0]?.content?.parts?.find(
-    p => p?.inlineData?.data || p?.inline_data?.data
-  );
+  const imgPart = data?.candidates?.[0]?.content?.parts?.find(p => p?.inlineData?.data || p?.inline_data?.data);
   if (!imgPart) throw new Error("Gemini no devolvió imagen.");
   const pd = imgPart.inlineData || imgPart.inline_data;
   return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
 }
 
-// ── BytePlus: solo para contenido SIN personas ────────────────
 async function imageToVideoByteplus(imageUrl, videoPrompt, aspectRatio, duration) {
   const r = await fetch(BYTEPLUS_CREATE, {
     method: "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model:   BYTEPLUS_MODEL,
-      content: [
-        { type: "image_url", image_url: { url: imageUrl } },
-        { type: "text", text: `[Image 1] ${videoPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p` },
-      ],
-    }),
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
+    body: JSON.stringify({ model: BYTEPLUS_MODEL, content: [
+      { type: "image_url", image_url: { url: imageUrl } },
+      { type: "text", text: `[Image 1] ${videoPrompt} --ratio ${aspectRatio} --duration ${duration} --resolution 720p` },
+    ]}),
   });
   const data = await r.json();
   if (!r.ok || data.error) {
     const msg = data.error?.message || data.message || "";
-    if (msg.toLowerCase().includes("real person") || msg.toLowerCase().includes("face") || msg.toLowerCase().includes("copyright"))
-      throw new Error("FACE_DETECTED");
+    if (msg.toLowerCase().includes("real person") || msg.toLowerCase().includes("face")) throw new Error("FACE_DETECTED");
     throw new Error(msg || `BytePlus error ${r.status}`);
   }
   const taskId = data.id;
   if (!taskId) throw new Error("BytePlus no devolvió task id");
-
-  const deadline = Date.now() + 6 * 60 * 1000;
+  const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise(res => setTimeout(res, 8000));
     const sr = await fetch(`${BYTEPLUS_BASE}/contents/generations/tasks/${taskId}`, {
@@ -113,244 +87,100 @@ async function imageToVideoByteplus(imageUrl, videoPrompt, aspectRatio, duration
     }
     if (sd.status === "failed") {
       const msg = sd.error?.message || "";
-      if (msg.toLowerCase().includes("real person") || msg.toLowerCase().includes("face"))
-        throw new Error("FACE_DETECTED");
+      if (msg.toLowerCase().includes("real person") || msg.toLowerCase().includes("face")) throw new Error("FACE_DETECTED");
       throw new Error(msg || "BytePlus failed");
     }
   }
   throw new Error("Timeout BytePlus");
 }
 
-// ── PiAPI Seedance 2 Fast: para contenido CON personas ────────
-async function imageToVideoPiapi(imageUrl, videoPrompt, aspectRatio, duration) {
-  const r = await fetch(PIAPI_URL, {
+async function imageToVideoEvolink(imageUrl, videoPrompt, aspectRatio, duration) {
+  const r = await fetch(EVOLINK_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-api-key":    process.env.PIAPI_KEY,
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}`,
     },
     body: JSON.stringify({
-      model:     "seedance",
-      task_type: "seedance-2-fast",          // ✅ seedance-2-fast
-      input: {
-        prompt:       `@image1 ${videoPrompt}`,
-        image_urls:   [imageUrl],
-        mode:         "omni_reference",
-        duration,
-        aspect_ratio: aspectRatio,
-        resolution:   "720p",
-      },
+      model:          EVOLINK_MODEL,
+      prompt:         `image 1 ${videoPrompt}`,
+      image_urls:     [imageUrl],
+      duration:       Math.min(Number(duration) || 5, 10),
+      aspect_ratio:   aspectRatio,
+      quality:        "480p",
+      generate_audio: false,
     }),
   });
   const data = await r.json();
-  if (!r.ok || data.code !== 200) throw new Error(data?.message || `PiAPI error ${r.status}`);
-  const taskId = data?.data?.task_id;
-  if (!taskId) throw new Error("PiAPI no devolvió task_id");
-
+  console.log("[comercial] EvoLink submit:", { id: data.id, status: data.status, error: data.error || null });
+  if (!r.ok || data.error) throw new Error(data.error?.message || data.message || `EvoLink error ${r.status}`);
+  const taskId = data.id;
+  if (!taskId) throw new Error("EvoLink no devolvió task id");
   const deadline = Date.now() + 10 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise(res => setTimeout(res, 8000));
-    const sr  = await fetch(`https://api.piapi.ai/api/v1/task/${taskId}`, {
-      headers: { "x-api-key": process.env.PIAPI_KEY },
+    const sr = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
+      headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
     });
-    const sd      = await sr.json();
-    const status  = sd?.data?.status;
-    const videoUrl =
-      sd?.data?.output?.video     ||
-      sd?.data?.output?.video_url ||
-      sd?.data?.output?.url       ||
-      null;
-    if (status === "completed" && videoUrl) return videoUrl;
-    if (status === "failed") throw new Error(sd?.data?.error?.message || "PiAPI failed");
+    const sd = await sr.json();
+    console.log("[comercial] EvoLink poll:", { status: sd.status, id: taskId });
+    if (sd.status === "completed" || sd.status === "succeeded") {
+      const videoUrl = sd.video_url || sd.output?.video_url || sd.output?.videos?.[0]?.url || sd.output?.url || null;
+      if (!videoUrl) throw new Error("EvoLink completó pero sin video_url");
+      return videoUrl;
+    }
+    if (sd.status === "failed") throw new Error(sd.error?.message || "EvoLink failed");
   }
-  throw new Error("Timeout PiAPI");
+  throw new Error("Timeout EvoLink");
 }
 
-// ── Router de video ───────────────────────────────────────────
-// alwaysPiapi=true fuerza PiAPI aunque hasHumanFace sea false
-// (para plantillas que siempre generan personas con Gemini)
-async function generateSceneVideo(imageUrl, videoPrompt, aspectRatio, duration, hasHumanFace, alwaysPiapi = false) {
-  if (alwaysPiapi || hasHumanFace) {
-    return await imageToVideoPiapi(imageUrl, videoPrompt, aspectRatio, duration);
+async function generateSceneVideo(imageUrl, videoPrompt, aspectRatio, duration, hasHumanFace, alwaysEvolink = false) {
+  if (alwaysEvolink || hasHumanFace) {
+    return await imageToVideoEvolink(imageUrl, videoPrompt, aspectRatio, duration);
   }
   return await imageToVideoByteplus(imageUrl, videoPrompt, aspectRatio, duration);
 }
 
-// ── Guardar video en biblioteca ───────────────────────────────
 async function saveVideoToLibrary(userId, videoUrl) {
   try {
     const res    = await fetch(videoUrl);
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const path   = `${userId}/comercial_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`;
-    const { error } = await supabaseAdmin.storage
-      .from("videos")
-      .upload(path, buffer, { contentType: "video/mp4", upsert: false });
+    const { error } = await supabaseAdmin.storage.from("videos").upload(path, buffer, { contentType: "video/mp4", upsert: false });
     if (error) throw new Error(error.message);
     const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
     return data?.publicUrl || videoUrl;
-  } catch (err) {
-    console.error("[comercial] saveVideo failed:", err.message);
-    return videoUrl;
-  }
+  } catch (err) { console.error("[comercial] saveVideo failed:", err.message); return videoUrl; }
 }
 
-// ── ElevenLabs: narración en off ──────────────────────────────
 async function generateNarration(text, accent, gender) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey || !text?.trim()) return null;
-  try {
-    const r = await fetch(`${ELEVENLABS_BASE}/text-to-speech/${getVoiceId(accent, gender)}`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.55, similarity_boost: 0.80, style: 0.35, use_speaker_boost: true },
-      }),
-    });
-    if (!r.ok) return null;
-    return { base64: Buffer.from(await r.arrayBuffer()).toString("base64"), mimeType: "audio/mpeg" };
-  } catch { return null; }
+  const r = await fetch(`${ELEVENLABS_BASE}/text-to-speech/${getVoiceId(accent, gender)}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
+    body: JSON.stringify({ text, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.55, similarity_boost: 0.80, style: 0.35, use_speaker_boost: true } }),
+  });
+  if (!r.ok) return null;
+  return { base64: Buffer.from(await r.arrayBuffer()).toString("base64"), mimeType: "audio/mpeg" };
 }
 
-// ── Prompts de moda ───────────────────────────────────────────
 function buildModaImagePrompt(idx, total, hasModelo, hasFondo) {
-  const scene = `outfit ${idx + 1} of ${total}`;
-  if (hasModelo && hasFondo) {
-    return `You are a world-class fashion photographer shooting a luxury campaign. [Image 1] = REFERENCE MODEL — preserve this exact person's face, skin tone, body proportions, hair with 100% fidelity. [Image 2] = REFERENCE BACKGROUND — reproduce this exact location. [Image 3] = CLOTHING ITEM — model must wear this exact garment, match every detail. Generate: full body photo of the model wearing the clothing (${scene}), standing in the background. Camera: 9:16 vertical portrait, cinematic lighting. NO text, NO watermarks.`;
-  }
-  if (hasModelo) {
-    return `You are a world-class fashion photographer. [Image 1] = REFERENCE MODEL — preserve face exactly. [Image 2] = CLOTHING ITEM — model wears this exact garment. Generate: full body photo (${scene}). Invent stunning background: ${["luxury resort poolside","European cobblestone street","modern minimalist studio","rooftop city at sunset"][idx % 4]}. Camera: 9:16 vertical, cinematic. NO text.`;
-  }
-  if (hasFondo) {
-    return `You are a world-class fashion photographer. [Image 1] = REFERENCE BACKGROUND — use this exact location. [Image 2] = CLOTHING ITEM — generate aspirational fashion model aged 20-28 wearing this garment. Generate: full body photo (${scene}) in exact background. 9:16 vertical. NO text.`;
-  }
-  const bgs = ["luxury infinity pool, golden hour, tropical palms","sleek modern art museum, white walls","European fashion week street, cobblestones","dramatic cliffside, turquoise ocean at sunset"];
-  return `You are a world-class fashion photographer. [Image 1] = CLOTHING ITEM — generate stunning aspirational fashion model aged 20-28 wearing this exact garment. Background: ${bgs[idx % 4]}. Full body shot (${scene}), confident pose, cinematic lighting, 9:16 vertical. NO text.`;
-}
-
-function buildModaImagePromptContinuity(idx, total) {
-  return `You are a world-class fashion photographer continuing a fashion lookbook shoot. [Image 1] = LAST FRAME from previous video clip — preserve EVERYTHING: exact same model face, skin, hair, body, background, lighting, camera angle. ONLY CHANGE: model now wears the clothing from [Image 2]. [Image 2] = NEW CLOTHING ITEM — reproduce this exact garment on the model. This is outfit ${idx + 1} of ${total}. Full body shot, 9:16 vertical. NO text.`;
-}
-
-// ── Prompts de producto ───────────────────────────────────────
-const EFECTOS_PRODUCTO = {
-  golden_particles: {
-    imagePrompt: "Ultra-cinematic product advertisement photograph. A beautifully manicured hand launches the EXACT product from [Image 1] into the air. CRITICAL: Product must be 100% identical to the reference — same shape, label, color, every detail preserved. Effect: thousands of luminous gold particles EXPLODE outward from the product in all directions — swirling streams of gold shimmer like a constellation. Background: pure black velvet void. Dramatic rim lighting. Mood: supreme luxury — Chanel/Dior campaign level. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand dramatically releases product upward, golden particles explode and swirl in spectacular slow motion. Product rotates slowly mid-air surrounded by golden light streams. Camera: slow push-in. Epic cinematic. NO text.",
-  },
-  fire_energy: {
-    imagePrompt: "Epic cinematic product advertisement. A strong hand dramatically launches the EXACT product from [Image 1] upward. CRITICAL: Product identical to reference — preserve all labels, colors, shape. Effect: massive fire bursts ERUPT behind the product — deep orange, blue and white flames — product pristine and untouched. Background: total darkness with ember particles. Mood: raw power, volcanic force. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand releases product with force, fire erupts dramatically behind it in slow motion. Sparks fly outward. Product stands perfect in fire light. Camera: low angle heroic push-in. NO text.",
-  },
-  liquid_splash: {
-    imagePrompt: "Award-winning product photography. An elegant hand tosses the EXACT product from [Image 1] through a spectacular liquid splash. CRITICAL: Product completely identical to reference. The product emerges from a crown of crystal-clear liquid. Droplets hang suspended like liquid diamonds. Background: pure white, studio lighting. Mood: freshness, purity, premium beauty. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand releases product upward, liquid crown EXPLODES in ultra slow motion. Crystal droplets cascade outward. Product rises through the splash perfectly clean. Camera: slow reveal zoom. NO text.",
-  },
-  crystal_smoke: {
-    imagePrompt: "Mysterious luxury product photograph. A graceful hand releases the EXACT product from [Image 1] into ethereal smoke. CRITICAL: Product identical to reference. Translucent smoke wisps curl around it. Ice crystals form nearby. Deep purple and indigo background. Mood: mystery, exclusivity — dark luxury perfume campaign. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand releases product into mystical smoke, wisps curl and dance hauntingly. Ice crystals shimmer in slow motion. Light rays pierce through dramatic smoke. Camera: slow orbit. NO text.",
-  },
-  flower_petals: {
-    imagePrompt: "Editorial beauty product photography. A delicate hand launches the EXACT product from [Image 1] into a magical petal storm. CRITICAL: Product completely identical to reference. Thousands of rose and cherry blossom petals EXPLODE outward. Golden hour warm light. Background: soft bokeh of lush garden. Mood: natural luxury, botanical magic — Dior Garden campaign. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand releases product upward, rose petals EXPLODE outward in glorious slow motion in a magical vortex. Warm golden light. Product rises through a storm of petals. Camera: gentle upward reveal. NO text.",
-  },
-  electric_storm: {
-    imagePrompt: "Electrifying tech product photography. A bold hand launches the EXACT product from [Image 1] into an electric storm. CRITICAL: Product identical to reference. Electric blue and white lightning arcs REACH TOWARD the product. Plasma bolts and energy rings surround it. Dark storm clouds, teal and electric blue palette. Mood: innovation, disruption, technology — Apple launch level. 9:16 vertical. NO text.",
-    videoPrompt:  "Hand releases product into electric storm, lightning arcs toward it dramatically. Energy pulses radiate outward in slow motion. Product glows with inner power. Camera: dramatic push-in from below. NO text.",
-  },
-};
-
-function buildExplosionPrompt(nombreNegocio) {
-  return `Award-winning food photography for a premium restaurant campaign. The EXACT dish from [Image 1] — preserve all ingredients, colors, plating style. Effect: the dish EXPLODES outward in cinematic slow motion. Each ingredient separates dramatically — bun flies upward, protein rises center, cheese melts in golden strings, vegetables spin outward, sauces splash in elegant arcs, spices float like cosmic dust. Background: deep black with warm smoke. Lighting: dramatic rim lights from below. Mood: Michelin-star explosion, cinematic food commercial. 9:16 vertical. Ultra-photorealistic. NO text.`;
-}
-
-function buildChefPrompt(chefDesc, hasChefPhoto) {
-  return `Cinematic food brand film photograph. ${chefDesc} Scene: professional dark dramatic kitchen, industrial steel surfaces, hanging copper pots, dramatic overhead spotlights. The chef stands confidently, holding or plating the dish. Cinematic composition. Lighting: warm dramatic key light, blue-toned fill, rim light. Mood: premium restaurant brand film — Gordon Ramsay/Nobu campaign level. 9:16 vertical. Photorealistic. NO text.`;
+  if (hasModelo && hasFondo) return `World-class fashion photographer. [Image 1] EXACT model — preserve face, skin, hair PERFECTLY. [Image 2] EXACT background — reproduce it exactly. [Image 3] Clothing — model WEARING it, exact fabric, pattern, cut. Full body 9:16. NO text.`;
+  if (hasModelo) return `World-class fashion photographer. [Image 1] EXACT model — preserve face PERFECTLY. [Image 2] Clothing — model WEARING it. Scene ${idx+1}/${total}: invent stunning aspirational background. Full body 9:16. NO text.`;
+  if (hasFondo)  return `World-class fashion photographer. [Image 1] EXACT background — reproduce exactly. [Image 2] Clothing — generate stunning model WEARING it, age 20-28. Full body 9:16. NO text.`;
+  return `World-class fashion photographer luxury campaign. [Image 1] Clothing — generate aspirational model WEARING it, age 20-28. Scene ${idx+1}/${total}: unique stunning location. Full body 9:16. NO text.`;
 }
 
 function buildStoryboardImagePrompt(scene, refs) {
-  return `World-class advertising photographer. ONE stunning photorealistic advertisement photograph. ${scene.image_prompt} ${refs?.some(i => i?.base64) ? "Use ALL reference images. Maintain exact likeness of people. Feature products prominently." : ""} Cinematic lighting. 9:16 vertical. TV commercial quality. NO text, NO subtitles, NO logos.`;
+  return [
+    "World-class advertising photographer. ONE stunning photorealistic advertisement photograph.",
+    scene.image_prompt,
+    refs?.some(i => i?.base64) ? "Use ALL reference images. Maintain exact likeness of people. Feature products prominently." : "",
+    "Cinematic lighting. 9:16 vertical. TV commercial quality. NO text, NO subtitles, NO logos.",
+  ].filter(Boolean).join("\n");
 }
 
-// ── Extract last frame via fal ────────────────────────────────
-async function extractLastFrame(videoUrl) {
-  try {
-    const { fal } = await import("@fal-ai/client");
-    const FAL_KEY = process.env.FAL_KEY;
-    if (!FAL_KEY) throw new Error("Missing FAL_KEY");
-    fal.config({ credentials: FAL_KEY });
-    const result = await fal.subscribe("fal-ai/ffmpeg-api", {
-      input: {
-        commands: [{ command: "ffmpeg", args: ["-sseof", "-0.1", "-i", videoUrl, "-vframes", "1", "-f", "image2", "-vcodec", "mjpeg", "last_frame.jpg"] }],
-        output_format: "base64",
-      },
-      pollInterval: 3000,
-    });
-    const frameB64 = result?.data?.outputs?.[0]?.data || result?.outputs?.[0]?.data || result?.data?.base64 || null;
-    if (!frameB64) throw new Error("extractLastFrame: no base64");
-    return frameB64;
-  } catch (err) {
-    console.error("[comercial] extractLastFrame failed:", err.message);
-    return null;
-  }
-}
-
-// ── Assemble clips ────────────────────────────────────────────
-async function assembleModaClips(videoUrls, userId) {
-  const RUNPOD_ENDPOINT = process.env.RUNPOD_ASSEMBLER_ENDPOINT_ID;
-  const RUNPOD_API_KEY  = process.env.RUNPOD_API_KEY || process.env.RP_API_KEY;
-  if (!RUNPOD_ENDPOINT || !RUNPOD_API_KEY) throw new Error("RunPod assembler no configurado");
-
-  const clipsB64 = await Promise.all(
-    videoUrls.map(async (url) => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Download clip failed: ${res.status}`);
-      return Buffer.from(await res.arrayBuffer()).toString("base64");
-    })
-  );
-
-  const submitRes = await fetch(`https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${RUNPOD_API_KEY}` },
-    body: JSON.stringify({ input: { action: "assemble_crossfade", clips_b64: clipsB64, crossfade_sec: 0.5, output_format: "mp4" } }),
-  });
-  if (!submitRes.ok) throw new Error(`RunPod submit error: ${submitRes.status}`);
-  const { id: rpJobId } = await submitRes.json();
-  if (!rpJobId) throw new Error("RunPod no devolvió job ID");
-
-  const deadline = Date.now() + 8 * 60 * 1000;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 5000));
-    const sr = await fetch(`https://api.runpod.ai/v2/${RUNPOD_ENDPOINT}/status/${rpJobId}`, {
-      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
-    });
-    if (!sr.ok) continue;
-    const sd = await sr.json();
-    if (sd.status === "COMPLETED") {
-      const videoB64 = sd.output?.video_b64 || sd.output?.video || null;
-      const videoUrl = sd.output?.video_url || null;
-      if (videoB64) {
-        const buf  = Buffer.from(videoB64, "base64");
-        const path = `${userId}/moda_transition_${Date.now()}.mp4`;
-        const { error } = await supabaseAdmin.storage.from("videos").upload(path, buf, { contentType: "video/mp4", upsert: false });
-        if (error) throw new Error(error.message);
-        const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
-        return data?.publicUrl;
-      }
-      if (videoUrl) return await saveVideoToLibrary(userId, videoUrl);
-      throw new Error("RunPod COMPLETED sin video");
-    }
-    if (sd.status === "FAILED")    throw new Error(`RunPod FAILED: ${sd.error}`);
-    if (sd.status === "CANCELLED") throw new Error("RunPod cancelado");
-  }
-  throw new Error("Timeout RunPod assembler");
-}
-
-// ─────────────────────────────────────────────────────────────
-// HANDLER PRINCIPAL
-// ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin",  "*");
   res.setHeader("access-control-allow-methods", "POST, OPTIONS");
@@ -363,12 +193,8 @@ export default async function handler(req, res) {
   if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-  const {
-    storyboard, referenceImages = [],
-    accent = "neutro", gender = "mujer",
-    plantilla_id, imagenes = {}, textos = {}, selectores = {},
-    hasHumanFace = false,
-  } = body;
+  const { storyboard, referenceImages = [], accent = "neutro", gender = "mujer",
+          plantilla_id, imagenes = {}, textos = {}, hasHumanFace = false } = body;
 
   const ref = `comercial-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
@@ -381,252 +207,130 @@ export default async function handler(req, res) {
   }
 
   try {
-
-    // ══════════════════════════════════════════════════════════
-    // TRANSICIÓN DE MODA
-    // SIEMPRE usa PiAPI — Gemini siempre genera personas
-    // ══════════════════════════════════════════════════════════
+    // ── TRANSICIÓN DE MODA ────────────────────────────────────
     if (plantilla_id === "transicion_moda") {
       const prendas = imagenes.prendas || [];
       const modelo  = imagenes.modelo  || [];
       const fondo   = imagenes.fondo   || [];
-
-      if (!prendas.length)
-        return res.status(400).json({ ok: false, error: "Necesitas al menos una foto de prenda." });
-
+      if (!prendas.length) return res.status(400).json({ ok: false, error: "Necesitas al menos una foto de prenda" });
       const hasModelo = modelo.length > 0;
       const hasFondo  = fondo.length  > 0;
-
-      console.log(`[comercial] transicion_moda — prendas=${prendas.length} hasModelo=${hasModelo} hasFondo=${hasFondo} → SIEMPRE PiAPI`);
-
-      const videoUrls    = [];
-      const tempPaths    = [];
-      let   lastFrameB64 = null;
+      const sceneResults = [];
 
       for (let i = 0; i < prendas.length; i++) {
         try {
-          console.log(`[comercial] prenda ${i + 1}/${prendas.length} — iniciando`);
-
-          const refs = [];
-          if (lastFrameB64) {
-            refs.push({ base64: lastFrameB64, mimeType: "image/jpeg" });
-          } else {
-            if (hasModelo) refs.push(modelo[0]);
-            if (hasFondo)  refs.push(fondo[0]);
-          }
-          refs.push(prendas[i]);
-
-          const imagePrompt = lastFrameB64
-            ? buildModaImagePromptContinuity(i, prendas.length)
-            : buildModaImagePrompt(i, prendas.length, hasModelo, hasFondo);
-
-          console.log(`[comercial] prenda ${i + 1} — generando imagen Gemini`);
-          const sceneImage = await generateSceneImage(imagePrompt, refs.filter(Boolean));
-
-          const { url: imageUrl, path: imagePath } = await uploadImageTemp(
-            sceneImage.base64, sceneImage.mimeType, userId
-          );
-          tempPaths.push(imagePath);
-
-          const videoPrompt = i === 0
-            ? "Fashion model stands elegantly, subtle natural movement — hair moves gently, fabric flows. Camera holds steady. Soft golden light. NO transitions, NO cuts. Single continuous shot. NO text."
-            : "Fashion model continues same pose and location, wearing new outfit — subtle natural movement, fabric flows. Same lighting and camera angle as before. Single continuous shot. NO text.";
-
-          // ✅ SIEMPRE PiAPI para moda (alwaysPiapi=true)
-          console.log(`[comercial] prenda ${i + 1} — animando con PiAPI Seedance 2 Fast`);
-          const videoUrl = await generateSceneVideo(imageUrl, videoPrompt, "9:16", 5, false, true);
-          videoUrls.push(videoUrl);
-
-          try {
-            lastFrameB64 = await extractLastFrame(videoUrl);
-            if (!lastFrameB64) lastFrameB64 = sceneImage.base64;
-          } catch {
-            lastFrameB64 = sceneImage.base64;
-          }
-
+          const refs = [...(hasModelo ? [modelo[0]] : []), ...(hasFondo ? [fondo[0]] : []), prendas[i]];
+          const sceneImage = await generateSceneImage(buildModaImagePrompt(i, prendas.length, hasModelo, hasFondo), refs);
+          const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
+          const vp = hasModelo ? "Fashion model walks confidently, hair flowing, outfit clearly visible. Cinematic dolly-in, golden hour. NO text." : "Elegant fashion model walks toward camera, outfit in full detail. Cinematic push-in, warm light. NO text.";
+          const videoUrl = await generateSceneVideo(imageUrl, vp, "9:16", 5, hasHumanFace && hasModelo);
+          const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
+          await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
+          const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
+          sceneResults.push({ scene_number: i + 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null });
         } catch (err) {
-          console.error(`[comercial] prenda ${i + 1} error:`, err.message);
+          console.error(`[comercial] prenda ${i+1}:`, err.message);
+          sceneResults.push({ scene_number: i + 1, ok: false, error: err.message === "FACE_DETECTED" ? "FACE_DETECTED" : err.message });
         }
       }
-
-      await supabaseAdmin.storage.from("user-uploads").remove(tempPaths).catch(() => {});
-
-      if (!videoUrls.length)
-        return res.status(500).json({ ok: false, error: "No se pudo generar ningún clip de moda." });
-
-      let finalVideoUrl;
-      if (videoUrls.length === 1) {
-        finalVideoUrl = await saveVideoToLibrary(userId, videoUrls[0]);
-      } else {
-        try {
-          finalVideoUrl = await assembleModaClips(videoUrls, userId);
-        } catch (assembleErr) {
-          console.error(`[comercial] assembleModaClips falló:`, assembleErr.message);
-          const savedClips = await Promise.all(videoUrls.map(url => saveVideoToLibrary(userId, url)));
-          const narration  = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-          return res.status(200).json({
-            ok: true, ref, plantilla_id, assembled: false,
-            note: "Videos generados por separado — el ensamble falló.",
-            scenes: savedClips.map((url, idx) => ({
-              scene_number: idx + 1, ok: true, video_url: url,
-              audio_b64: idx === 0 ? narration?.base64 || null : null,
-            })),
-            success_count: savedClips.length, total_scenes: savedClips.length, jade_cost: COMERCIAL_COST,
-          });
-        }
-      }
-
-      const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-      return res.status(200).json({
-        ok: true, ref, plantilla_id, assembled: videoUrls.length > 1,
-        scenes: [{ scene_number: 1, ok: true, video_url: finalVideoUrl, audio_b64: narration?.base64 || null }],
-        success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST,
-      });
+      const successCount = sceneResults.filter(s => s.ok).length;
+      return res.status(200).json({ ok: successCount > 0, ref, plantilla_id, scenes: sceneResults, success_count: successCount, total_scenes: prendas.length, jade_cost: COMERCIAL_COST });
     }
 
-    // ══════════════════════════════════════════════════════════
-    // PRODUCTO ESTELAR — BytePlus (no hay personas)
-    // ══════════════════════════════════════════════════════════
+    // ── PRODUCTO ESTELAR ──────────────────────────────────────
     if (plantilla_id === "producto_estelar") {
       const producto = imagenes.producto || [];
-      if (!producto.length)
-        return res.status(400).json({ ok: false, error: "Sube la foto de tu producto." });
+      if (!producto.length) return res.status(400).json({ ok: false, error: "Sube la foto del producto" });
 
-      const efectoKey  = selectores?.efecto || "golden_particles";
-      const efectoData = EFECTOS_PRODUCTO[efectoKey] || EFECTOS_PRODUCTO.golden_particles;
+      // NO usamos Gemini — la foto del usuario ES el producto.
+      // BytePlus anima directamente con el prompt del efecto.
+      // El prompt describe: mano lanza el producto al aire → transformación en el aire con el efecto.
+      const efectoMap = {
+        golden_particles: "A hand elegantly launches the product (@image1) into the air. Once airborne, an explosion of golden glowing particles and light rays burst from the product in slow motion, luxury commercial quality, dark studio background, dramatic rim lighting.",
+        fire_energy:      "A hand powerfully throws the product (@image1) upward. Mid-air, dramatic fire and energy bursts erupt around it, flames dancing in slow motion, dark background, cinematic power and force.",
+        liquid_splash:    "A hand tosses the product (@image1) into the air. It emerges from a spectacular liquid splash, crystal clear water droplets frozen in time around it, fresh and clean, high-speed photography style.",
+        crystal_smoke:    "A hand lifts the product (@image1) into the air. Mystical smoke and glowing crystal formations materialize around it, mysterious and sophisticated, dark moody cinematic lighting.",
+        flower_petals:    "A hand gently launches the product (@image1) upward. Blooming flower petals burst and fly through the air around it, natural and soft, warm golden light, luxury brand aesthetic.",
+        electric_storm:   "A hand throws the product (@image1) into the air. Electric lightning bolts and energy storms crackle around it mid-air, technology and innovation, dramatic blue neon light.",
+      };
+      const efecto = body.selectores?.efecto || "golden_particles";
+      const videoPrompt = (efectoMap[efecto] || efectoMap.golden_particles) + " ABSOLUTELY NO text, NO subtitles, NO watermarks, NO logos.";
 
-      console.log(`[comercial] producto_estelar — efecto=${efectoKey} → BytePlus`);
-      const sceneImage = await generateSceneImage(efectoData.imagePrompt, [producto[0]]);
-      const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
-      const videoUrl   = await imageToVideoByteplus(imageUrl, efectoData.videoPrompt, "9:16", 5);
+      const { url: imageUrl, path: imagePath } = await uploadImageTemp(producto[0].base64, producto[0].mimeType, userId);
+      const videoUrl   = await imageToVideoByteplus(imageUrl, videoPrompt, "9:16", 5);
       const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
-      const narration  = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-
-      return res.status(200).json({
-        ok: true, ref, plantilla_id,
-        scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }],
-        success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST,
-      });
+      const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
+      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST });
     }
 
-    // ══════════════════════════════════════════════════════════
-    // EXPLOSIÓN DE SABOR — BytePlus (no hay personas)
-    // ══════════════════════════════════════════════════════════
+    // ── EXPLOSIÓN DE SABOR ────────────────────────────────────
     if (plantilla_id === "explosion_sabor") {
       const plato = imagenes.plato || [];
-      if (!plato.length)
-        return res.status(400).json({ ok: false, error: "Sube la foto del platillo." });
-
-      console.log(`[comercial] explosion_sabor → BytePlus`);
-      const sceneImage = await generateSceneImage(buildExplosionPrompt(textos?.nombre_negocio || ""), [plato[0]]);
-      const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
-      const videoUrl   = await imageToVideoByteplus(imageUrl, "Food ingredients explode dramatically outward in ultra slow motion. Each ingredient flies apart beautifully. Sauces splash in arcs. Camera: slow pull-back from below. Epic cinematic. NO text.", "9:16", 5);
+      if (!plato.length) return res.status(400).json({ ok: false, error: "Sube la foto del platillo" });
+      // NO usamos Gemini — la foto del plato va directo a BytePlus
+      // BytePlus anima el plato explotando con cada ingrediente volando
+      const videoPrompt = "@image1 The dish dramatically explodes outward, each individual ingredient flies through the air in slow motion, components separating and floating in different directions revealing every detail, dark moody background, dramatic studio lighting, epic cinematic food commercial, ingredients suspended mid-air. ABSOLUTELY NO text, NO subtitles, NO watermarks.";
+      const { url: imageUrl, path: imagePath } = await uploadImageTemp(plato[0].base64, plato[0].mimeType, userId);
+      const videoUrl   = await imageToVideoByteplus(imageUrl, videoPrompt, "9:16", 5);
       const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
-      const narration  = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-
-      return res.status(200).json({
-        ok: true, ref, plantilla_id,
-        scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }],
-        success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST,
-      });
+      const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
+      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST });
     }
 
-    // ══════════════════════════════════════════════════════════
-    // CHEF IA — SIEMPRE PiAPI (siempre hay persona)
-    // ══════════════════════════════════════════════════════════
+    // ── CHEF IA ───────────────────────────────────────────────
     if (plantilla_id === "chef_ia") {
       const plato = imagenes.plato || [];
       const chef  = imagenes.chef  || [];
-      if (!plato.length)
-        return res.status(400).json({ ok: false, error: "Sube la foto del platillo." });
-
-      const hasChefPhoto = chef.length > 0;
-      const avatarDescs  = {
-        chef_hombre_latino: "a professional confident Latin male chef, 30s, clean white chef coat",
-        chef_mujer_latina:  "an elegant professional Latin female chef, 30s, white chef coat, warm smile",
-        chef_barbudo:       "a tattooed bearded male chef, 35s, dark apron, urban artisan style",
-        chef_mujer_moderna: "a young modern female chef, stylish apron, contemporary chic look",
+      if (!plato.length) return res.status(400).json({ ok: false, error: "Sube la foto del platillo" });
+      const avatarDescs = {
+        chef_hombre_latino: "professional Latin male chef, 30s, white coat, confident",
+        chef_mujer_latina:  "elegant Latin female chef, 30s, white coat, warm smile",
+        chef_barbudo:       "tattooed bearded male chef, black apron, urban style",
+        chef_mujer_moderna: "young modern female chef, stylish apron",
       };
-      const chefDesc = hasChefPhoto
-        ? "[Image 1] = REFERENCE CHEF — preserve face EXACTLY."
-        : `Generate ${avatarDescs[selectores?.avatar_tipo] || avatarDescs.chef_hombre_latino}.`;
-      const refs = hasChefPhoto ? [chef[0], plato[0]] : [plato[0]];
-
-      console.log(`[comercial] chef_ia → SIEMPRE PiAPI`);
-      const sceneImage = await generateSceneImage(buildChefPrompt(chefDesc, hasChefPhoto), refs);
+      const chefDesc   = chef.length ? "[Image 1] is the chef — maintain exact likeness." : `Generate ${avatarDescs[body.selectores?.avatar_tipo] || avatarDescs.chef_hombre_latino}.`;
+      const refs       = chef.length ? [chef[0], plato[0]] : [plato[0]];
+      const sceneImage = await generateSceneImage(`World-class food photographer. ${chefDesc} [Image ${chef.length ? 2 : 1}] finished dish. Chef plating in professional kitchen, cinematic lighting, photorealistic, 9:16, NO text.`, refs);
       const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
-      // ✅ alwaysPiapi=true
-      const videoUrl   = await generateSceneVideo(imageUrl, "Chef elegantly plates and presents dish with confident professional movements. Slow cinematic camera push-in. Warm dramatic kitchen lighting. Steam rises from dish. NO text.", "9:16", 5, false, true);
+      const useHuman   = hasHumanFace && chef.length > 0;
+      const videoUrl   = await generateSceneVideo(imageUrl, "Chef elegantly plates and presents dish, smooth cinematic camera movement, warm kitchen lighting. NO text.", "9:16", 5, useHuman);
       const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
-      const narration  = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-
-      return res.status(200).json({
-        ok: true, ref, plantilla_id,
-        scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }],
-        success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST,
-      });
+      const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
+      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: COMERCIAL_COST });
     }
 
-    // ══════════════════════════════════════════════════════════
-    // COMERCIAL COMPLETO — routing por hasHumanFace
-    // ══════════════════════════════════════════════════════════
+    // ── STORYBOARD COMPLETO ───────────────────────────────────
     if (!storyboard?.scenes?.length)
       return res.status(400).json({ ok: false, error: "MISSING_STORYBOARD" });
 
     const sceneResults = await Promise.allSettled(
       storyboard.scenes.map(async (scene, idx) => {
         let sceneImage = null;
-        try {
-          sceneImage = await generateSceneImage(buildStoryboardImagePrompt(scene, referenceImages), referenceImages);
-        } catch (e) { console.error(`[comercial] img ${idx + 1}:`, e.message); }
-
+        try { sceneImage = await generateSceneImage(buildStoryboardImagePrompt(scene, referenceImages), referenceImages); }
+        catch (e) { console.error(`[comercial] img ${idx+1}:`, e.message); }
         let videoUrl = null;
         if (sceneImage) {
           try {
             const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
-            videoUrl = await generateSceneVideo(imageUrl, scene.video_prompt, "9:16", 5, hasHumanFace, false);
+            videoUrl = await generateSceneVideo(imageUrl, scene.video_prompt, "9:16", 5, hasHumanFace);
             videoUrl = await saveVideoToLibrary(userId, videoUrl);
             await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
-          } catch (e) { console.error(`[comercial] video ${idx + 1}:`, e.message); }
+          } catch (e) { console.error(`[comercial] video ${idx+1}:`, e.message); }
         }
-
         let narration = null;
-        if (scene.narration) {
-          try { narration = await generateNarration(scene.narration, accent, gender); } catch {}
-        }
-
-        return {
-          scene_number: scene.scene_number, narrative_role: scene.narrative_role || null,
-          description: scene.description, narration_text: scene.narration,
-          image_b64: sceneImage?.base64 || null, image_mime: sceneImage?.mimeType || "image/jpeg",
-          video_url: videoUrl || null, audio_b64: narration?.base64 || null, audio_mime: "audio/mpeg",
-          ok: !!videoUrl,
-        };
+        if (scene.narration) try { narration = await generateNarration(scene.narration, accent, gender); } catch {}
+        return { scene_number: scene.scene_number, narrative_role: scene.narrative_role || null, description: scene.description, narration_text: scene.narration, image_b64: sceneImage?.base64 || null, image_mime: sceneImage?.mimeType || "image/jpeg", video_url: videoUrl || null, audio_b64: narration?.base64 || null, audio_mime: "audio/mpeg", ok: !!videoUrl };
       })
     );
-
-    const scenes       = sceneResults.map((r, idx) =>
-      r.status === "fulfilled" ? r.value : { scene_number: idx + 1, ok: false, error: r.reason?.message }
-    );
+    const scenes       = sceneResults.map((r, idx) => r.status === "fulfilled" ? r.value : { scene_number: idx+1, ok: false, error: r.reason?.message });
     const successCount = scenes.filter(s => s.ok).length;
-
-    return res.status(200).json({
-      ok: successCount > 0, ref,
-      title: storyboard.title, style: storyboard.style,
-      music_mood: storyboard.music_mood, call_to_action: storyboard.call_to_action,
-      accent, gender, scenes,
-      success_count: successCount, total_scenes: scenes.length, jade_cost: COMERCIAL_COST,
-    });
+    return res.status(200).json({ ok: successCount > 0, ref, title: storyboard.title, style: storyboard.style, music_mood: storyboard.music_mood, call_to_action: storyboard.call_to_action, accent, gender, scenes, success_count: successCount, total_scenes: scenes.length, jade_cost: COMERCIAL_COST });
 
   } catch (e) {
-    try {
-      await supabaseAdmin.rpc("spend_jades", {
-        p_user_id: userId, p_amount: -COMERCIAL_COST, p_reason: "comercial_refund_error", p_ref: ref,
-      });
-    } catch {}
+    try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -COMERCIAL_COST, p_reason: "comercial_refund_error", p_ref: ref }); } catch {}
     console.error("[comercial-generate] SERVER_ERROR:", e.message);
     return res.status(500).json({ ok: false, error: "SERVER_ERROR", detail: e.message });
   }
