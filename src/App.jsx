@@ -1,9 +1,7 @@
 // src/App.jsx — IsabelaOS Studio v7
-// Arquitectura: Landing + módulos como overlay sin cambiar de página
-// CAMBIOS:
-//   - Idioma default: inglés (EN)
-//   - Modal bienvenida post-registro con 10 Jades
-//   - TemplatesPanel mantenido
+// CAMBIOS v7.1:
+//   - Admin Panel integrado (solo exportalling@gmail.com)
+//   - Botón 🛠️ Admin visible solo para admin en el hero card
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth }          from "./context/AuthContext";
 import { supabase }         from "./lib/supabaseClient";
@@ -23,6 +21,9 @@ import Refund               from "./components/Refund";
 import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
 import LandingView          from "./components/LandingView";
 import { BuyJadesModal }    from "./components/BuyJadesModal";
+import AdminPanel           from "./components/AdminPanel";
+
+const ADMIN_EMAIL = "exportalling@gmail.com";
 
 async function getAuthHeaders() {
   try {
@@ -130,7 +131,6 @@ function WelcomeModal({ lang, onGoImage, onGoAvatar, onClose }) {
 export default function App() {
   const { user, signInWithGoogle, signOut } = useAuth();
 
-  // Default inglés — usuario puede cambiar a español
   const [lang, setLangState] = useState(() => {
     try { return localStorage.getItem("isabelaos_lang") || "en"; } catch { return "en"; }
   });
@@ -138,11 +138,14 @@ export default function App() {
 
   const [authOpen,     setAuthOpen]     = useState(false);
   const [buyOpen,      setBuyOpen]      = useState(false);
+  const [adminOpen,    setAdminOpen]    = useState(false);
   const [activeModule, setActiveModule] = useState(null);
   const [landingPage,  setLandingPage]  = useState("home");
   const [jades,        setJades]        = useState(0);
   const [showWelcome,  setShowWelcome]  = useState(false);
   const prevJades = useRef(0);
+
+  const isAdmin = user?.email === ADMIN_EMAIL;
 
   // Rutas estáticas
   const path = window.location.pathname;
@@ -157,7 +160,6 @@ export default function App() {
       const data = await r.json().catch(() => null);
       if (data?.ok) {
         const newJades = data.jades ?? 0;
-        // Mostrar bienvenida solo la primera vez (10 jades = recién registrado)
         if (newJades === 10 && prevJades.current === 0) {
           const key = `isabelaos_welcome_${user.id}`;
           if (!localStorage.getItem(key)) {
@@ -212,7 +214,12 @@ export default function App() {
 
   return (
     <>
-      {/* Modal bienvenida — aparece solo una vez al registrarse */}
+      {/* Admin Panel — solo para exportalling@gmail.com */}
+      {isAdmin && adminOpen && (
+        <AdminPanel onClose={() => setAdminOpen(false)} />
+      )}
+
+      {/* Modal bienvenida */}
       {showWelcome && (
         <WelcomeModal
           lang={lang}
@@ -239,6 +246,7 @@ export default function App() {
         onOpenAbout={() => setLandingPage("about")}
         onSignOut={signOut}
         onBuyJades={() => setBuyOpen(true)}
+        onOpenAdmin={isAdmin ? () => setAdminOpen(true) : null}
       >
         {activeModule && renderModule()}
       </LandingView>
