@@ -1,8 +1,9 @@
 // src/components/LandingView.jsx — IsabelaOS Studio v7
 // PATCHES:
 //   ✅ Popup viral divine-light.mp4 al entrar
-//   ✅ Globo 🌐 visible en mobile (fuera de lo-nav-links-desktop)  
+//   ✅ Globo 🌐 visible en mobile (fuera de lo-nav-links-desktop)
 //   ✅ Toast de bienvenida 10 Jades al registrarse
+//   ✅ v7.1: Botón Admin 🛠️ en hero card (solo admin)
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
 
@@ -76,14 +77,12 @@ function ViralPopup({ onClose, onGoTemplates, isEs }) {
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.9)", backdropFilter: "blur(16px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", animation: "moIn .35s ease" }}>
       <div style={{ width: "100%", maxWidth: 500, background: "#0a0c12", border: "1px solid rgba(200,169,110,0.4)", borderRadius: 24, overflow: "hidden", animation: "moPIn .4s ease", boxShadow: "0 0 100px rgba(200,169,110,0.2), 0 40px 80px rgba(0,0,0,0.8)" }}>
-        {/* Video */}
         <div style={{ position: "relative", aspectRatio: "21/9", overflow: "hidden" }}>
           <video src="/gallery/divine-light.mp4" autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, #0a0c12 100%)" }} />
           <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 34, height: 34, cursor: "pointer", color: "#fff", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>✕</button>
           <div style={{ position: "absolute", top: 12, left: 12, background: "#C8A96E", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase" }}>⚡ NUEVO</div>
         </div>
-        {/* Content */}
         <div style={{ padding: "22px 26px 26px" }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 10 }}>
             Want to appear in this video?
@@ -138,6 +137,7 @@ export default function LandingView({
   user, jades, onOpenAuth, onStartDemo, onOpenContact,
   onOpenAbout, onSignOut, onBuyJades, lang, setLang,
   activeModule, setActiveModule, children,
+  onOpenAdmin, // null si no es admin
 }) {
   const isEs = lang === "es";
   const [scrolled, setScrolled] = useState(false);
@@ -146,7 +146,6 @@ export default function LandingView({
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
   const prevUser = useRef(null);
 
-  // Popup viral — 1.5s después de entrar, solo una vez por sesión
   useEffect(() => {
     const shown = sessionStorage.getItem("viralPopupShown");
     if (!shown) {
@@ -158,10 +157,8 @@ export default function LandingView({
     }
   }, []);
 
-  // Toast de bienvenida — cuando el usuario se acaba de registrar (user aparece por primera vez)
   useEffect(() => {
     if (user && !prevUser.current) {
-      // Verificar si es registro nuevo: created_at dentro de los últimos 2 minutos
       const createdAt = user.created_at ? new Date(user.created_at).getTime() : 0;
       const isNewUser = Date.now() - createdAt < 2 * 60 * 1000;
       if (isNewUser) setShowWelcomeToast(true);
@@ -250,7 +247,6 @@ export default function LandingView({
     <div style={{ fontFamily: V.ffB, background: V.bg, color: V.text, overflowX: "hidden", minHeight: "100vh" }}>
       <style>{CSS}</style>
 
-      {/* POPUP VIRAL */}
       {showViralPopup && (
         <ViralPopup
           isEs={isEs}
@@ -263,7 +259,6 @@ export default function LandingView({
         />
       )}
 
-      {/* WELCOME TOAST */}
       {showWelcomeToast && (
         <WelcomeToast
           isEs={isEs}
@@ -272,7 +267,6 @@ export default function LandingView({
         />
       )}
 
-      {/* OVERLAY MÓDULO */}
       {activeModule && children && (
         <ModOverlay title={activeModule} onClose={() => setActiveModule(null)}>
           {children}
@@ -292,7 +286,6 @@ export default function LandingView({
 
       {/* NAV */}
       <nav style={{ position:"fixed",top:36,left:0,right:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",height:60,transition:"all .3s",...(scrolled?{background:"rgba(8,10,14,.94)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(255,255,255,.07)"}:{}) }}>
-        {/* LOGO */}
         <div style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer",flexShrink:0 }} onClick={() => scrollTo("hero")}>
           <div style={{ width:36,height:36,borderRadius:9,overflow:"hidden",background:`linear-gradient(135deg,${V.fire},${V.gold})`,display:"grid",placeItems:"center",position:"relative",boxShadow:`0 0 20px rgba(255,90,0,.4)`,flexShrink:0 }}>
             <video src="/gallery/logo.mp4" autoPlay muted loop playsInline style={{ position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover" }} onError={e=>e.target.style.display="none"} />
@@ -304,7 +297,6 @@ export default function LandingView({
           </div>
         </div>
 
-        {/* DESKTOP: galeria, planes, contacto + globo + modules (hidden on mobile) */}
         <div className="lo-nav-links-desktop" style={{ display:"flex",alignItems:"center",gap:8 }}>
           {["galeria","planes"].map(id=>(
             <button key={id} onClick={()=>scrollTo(id)} style={{ background:"none",border:"none",color:"rgba(240,236,228,.6)",fontFamily:V.ffU,fontSize:13,padding:"7px 13px",cursor:"pointer",borderRadius:8,transition:"all .2s" }}>
@@ -318,7 +310,6 @@ export default function LandingView({
           {user?<HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>:<button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)" }}>{isEs?"Entrar":"Sign in"}</button>}
         </div>
 
-        {/* MOBILE: globo + entrar/módulos — SIEMPRE VISIBLE en todos los tamaños */}
         <div style={{ display:"flex",alignItems:"center",gap:8 }}>
           <button onClick={()=>setLang(isEs?"en":"es")} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,padding:"7px 12px",cursor:"pointer",fontFamily:V.ffU,flexShrink:0 }}>
             {isEs?"🌐 EN":"🌐 ES"}
@@ -366,6 +357,8 @@ export default function LandingView({
               <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades al registrarte</b> · {isEs ? "Para generar imágenes · Sin tarjeta" : "To generate images · No credit card"}</p>
             </div>
           </div>
+
+          {/* HERO RIGHT — card usuario */}
           <div className="lo-hero-right" style={{ background: "rgba(6,7,12,.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 32px", position: "relative" }}>
             <div style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", filter: "blur(80px)", background: "rgba(255,90,0,.08)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
             <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
@@ -395,6 +388,27 @@ export default function LandingView({
                       </button>
                     ))}
                   </div>
+
+                  {/* ── BOTÓN ADMIN — solo para exportalling@gmail.com ── */}
+                  {onOpenAdmin && (
+                    <button
+                      onClick={onOpenAdmin}
+                      style={{
+                        width:"100%",marginBottom:8,
+                        background:"rgba(255,90,0,.08)",
+                        border:"1px solid rgba(255,90,0,.25)",
+                        borderRadius:8,color:"#ff5a00",
+                        fontFamily:V.ffU,fontSize:12,fontWeight:700,
+                        padding:"9px",cursor:"pointer",
+                        transition:"all .2s",
+                      }}
+                      onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,90,0,.15)"; e.currentTarget.style.borderColor="rgba(255,90,0,.5)"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,90,0,.08)"; e.currentTarget.style.borderColor="rgba(255,90,0,.25)"; }}
+                    >
+                      🛠️ Admin Panel
+                    </button>
+                  )}
+
                   <button onClick={onSignOut} style={{ width: "100%", background: "none", border: "1px solid rgba(255,255,255,.08)", borderRadius: 8, color: V.muted, fontFamily: V.ffU, fontSize: 12, padding: 9, cursor: "pointer" }}>{isEs ? "Cerrar sesión" : "Sign out"}</button>
                 </div>
               ) : (
@@ -442,7 +456,7 @@ export default function LandingView({
         ))}
       </div>
 
-      {/* PLANTILLAS ÉPICAS — Banner destacado */}
+      {/* PLANTILLAS ÉPICAS */}
       <section style={{ padding: "60px 32px 0", maxWidth: 1280, margin: "0 auto" }}>
         <div onClick={() => user ? go("templates") : onOpenAuth()} style={{ background: "linear-gradient(135deg,rgba(200,169,110,0.08),rgba(200,169,110,0.03))", border: "1px solid rgba(200,169,110,0.25)", borderRadius: 20, padding: "32px 36px", cursor: "pointer", transition: "all .3s", display: "flex", alignItems: "center", gap: 32, overflow: "hidden", position: "relative" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(200,169,110,0.5)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
