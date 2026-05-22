@@ -1,15 +1,4 @@
 // src/components/CineAIPanel.jsx
-// ─────────────────────────────────────────────────────────────
-// Panel CineAI de IsabelaOS — Seedance 2.0 via PiAPI
-//
-// FIXES v4:
-//   - Continuación: manda TANTO el último frame (imageUrl) COMO el
-//     video anterior completo (refVideoUrl) para continuidad perfecta
-//   - Audio: zona de upload siempre visible, no solo con foto
-//   - Video de referencia: subida directa MP4 + URL externa (ya funcionaba)
-//   - isContinuation se manda al backend como campo propio
-//   - previousVideoUrl: estado separado que guarda la URL del clip anterior
-// ─────────────────────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -132,9 +121,9 @@ const HOW_IT_WORKS = [
   { icon: "🖼️", title: "Animar foto exacta", desc: "Activa esta opción para animar tu foto respetando el fondo y personajes originales." },
   { icon: "🎥", title: "Video de referencia", desc: "Sube el video del baile en MP4 o pega la URL. El modelo copia el movimiento exacto. IMPORTANTE: el fondo siempre viene de tu foto o del prompt." },
   { icon: "🎵", title: "Audio para Lip Sync", desc: "Sube un audio MP3 o WAV para que el personaje haga lip sync de esa canción específica." },
-  { icon: "▶", title: "Continuar escena — CONTINUIDAD PERFECTA", desc: "Cuando termina un clip, el botón 'Continuar escena' extrae el último frame Y usa el clip completo como referencia de atmósfera. Así Seedance mantiene la iluminación, el movimiento de cámara y el estilo entre clips. Esta es la técnica que usan los mejores creadores de AI video." },
+  { icon: "▶", title: "Continuar escena", desc: "Cuando termina un clip, el botón 'Continuar escena' extrae el último frame Y usa el clip completo como referencia de atmósfera." },
   { icon: "🚫", title: "Celebridades bloqueadas", desc: "No puedes generar videos con Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc." },
-  { icon: "💎", title: "Costo en Jades", desc: "5 segundos = 40 Jades · 10 segundos = 75 Jades · 15 segundos = 110 Jades. Los Jades se reembolsan automáticamente si hay error del servidor." },
+  { icon: "💎", title: "Costo en Jades", desc: "5 segundos = 40 Jades · 10 segundos = 75 Jades · 15 segundos = 110 Jades." },
 ];
 
 export default function CineAIPanel() {
@@ -143,15 +132,9 @@ export default function CineAIPanel() {
   const [subjectDesc,    setSubjectDesc]    = useState("");
   const [customPrompt,   setCustomPrompt]   = useState("");
 
-  // Uploads
-  // Hasta 6 imágenes de referencia
-  const [refImages,       setRefImages]       = useState([]); // [{url, preview}] máx 6
+  const [refImages,       setRefImages]       = useState([]);
   const [uploadingImages, setUploadingImages] = useState(false);
-  // Compatibilidad: primera imagen = faceImageUrl
   const faceImageUrl = refImages[0]?.url || null;
-  const facePreview  = refImages[0]?.preview || null;
-  const setFaceImageUrl = (url) => setRefImages(prev => prev.length ? [{ ...prev[0], url }, ...prev.slice(1)] : [{ url, preview: null }]);
-  const setFacePreview  = (preview) => setRefImages(prev => prev.length ? [{ ...prev[0], preview }, ...prev.slice(1)] : [{ url: null, preview }]);
   const [refVideoUrl,     setRefVideoUrl]     = useState(null);
   const [refVideoPreview, setRefVideoPreview] = useState(null);
   const [refVideoExtUrl,  setRefVideoExtUrl]  = useState("");
@@ -161,13 +144,11 @@ export default function CineAIPanel() {
   const [uploadingVideo,  setUploadingVideo]  = useState(false);
   const [uploadingAudio,  setUploadingAudio]  = useState(false);
 
-  // Opciones
   const [animateExact, setAnimateExact] = useState(false);
   const [duration,     setDuration]     = useState(10);
   const [ratio,        setRatio]        = useState("9:16");
   const [quality,      setQuality]      = useState("480p");
 
-  // Estado del job
   const [generating,     setGenerating]     = useState(false);
   const [currentTaskId,  setCurrentTaskId]  = useState(null);
   const [jobStatus,      setJobStatus]      = useState(null);
@@ -175,21 +156,16 @@ export default function CineAIPanel() {
   const [error,          setError]          = useState(null);
   const [blockedWarning, setBlockedWarning] = useState(null);
 
-  // Continuación — FIX PRINCIPAL:
-  // previousVideoUrl = URL del clip anterior completo (para @Video1 en Seedance)
-  // lastFrameUrl     = último frame del clip anterior (para @Image1 en Seedance)
   const [extractingFrame,  setExtractingFrame]  = useState(false);
   const [lastFrameUrl,     setLastFrameUrl]     = useState(null);
-  const [previousVideoUrl, setPreviousVideoUrl] = useState(null); // ← NUEVO
+  const [previousVideoUrl, setPreviousVideoUrl] = useState(null);
   const [isContinuation,   setIsContinuation]   = useState(false);
   const [frameExtracted,   setFrameExtracted]   = useState(false);
 
-  // UI
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
   const [showExtUrlInput, setShowExtUrlInput] = useState(false);
 
-  // Asistente Isabela — generador de prompts con Claude
   const [showIsabela,     setShowIsabela]     = useState(false);
   const [isabelaStep,     setIsabelaStep]     = useState(0);
   const [isabelaAnswers,  setIsabelaAnswers]  = useState({});
@@ -197,7 +173,6 @@ export default function CineAIPanel() {
   const [isabelaResult,   setIsabelaResult]   = useState(null);
   const [isabelaError,    setIsabelaError]    = useState(null);
 
-  // Modales
   const [showTermsModal,   setShowTermsModal]   = useState(false);
   const [termsAccepted,    setTermsAccepted]    = useState(() => {
     try { return !!localStorage.getItem(TERMS_ACCEPTED_KEY); } catch { return false; }
@@ -266,24 +241,46 @@ export default function CineAIPanel() {
     }
   };
 
+  // ── POLLING — FIX: timeout 6 min + detección "Service busy" ──
   const startPolling = useCallback((taskId) => {
     clearInterval(pollRef.current);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 90; // 90 × 4s = 6 minutos
+
     pollRef.current = setInterval(async () => {
+      attempts++;
+      if (attempts > MAX_ATTEMPTS) {
+        clearInterval(pollRef.current);
+        setError("El servidor tardó demasiado. Tus Jades serán reembolsados automáticamente. Intenta de nuevo.");
+        setGenerating(false);
+        return;
+      }
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        const res  = await fetch(`/api/cineai/status/${taskId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        // POST igual que Templates/poll-video.js — que sí funciona
+        const res = await fetch("/api/cineai/poll-status", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ taskId }),
         });
         const data = await res.json();
         console.log("[CineAI] poll:", data.status, data.videoUrl || "");
         setJobStatus(data.status);
-        if (data.status === "completed") {
+        if (data.status === "completed" && data.videoUrl) {
           setVideoUrl(data.videoUrl);
           setGenerating(false);
           clearInterval(pollRef.current);
         } else if (data.status === "failed") {
-          setError(data.error || "La generación falló");
+          const errMsg = data.error || "";
+          if (errMsg.toLowerCase().includes("service busy") || errMsg.toLowerCase().includes("allocating")) {
+            setError("⚠️ Servidor ocupado — intenta de nuevo en unos minutos.");
+          } else {
+            setError(errMsg || "La generación falló.");
+          }
           setGenerating(false);
           clearInterval(pollRef.current);
         }
@@ -313,17 +310,12 @@ export default function CineAIPanel() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      // ── Construcción del body según modo ──────────────────
       let bodyPayload;
-
       if (isContinuation) {
-        // MODO CONTINUACIÓN — técnica de continuidad perfecta:
-        // imageUrl   = último frame del clip anterior (@Image1 = punto de arranque)
-        // refVideoUrl = clip anterior completo      (@Video1 = referencia de atmósfera)
         bodyPayload = {
           prompt,
-          imageUrl:       lastFrameUrl,      // último frame
-          refVideoUrl:    previousVideoUrl,  // clip completo anterior ← FIX
+          imageUrl:       lastFrameUrl,
+          refVideoUrl:    previousVideoUrl,
           isContinuation: true,
           duration,
           aspectRatio:    ratio,
@@ -334,7 +326,6 @@ export default function CineAIPanel() {
         bodyPayload = {
           prompt,
           imageUrl:     faceImageUrl          || null,
-          // Todas las imágenes de referencia (máx 6) → generate.js las procesa
           refImages:    refImages.filter(i => i.url).map(i => i.url),
           refVideoUrl:  effectiveRefVideoUrl  || null,
           audioUrl:     audioUrl              || null,
@@ -347,31 +338,23 @@ export default function CineAIPanel() {
         };
       }
 
-      console.log("[CineAI] generate body:", bodyPayload);
-
       const res = await fetch("/api/cineai/generate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization:  `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(bodyPayload),
       });
 
       const data = await res.json();
-      console.log("[CineAI] generate response:", data);
 
       if (!res.ok) {
         if (data.blocked) setBlockedWarning(data.error);
         throw new Error(data.error || data.detail || "Error del servidor");
       }
 
-      // Usar taskId si existe, sino jobId como fallback para polling
       const pollId = data.taskId || data.jobId;
       setCurrentTaskId(pollId);
       setJobStatus("pending");
 
-      // Si fal.ai devolvió el video directamente (sync), mostrarlo ya
       if (data.videoUrl) {
         setVideoUrl(data.videoUrl);
         setGenerating(false);
@@ -385,33 +368,22 @@ export default function CineAIPanel() {
     }
   };
 
-  // ── CONTINUAR ESCENA — FIX PRINCIPAL ─────────────────────
-  // Guarda TANTO el último frame (imageUrl) COMO la URL del video
-  // completo (previousVideoUrl) para mandárselos juntos al siguiente generate.
   const handleContinueScene = async () => {
     if (!videoUrl) return;
     setExtractingFrame(true);
     setFrameExtracted(false);
     setError(null);
-
     try {
-      // 1. Guardar URL del clip actual ANTES de resetear el estado
-      const currentVideoUrl = videoUrl; // ← URL pública en Supabase Storage
-
-      // 2. Extraer último frame del clip actual
+      const currentVideoUrl = videoUrl;
       const frameBlob = await extractLastFrame(currentVideoUrl);
       const path = `cineai/frames/${Date.now()}_lastframe.png`;
       const { error: upErr } = await supabase.storage
         .from("user-uploads")
         .upload(path, frameBlob, { contentType: "image/png", upsert: true });
       if (upErr) throw upErr;
-
       const { data } = supabase.storage.from("user-uploads").getPublicUrl(path);
-
-      // 3. Guardar ambas URLs en estado
-      setLastFrameUrl(data.publicUrl);       // último frame → @Image1
-      setPreviousVideoUrl(currentVideoUrl);  // clip completo → @Video1 ← FIX
-
+      setLastFrameUrl(data.publicUrl);
+      setPreviousVideoUrl(currentVideoUrl);
       setFrameExtracted(true);
       setTimeout(() => {
         setIsContinuation(true);
@@ -420,7 +392,6 @@ export default function CineAIPanel() {
         setCurrentTaskId(null);
         setFrameExtracted(false);
       }, 1500);
-
     } catch (e) {
       setError("No se pudo extraer el último frame: " + e.message);
     } finally {
@@ -442,7 +413,6 @@ export default function CineAIPanel() {
     clearInterval(pollRef.current);
   };
 
-  // ── ASISTENTE ISABELA — genera prompt con Claude ──────────
   const ISABELA_QUESTIONS = [
     { key: "scene_type",   q: "¿Qué tipo de escena quieres crear?", opts: ["Escena cinematográfica (Hollywood)", "TikTok / Trend viral", "Video musical / Lip sync", "Comercial / Producto", "Otra — la describo yo"] },
     { key: "face",         q: "¿Vas a usar tu rostro o el de alguien específico?", opts: ["Sí, mi propio rostro", "El rostro de otra persona (con permiso)", "No, sin cara específica"] },
@@ -469,80 +439,9 @@ export default function CineAIPanel() {
     setIsabelaLoading(true);
     setIsabelaError(null);
     try {
-      const durationSec = duration; // 5, 10 o 15 — seleccionado por el usuario en el panel
-
-      const systemPrompt = `You are Isabela, IsabelaOS Studio's AI assistant specialized in creating Seedance 2.0 prompts following BytePlus official documentation.
-
-OFFICIAL SEEDANCE 2.0 PROMPT STRUCTURE (BytePlus docs):
-Formula: [Subject 1] + [Action/Movement 1] + [Action/Movement 2]
-Or multi-subject: [Subject 1] + [Action] + [Subject 2] + [Action]
-List elements in ORDER. Model expands from your words. Be specific and concrete.
-ALWAYS start with the subject/main action — NEVER start with camera or style.
-
-DURATION COMMAND (MANDATORY — append at very end):
---dur 5   → 5 seconds: ONE clear single action, no cuts
---dur 10  → 10 seconds: 1-2 actions + one camera move, optionally one cut
---dur 15  → 15 seconds: 2-3 scenes connected with "Cut to [new scene]"
-The user selected: --dur ${durationSec} — use this EXACT command.
-
-CAMERA LANGUAGE (exact BytePlus terms — use natural language):
-surround | aerial drone | zoom in | zoom out | pan left/right | tilt up/down
-follow camera | handheld | dolly in | dolly push-in | tracking shot | static tripod
-For scene transitions: "Cut to [full description of new scene]" or "Camera cut to [scene]"
-After a cut that changes location: describe the NEW scene completely.
-
-MULTIMODAL REFERENCE SYNTAX (only include if user has uploads):
-- Images: "Reference [element] from Image 1" or "Extract [element] from Image 2"
-- Video: "Extend Video 1 backward, [new content], and connect to Video 1 at the end"
-- Combination: "Reference character from Image 1, background from Image 2, generate [action]"
-- Note: Image 1 = first uploaded photo (main subject), Image 2+ = additional references
-
-LIP SYNC (only if audio provided):
-Include: "lips moving naturally synced to audio, expressive mouth movement, close-up face moments"
-
-VISUAL STYLE MODIFIERS (add 1-2 max, only what fits the scene):
-Cinematic: film grain | cinematic color grading | anamorphic lens | shallow depth of field
-TikTok: vertical format | ring light | smooth orbit | beat-synced movement  
-Aerial: sweeping drone | bird's eye view | epic landscape reveal
-Slow motion: high-speed footage | slow motion impact | bullet time
-Night/City: neon reflections | wet pavement | volumetric fog | rim lighting
-Golden hour: warm backlight | sun flares | golden tones
-
-DURATION DEPTH GUIDE:
---dur 5: "Woman turns to camera with intense gaze, close-up, cinematic rim light. --dur 5"
---dur 10: "Man sprints across rooftop at sunset, tracking shot behind. Cut to close-up of face, dramatic push-in, film grain. --dur 10"  
---dur 15: "Hero stands at cliff edge, camera pulls back revealing city below, epic orchestral. Cut to aerial drone sweeping over skyline, golden hour. Cut to close-up of determined eyes, slow zoom in. --dur 15"
-
-HARD RULES:
-- NO celebrity names, brand names, copyrighted characters (say "a young woman" not "Selena Gomez")
-- Do NOT start with camera description
-- Max 180 words for the prompt itself (not counting --dur)
-- English only for the prompt
-- Be specific: not "beautiful lighting" but "warm rim light from the left, soft shadow on the right"
-
-OUTPUT FORMAT — return EXACTLY this structure, nothing else:
-
-PROMPT:
-[Optimized English prompt ending with --dur ${durationSec}]
-
-GUÍA DE RECURSOS:
-[Spanish: specific upload instructions — which slot each photo/video goes in, what role it plays]
-
-CONSEJO ISABELA:
-[Spanish: 1 very specific tip to maximize quality for this exact scene type]`;
-
-      const userMsg = `User wants to create: ${JSON.stringify(isabelaAnswers, null, 2)}
-
-Duration selected in panel: ${durationSec} seconds → must end with --dur ${durationSec}
-Reference images uploaded: ${refImages.length} (${refImages.length > 0 ? "Image 1 = main subject" + (refImages.length > 1 ? `, Image 2-${refImages.length} = additional references` : "") : "none"})
-Reference video: ${effectiveRefVideoUrl ? "Yes — Video 1 available for reference syntax" : "No reference video"}
-Audio for lip sync: ${audioUrl ? "YES — include lip sync language in prompt" : "No audio"}
-Aspect ratio: ${ratio}`;
-
-      // Llamada al backend seguro — API key de Anthropic nunca sale del servidor
+      const durationSec = duration;
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-
       const res = await fetch("/api/cineai/isabela-prompt", {
         method: "POST",
         headers: {
@@ -550,7 +449,7 @@ Aspect ratio: ${ratio}`;
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          answers: isabelaAnswers,
+          answers,
           duration: durationSec,
           refImagesCount: refImages.length,
           hasVideo: !!effectiveRefVideoUrl,
@@ -560,10 +459,7 @@ Aspect ratio: ${ratio}`;
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Error del servidor");
-      const text = data.text || "";
-      setIsabelaResult(text);
-      // Extraer solo el prompt para el botón "Usar este prompt"
-      // (el usuario verá el texto completo pero el botón solo copia el prompt)
+      setIsabelaResult(data.text || "");
     } catch (e) {
       setIsabelaError("Error generando prompt: " + e.message);
     } finally {
@@ -585,7 +481,6 @@ Aspect ratio: ${ratio}`;
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;500;700&display=swap');
         .cp*,.cp *::before,.cp *::after{box-sizing:border-box;margin:0;padding:0;}
         .cp{font-family:'Syne',sans-serif;background:#060608;min-height:100vh;color:#ddd8cc;}
-
         .cp-header{padding:32px 26px 20px;border-bottom:1px solid #111;position:relative;overflow:hidden;}
         .cp-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,80,0.3),transparent);}
         .cp-eyebrow{font-size:10px;letter-spacing:4px;color:#666;text-transform:uppercase;margin-bottom:4px;}
@@ -598,10 +493,8 @@ Aspect ratio: ${ratio}`;
         @keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
         .how-btn{background:rgba(200,160,80,0.08);border:1px solid rgba(200,160,80,0.2);border-radius:8px;color:#c8a050;font-family:'Syne',sans-serif;font-size:12px;padding:8px 16px;cursor:pointer;letter-spacing:1px;white-space:nowrap;transition:all 0.15s;margin-top:12px;}
         .how-btn:hover{background:rgba(200,160,80,0.15);}
-
         .blocked-banner-top{background:rgba(200,60,60,0.07);border-bottom:1px solid rgba(200,60,60,0.15);padding:10px 26px;font-size:12px;color:#f08080;display:flex;align-items:center;gap:10px;line-height:1.5;}
         .blocked-banner-top strong{color:#f09090;}
-
         .mode-selector{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111;}
         .mode-btn{padding:16px 22px;background:transparent;border:none;cursor:pointer;text-align:left;transition:all 0.15s;border-bottom:3px solid transparent;color:#666;}
         .mode-btn:hover{background:rgba(255,255,255,0.02);color:#aaa;}
@@ -610,13 +503,11 @@ Aspect ratio: ${ratio}`;
         .mode-btn-icon{font-size:22px;display:block;margin-bottom:3px;}
         .mode-btn-label{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:3px;display:block;}
         .mode-btn-desc{font-size:10px;letter-spacing:1px;opacity:0.5;margin-top:1px;}
-
         .cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#0e0e0e;}
         .cp-cell{background:#060608;padding:20px 24px;}
         .cp-cell-full{grid-column:1/-1;}
         .sec-label{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#555;margin-bottom:14px;display:flex;align-items:center;gap:10px;}
         .sec-label::after{content:'';flex:1;height:1px;background:#111;}
-
         .preset-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
         .preset-btn{background:#0a0a0c;border:1px solid #222;border-radius:8px;padding:12px 4px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:#666;}
         .preset-btn:hover{border-color:#3a3020;color:#aaa;}
@@ -624,21 +515,17 @@ Aspect ratio: ${ratio}`;
         .preset-btn:disabled{opacity:0.4;cursor:not-allowed;}
         .pi{font-size:20px;display:block;margin-bottom:4px;}
         .pn{font-size:9px;letter-spacing:2px;text-transform:uppercase;}
-
         .upload-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;position:relative;}
         .upload-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.03);}
         .upload-zone.has-file{border-style:solid;border-color:#2a2820;}
         .upload-zone.uploading{border-color:rgba(200,160,80,0.4);animation:pb 1s infinite;}
         @keyframes pb{50%{border-color:rgba(200,160,80,0.1);}}
-        .uz-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;border:2px solid #c8a050;}
         .uz-video-thumb{width:auto;max-width:100%;max-height:110px;border-radius:6px;border:2px solid #c8a050;object-fit:contain;background:#000;display:block;margin:0 auto;}
         .uz-label{font-size:11px;color:#888;line-height:1.5;}
         .uz-hint{font-size:10px;color:#c8a050;letter-spacing:1px;}
         .uz-badge{position:absolute;top:6px;right:6px;background:rgba(200,160,80,0.12);border:1px solid rgba(200,160,80,0.25);border-radius:4px;font-size:8px;color:#c8a050;padding:2px 6px;letter-spacing:1px;text-transform:uppercase;}
         .remove-btn{background:none;border:none;color:#803030;font-size:10px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;padding:4px 0;font-family:'Syne',sans-serif;}
         .remove-btn:hover{color:#e07070;}
-
-        /* Audio zone — siempre visible, no solo con foto */
         .audio-section{margin-top:14px;}
         .audio-zone{border:1px dashed #1a1a1a;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all 0.2s;}
         .audio-zone:hover{border-color:#c8a050;background:rgba(200,160,80,0.02);}
@@ -648,7 +535,6 @@ Aspect ratio: ${ratio}`;
         .audio-zone-label{font-size:11px;color:#c8a050;letter-spacing:1px;}
         .audio-zone-name{font-size:12px;color:#ddd8cc;margin-top:2px;word-break:break-all;}
         .audio-zone-hint{font-size:10px;color:#333;letter-spacing:1px;}
-
         .animate-toggle{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;background:rgba(200,160,80,0.04);border:1px solid rgba(200,160,80,0.1);border-radius:8px;cursor:pointer;transition:all 0.15s;}
         .animate-toggle:hover{border-color:rgba(200,160,80,0.2);}
         .animate-toggle.active{border-color:rgba(200,160,80,0.35);background:rgba(200,160,80,0.08);}
@@ -656,15 +542,11 @@ Aspect ratio: ${ratio}`;
         .animate-toggle-label{font-size:12px;color:#888;letter-spacing:1px;cursor:pointer;}
         .animate-toggle.active .animate-toggle-label{color:#c8a050;}
         .animate-toggle-desc{font-size:10px;color:#444;margin-left:26px;margin-top:4px;letter-spacing:0.5px;line-height:1.4;}
-
         .r2v-notice{background:rgba(100,150,255,0.07);border:1px solid rgba(100,150,255,0.2);border-radius:8px;padding:8px 12px;font-size:11px;color:#90aaff;margin-top:8px;line-height:1.5;}
-
         .ext-url-toggle{font-size:11px;color:#c8a050;cursor:pointer;letter-spacing:1px;margin-top:8px;display:inline-block;text-decoration:underline;}
         .ext-url-input{width:100%;background:#0a0a0c;border:1px solid #1e1e1e;border-radius:8px;color:#ddd8cc;font-family:'Syne',sans-serif;font-size:12px;padding:10px 13px;outline:none;margin-top:8px;transition:border-color 0.2s;}
         .ext-url-input:focus{border-color:#c8a050;}
         .ext-url-input::placeholder{color:#2a2a2a;}
-
-        /* Continuation badge mejorado — muestra frame + video anterior */
         .continuation-badge{background:rgba(80,180,100,0.08);border:1px solid rgba(80,180,100,0.2);border-radius:8px;padding:10px 14px;font-size:12px;color:#60c870;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
         .continuation-badge img{width:40px;height:40px;border-radius:4px;border:1px solid rgba(80,180,100,0.3);object-fit:cover;}
         .continuation-badge video{width:60px;height:40px;border-radius:4px;border:1px solid rgba(80,180,100,0.3);object-fit:cover;}
@@ -672,7 +554,6 @@ Aspect ratio: ${ratio}`;
         .continuation-info{flex:1;min-width:120px;}
         .continuation-info-title{font-size:11px;color:#60c870;letter-spacing:1px;}
         .continuation-info-desc{font-size:10px;color:#444;margin-top:2px;line-height:1.4;}
-
         .cp-input,.cp-textarea{width:100%;background:#0a0a0c;border:1px solid #161616;border-radius:8px;color:#ddd8cc;font-family:'Syne',sans-serif;font-size:13px;padding:11px 13px;outline:none;transition:border-color 0.2s;}
         .cp-input:focus,.cp-textarea:focus{border-color:#2a2820;}
         .cp-input::placeholder,.cp-textarea::placeholder{color:#222;}
@@ -680,7 +561,6 @@ Aspect ratio: ${ratio}`;
         .cp-textarea{resize:vertical;min-height:86px;margin-top:10px;display:block;}
         .prompt-preview{margin-top:10px;padding:10px 13px;background:#080808;border:1px solid #111;border-radius:8px;font-size:11px;color:#252525;line-height:1.7;font-style:italic;}
         .blocked-banner{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.18);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;line-height:1.5;margin-top:10px;display:flex;gap:8px;}
-
         .toggle-row{display:flex;gap:6px;}
         .toggle-btn{flex:1;background:#0a0a0c;border:1px solid #222;border-radius:8px;padding:12px 6px;cursor:pointer;text-align:center;transition:all 0.15s;color:#777;}
         .toggle-btn:hover{border-color:#3a3020;color:#bbb;}
@@ -688,7 +568,6 @@ Aspect ratio: ${ratio}`;
         .toggle-btn:disabled{opacity:0.4;cursor:not-allowed;}
         .tm{display:block;font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:2px;}
         .ts{display:block;font-size:9px;letter-spacing:1px;opacity:0.5;margin-top:2px;}
-
         .cta-cell{grid-column:1/-1;padding:18px 24px 26px;border-top:1px solid #0e0e0e;background:#060608;}
         .jade-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(200,160,80,0.04);border:1px solid rgba(200,160,80,0.1);border-radius:10px;margin-bottom:12px;}
         .jade-left{font-size:10px;color:#333;letter-spacing:2px;text-transform:uppercase;}
@@ -699,7 +578,6 @@ Aspect ratio: ${ratio}`;
         .gen-btn:hover:not(:disabled){background:#d4aa5a;transform:translateY(-1px);}
         .gen-btn:disabled{background:#141414;color:#2a2a2a;cursor:not-allowed;transform:none;}
         .error-box{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.15);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;margin-bottom:12px;}
-
         .result-cell{grid-column:1/-1;padding:26px;text-align:center;border-bottom:1px solid #0e0e0e;background:#060608;}
         .spinner{width:32px;height:32px;border:2px solid #161616;border-top-color:#c8a050;border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 14px;}
         @keyframes spin{to{transform:rotate(360deg);}}
@@ -717,7 +595,6 @@ Aspect ratio: ${ratio}`;
         .ra-btn.green{background:rgba(80,180,100,0.1);border-color:rgba(80,180,100,0.3);color:#60c870;}
         .ra-btn.green:hover{background:rgba(80,180,100,0.18);}
         .ra-btn:disabled{opacity:0.4;cursor:not-allowed;}
-
         .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;overflow-y:auto;}
         .modal-box{background:#0a0a0c;border:1px solid #1e1e1e;border-radius:16px;width:100%;max-width:480px;padding:24px;position:relative;max-height:90vh;overflow-y:auto;}
         .modal-title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;color:#f0e8d0;margin-bottom:20px;}
@@ -727,30 +604,25 @@ Aspect ratio: ${ratio}`;
         .modal-icon{font-size:22px;flex-shrink:0;margin-top:2px;}
         .modal-item-title{font-size:13px;font-weight:700;color:#f0e8d0;margin-bottom:4px;letter-spacing:1px;}
         .modal-item-desc{font-size:12px;color:#888;line-height:1.6;}
-
         .fs-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;}
         .fs-close{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:50%;color:#fff;font-size:20px;width:44px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
         .fs-close:hover{background:rgba(200,160,80,0.3);border-color:#c8a050;}
         .fs-video{max-width:100%;max-height:90vh;border-radius:12px;}
-
         @media(max-width:600px){
           .cp-grid{grid-template-columns:1fr;}
           .cp-cell-full,.result-cell,.cta-cell{grid-column:1;}
           .cp-title{font-size:32px;letter-spacing:5px;}
-          .cp-tagline{font-size:12px;}
           .preset-grid{grid-template-columns:repeat(2,1fr);}
-          .sec-label{font-size:11px;}
           .modal-box{padding:18px;}
           .mode-btn-label{font-size:14px;}
           .jade-num{font-size:22px;}
           .gen-btn{font-size:18px;padding:14px;}
           .cp-header{padding:20px 16px 16px;}
           .cp-cell{padding:16px 16px;}
-          .blocked-banner-top{padding:8px 16px;font-size:11px;}
         }
       `}</style>
 
-      {/* ══ MODAL TÉRMINOS ════════════════════════════════════ */}
+      {/* MODAL TÉRMINOS */}
       {showTermsModal && (
         <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
           <div className="modal-box" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
@@ -787,7 +659,7 @@ Aspect ratio: ${ratio}`;
         </div>
       )}
 
-      {/* ══ MODAL CONSENTIMIENTO FOTO ════════════════════════ */}
+      {/* MODAL CONSENTIMIENTO FOTO */}
       {showPhotoConsent && (
         <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }}>
           <div className="modal-box" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
@@ -799,7 +671,6 @@ Aspect ratio: ${ratio}`;
                 <p style={{ color: "#ddd8cc", marginBottom: 8 }}>☑ <strong>No usaré esta imagen</strong> para suplantar la identidad de ninguna persona.</p>
                 <p style={{ color: "#ddd8cc", marginBottom: 0 }}>☑ <strong>Asumo toda la responsabilidad</strong> por el uso que haga del contenido generado.</p>
               </div>
-              <p style={{ fontSize: 11, color: "#555", lineHeight: 1.6 }}>Las fotos con contenido inapropiado o que violen derechos de imagen de terceros serán bloqueadas automáticamente.</p>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
               <button onClick={async () => {
@@ -858,13 +729,11 @@ Aspect ratio: ${ratio}`;
         </div>
       )}
 
-      {/* ══ MODAL ASISTENTE ISABELA ══════════════════════════ */}
+      {/* MODAL ASISTENTE ISABELA */}
       {showIsabela && (
         <div className="modal-overlay" style={{ zIndex: 3000, alignItems: "center", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && setShowIsabela(false)}>
           <div className="modal-box" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setShowIsabela(false)}>✕</button>
-
-            {/* Header Isabela */}
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
               <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#c8a050,#f0d080)", display: "grid", placeItems: "center", fontSize: 26, flexShrink: 0 }}>🤖</div>
               <div>
@@ -872,17 +741,13 @@ Aspect ratio: ${ratio}`;
                 <div style={{ fontSize: 11, color: "#555", letterSpacing: 1 }}>Asistente de prompts · Seedance 2.0 · IsabelaOS</div>
               </div>
             </div>
-
             {!isabelaResult && !isabelaLoading && (
               <>
-                {/* Saludo */}
                 {isabelaStep === 0 && (
                   <div style={{ background: "rgba(200,160,80,0.06)", border: "1px solid rgba(200,160,80,0.15)", borderRadius: 12, padding: "14px 16px", marginBottom: 18, fontSize: 13, color: "#888", lineHeight: 1.7 }}>
-                    ¡Hola! Soy <strong style={{ color: "#c8a050" }}>Isabela</strong>, tu asistente de IA en IsabelaOS Studio. Voy a ayudarte a crear el prompt perfecto para Seedance 2.0 y decirte exactamente qué imágenes o videos subir y en qué orden. 🎬
+                    ¡Hola! Soy <strong style={{ color: "#c8a050" }}>Isabela</strong>, tu asistente de IA en IsabelaOS Studio. Voy a ayudarte a crear el prompt perfecto para Seedance 2.0. 🎬
                   </div>
                 )}
-
-                {/* Pregunta actual */}
                 {(() => {
                   const q = activeQuestions[isabelaStep];
                   if (!q) return null;
@@ -912,17 +777,12 @@ Aspect ratio: ${ratio}`;
                 })()}
               </>
             )}
-
-            {/* Cargando */}
             {isabelaLoading && (
               <div style={{ textAlign: "center", padding: "30px 0" }}>
                 <div style={{ width: 32, height: 32, border: "2px solid #161616", borderTopColor: "#c8a050", borderRadius: "50%", animation: "spin 0.9s linear infinite", margin: "0 auto 16px" }} />
                 <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 18, letterSpacing: 4, color: "#c8a050" }}>GENERANDO TU PROMPT...</div>
-                <p style={{ fontSize: 12, color: "#444", marginTop: 6, letterSpacing: 1 }}>Isabela está creando el prompt perfecto para Seedance 2.0</p>
               </div>
             )}
-
-            {/* Resultado */}
             {isabelaResult && !isabelaLoading && (
               <div>
                 <div style={{ background: "rgba(80,180,100,0.06)", border: "1px solid rgba(80,180,100,0.2)", borderRadius: 12, padding: "16px", marginBottom: 16 }}>
@@ -931,7 +791,6 @@ Aspect ratio: ${ratio}`;
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button onClick={() => {
-                    // Extraer solo el prompt (entre "PROMPT:" y "GUÍA DE RECURSOS:")
                     const text = isabelaResult;
                     const promptMatch = text.match(/PROMPT:\n([\s\S]*?)(?:\n\nGUÍA DE RECURSOS:|\nGUÍA DE RECURSOS:|$)/);
                     const extracted = promptMatch ? promptMatch[1].trim() : text.split("GUÍA DE RECURSOS:")[0].replace("PROMPT:","").trim();
@@ -953,7 +812,6 @@ Aspect ratio: ${ratio}`;
                 </div>
               </div>
             )}
-
             {isabelaError && (
               <div style={{ background: "rgba(200,60,60,0.06)", border: "1px solid rgba(200,60,60,0.2)", borderRadius: 8, padding: "12px", fontSize: 12, color: "#e07070" }}>{isabelaError}</div>
             )}
@@ -980,23 +838,20 @@ Aspect ratio: ${ratio}`;
         </div>
       </div>
 
-      {/* Banner celebridades bloqueadas */}
       <div className="blocked-banner-top">
         <span>🚫</span>
-        <span><strong>Rostros de celebridades y personajes de Hollywood están bloqueados por derechos de autor.</strong>{" "}No puedes usar Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc. Describe un personaje original.</span>
+        <span><strong>Rostros de celebridades y personajes de Hollywood están bloqueados.</strong> No puedes usar Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc.</span>
       </div>
 
-      {/* Banner términos */}
       <div style={{ background: "rgba(200,160,80,0.04)", borderBottom: "1px solid rgba(200,160,80,0.1)", padding: "8px 26px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <p style={{ fontSize: 11, color: "#444", letterSpacing: 1, lineHeight: 1.5 }}>
-          ⚖️ Todo el contenido generado es <strong style={{ color: "#666" }}>responsabilidad exclusiva del usuario</strong>. Prohibida la suplantación de identidad y el uso sin consentimiento de imágenes de terceros.
+          ⚖️ Todo el contenido generado es <strong style={{ color: "#666" }}>responsabilidad exclusiva del usuario</strong>.
         </p>
         <button onClick={() => setShowTermsModal(true)} style={{ background: "none", border: "none", color: "#c8a050", fontSize: 11, cursor: "pointer", letterSpacing: 1, whiteSpace: "nowrap", textDecoration: "underline", padding: 0 }}>
           Ver términos completos
         </button>
       </div>
 
-      {/* Selector de modo */}
       <div className="mode-selector">
         {MODES.map((m) => (
           <button key={m.id} className={`mode-btn ${activeMode === m.id ? "active" : ""}`}
@@ -1017,7 +872,7 @@ Aspect ratio: ${ratio}`;
               <>
                 <div className="spinner" />
                 <div className="result-title">
-                  {{ pending: "En cola...", processing: "Renderizando..." }[jobStatus] || "Procesando..."}
+                  {jobStatus === "pending" ? "En cola..." : jobStatus === "processing" ? "Renderizando..." : "Procesando..."}
                 </div>
                 <p className="result-sub">Seedance 2.0 está creando tu escena · 1–3 minutos</p>
                 <div className="dots" style={{ marginTop: 14 }}><span /><span /><span /></div>
@@ -1031,12 +886,11 @@ Aspect ratio: ${ratio}`;
                   <a href={videoUrl} download className="ra-btn gold">⬇ Descargar</a>
                   {frameExtracted && (
                     <div style={{ background: "rgba(80,180,100,0.12)", border: "1px solid rgba(80,180,100,0.3)", borderRadius: 8, padding: "8px 16px", fontSize: 12, color: "#60c870", letterSpacing: 1, width: "100%", marginTop: 4 }}>
-                      ✅ Frame extraído + clip guardado — preparando continuación perfecta...
+                      ✅ Frame extraído — preparando continuación perfecta...
                     </div>
                   )}
                   <button className="ra-btn green" onClick={handleContinueScene}
-                    disabled={extractingFrame || frameExtracted}
-                    style={extractingFrame ? { opacity: 0.7 } : {}}>
+                    disabled={extractingFrame || frameExtracted}>
                     {extractingFrame ? "⏳ Extrayendo frame..." : frameExtracted ? "✅ Listo" : "▶ Continuar escena →"}
                   </button>
                   <button className="ra-btn" onClick={handleReset}>✦ Nueva escena</button>
@@ -1046,8 +900,7 @@ Aspect ratio: ${ratio}`;
             {error && currentTaskId && !videoUrl && (
               <>
                 <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
-                <div className="result-title">Falló</div>
-                <p className="result-sub" style={{ color: "#c05050" }}>{error}</p>
+                <div className="result-title" style={{ fontSize: 16, color: "#e07070" }}>{error}</div>
                 <button className="ra-btn" style={{ marginTop: 14 }} onClick={handleReset}>Reintentar</button>
               </>
             )}
@@ -1068,25 +921,16 @@ Aspect ratio: ${ratio}`;
           </div>
         </div>
 
-        {/* Fotos de referencia — hasta 6 + Audio */}
+        {/* Fotos + Audio */}
         <div className="cp-cell">
-          <p className="sec-label">
-            Imágenes de referencia — hasta 6 ({refImages.length}/6)
-          </p>
-
-          {/* Modo continuación */}
+          <p className="sec-label">Imágenes de referencia — hasta 6 ({refImages.length}/6)</p>
           {isContinuation && lastFrameUrl ? (
             <div className="continuation-badge">
               <img src={lastFrameUrl} alt="último frame" />
-              {previousVideoUrl && (
-                <video src={previousVideoUrl} muted autoPlay loop playsInline />
-              )}
+              {previousVideoUrl && <video src={previousVideoUrl} muted autoPlay loop playsInline />}
               <div className="continuation-info">
                 <div className="continuation-info-title">CONTINUIDAD PERFECTA</div>
-                <div className="continuation-info-desc">
-                  Último frame + clip completo como referencia.<br />
-                  Seedance mantendrá luz, cámara y estilo.
-                </div>
+                <div className="continuation-info-desc">Último frame + clip completo como referencia.</div>
               </div>
               <button className="continuation-cancel"
                 onClick={() => { setIsContinuation(false); setLastFrameUrl(null); setPreviousVideoUrl(null); }}>
@@ -1095,7 +939,6 @@ Aspect ratio: ${ratio}`;
             </div>
           ) : (
             <>
-              {/* Grid de imágenes subidas */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }}>
                 {refImages.map((img, idx) => (
                   <div key={idx} style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(200,160,80,0.3)", aspectRatio: "1/1", background: "#0a0a0c" }}>
@@ -1109,10 +952,8 @@ Aspect ratio: ${ratio}`;
                     </button>
                   </div>
                 ))}
-                {/* Botón agregar (máx 6) */}
                 {refImages.length < 6 && (
-                  <div
-                    className={`upload-zone ${uploadingImages ? "uploading" : ""}`}
+                  <div className={`upload-zone ${uploadingImages ? "uploading" : ""}`}
                     style={{ aspectRatio: "1/1", minHeight: "auto", cursor: "pointer" }}
                     onClick={() => faceInputRef.current?.click()}>
                     {uploadingImages ? (
@@ -1128,34 +969,24 @@ Aspect ratio: ${ratio}`;
                   </div>
                 )}
               </div>
-
               <p style={{ fontSize: 10, color: "#444", letterSpacing: 0.5, lineHeight: 1.5, marginBottom: 8 }}>
-                📌 <strong style={{ color: "#666" }}>1ª foto</strong> = cara/sujeto principal · Las demás = referencias de ropa, fondo, estilo, ángulo
+                📌 <strong style={{ color: "#666" }}>1ª foto</strong> = cara/sujeto principal · Las demás = referencias adicionales
               </p>
-
-              {/* Toggle animar foto exacta */}
               {refImages.length > 0 && (
                 <>
-                  <div className={`animate-toggle ${animateExact ? "active" : ""}`}
-                    onClick={() => setAnimateExact((v) => !v)}>
+                  <div className={`animate-toggle ${animateExact ? "active" : ""}`} onClick={() => setAnimateExact((v) => !v)}>
                     <input type="checkbox" checked={animateExact} readOnly />
                     <span className="animate-toggle-label">Animar foto exacta (respeta fondo original)</span>
                   </div>
-                  {animateExact && (
-                    <p className="animate-toggle-desc">
-                      El modelo animará la 1ª foto respetando el fondo y escenario originales.
-                    </p>
-                  )}
+                  {animateExact && <p className="animate-toggle-desc">El modelo animará la 1ª foto respetando el fondo y escenario originales.</p>}
                 </>
               )}
-
               <input ref={faceInputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
                 onChange={async (e) => {
                   const files = Array.from(e.target.files || []);
                   if (!files.length) return;
                   const remaining = 6 - refImages.length;
                   const toProcess = files.slice(0, remaining);
-                  // Verificar la primera imagen con checkImageSafety
                   if (refImages.length === 0 && toProcess[0]) {
                     const isSafe = await checkImageSafety(toProcess[0]);
                     if (!isSafe) { setError("Imagen bloqueada por contenido inapropiado."); e.target.value = ""; return; }
@@ -1164,7 +995,6 @@ Aspect ratio: ${ratio}`;
                     e.target.value = "";
                     return;
                   }
-                  // Para las demás imágenes subir directo
                   setUploadingImages(true);
                   for (const file of toProcess) {
                     const ext = file.name.split(".").pop();
@@ -1182,11 +1012,9 @@ Aspect ratio: ${ratio}`;
             </>
           )}
 
-          {/* ── AUDIO — siempre visible, no solo con foto ────── */}
           <div className="audio-section">
             <p className="sec-label" style={{ marginTop: 14 }}>Audio para Lip Sync (opcional)</p>
-            <div
-              className={`audio-zone ${audioUrl ? "has-file" : ""} ${uploadingAudio ? "uploading" : ""}`}>
+            <div className={`audio-zone ${audioUrl ? "has-file" : ""} ${uploadingAudio ? "uploading" : ""}`}>
               <span style={{ fontSize: 20, flexShrink: 0 }}>🎵</span>
               <div className="audio-zone-text">
                 {audioUrl ? (
@@ -1200,21 +1028,8 @@ Aspect ratio: ${ratio}`;
                   <>
                     <div className="audio-zone-label">Subir audio</div>
                     <div className="audio-zone-hint">MP3 / WAV · cualquier canción</div>
-                    <button
-                      type="button"
-                      onClick={() => audioInputRef.current?.click()}
-                      style={{
-                        marginTop: 6,
-                        background: "rgba(200,160,80,0.12)",
-                        border: "1px solid rgba(200,160,80,0.35)",
-                        borderRadius: 8,
-                        color: "#c8a050",
-                        fontFamily: "'Syne', sans-serif",
-                        fontSize: 11,
-                        letterSpacing: 1,
-                        padding: "6px 16px",
-                        cursor: "pointer",
-                      }}>
+                    <button type="button" onClick={() => audioInputRef.current?.click()}
+                      style={{ marginTop: 6, background: "rgba(200,160,80,0.12)", border: "1px solid rgba(200,160,80,0.35)", borderRadius: 8, color: "#c8a050", fontFamily: "'Syne', sans-serif", fontSize: 11, letterSpacing: 1, padding: "6px 16px", cursor: "pointer" }}>
                       📁 Seleccionar audio
                     </button>
                   </>
@@ -1222,40 +1037,26 @@ Aspect ratio: ${ratio}`;
               </div>
               {audioUrl && (
                 <button className="remove-btn" style={{ marginLeft: "auto", flexShrink: 0 }}
-                  onClick={(e) => { e.stopPropagation(); setAudioUrl(null); setAudioName(null); }}>
-                  ×
-                </button>
+                  onClick={(e) => { e.stopPropagation(); setAudioUrl(null); setAudioName(null); }}>×</button>
               )}
             </div>
-            <input ref={audioInputRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*"
-              style={{ display: "none" }}
+            <input ref={audioInputRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*" style={{ display: "none" }}
               onChange={(e) => {
                 const f = e.target.files[0];
-                if (f) {
-                  setAudioName(f.name);
-                  uploadToStorage(f, "cineai/audio", setAudioUrl, () => {}, setUploadingAudio, "name");
-                }
+                if (f) { setAudioName(f.name); uploadToStorage(f, "cineai/audio", setAudioUrl, () => {}, setUploadingAudio, "name"); }
               }} />
           </div>
         </div>
 
-        {/* Video de referencia — solo si NO es continuación */}
+        {/* Video de referencia */}
         {!isContinuation && (
           <div className="cp-cell cp-cell-full">
-            <p className="sec-label">
-              {activeMode === "tiktok"
-                ? "Video del trend a copiar — MP4 directo o URL (opcional)"
-                : "Video de referencia — MP4 directo o URL (opcional)"}
-            </p>
-
+            <p className="sec-label">Video de referencia — MP4 o URL (opcional)</p>
             <div className="r2v-notice">
-              ℹ️ <strong>Importante:</strong> el modelo copia el <strong>movimiento</strong> del video de referencia, pero el <strong>fondo siempre viene de tu foto o del prompt</strong>. Nunca se copia el fondo del video de referencia.
+              ℹ️ El modelo copia el <strong>movimiento</strong> del video, pero el <strong>fondo siempre viene de tu foto o del prompt</strong>.
             </div>
-
             <div style={{ marginTop: 10 }}>
-              <div
-                className={`upload-zone ${refVideoPreview ? "has-file" : ""} ${uploadingVideo ? "uploading" : ""}`}
-                style={{ minHeight: 130, maxHeight: 170 }}>
+              <div className={`upload-zone ${refVideoPreview ? "has-file" : ""} ${uploadingVideo ? "uploading" : ""}`} style={{ minHeight: 130, maxHeight: 170 }}>
                 {refVideoPreview ? (
                   <>
                     <div className="uz-badge">✓ referencia</div>
@@ -1270,71 +1071,34 @@ Aspect ratio: ${ratio}`;
                   <>
                     <span style={{ fontSize: 22 }}>🔗</span>
                     <p style={{ fontSize: 11, color: "#c8a050" }}>URL externa configurada</p>
-                    <p style={{ fontSize: 10, color: "#555" }}>{refVideoExtUrl.slice(0, 50)}...</p>
                   </>
                 ) : (
                   <>
                     <span style={{ fontSize: 28 }}>🎬</span>
                     <p className="uz-label">Video de referencia MP4</p>
-                    <button
-                      type="button"
-                      onClick={() => videoInputRef.current?.click()}
-                      style={{
-                        marginTop: 8,
-                        background: "rgba(200,160,80,0.12)",
-                        border: "1px solid rgba(200,160,80,0.35)",
-                        borderRadius: 8,
-                        color: "#c8a050",
-                        fontFamily: "'Syne', sans-serif",
-                        fontSize: 12,
-                        letterSpacing: 1,
-                        padding: "8px 20px",
-                        cursor: "pointer",
-                      }}>
+                    <button type="button" onClick={() => videoInputRef.current?.click()}
+                      style={{ marginTop: 8, background: "rgba(200,160,80,0.12)", border: "1px solid rgba(200,160,80,0.35)", borderRadius: 8, color: "#c8a050", fontFamily: "'Syne', sans-serif", fontSize: 12, letterSpacing: 1, padding: "8px 20px", cursor: "pointer" }}>
                       📁 Seleccionar MP4
                     </button>
                     <p className="uz-hint" style={{ marginTop: 6 }}>máx recomendado 15s</p>
                   </>
                 )}
               </div>
-
-              {refVideoPreview && (
-                <button className="remove-btn"
-                  onClick={() => { setRefVideoPreview(null); setRefVideoUrl(null); }}>
-                  × quitar video
-                </button>
-              )}
-
-              {/* URL externa */}
+              {refVideoPreview && <button className="remove-btn" onClick={() => { setRefVideoPreview(null); setRefVideoUrl(null); }}>× quitar video</button>}
               {!refVideoPreview && (
                 <>
                   <span className="ext-url-toggle" onClick={() => setShowExtUrlInput((v) => !v)}>
-                    {showExtUrlInput ? "▲ Ocultar URL externa" : "▼ O pega la URL de un video (TikTok, YouTube, etc.)"}
+                    {showExtUrlInput ? "▲ Ocultar URL externa" : "▼ O pega la URL de un video"}
                   </span>
                   {showExtUrlInput && (
-                    <input
-                      className="ext-url-input"
-                      placeholder="https://www.tiktok.com/@usuario/video/... o cualquier URL de video"
-                      value={refVideoExtUrl}
-                      onChange={(e) => setRefVideoExtUrl(e.target.value)}
-                    />
+                    <input className="ext-url-input" placeholder="https://..." value={refVideoExtUrl} onChange={(e) => setRefVideoExtUrl(e.target.value)} />
                   )}
-                  {refVideoExtUrl && (
-                    <button className="remove-btn"
-                      onClick={() => { setRefVideoExtUrl(""); setShowExtUrlInput(false); }}>
-                      × quitar URL
-                    </button>
-                  )}
+                  {refVideoExtUrl && <button className="remove-btn" onClick={() => { setRefVideoExtUrl(""); setShowExtUrlInput(false); }}>× quitar URL</button>}
                 </>
               )}
             </div>
-
-            <input ref={videoInputRef} type="file" accept="video/mp4,video/mov,video/quicktime,video/*"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files[0];
-                if (f) uploadToStorage(f, "cineai/refs", setRefVideoUrl, setRefVideoPreview, setUploadingVideo);
-              }} />
+            <input ref={videoInputRef} type="file" accept="video/mp4,video/mov,video/quicktime,video/*" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files[0]; if (f) uploadToStorage(f, "cineai/refs", setRefVideoUrl, setRefVideoPreview, setUploadingVideo); }} />
           </div>
         )}
 
@@ -1343,37 +1107,18 @@ Aspect ratio: ${ratio}`;
           <p className="sec-label">Describe la escena</p>
           {selectedPreset !== "custom" ? (
             <>
-              <input
-                className={`cp-input ${liveBlocked ? "warn" : ""}`}
-                placeholder={activeMode === "tiktok"
-                  ? "¿Quién baila? ej: mujer joven con outfit colorido, hombre con sombrero..."
-                  : "¿Quién aparece? ej: hombre con saco negro, mujer con vestido rojo..."}
-                value={subjectDesc}
-                onChange={(e) => { setSubjectDesc(e.target.value); setBlockedWarning(null); }}
-                disabled={generating}
-              />
+              <input className={`cp-input ${liveBlocked ? "warn" : ""}`}
+                placeholder={activeMode === "tiktok" ? "¿Quién baila? ej: mujer joven con outfit colorido..." : "¿Quién aparece? ej: hombre con saco negro..."}
+                value={subjectDesc} onChange={(e) => { setSubjectDesc(e.target.value); setBlockedWarning(null); }} disabled={generating} />
               <div className="prompt-preview">{subjectDesc ? `${subjectDesc}. ` : ""}{preset?.prompt}</div>
             </>
           ) : (
-            <textarea
-              className={`cp-textarea ${liveBlocked ? "warn" : ""}`}
-              placeholder={activeMode === "tiktok"
-                ? "Describe el trend: personaje, movimiento, iluminación, energía, estética..."
-                : "Describe tu escena: personaje, acción, iluminación, cámara, atmósfera, estilo..."}
-              value={customPrompt}
-              onChange={(e) => { setCustomPrompt(e.target.value); setBlockedWarning(null); }}
-              disabled={generating}
-            />
+            <textarea className={`cp-textarea ${liveBlocked ? "warn" : ""}`}
+              placeholder="Describe tu escena completa..."
+              value={customPrompt} onChange={(e) => { setCustomPrompt(e.target.value); setBlockedWarning(null); }} disabled={generating} />
           )}
-          {liveBlocked && (
-            <div className="blocked-banner">
-              <span>🚫</span>
-              <span><strong>"{liveBlocked}"</strong> está bloqueado por derechos de autor. Describe un personaje original.</span>
-            </div>
-          )}
-          {blockedWarning && !liveBlocked && (
-            <div className="blocked-banner"><span>⚠️</span><span>{blockedWarning}</span></div>
-          )}
+          {liveBlocked && <div className="blocked-banner"><span>🚫</span><span><strong>"{liveBlocked}"</strong> está bloqueado. Describe un personaje original.</span></div>}
+          {blockedWarning && !liveBlocked && <div className="blocked-banner"><span>⚠️</span><span>{blockedWarning}</span></div>}
         </div>
 
         {/* Duración */}
@@ -1388,7 +1133,6 @@ Aspect ratio: ${ratio}`;
               </button>
             ))}
           </div>
-          {/* Selector de calidad */}
           <p className="sec-label" style={{ marginTop: 14 }}>Calidad de video</p>
           <div className="toggle-row">
             {QUALITIES.map((q) => (
@@ -1399,9 +1143,6 @@ Aspect ratio: ${ratio}`;
               </button>
             ))}
           </div>
-          <p style={{ fontSize: 10, color: "#444", letterSpacing: 0.5, marginTop: 8, lineHeight: 1.5 }}>
-            💡 480p = ${quality === "480p" ? "~$0.055/s" : "$0.075/s"} · 720p = ${quality === "720p" ? "~$0.161/s" : "$0.161/s"} en EvoLink. Con 480p podés generar el doble de videos.
-          </p>
         </div>
 
         {/* Formato */}
@@ -1410,8 +1151,7 @@ Aspect ratio: ${ratio}`;
           <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
             {RATIOS.map((r) => (
               <button key={r.value} className={`toggle-btn ${ratio === r.value ? "active" : ""}`}
-                onClick={() => setRatio(r.value)} disabled={generating}
-                style={{ flexShrink: 0, minWidth: 72 }}>
+                onClick={() => setRatio(r.value)} disabled={generating} style={{ flexShrink: 0, minWidth: 72 }}>
                 <span className="tm">{r.label}</span>
                 <span className="ts">{r.desc}</span>
               </button>
