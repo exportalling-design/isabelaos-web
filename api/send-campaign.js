@@ -7,7 +7,6 @@ import { getUserIdFromAuthHeader } from "../src/lib/getUserIdFromAuth.js";
 
 const RESEND_API = "https://api.resend.com/emails";
 
-// IDs de admin autorizados (agregá el tuyo)
 const ADMIN_EMAILS = ["exportalling@gmail.com"];
 
 async function sendEmail(to, subject, html) {
@@ -18,7 +17,7 @@ async function sendEmail(to, subject, html) {
       "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from:    "IsabelaOS Studio <hola@isabelaos.com>",
+      from:    "IsabelaOS Studio <onboarding@resend.dev>", // ← sin verificar dominio
       to:      [to],
       subject,
       html,
@@ -28,7 +27,6 @@ async function sendEmail(to, subject, html) {
   return { ok: r.ok, id: data?.id, error: data?.message || null };
 }
 
-// HTML del correo de campaña
 function buildEmailHTML(userEmail) {
   return `<!DOCTYPE html>
 <html>
@@ -139,7 +137,6 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
 
-  // Solo admins
   const userId = await getUserIdFromAuthHeader(req);
   if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
@@ -152,7 +149,6 @@ export default async function handler(req, res) {
   if (!ADMIN_EMAILS.includes(profile?.email))
     return res.status(403).json({ ok: false, error: "FORBIDDEN — solo admins" });
 
-  // Obtener todos los usuarios con sus emails desde auth.users
   const { data: users, error: usersErr } = await supabaseAdmin.auth.admin.listUsers({
     perPage: 1000,
   });
@@ -167,11 +163,11 @@ export default async function handler(req, res) {
 
   const subject = "💎 Your 10 free Jades are waiting — Create AI images now";
 
-  // Enviar en lotes de 10 (rate limit de Resend)
   const results = { sent: 0, failed: 0, errors: [] };
 
-  for (let i = 0; i < emails.length; i += 10) {
-    const batch = emails.slice(i, i + 10);
+  // Lotes de 3 para respetar rate limit de Resend (5/seg)
+  for (let i = 0; i < emails.length; i += 3) {
+    const batch = emails.slice(i, i + 3);
     await Promise.all(batch.map(async (email) => {
       try {
         const r = await sendEmail(email, subject, buildEmailHTML(email));
@@ -182,8 +178,8 @@ export default async function handler(req, res) {
         results.errors.push({ email, error: e.message });
       }
     }));
-    // Pausa entre lotes para evitar rate limit
-    if (i + 10 < emails.length) await new Promise(r => setTimeout(r, 1000));
+    // 800ms entre lotes — seguro bajo el rate limit
+    if (i + 3 < emails.length) await new Promise(r => setTimeout(r, 800));
   }
 
   console.log(`[send-campaign] Resultado: ${results.sent} enviados, ${results.failed} fallidos`);
@@ -193,7 +189,7 @@ export default async function handler(req, res) {
     total: emails.length,
     sent: results.sent,
     failed: results.failed,
-    errors: results.errors.slice(0, 10), // max 10 errores en respuesta
+    errors: results.errors.slice(0, 10),
   });
 }
 
