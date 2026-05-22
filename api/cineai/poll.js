@@ -1,10 +1,5 @@
 // api/cineai/poll.js
 // GET /api/cineai/poll?taskId=xxx
-// ─────────────────────────────────────────────────────────────
-// DOS proveedores:
-//   evolink_seedance  → con foto → GET https://api.evolink.ai/v1/tasks/{id}
-//   byteplus_seedance → sin foto → GET https://ark.../api/v3/contents/generations/tasks/{id}
-// ─────────────────────────────────────────────────────────────
 import { supabaseAdmin }          from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
@@ -16,22 +11,25 @@ async function pollEvolink(taskId) {
   console.error("[poll] EvoLink raw:", JSON.stringify(data).slice(0, 400));
   if (!r.ok) throw new Error(data?.message || `EvoLink error ${r.status}`);
   return {
-    done:     data.status === "succeeded" || data.status === "completed",
-    failed:   data.status === "failed",
+    // ✅ FIX: EvoLink devuelve "completed", no "succeeded"
+    done:   data.status === "completed" || data.status === "succeeded",
+    failed: data.status === "failed",
+    // ✅ FIX: EvoLink devuelve videoUrl en results[], no en video_url
     videoUrl: (
-      data.video_url                          ||
-      data.output?.video_url                  ||
-      data.output?.videos?.[0]?.url           ||
-      data.output?.url                        ||
-      data.videos?.[0]?.url                   ||
-      data.result?.video_url                  ||
-      data.result?.url                        ||
-      data.data?.video_url                    ||
-      data.url                                ||
+      data.results?.[0]              ||
+      data.video_url                 ||
+      data.output?.video_url         ||
+      data.output?.videos?.[0]?.url  ||
+      data.output?.url               ||
+      data.videos?.[0]?.url          ||
+      data.result?.video_url         ||
+      data.result?.url               ||
+      data.data?.video_url           ||
+      data.url                       ||
       null
     ),
-    error:    data.error?.message || data.error || null,
-    rawData:  data,
+    error:   data.error?.message || data.error || null,
+    rawData: data,
   };
 }
 
@@ -44,7 +42,6 @@ async function pollByteplus(taskId) {
   console.error("[poll] BytePlus raw:", JSON.stringify(data).slice(0, 400));
   if (!r.ok || data.error) throw new Error(data.error?.message || `BytePlus error ${r.status}`);
 
-  // Extraer video — estructura: content[].type="video_url", content[].video_url.url
   let videoUrl = null;
   if (Array.isArray(data.content)) {
     for (const item of data.content) {
@@ -55,10 +52,10 @@ async function pollByteplus(taskId) {
   videoUrl = videoUrl || data.video_url || data.result?.video_url || null;
 
   return {
-    done:   data.status === "succeeded",
-    failed: data.status === "failed",
+    done:    data.status === "succeeded",
+    failed:  data.status === "failed",
     videoUrl,
-    error:  data.error?.message || data.fail_message || null,
+    error:   data.error?.message || data.fail_message || null,
     rawData: data,
   };
 }
@@ -106,7 +103,6 @@ export default async function handler(req, res) {
   const taskId = req.query.taskId;
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
-  // Buscar job por provider_request_id o por id
   let job = null;
   const { data: j1 } = await supabaseAdmin.from("video_jobs").select("*")
     .eq("provider_request_id", taskId).eq("user_id", userId).eq("mode", "cineai").single();
@@ -118,7 +114,6 @@ export default async function handler(req, res) {
   }
   if (!job) return res.status(404).json({ ok: false, error: "Job no encontrado" });
 
-  // Resultado cacheado
   if (job.status === "COMPLETED" && job.result_url)
     return res.status(200).json({ ok: true, status: "completed", videoUrl: job.result_url, jobId: job.id });
   if (job.status === "FAILED")
