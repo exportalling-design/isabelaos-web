@@ -1,68 +1,37 @@
-// api/cineai/status/[taskId].js — mismo routing que poll.js
+// api/cineai/status/[taskId].js
+// Copia exacta del patrón que funciona en api/templates/poll-video.js
+// EvoLink docs: status = "completed" | "failed" | "pending" | "processing"
+// EvoLink docs: video URL en data.results[0] (array de strings)
 import { supabaseAdmin }          from "../../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader } from "../../../src/lib/getUserIdFromAuth.js";
 
-async function pollEvolink(taskId) {
-  const r = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
-    headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
-  });
-  const data = await r.json();
-  console.error("[status] EvoLink raw:", JSON.stringify(data).slice(0, 400));
-  if (!r.ok) throw new Error(data?.message || `EvoLink error ${r.status}`);
-  return {
-    // ✅ FIX: EvoLink devuelve "completed", no "succeeded"
-    done:   data.status === "completed" || data.status === "succeeded",
-    failed: data.status === "failed",
-    // ✅ FIX: EvoLink devuelve videoUrl en results[], no en video_url
-    videoUrl: (
-      data.results?.[0]              ||
-      data.video_url                 ||
-      data.output?.video_url         ||
-      data.videos?.[0]?.url          ||
-      data.result?.video_url         ||
-      data.data?.video_url           ||
-      null
-    ),
-    error:   data.error?.message || null,
-    rawData: data,
-  };
+async function fetchToBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${url}`);
+  return Buffer.from(await res.arrayBuffer());
 }
 
-async function pollByteplus(taskId) {
-  const r = await fetch(`https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks/${taskId}`, {
-    headers: { "Authorization": `Bearer ${process.env.BYTEPLUS_API_KEY}` },
-  });
-  const data = await r.json();
-  console.error("[status] BytePlus raw:", JSON.stringify(data).slice(0, 400));
-  if (!r.ok || data.error) throw new Error(data.error?.message || `BytePlus error ${r.status}`);
-  let videoUrl = null;
-  if (Array.isArray(data.content)) {
-    for (const item of data.content) {
-      if (item.type === "video_url" && item.video_url?.url) { videoUrl = item.video_url.url; break; }
-      if (item.type === "video_url" && typeof item.video_url === "string") { videoUrl = item.video_url; break; }
-    }
+async function uploadToStorage(buf, userId, jobId) {
+  const filePath = `${userId}/cineai_${jobId}_${Date.now()}.mp4`;
+  const { error } = await supabaseAdmin.storage
+    .from("videos")
+    .upload(filePath, buf, { contentType: "video/mp4", upsert: true });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(filePath);
+  if (!data?.publicUrl) throw new Error("No public URL returned");
+  return data.publicUrl;
+}
+
+function extractEvoLinkVideoUrl(data) {
+  if (Array.isArray(data?.results) && data.results.length > 0) {
+    const first = data.results[0];
+    if (typeof first === "string" && first.startsWith("http")) return first;
+    if (typeof first === "object") return first?.url || first?.video_url || null;
   }
-  videoUrl = videoUrl || data.video_url || data.result?.video_url || null;
-  return { done: data.status === "succeeded", failed: data.status === "failed", videoUrl, error: data.error?.message || data.fail_message || null, rawData: data };
+  return data?.result?.url || data?.result?.video_url || data?.video_url || null;
 }
 
-async function saveVideoToLibrary(userId, videoUrl, taskId) {
-  try {
-    const res = await fetch(videoUrl);
-    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-    const buffer = Buffer.from(await res.arrayBuffer());
-    const path = `${userId}/cineai_${(taskId || "").slice(-8)}_${Date.now()}.mp4`;
-    const { error } = await supabaseAdmin.storage.from("videos").upload(path, buffer, { contentType: "video/mp4", upsert: false });
-    if (error) throw new Error(error.message);
-    const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
-    return data?.publicUrl || videoUrl;
-  } catch (err) {
-    console.error("[status] saveVideo failed:", err.message);
-    return videoUrl;
-  }
-}
-
-async function cleanupTempFiles(job) {
+async function cleanup(job) {
   const imageUrl = job?.payload?.image_url;
   if (!imageUrl) return;
   try {
@@ -88,57 +57,85 @@ export default async function handler(req, res) {
   if (!taskId) return res.status(400).json({ ok: false, error: "taskId requerido" });
 
   let job = null;
-  const { data: j1 } = await supabaseAdmin.from("video_jobs").select("*").eq("provider_request_id", taskId).eq("user_id", userId).eq("mode", "cineai").single();
+  const { data: j1 } = await supabaseAdmin.from("video_jobs").select("*")
+    .eq("provider_request_id", taskId).eq("user_id", userId).eq("mode", "cineai").single();
   if (j1) job = j1;
   if (!job) {
-    const { data: j2 } = await supabaseAdmin.from("video_jobs").select("*").eq("id", taskId).eq("user_id", userId).eq("mode", "cineai").single();
+    const { data: j2 } = await supabaseAdmin.from("video_jobs").select("*")
+      .eq("id", taskId).eq("user_id", userId).eq("mode", "cineai").single();
     if (j2) job = j2;
   }
   if (!job) return res.status(404).json({ ok: false, error: "Job no encontrado" });
 
+  // Resultado cacheado
   if (job.status === "COMPLETED" && job.result_url)
     return res.status(200).json({ ok: true, status: "completed", videoUrl: job.result_url, jobId: job.id });
   if (job.status === "FAILED")
     return res.status(200).json({ ok: true, status: "failed", error: job.provider_error || "Error", jobId: job.id });
 
-  const provider     = job.provider || "byteplus_seedance";
   const providerTask = job.provider_request_id || taskId;
 
-  let result;
-  try {
-    result = provider === "evolink_seedance" ? await pollEvolink(providerTask) : await pollByteplus(providerTask);
-  } catch (err) {
-    console.error(`[status] ${provider} error:`, err.message);
+  // Consultar EvoLink
+  const evolinkRes = await fetch(`https://api.evolink.ai/v1/tasks/${providerTask}`, {
+    headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
+  });
+
+  const data = await evolinkRes.json();
+  const evoStatus = data.status || "pending";
+  console.error(`[status] EvoLink taskId=${providerTask} status=${evoStatus} progress=${data.progress}`);
+
+  if (!evolinkRes.ok) {
+    console.error(`[status] EvoLink HTTP error ${evolinkRes.status}:`, JSON.stringify(data).slice(0, 300));
     return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
   }
 
-  let newStatus = "IN_PROGRESS", finalVideoUrl = null, errorMsg = null;
-
-  if (result.done && result.videoUrl) {
-    finalVideoUrl = await saveVideoToLibrary(userId, result.videoUrl, providerTask);
-    newStatus     = "COMPLETED";
-    await cleanupTempFiles(job);
-  } else if (result.done && !result.videoUrl) {
-    console.error("[status] done sin videoUrl. raw:", JSON.stringify(result.rawData || {}).slice(0, 600));
-    newStatus = "FAILED";
-    errorMsg  = "Video generado pero el proveedor no devolvió la URL";
-  } else if (result.failed) {
-    newStatus = "FAILED";
-    errorMsg  = result.error || `Error en ${provider}`;
+  if (evoStatus === "failed" || evoStatus === "error") {
+    const errMsg = data.error?.message || data.message || "EvoLink generation failed";
+    console.error(`[status] EvoLink FAILED:`, errMsg);
+    await supabaseAdmin.from("video_jobs").update({
+      status: "FAILED", provider_status: "failed",
+      provider_error: errMsg, updated_at: new Date().toISOString(),
+    }).eq("id", job.id);
+    return res.status(200).json({ ok: true, status: "failed", error: errMsg, jobId: job.id });
   }
 
-  const upd = { status: newStatus, provider_status: result.done ? "succeeded" : result.failed ? "failed" : "running", updated_at: new Date().toISOString() };
-  if (finalVideoUrl)             upd.result_url     = finalVideoUrl;
-  if (errorMsg)                  upd.provider_error = errorMsg;
-  if (newStatus === "COMPLETED") upd.completed_at   = new Date().toISOString();
-  await supabaseAdmin.from("video_jobs").update(upd).eq("id", job.id);
+  if (evoStatus !== "completed") {
+    return res.status(200).json({ ok: true, status: "processing", progress: data.progress || 0, jobId: job.id });
+  }
+
+  // Completado
+  const evolinkVideoUrl = extractEvoLinkVideoUrl(data);
+  console.error(`[status] evolinkVideoUrl=${evolinkVideoUrl}`);
+
+  if (!evolinkVideoUrl) {
+    console.error(`[status] NO VIDEO URL found:`, JSON.stringify(data));
+    return res.status(200).json({ ok: true, status: "processing", jobId: job.id });
+  }
+
+  let permanentUrl;
+  try {
+    const buf = await fetchToBuffer(evolinkVideoUrl);
+    permanentUrl = await uploadToStorage(buf, userId, job.id);
+    console.error(`[status] Saved to Storage: ${permanentUrl.slice(0, 60)}`);
+  } catch (err) {
+    console.error(`[status] Storage upload failed, fallback:`, err.message);
+    permanentUrl = evolinkVideoUrl;
+  }
+
+  await supabaseAdmin.from("video_jobs").update({
+    status:          "COMPLETED",
+    provider_status: "completed",
+    result_url:      permanentUrl,
+    video_url:       permanentUrl,
+    output_url:      permanentUrl,
+    completed_at:    new Date().toISOString(),
+    updated_at:      new Date().toISOString(),
+  }).eq("id", job.id);
+
+  await cleanup(job);
 
   return res.status(200).json({
-    ok: true,
-    status:   newStatus === "COMPLETED" ? "completed" : newStatus === "FAILED" ? "failed" : "processing",
-    videoUrl: finalVideoUrl || null,
-    error:    errorMsg      || null,
-    jobId:    job.id,
+    ok: true, status: "completed", videoUrl: permanentUrl, jobId: job.id,
   });
 }
 
