@@ -245,13 +245,13 @@ export default function CineAIPanel() {
   const startPolling = useCallback((taskId) => {
     clearInterval(pollRef.current);
     let attempts = 0;
-    const MAX_ATTEMPTS = 90; // 90 × 4s = 6 minutos
+    const MAX_ATTEMPTS = 150; // 150 × 4s = 10 minutos
 
     pollRef.current = setInterval(async () => {
       attempts++;
       if (attempts > MAX_ATTEMPTS) {
         clearInterval(pollRef.current);
-        setError("El servidor tardó demasiado. Tus Jades serán reembolsados automáticamente. Intenta de nuevo.");
+        setError("⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo. Si no, tus Jades serán reembolsados.");
         setGenerating(false);
         return;
       }
