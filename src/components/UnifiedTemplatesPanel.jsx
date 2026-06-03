@@ -8,6 +8,33 @@ import { BuyJadesModal } from "./BuyJadesModal";
 const ACCENT = "#ff5a00";
 const GOLD   = "#ffb300";
 
+const RESPONSIVE_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:wght@300;400;500&display=swap');
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Desktop — 3 columnas */
+  .tmpl-grid-3   { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+  .tmpl-grid-epic{ display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+  .tmpl-card     { aspect-ratio: 9/16; }
+
+  /* Tablet — 2 columnas */
+  @media(max-width:1024px){
+    .tmpl-grid-3   { grid-template-columns: repeat(2,1fr) !important; gap: 12px !important; }
+    .tmpl-grid-epic{ grid-template-columns: repeat(2,1fr) !important; gap: 12px !important; }
+  }
+
+  /* Mobile — 1 columna, videos grandes */
+  @media(max-width:600px){
+    .tmpl-grid-3   { grid-template-columns: 1fr !important; gap: 20px !important; }
+    .tmpl-grid-epic{ grid-template-columns: 1fr !important; gap: 20px !important; }
+    .tmpl-card     { aspect-ratio: 4/5 !important; min-height: 400px !important; }
+    .tmpl-section  { padding: 0 14px 24px !important; }
+    .tmpl-header   { padding: 18px 14px 12px !important; }
+    .tmpl-generate { padding: 0 14px 80px !important; }
+  }
+`;
+const GOLD   = "#ffb300";
+
 const FREE_TEMPLATES = [
   {
     id: "free-1", free: true,
@@ -129,18 +156,22 @@ function TemplateCard({ tmpl, lang, onClick, usedFree }) {
   const isEs = lang === "es";
   const locked = tmpl.free && usedFree;
 
+  // Autoplay siempre — mobile y desktop
+  useEffect(() => {
+    const v = vRef.current;
+    if (!v) return;
+    v.play().catch(() => {});
+  }, []);
+
   return (
     <div
       onClick={() => !locked && onClick()}
-      onMouseEnter={() => vRef.current?.play()}
-      onMouseLeave={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; } }}
-      onTouchStart={() => vRef.current?.play()}
-      onTouchEnd={() => { if (vRef.current) { vRef.current.pause(); vRef.current.currentTime = 0; } }}
+      className="tmpl-card"
       style={{ position: "relative", borderRadius: 20, overflow: "hidden", cursor: locked ? "not-allowed" : "pointer", aspectRatio: "9/16", background: "#080808", border: "1px solid rgba(255,90,0,0.3)", transition: "transform 0.25s, box-shadow 0.25s", opacity: locked ? 0.55 : 1 }}
-      onMouseOver={e => { if (!locked) { e.currentTarget.style.transform = "scale(1.03)"; e.currentTarget.style.boxShadow = "0 24px 60px rgba(255,90,0,0.4)"; } }}
+      onMouseOver={e => { if (!locked) { e.currentTarget.style.transform = "scale(1.02)"; e.currentTarget.style.boxShadow = "0 24px 60px rgba(255,90,0,0.4)"; } }}
       onMouseOut={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}
     >
-      <video ref={vRef} src={tmpl.video} muted playsInline loop preload="auto" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      <video ref={vRef} src={tmpl.video} muted playsInline loop autoPlay preload="auto" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(0deg,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0.1) 55%,transparent 100%)" }} />
 
       {/* Badge FREE / EPIC / etc */}
@@ -256,11 +287,11 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
     return () => clearInterval(iv);
   }, [step, taskId]);
 
-  const STYLES = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:wght@300;400;500&display=swap'); @keyframes spin{to{transform:rotate(360deg)}}`;
+  
 
   return (
-    <div style={{ fontFamily: "'DM Sans',sans-serif", color: "#fff", paddingBottom: 80 }}>
-      <style>{STYLES}</style>
+    <div className="tmpl-generate" style={{ fontFamily: "'DM Sans',sans-serif", color: "#fff", paddingBottom: 80 }}>
+      <style>{RESPONSIVE_CSS}</style>
 
       {/* Header */}
       <div style={{ padding: "20px 20px 0", display: "flex", alignItems: "center", gap: 12 }}>
@@ -485,7 +516,7 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
 
   if (view === "generate" && tmpl) return (
     <>
-      <style>{STYLES}</style>
+      <style>{RESPONSIVE_CSS}</style>
       <BuyJadesModal open={buyOpen} onClose={() => setBuyOpen(false)} userId={null} onSuccess={() => { setBuyOpen(false); onJadesUpdate?.(); }} lang={lang} />
       <GenerateView tmpl={tmpl} lang={lang} userJades={userJades} onJadesUpdate={onJadesUpdate} onBack={() => setView("gallery")} setUsedFreeId={setUsedFreeId} onOpenBuy={() => setBuyOpen(true)} />
     </>
@@ -493,11 +524,11 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
 
   return (
     <div style={{ fontFamily: "'DM Sans',sans-serif", color: "#fff", paddingBottom: 60 }}>
-      <style>{STYLES}</style>
+      <style>{RESPONSIVE_CSS}</style>
       <BuyJadesModal open={buyOpen} onClose={() => setBuyOpen(false)} userId={null} onSuccess={() => { setBuyOpen(false); onJadesUpdate?.(); }} lang={lang} />
 
       {/* Header */}
-      <div style={{ padding: "24px 20px 16px" }}>
+      <div className="tmpl-header" style={{ padding: "24px 20px 16px" }}>
         <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
           🎬 {isEs ? "Plantillas de Video" : "Video Templates"}
         </div>
@@ -540,14 +571,14 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
       ) : (
         <>
           {/* Sección GRATIS */}
-          <div style={{ padding: "0 20px 20px" }}>
+          <div className="tmpl-section" style={{ padding: "0 20px 20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 12, fontWeight: 800, color: ACCENT, letterSpacing: 1.5, textTransform: "uppercase" }}>
                 🎁 {isEs ? "Gratis · 5 seg · Marca de agua" : "Free · 5 sec · Watermark"}
               </div>
               <div style={{ flex: 1, height: 1, background: "rgba(255,90,0,0.2)" }} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <div className="tmpl-grid-3">
               {FREE_TEMPLATES.map(t => (
                 <TemplateCard key={t.id} tmpl={t} lang={lang} usedFree={!!usedFreeId} onClick={() => handleSelect(t.id)} />
               ))}
@@ -562,7 +593,7 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
               </div>
               <div style={{ flex: 1, height: 1, background: "rgba(255,90,0,0.2)" }} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <div className="tmpl-grid-epic">
               {EPIC_TEMPLATES.map(t => (
                 <TemplateCard key={t.id} tmpl={t} lang={lang} usedFree={false} onClick={() => handleSelect(t.id)} />
               ))}
