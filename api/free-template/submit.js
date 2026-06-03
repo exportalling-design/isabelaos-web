@@ -103,10 +103,55 @@ Maintain exact facial identity from the uploaded face image until the final fram
 Duration: 5 seconds.`,
   },
 
-  // free-3 — placeholder hasta que Luis genere el video y prompt
   "free-3": {
-    male:   "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Fashion editorial video of a man, luxury aesthetic, soft bokeh, elegance, cinematic lighting, ultra realistic, 5 seconds.",
-    female: "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Fashion editorial video of a woman, luxury aesthetic, soft bokeh, elegance, cinematic lighting, ultra realistic, 5 seconds.",
+    male: `Ultra realistic cinematic sci-fi scene.
+Single continuous shot.
+A futuristic megacity filled with massive skyscrapers, holographic displays, flying vehicles, and thousands of pedestrians.
+The protagonist stands completely still in the center of a crowded plaza.
+Everyone around them moves with urgency through the city.
+The protagonist occupies a large portion of the frame.
+The camera performs a smooth cinematic orbit around the protagonist.
+The protagonist remains calm and motionless while the crowd moves around them.
+Small glowing particles begin appearing in the air.
+The city atmosphere becomes increasingly mysterious.
+A powerful beam of light descends from the sky onto the protagonist.
+Floating particles spiral around the protagonist.
+The surrounding crowd gradually stops and turns their attention toward the protagonist.
+The camera slowly pushes closer.
+The protagonist raises their gaze with confidence and determination.
+Epic cinematic lighting.
+Ultra realistic visual effects.
+Premium blockbuster science-fiction realism.
+Powerful visual storytelling.
+Cinematic depth of field.
+Seamless camera movement.
+Duration: 5 seconds.`,
+    female: `Use the uploaded image as the main character reference.
+Maintain character consistency throughout the video.
+Preserve facial appearance, hairstyle, and overall character identity.
+Ultra realistic cinematic sci-fi scene.
+Single continuous shot.
+A futuristic megacity filled with massive skyscrapers, holographic displays, flying vehicles, and thousands of pedestrians.
+The protagonist stands completely still in the center of a crowded plaza.
+Everyone around them moves with urgency through the city.
+The protagonist occupies a large portion of the frame.
+The camera performs a smooth cinematic orbit around the protagonist.
+The protagonist remains calm and motionless while the crowd moves around them.
+Small glowing particles begin appearing in the air.
+The city atmosphere becomes increasingly mysterious.
+A powerful beam of light descends from the sky onto the protagonist.
+Floating particles spiral around the protagonist.
+The surrounding crowd gradually stops and turns their attention toward the protagonist.
+The camera slowly pushes closer.
+The protagonist raises their gaze with confidence and determination.
+Epic cinematic lighting.
+Ultra realistic visual effects.
+Premium blockbuster science-fiction realism.
+Powerful visual storytelling.
+Cinematic depth of field.
+Seamless camera movement.
+Maintain character consistency until the final frame.
+Duration: 5 seconds.`,
   },
 };
 
