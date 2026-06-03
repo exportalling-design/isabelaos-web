@@ -22,6 +22,7 @@ import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
 import LandingView          from "./components/LandingView";
 import { BuyJadesModal }    from "./components/BuyJadesModal";
 import AdminPanel           from "./components/AdminPanel";
+import Privacy              from "./components/Privacy";
 
 const ADMIN_EMAIL = "exportalling@gmail.com";
 
@@ -151,6 +152,7 @@ export default function App() {
   const path = window.location.pathname;
   if (path === "/terms")  return <Terms  lang={lang} />;
   if (path === "/refund") return <Refund lang={lang} />;
+  if (path === "/privacy") return <Privacy lang={lang} />;
 
   const fetchJades = useCallback(async () => {
     if (!user?.id) return;
