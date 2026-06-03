@@ -1,111 +1,133 @@
 // api/free-template/poll.js
-// Polling del video gratis — igual que poll-video.js de templates
-// Cuando completa, sube a Supabase Storage y actualiza free_video_uses
+// Polling idéntico a api/templates/poll-video.js — mismo patrón probado
+// EvoLink → descarga video → sube a Supabase Storage → retorna URL permanente
 
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { supabaseAdmin }           from "../../src/lib/supabaseAdmin.js";
+import { getUserIdFromAuthHeader }  from "../../src/lib/getUserIdFromAuth.js";
 
 const EVOLINK_API_KEY = process.env.EVOLINK_API_KEY;
-const EVOLINK_BASE    = "https://api.evolink.ai/v1";
+const VIDEO_BUCKET    = "free-videos"; // bucket separado para videos gratis
+
+// Descarga video desde URL externa → buffer
+async function fetchToBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${url}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// Sube buffer a Supabase Storage → retorna URL pública permanente
+async function uploadToStorage(buf, userId, taskId) {
+  const filePath = `${userId}/free_${taskId}_${Date.now()}.mp4`;
+  const { error } = await supabaseAdmin.storage
+    .from(VIDEO_BUCKET)
+    .upload(filePath, buf, { contentType: "video/mp4", upsert: true });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  const { data } = supabaseAdmin.storage.from(VIDEO_BUCKET).getPublicUrl(filePath);
+  if (!data?.publicUrl) throw new Error("No public URL returned");
+  return data.publicUrl;
+}
+
+// Extrae video URL — idéntico al extractEvoLinkVideoUrl de poll-video.js
+function extractEvoLinkVideoUrl(data) {
+  if (Array.isArray(data?.results) && data.results.length > 0) {
+    const first = data.results[0];
+    if (typeof first === "string" && first.startsWith("http")) return first;
+    if (typeof first === "object") return first?.url || first?.video_url || null;
+  }
+  return (
+    data?.result?.url       ||
+    data?.result?.video_url ||
+    data?.output?.video_url ||
+    data?.video_url         ||
+    null
+  );
+}
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type, authorization");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST")    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
 
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (!token) return res.status(401).json({ ok: false, error: "No token" });
+  const userId = await getUserIdFromAuthHeader(req);
+  if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
 
-  const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-  const { taskId, templateId } = req.body;
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+  const { taskId } = body;
   if (!taskId) return res.status(400).json({ ok: false, error: "Missing taskId" });
 
-  // ── Verificar si ya está en Supabase (completado previamente) ─────────────
-  const { data: existing } = await supabaseAdmin
-    .from("free_video_uses")
-    .select("status, video_url")
-    .eq("task_id", taskId)
-    .maybeSingle();
-
-  if (existing?.status === "completed" && existing?.video_url) {
-    return res.status(200).json({ ok: true, status: "completed", videoUrl: existing.video_url });
-  }
-
-  // ── Consultar EvoLink ─────────────────────────────────────────────────────
-  let evoRes;
   try {
-    evoRes = await fetch(`${EVOLINK_BASE}/video/generations/${taskId}`, {
+    // ── 1. Buscar en Supabase — si ya completó, retornar directo ─────────────
+    const { data: job } = await supabaseAdmin
+      .from("free_video_uses")
+      .select("status, video_url")
+      .eq("task_id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (job?.status === "completed" && job?.video_url) {
+      console.log("[free-poll] already done — returning cached video_url");
+      return res.status(200).json({ ok: true, status: "completed", videoUrl: job.video_url });
+    }
+
+    // ── 2. Consultar EvoLink — idéntico a poll-video.js ───────────────────────
+    const evolinkRes = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
       headers: { Authorization: `Bearer ${EVOLINK_API_KEY}` },
     });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: "Error conectando a EvoLink: " + e.message });
-  }
 
-  const raw = await evoRes.json().catch(() => null);
-  console.log("[free-template/poll] EvoLink raw:", JSON.stringify(raw));
+    const data   = await evolinkRes.json();
+    const status = data.status || "pending";
+    console.log(`[free-poll] EvoLink taskId=${taskId} status=${status} progress=${data.progress}`);
 
-  const status = raw?.status || "pending";
+    if (!evolinkRes.ok) {
+      console.error(`[free-poll] EvoLink HTTP error ${evolinkRes.status}:`, JSON.stringify(data).slice(0, 300));
+      return res.status(200).json({ ok: true, status: "processing" }); // retry
+    }
 
-  if (status === "failed" || status === "error") {
-    await supabaseAdmin.from("free_video_uses").update({ status: "failed" }).eq("task_id", taskId);
-    return res.status(200).json({ ok: true, status: "failed", error: raw?.error || "Generation failed" });
-  }
+    // ── 3. Si falló ───────────────────────────────────────────────────────────
+    if (status === "failed" || status === "error") {
+      const errMsg = data.error?.message || data.message || "EvoLink generation failed";
+      console.error("[free-poll] EvoLink FAILED:", errMsg);
+      await supabaseAdmin
+        .from("free_video_uses")
+        .update({ status: "failed" })
+        .eq("task_id", taskId);
+      return res.status(200).json({ ok: true, status: "failed", error: errMsg });
+    }
 
-  if (status !== "completed" && status !== "succeed") {
-    return res.status(200).json({ ok: true, status: "processing" });
-  }
+    // ── 4. Todavía procesando ────────────────────────────────────────────────
+    if (status !== "completed" && status !== "succeed") {
+      return res.status(200).json({ ok: true, status: "processing", progress: data.progress || 0 });
+    }
 
-  // ── Completado — extraer URL del video ────────────────────────────────────
-  const rawVideoUrl =
-    raw?.results?.[0] ||
-    raw?.data?.results?.[0] ||
-    raw?.video_url ||
-    raw?.data?.video_url ||
-    null;
+    // ── 5. Completado — extraer URL ───────────────────────────────────────────
+    const evolinkVideoUrl = extractEvoLinkVideoUrl(data);
+    console.log(`[free-poll] evolinkVideoUrl=${evolinkVideoUrl}`);
 
-  if (!rawVideoUrl) {
-    // EvoLink terminó pero URL aún no disponible — seguir esperando
-    return res.status(200).json({ ok: true, status: "processing" });
-  }
+    if (!evolinkVideoUrl) {
+      console.error("[free-poll] NO VIDEO URL found in response:", JSON.stringify(data));
+      return res.status(200).json({ ok: true, status: "processing" }); // retry
+    }
 
-  // ── Descargar video y subir a Supabase Storage ────────────────────────────
-  try {
-    const videoResponse = await fetch(rawVideoUrl);
-    if (!videoResponse.ok) throw new Error("Error descargando video de EvoLink");
+    // ── 6. Descargar → subir a Supabase Storage ───────────────────────────────
+    console.log("[free-poll] Downloading video from EvoLink...");
+    const videoBuf     = await fetchToBuffer(evolinkVideoUrl);
+    const permanentUrl = await uploadToStorage(videoBuf, userId, taskId);
+    console.log(`[free-poll] Saved to Storage: ${permanentUrl.slice(0, 60)}`);
 
-    const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const fileName    = `free-${user.id}-${Date.now()}.mp4`;
+    // ── 7. Actualizar free_video_uses ─────────────────────────────────────────
+    await supabaseAdmin
+      .from("free_video_uses")
+      .update({ status: "completed", video_url: permanentUrl })
+      .eq("task_id", taskId);
 
-    const { error: upErr } = await supabaseAdmin.storage
-      .from("free-videos")
-      .upload(fileName, videoBuffer, { contentType: "video/mp4", upsert: false });
+    return res.status(200).json({ ok: true, status: "completed", videoUrl: permanentUrl });
 
-    if (upErr) throw new Error("Error subiendo video: " + upErr.message);
-
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from("free-videos")
-      .getPublicUrl(fileName);
-
-    // ── Actualizar registro en Supabase ───────────────────────────────────
-    await supabaseAdmin.from("free_video_uses").update({
-      status:     "completed",
-      video_url:  publicUrl,
-    }).eq("task_id", taskId);
-
-    return res.status(200).json({ ok: true, status: "completed", videoUrl: publicUrl });
-
-  } catch (e) {
-    console.error("[free-template/poll] Storage error:", e.message);
-    // Retornar URL directa de EvoLink como fallback
-    await supabaseAdmin.from("free_video_uses").update({
-      status:    "completed",
-      video_url: rawVideoUrl,
-    }).eq("task_id", taskId);
-
-    return res.status(200).json({ ok: true, status: "completed", videoUrl: rawVideoUrl });
+  } catch (err) {
+    console.error("[free-poll] error:", err.message);
+    return res.status(500).json({ ok: false, error: "Error polling video status" });
   }
 }
+
+export const config = { runtime: "nodejs" };
