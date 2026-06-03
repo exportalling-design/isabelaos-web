@@ -33,7 +33,6 @@ const RESPONSIVE_CSS = `
     .tmpl-generate { padding: 0 14px 80px !important; }
   }
 `;
-const GOLD   = "#ffb300";
 
 const FREE_TEMPLATES = [
   {
