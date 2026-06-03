@@ -205,18 +205,18 @@ export default async function handler(req, res) {
 
   // ── Llamar a EvoLink Seedance 1.5 Pro ─────────────────────────────────────
   const evoPayload = {
-    model:        "seedance-1.5-pro",
+    model:          "seedance-1.5-pro",
     prompt,
-    image_urls:   [faceUrl],
-    duration:     5,
-    resolution:   "480p",
-    aspect_ratio: "9:16",
-    with_audio:   true,
+    image_urls:     [faceUrl],
+    duration:       5,
+    aspect_ratio:   "9:16",
+    quality:        "480p",
+    generate_audio: true,
   };
 
   let evoRes, evoJson;
   try {
-    evoRes = await fetch("https://api.evolink.ai/v1/tasks", {
+    evoRes = await fetch("https://api.evolink.ai/v1/videos/generations", {
       method:  "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${EVOLINK_API_KEY}` },
       body:    JSON.stringify(evoPayload),
@@ -228,9 +228,14 @@ export default async function handler(req, res) {
 
   console.log("[free-template/submit] EvoLink response:", JSON.stringify(evoJson));
 
+  if (!evoRes.ok || evoJson?.error) {
+    console.error("[free-template/submit] EvoLink error:", JSON.stringify(evoJson).slice(0,300));
+    return res.status(500).json({ ok: false, error: evoJson?.error?.message || evoJson?.message || `EvoLink error ${evoRes.status}` });
+  }
+
   const taskId = evoJson?.id || evoJson?.task_id || null;
-  if (!evoRes.ok || !taskId) {
-    return res.status(500).json({ ok: false, error: evoJson?.error || evoJson?.message || "Error en EvoLink" });
+  if (!taskId) {
+    return res.status(500).json({ ok: false, error: "EvoLink no devolvió task id" });
   }
 
   // ── Registrar en Supabase ─────────────────────────────────────────────────
