@@ -1,14 +1,13 @@
 // api/free-template/submit.js
 // Genera video gratis con Seedance 1.5 Pro (5 segundos)
 // Verifica que el usuario no haya usado su video gratis antes
-// Usa el mismo patrón de endpoint que templates/submit-video.js
 
 import { supabaseAdmin }           from "../../src/lib/supabaseAdmin.js";
 import { getUserIdFromAuthHeader }  from "../../src/lib/getUserIdFromAuth.js";
 
 const EVOLINK_API_KEY = process.env.EVOLINK_API_KEY;
 
-// ── Prompts reales por plantilla y género ────────────────────────────────────
+// ── Prompts por plantilla y género ───────────────────────────────────────────
 const PROMPTS = {
   "free-1": {
     male: `Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference.
@@ -48,11 +47,63 @@ Ultra realistic human emotion, visible tears, dramatic cinematic lighting, shall
 Maintain exact facial identity from the uploaded face image until the final frame.
 Duration: 5 seconds.`,
   },
-  // Plantillas 2 y 3 — prompts genéricos hasta que Luis los genere
+
   "free-2": {
-    male:   "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Dramatic cinematic portrait of a man with volumetric light rays, smoke, emotional expression, ultra realistic, 5 seconds.",
-    female: "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Dramatic cinematic portrait of a woman with volumetric light rays, smoke, emotional expression, ultra realistic, 5 seconds.",
+    male: `Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference.
+Preserve exact facial structure, eyes, nose, mouth, skin tone, hairstyle, facial proportions, and identity consistency throughout the entire video.
+The protagonist must clearly look like the person from the uploaded face image.
+Ultra realistic cinematic power awakening scene.
+Single continuous shot.
+The protagonist stands in an open rocky landscape at sunset.
+The camera begins in a close-up on the protagonist's face.
+The protagonist occupies most of the frame.
+Strong focus on facial identity.
+The protagonist stares forward with determination.
+Small glowing energy particles begin appearing around the body.
+Wind gradually increases.
+Hair and clothing move naturally.
+The camera performs a subtle cinematic orbit around the protagonist.
+The energy rapidly intensifies.
+Dust rises from the ground.
+The air becomes distorted by power.
+A massive golden energy aura erupts around the protagonist.
+The protagonist remains fully recognizable.
+Eyes begin glowing with intense energy.
+Powerful shockwave expands outward.
+Epic cinematic lighting.
+Ultra realistic visual effects.
+Premium blockbuster superhero realism.
+Maintain exact facial identity from the uploaded face image until the final frame.
+Duration: 5 seconds.`,
+    female: `Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference.
+Preserve exact facial structure, eyes, nose, mouth, skin tone, hairstyle, facial proportions, and identity consistency throughout the entire video.
+The protagonist must clearly look like the person from the uploaded face image.
+Ultra realistic cinematic power awakening scene.
+Single continuous shot.
+The protagonist stands in an open rocky landscape at sunset.
+The camera begins in a close-up on the protagonist's face.
+The protagonist occupies most of the frame.
+Strong focus on facial identity.
+The protagonist stares forward with determination.
+Small glowing energy particles begin appearing around the body.
+Wind gradually increases.
+Hair and clothing move naturally.
+The camera performs a subtle cinematic orbit around the protagonist.
+The energy rapidly intensifies.
+Dust rises from the ground.
+The air becomes distorted by power.
+A massive golden energy aura erupts around the protagonist.
+The protagonist remains fully recognizable.
+Eyes begin glowing with intense energy.
+Powerful shockwave expands outward.
+Epic cinematic lighting.
+Ultra realistic visual effects.
+Premium blockbuster superhero realism.
+Maintain exact facial identity from the uploaded face image until the final frame.
+Duration: 5 seconds.`,
   },
+
+  // free-3 — placeholder hasta que Luis genere el video y prompt
   "free-3": {
     male:   "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Fashion editorial video of a man, luxury aesthetic, soft bokeh, elegance, cinematic lighting, ultra realistic, 5 seconds.",
     female: "Use the uploaded face image as the ABSOLUTE PRIMARY facial identity reference. Preserve exact facial features throughout. Fashion editorial video of a woman, luxury aesthetic, soft bokeh, elegance, cinematic lighting, ultra realistic, 5 seconds.",
@@ -87,7 +138,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: "Ya usaste tu video gratis. Obtén Jades para continuar." });
   }
 
-  // ── Subir imagen a Supabase Storage → URL pública ─────────────────────────
+  // ── Subir imagen a Supabase Storage ──────────────────────────────────────
   const imgBuffer = Buffer.from(faceBase64, "base64");
   const fileName  = `free-face-${userId}-${Date.now()}.jpg`;
 
@@ -107,13 +158,11 @@ export default async function handler(req, res) {
   const templatePrompts = PROMPTS[templateId] || PROMPTS["free-1"];
   const prompt = gender === "female" ? templatePrompts.female : templatePrompts.male;
 
-  // ── Llamar a EvoLink Seedance 1.5 Pro ────────────────────────────────────
-  // Modelo exacto: seedance-1.5-pro
-  // Endpoint idéntico al que usan las plantillas épicas: /v1/tasks
+  // ── Llamar a EvoLink Seedance 1.5 Pro ─────────────────────────────────────
   const evoPayload = {
     model:        "seedance-1.5-pro",
     prompt,
-    image_urls:   [faceUrl],   // referencia de rostro I2V
+    image_urls:   [faceUrl],
     duration:     5,
     resolution:   "480p",
     aspect_ratio: "9:16",
@@ -124,11 +173,8 @@ export default async function handler(req, res) {
   try {
     evoRes = await fetch("https://api.evolink.ai/v1/tasks", {
       method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${EVOLINK_API_KEY}`,
-      },
-      body: JSON.stringify(evoPayload),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${EVOLINK_API_KEY}` },
+      body:    JSON.stringify(evoPayload),
     });
     evoJson = await evoRes.json().catch(() => null);
   } catch (e) {
