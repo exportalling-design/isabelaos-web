@@ -1,9 +1,10 @@
-// src/components/LandingView.jsx — IsabelaOS Studio v7
+// src/components/LandingView.jsx — IsabelaOS Studio v7.1
 // PATCHES:
-//   ✅ Popup viral divine-light.mp4 al entrar
-//   ✅ Globo 🌐 visible en mobile (fuera de lo-nav-links-desktop)
-//   ✅ Toast de bienvenida 10 Jades al registrarse
-//   ✅ v7.1: Botón Admin 🛠️ en hero card (solo admin)
+//   ✅ Popup viral → apunta a free-template (video gratis)
+//   ✅ free-template agregado como primer módulo en MODS
+//   ✅ Globo 🌐 visible en mobile
+//   ✅ Toast de bienvenida 10 Jades
+//   ✅ Botón Admin 🛠️ en hero card (solo admin)
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
 
@@ -62,7 +63,7 @@ function ModOverlay({ title, onClose, children }) {
     <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "96px 16px 16px", overflowY: "auto", animation: "moIn .3s ease" }}>
       <div style={{ width: "100%", maxWidth: 1200, flexShrink: 0, background: "#0d1017", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 24, overflow: "hidden", animation: "moPIn .3s ease" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,90,0,0.05)", position: "sticky", top: 0, backdropFilter: "blur(20px)", zIndex: 10 }}>
-          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#ff5a00", fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title}</button>
+          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#ff5a00", fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title === "free-template" ? "Video Gratis" : title}</button>
           <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "rgba(240,236,228,0.5)", fontSize: 16, padding: "4px 12px", cursor: "pointer" }}>✕</button>
         </div>
         <div>{children}</div>
@@ -72,30 +73,32 @@ function ModOverlay({ title, onClose, children }) {
 }
 
 // ── POPUP VIRAL ─────────────────────────────────────────────────────────────
-function ViralPopup({ onClose, onGoTemplates, isEs }) {
+function ViralPopup({ onClose, onGoFree, isEs }) {
   useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.9)", backdropFilter: "blur(16px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", animation: "moIn .35s ease" }}>
-      <div style={{ width: "100%", maxWidth: 500, background: "#0a0c12", border: "1px solid rgba(200,169,110,0.4)", borderRadius: 24, overflow: "hidden", animation: "moPIn .4s ease", boxShadow: "0 0 100px rgba(200,169,110,0.2), 0 40px 80px rgba(0,0,0,0.8)" }}>
+      <div style={{ width: "100%", maxWidth: 500, background: "#0a0c12", border: "1px solid rgba(255,90,0,0.4)", borderRadius: 24, overflow: "hidden", animation: "moPIn .4s ease", boxShadow: "0 0 100px rgba(255,90,0,0.2), 0 40px 80px rgba(0,0,0,0.8)" }}>
         <div style={{ position: "relative", aspectRatio: "21/9", overflow: "hidden" }}>
           <video src="/gallery/divine-light.mp4" autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, #0a0c12 100%)" }} />
           <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 34, height: 34, cursor: "pointer", color: "#fff", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>✕</button>
-          <div style={{ position: "absolute", top: 12, left: 12, background: "#C8A96E", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase" }}>⚡ NUEVO</div>
+          <div style={{ position: "absolute", top: 12, left: 12, background: "#ff5a00", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase" }}>🎁 GRATIS</div>
         </div>
         <div style={{ padding: "22px 26px 26px" }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 10 }}>
-            Want to appear in this video?
+            {isEs ? "¿Quieres aparecer en este video?" : "Want to appear in this video?"}
           </div>
           <p style={{ fontSize: 13, color: "rgba(240,236,228,0.6)", lineHeight: 1.7, marginBottom: 18 }}>
-            You can now recreate this epic scene by uploading just your photo. AI places you as the protagonist in seconds. Available now in Epic Templates — free to try with your 10 Jades.
+            {isEs
+              ? "Sube tu foto y genera tu video cinematográfico GRATIS en minutos. 1 video gratis por cuenta — sin tarjeta de crédito."
+              : "Upload your photo and generate your FREE cinematic AI video in minutes. 1 free video per account — no credit card needed."}
           </p>
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={onGoTemplates} style={{ flex: 1, background: "linear-gradient(135deg,#C8A96E,#e8c97a)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
-              ⚡ Try Epic Templates →
+            <button onClick={onGoFree} style={{ flex: 1, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
+              🎁 {isEs ? "Generar mi video GRATIS →" : "Generate my FREE video →"}
             </button>
             <button onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "14px", cursor: "pointer" }}>
-              Maybe later
+              {isEs ? "Quizás después" : "Maybe later"}
             </button>
           </div>
         </div>
@@ -115,18 +118,18 @@ function WelcomeToast({ isEs, onDismiss, onGoGenerator }) {
       <div style={{ fontSize: 28, flexShrink: 0 }}>🎉</div>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
-          Welcome! You have 10 free Jades
+          {isEs ? "¡Bienvenido! Tienes 10 Jades gratis" : "Welcome! You have 10 free Jades"}
         </div>
         <div style={{ fontSize: 12, color: "rgba(240,236,228,0.55)", lineHeight: 1.5 }}>
-          Use them now to generate AI images — no credit card needed.
+          {isEs ? "Úsalos para generar imágenes IA — sin tarjeta." : "Use them now to generate AI images — no credit card needed."}
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-        <button onClick={onGoGenerator} style={{ background: "#C8A96E", border: "none", borderRadius: 8, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 11, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-          🖼️ Create image now
+        <button onClick={onGoGenerator} style={{ background: "#ff5a00", border: "none", borderRadius: 8, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 11, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          🖼️ {isEs ? "Crear imagen" : "Create image"}
         </button>
         <button onClick={onDismiss} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>
-          Dismiss
+          {isEs ? "Cerrar" : "Dismiss"}
         </button>
       </div>
     </div>
@@ -137,7 +140,7 @@ export default function LandingView({
   user, jades, onOpenAuth, onStartDemo, onOpenContact,
   onOpenAbout, onSignOut, onBuyJades, lang, setLang,
   activeModule, setActiveModule, children,
-  onOpenAdmin, // null si no es admin
+  onOpenAdmin,
 }) {
   const isEs = lang === "es";
   const [scrolled, setScrolled] = useState(false);
@@ -178,15 +181,17 @@ export default function LandingView({
   }, [setActiveModule]);
 
   const MODS = [
-    { key: "cineai",     icon: "🎬", label: "CineAI",           color: "#ff5a00", badge: "🔥 NUEVO", desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
-    { key: "templates",  icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO", desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face", vid: "/gallery/divine-light.mp4" },
-    { key: "photoshoot", icon: "📸", label: "Photoshoot",        color: "#f59e0b", badge: "📸", desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds", vid: "/gallery/comercial-product.mp4" },
-    { key: "avatars",    icon: "👤", label: isEs?"Avatares":"Avatars", color: "#a855f7", badge: "👤", desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face", vid: "/gallery/avatar-demo.mp4" },
-    { key: "comercial",  icon: "🎙️", label: "Comercial IA",      color: "#10b981", badge: "🎙️", desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice", vid: "/gallery/comercial-chef.mp4" },
-    { key: "montaje",    icon: "✨", label: "Montaje IA",         color: "#f43f5e", badge: "✨", desc: isEs ? "Personas y productos en cualquier escenario" : "People and products in any scenario", vid: "/gallery/montaje-demo.mp4" },
-    { key: "generator",  icon: "🖼️", label: isEs?"Imagen IA":"AI Image", color: "#06b6d4", badge: "🖼️", desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX", vid: null },
-    { key: "img2video",  icon: "🎥", label: "Imagen → Video",    color: "#8b5cf6", badge: "🎥", desc: isEs ? "Convierte tus fotos en videos" : "Convert your photos to videos", vid: null },
-    { key: "library",    icon: "📂", label: isEs?"Biblioteca":"Library", color: "#64748b", badge: "📂", desc: isEs ? "Tus creaciones guardadas" : "Your saved creations", vid: null },
+    // ── VIDEO GRATIS — primero siempre ──────────────────────────────────────
+    { key: "free-template", icon: "🎁", label: isEs ? "Video Gratis" : "Free Video",       color: "#ff5a00", badge: "🎁 GRATIS", desc: isEs ? "1 video gratis con tu rostro · Marca de agua" : "1 free video with your face · Watermark", vid: "/gallery/free-template-1.mp4" },
+    { key: "cineai",        icon: "🎬", label: "CineAI",                                    color: "#ff5a00", badge: "🔥 NUEVO",  desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
+    { key: "templates",     icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO",  desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face", vid: "/gallery/divine-light.mp4" },
+    { key: "photoshoot",    icon: "📸", label: "Photoshoot",                                  color: "#f59e0b", badge: "📸",        desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds", vid: "/gallery/comercial-product.mp4" },
+    { key: "avatars",       icon: "👤", label: isEs ? "Avatares" : "Avatars",                color: "#a855f7", badge: "👤",        desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face", vid: "/gallery/avatar-demo.mp4" },
+    { key: "comercial",     icon: "🎙️", label: "Comercial IA",                              color: "#10b981", badge: "🎙️",       desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice", vid: "/gallery/comercial-chef.mp4" },
+    { key: "montaje",       icon: "✨", label: "Montaje IA",                                  color: "#f43f5e", badge: "✨",        desc: isEs ? "Personas y productos en cualquier escenario" : "People and products in any scenario", vid: "/gallery/montaje-demo.mp4" },
+    { key: "generator",     icon: "🖼️", label: isEs ? "Imagen IA" : "AI Image",             color: "#06b6d4", badge: "🖼️",       desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX", vid: null },
+    { key: "img2video",     icon: "🎥", label: "Imagen → Video",                              color: "#8b5cf6", badge: "🎥",        desc: isEs ? "Convierte tus fotos en videos" : "Convert your photos to videos", vid: null },
+    { key: "library",       icon: "📂", label: isEs ? "Biblioteca" : "Library",              color: "#64748b", badge: "📂",        desc: isEs ? "Tus creaciones guardadas" : "Your saved creations", vid: null },
   ];
 
   const GAL = [
@@ -251,9 +256,9 @@ export default function LandingView({
         <ViralPopup
           isEs={isEs}
           onClose={() => setShowViralPopup(false)}
-          onGoTemplates={() => {
+          onGoFree={() => {
             setShowViralPopup(false);
-            if (user) go("templates");
+            if (user) go("free-template");
             else onOpenAuth();
           }}
         />
@@ -330,7 +335,7 @@ export default function LandingView({
         </div>
         <div className="lo-hero-grid" style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
           <div className="lo-hero-left" style={{ position: "relative", overflow: "hidden" }}>
-            <video src="/gallery/cineai-fight.mp4" autoPlay muted loop playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            <video src="/gallery/free-template-1.mp4" autoPlay muted loop playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(8,10,14,.2) 0%, rgba(8,10,14,.85) 100%)" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(8,10,14,.5) 0%, transparent 30%, rgba(8,10,14,.6) 100%)" }} />
             <div className="lo-hero-copy" style={{ position: "relative", zIndex: 2, padding: "60px 48px", display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
@@ -346,15 +351,21 @@ export default function LandingView({
               <p style={{ marginTop: 16, fontSize: 17, lineHeight: 1.7, color: "rgba(240,236,228,.75)", maxWidth: 500 }}>
                 {isEs ? "Genera escenas de Hollywood, videos musicales, comerciales y contenido viral con IA — con tu cara, tu historia, tu marca." : "Generate Hollywood scenes, music videos, commercials and viral content with AI — your face, your story, your brand."}
               </p>
-              <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 28 }}>
-                <button onClick={user ? () => go("cineai") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
-                  {isEs ? "🎬 Comenzar — Registro gratuito" : "🎬 Start — Free sign up"}
+              {/* Badge video gratis */}
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.12)", border: "1px solid rgba(255,90,0,.35)", borderRadius: 100, padding: "8px 18px", marginTop: 20, alignSelf: "flex-start" }}>
+                <span style={{ fontSize: 16 }}>🎁</span>
+                <span style={{ fontFamily: V.ffU, fontSize: 13, fontWeight: 800, color: V.fire }}>
+                  {isEs ? "1 VIDEO GRATIS al registrarte — sin tarjeta" : "1 FREE VIDEO on signup — no card needed"}
+                </span>
+              </div>
+              <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 20 }}>
+                <button onClick={user ? () => go("free-template") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
+                  {isEs ? "🎬 Generar mi video gratis →" : "🎬 Generate my free video →"}
                 </button>
                 <button onClick={() => scrollTo("galeria")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, color: "#fff", fontSize: 15, padding: "16px 26px", cursor: "pointer", fontFamily: V.ffB }}>
                   {isEs ? "Ver ejemplos reales ↓" : "See real examples ↓"}
                 </button>
               </div>
-              <p style={{ marginTop: 12, fontSize: 12, color: V.muted }}><b style={{ color: V.gold }}>✓ 10 Jades al registrarte</b> · {isEs ? "Para generar imágenes · Sin tarjeta" : "To generate images · No credit card"}</p>
             </div>
           </div>
 
@@ -381,30 +392,19 @@ export default function LandingView({
                   <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: V.muted, marginBottom: 8 }}>{isEs ? "Mis módulos" : "My modules"}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
                     {MODS.map(m => (
-                      <button key={m.key} onClick={() => go(m.key)} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left" }}
+                      <button key={m.key} onClick={() => go(m.key)}
+                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "free-template" ? 700 : 400 }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,.07)"; e.currentTarget.style.color = "rgba(240,236,228,.6)"; }}>
+                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"; e.currentTarget.style.color = m.key === "free-template" ? V.fire : "rgba(240,236,228,.6)"; }}>
                         <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}
                       </button>
                     ))}
                   </div>
 
-                  {/* ── BOTÓN ADMIN — solo para exportalling@gmail.com ── */}
                   {onOpenAdmin && (
-                    <button
-                      onClick={onOpenAdmin}
-                      style={{
-                        width:"100%",marginBottom:8,
-                        background:"rgba(255,90,0,.08)",
-                        border:"1px solid rgba(255,90,0,.25)",
-                        borderRadius:8,color:"#ff5a00",
-                        fontFamily:V.ffU,fontSize:12,fontWeight:700,
-                        padding:"9px",cursor:"pointer",
-                        transition:"all .2s",
-                      }}
+                    <button onClick={onOpenAdmin} style={{ width:"100%",marginBottom:8,background:"rgba(255,90,0,.08)",border:"1px solid rgba(255,90,0,.25)",borderRadius:8,color:"#ff5a00",fontFamily:V.ffU,fontSize:12,fontWeight:700,padding:"9px",cursor:"pointer",transition:"all .2s" }}
                       onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,90,0,.15)"; e.currentTarget.style.borderColor="rgba(255,90,0,.5)"; }}
-                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,90,0,.08)"; e.currentTarget.style.borderColor="rgba(255,90,0,.25)"; }}
-                    >
+                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,90,0,.08)"; e.currentTarget.style.borderColor="rgba(255,90,0,.25)"; }}>
                       🛠️ Admin Panel
                     </button>
                   )}
@@ -414,26 +414,23 @@ export default function LandingView({
               ) : (
                 <div className="lo-demo-box" style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 20, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
                   <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
-                  <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "Crea con IA — 10 Jades al registrarte" : "Create with AI — 10 Jades on signup"}</div>
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,.1)", border: "1px solid rgba(255,179,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.gold, fontWeight: 600, marginBottom: 14 }}>
-                    🎁 {isEs ? "10 Jades al registrarte — genera imágenes" : "10 Jades on signup — generate images"}
+                  <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "1 video gratis al registrarte" : "1 free video on signup"}</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.fire, fontWeight: 700, marginBottom: 14 }}>
+                    🎁 {isEs ? "Sin tarjeta · 5 segundos · Tu rostro" : "No card · 5 seconds · Your face"}
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
                     {MODS.slice(0, 6).map(m => (
-                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: "rgba(240,236,228,.5)", transition: "all .15s" }}
+                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)", transition: "all .15s", fontWeight: m.key === "free-template" ? 700 : 400 }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.08)"; e.currentTarget.style.color = V.gold; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.04)"; e.currentTarget.style.color = "rgba(240,236,228,.5)"; }}>
+                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.color = m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)"; }}>
                         {m.icon} {m.label}
                       </div>
                     ))}
                   </div>
-                  <textarea value={demoText} onChange={e => setDemoText(e.target.value)}
-                    placeholder={isEs ? "Describe lo que quieres crear... ej: Yo como protagonista en una escena épica de noche" : "Describe what you want to create..."}
-                    style={{ width: "100%", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 11, color: "#fff", fontFamily: V.ffB, fontSize: 13, padding: "12px 14px", resize: "none", outline: "none", height: 84, marginBottom: 11 }} />
                   <button onClick={onStartDemo} style={{ width: "100%", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 11, color: "#000", fontFamily: V.ffU, fontSize: 15, fontWeight: 800, padding: 14, cursor: "pointer", boxShadow: "0 0 30px rgba(255,90,0,.3)" }}>
-                    {isEs ? "Registrarme y crear →" : "Sign up and create →"}
+                    {isEs ? "🎁 Registrarme — 1 video gratis →" : "🎁 Sign up — 1 free video →"}
                   </button>
-                  <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "10 Jades al registrarte · Sin tarjeta" : "10 Jades on signup · No credit card"}</div>
+                  <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "Sin tarjeta · Sin suscripción" : "No card · No subscription"}</div>
                 </div>
               )}
             </div>
@@ -538,13 +535,16 @@ export default function LandingView({
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 40 }}>{isEs ? "TODO LO QUE NECESITAS" : "EVERYTHING YOU NEED"}</h2>
         <div className="lo-mod-grid-css" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
           {MODS.map(m => (
-            <div key={m.key} onClick={() => user ? go(m.key) : onStartDemo()} style={{ border: `1px solid ${V.border2}`, borderRadius: 18, background: V.bg2, overflow: "hidden", cursor: "pointer", transition: "all .3s" }}
+            <div key={m.key} onClick={() => user ? go(m.key) : onStartDemo()} style={{ border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.35)" : V.border2}`, borderRadius: 18, background: m.key === "free-template" ? "rgba(255,90,0,.05)" : V.bg2, overflow: "hidden", cursor: "pointer", transition: "all .3s", ...(m.key === "free-template" ? { boxShadow: "0 0 40px rgba(255,90,0,.1)" } : {}) }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = m.color; e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 16px 50px rgba(0,0,0,.4)"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = V.border2; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+              onMouseLeave={e => { e.currentTarget.style.borderColor = m.key === "free-template" ? "rgba(255,90,0,.35)" : V.border2; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = m.key === "free-template" ? "0 0 40px rgba(255,90,0,.1)" : "none"; }}>
               {m.vid ? (
                 <div style={{ height: 160, overflow: "hidden", position: "relative" }}>
                   <video src={m.vid} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to bottom,transparent 40%,${V.bg2} 100%)` }} />
+                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to bottom,transparent 40%,${m.key === "free-template" ? "rgba(20,5,0,.9)" : V.bg2} 100%)` }} />
+                  {m.key === "free-template" && (
+                    <div style={{ position: "absolute", top: 10, right: 10, background: V.fire, color: "#000", fontSize: 10, fontWeight: 800, borderRadius: 6, padding: "3px 8px", letterSpacing: 1 }}>GRATIS</div>
+                  )}
                 </div>
               ) : (
                 <div style={{ height: 160, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,rgba(255,90,0,.06),rgba(8,10,14,.5))` }}>
@@ -552,7 +552,7 @@ export default function LandingView({
                 </div>
               )}
               <div style={{ padding: "16px 18px 20px" }}>
-                <span style={{ display: "inline-block", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 5, padding: "2px 7px", color: "rgba(240,236,228,.5)", marginBottom: 7 }}>{m.badge}</span>
+                <span style={{ display: "inline-block", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", background: m.key === "free-template" ? "rgba(255,90,0,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.12)"}`, borderRadius: 5, padding: "2px 7px", color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)", marginBottom: 7 }}>{m.badge}</span>
                 <div style={{ fontFamily: V.ffU, fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 5 }}>{m.label}</div>
                 <div style={{ fontSize: 12, color: V.muted, lineHeight: 1.6 }}>{m.desc}</div>
                 <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: m.color, letterSpacing: 0.5 }}>{isEs ? "Ver módulo →" : "See module →"}</div>
@@ -569,8 +569,8 @@ export default function LandingView({
         <div className="lo-how-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 2, background: V.border2, borderRadius: 18, overflow: "hidden" }}>
           {[
             { n: "01", icon: "📸", t: isEs?"Sube tu foto":"Upload photo", d: isEs?"La IA aprende tu cara en segundos":"AI learns your face in seconds" },
-            { n: "02", icon: "✍️", t: isEs?"Describe la escena":"Describe scene", d: isEs?"Hollywood, TikTok, comercial — lo que imagines":"Hollywood, TikTok, commercial — anything" },
-            { n: "03", icon: "🎬", t: isEs?"Descarga y publica":"Download & share", d: isEs?"Listo en menos de 3 minutos":"Ready in under 3 minutes" },
+            { n: "02", icon: "🎁", t: isEs?"Genera gratis":"Generate free", d: isEs?"Tu primera escena cinematográfica — sin tarjeta":"Your first cinematic scene — no card needed" },
+            { n: "03", icon: "🎬", t: isEs?"Descarga y publica":"Download & share", d: isEs?"Listo en menos de 5 minutos":"Ready in under 5 minutes" },
           ].map((s, i) => (
             <div key={i} style={{ background: V.bg2, padding: "36px 28px", position: "relative", overflow: "hidden" }}>
               <div style={{ fontFamily: V.ffD, fontSize: 80, letterSpacing: 3, color: "rgba(255,90,0,.05)", position: "absolute", right: 16, top: 12, lineHeight: 1 }}>{s.n}</div>
@@ -638,9 +638,9 @@ export default function LandingView({
         <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at center,rgba(255,90,0,.06),transparent 70%)", pointerEvents: "none" }} />
         <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 12 }}>{isEs ? "Empieza hoy" : "Start today"}</div>
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,6vw,70px)", color: "#fff", letterSpacing: 2, lineHeight: 0.95, marginBottom: 12 }}>{isEs ? "TU PRIMERA ESCENA\nEN MENOS DE 3 MIN" : "YOUR FIRST SCENE\nIN UNDER 3 MIN"}</h2>
-        <p style={{ fontSize: 16, color: V.muted, maxWidth: 460, margin: "0 auto 28px", lineHeight: 1.7 }}>{isEs ? "Sin tarjeta. 10 Jades al registrarte para generar imágenes." : "No credit card. 10 Jades on signup to generate images."}</p>
-        <button onClick={user ? () => go("cineai") : onStartDemo} style={{ display: "inline-block", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 15, color: "#000", fontFamily: V.ffU, fontSize: 18, fontWeight: 800, padding: "20px 50px", cursor: "pointer", boxShadow: `0 0 70px rgba(255,90,0,.4),0 8px 30px rgba(0,0,0,.4)`, transition: "all .25s" }}>
-          {isEs ? "🎬 Comenzar con 10 Jades" : "🎬 Start with 10 Jades"}
+        <p style={{ fontSize: 16, color: V.muted, maxWidth: 460, margin: "0 auto 28px", lineHeight: 1.7 }}>{isEs ? "Sin tarjeta. 1 video gratis al registrarte." : "No credit card. 1 free video on signup."}</p>
+        <button onClick={user ? () => go("free-template") : onStartDemo} style={{ display: "inline-block", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 15, color: "#000", fontFamily: V.ffU, fontSize: 18, fontWeight: 800, padding: "20px 50px", cursor: "pointer", boxShadow: `0 0 70px rgba(255,90,0,.4),0 8px 30px rgba(0,0,0,.4)`, transition: "all .25s" }}>
+          {isEs ? "🎁 Generar mi video gratis" : "🎁 Generate my free video"}
         </button>
       </div>
 
