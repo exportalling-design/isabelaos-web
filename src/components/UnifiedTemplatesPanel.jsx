@@ -55,10 +55,10 @@ const FREE_TEMPLATES = [
   },
   {
     id: "free-3", free: true,
-    emoji: "🎬",
-    label:       { es: "Plantilla Gratis 3",  en: "Free Template 3" },
+    emoji: "🌌",
+    label:       { es: "The Chosen One",      en: "The Chosen One" },
     tag:         { es: "GRATIS",              en: "FREE" },
-    description: { es: "Video fashion editorial con tu propio rostro. Lujo y elegancia. 5 segundos.", en: "Fashion editorial video with your own face. Luxury and elegance. 5 seconds." },
+    description: { es: "Eres el elegido. Una metrópolis futurista se detiene ante ti. Luz divina desde el cielo. 5 segundos.", en: "You are the chosen one. A futuristic metropolis stops for you. Divine light from the sky. 5 seconds." },
     video: "/gallery/free-template-3.mp4",
     duration: "5s", model: "Seedance 1.5 Pro",
   },
