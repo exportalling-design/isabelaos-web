@@ -215,7 +215,7 @@ export default function FreeTemplatePanel({ lang = "es", onUpgrade }) {
       const res = await fetch("/api/free-template/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ templateId: selectedId, faceBase64: faceB64, prompt: genderedPrompt, dialogLang }),
+        body: JSON.stringify({ templateId: selectedId, faceBase64: faceB64, gender }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Error al enviar");
