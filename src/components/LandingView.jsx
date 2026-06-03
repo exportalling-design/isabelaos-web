@@ -90,8 +90,8 @@ function ViralPopup({ onClose, onGoFree, isEs }) {
           </div>
           <p style={{ fontSize: 13, color: "rgba(240,236,228,0.6)", lineHeight: 1.7, marginBottom: 18 }}>
             {isEs
-              ? "Sube tu foto y genera tu video cinematográfico GRATIS en minutos. 1 video gratis por cuenta — sin tarjeta de crédito."
-              : "Upload your photo and generate your FREE cinematic AI video in minutes. 1 free video per account — no credit card needed."}
+              ? "¡Tenemos plantillas gratis disponibles para ti! Sube tu foto y genera tu video cinematográfico gratis en minutos — sin tarjeta. Ve directamente a las plantillas."
+              : "We have free templates available for you! Upload your photo and generate your cinematic AI video for free in minutes — no card needed. Go directly to the templates."}
           </p>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={onGoFree} style={{ flex: 1, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
