@@ -1,29 +1,28 @@
-// src/App.jsx — IsabelaOS Studio v7.2
-// CAMBIOS v7.2:
-//   - FreeTemplatePanel integrado (video gratis con Seedance 1.5 Pro)
-//   - WelcomeModal actualizado → dirige a free-template primero
+// src/App.jsx — IsabelaOS Studio v7.3
+// CAMBIOS v7.3:
+//   - UnifiedTemplatesPanel reemplaza FreeTemplatePanel + TemplatesPanel
+//   - WelcomeModal → dirige a templates (panel unificado)
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useAuth }          from "./context/AuthContext";
-import { supabase }         from "./lib/supabaseClient";
-import { JADE_PACKS, COSTS } from "./lib/pricing";
-import ContactView          from "./components/ContactView";
-import { Img2VideoPanel }   from "./components/Img2VideoPanel";
-import LibraryView          from "./components/LibraryView";
-import AvatarStudioPanel    from "./components/AvatarStudioPanel";
-import MontajeIAPanel       from "./components/MontajeIAPanel";
-import CreatorPanel         from "./components/CreatorPanel";
-import ComercialPanel       from "./components/ComercialPanel";
-import ProductPhotoshoot    from "./components/ProductPhotoshoot";
-import CineAIPanel          from "./components/CineAIPanel";
-import TemplatesPanel       from "./components/TemplatesPanel";
-import FreeTemplatePanel    from "./components/FreeTemplatePanel";
-import Terms                from "./components/Terms";
-import Refund               from "./components/Refund";
-import Privacy              from "./components/Privacy";
-import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
-import LandingView          from "./components/LandingView";
-import { BuyJadesModal }    from "./components/BuyJadesModal";
-import AdminPanel           from "./components/AdminPanel";
+import { useAuth }               from "./context/AuthContext";
+import { supabase }              from "./lib/supabaseClient";
+import { JADE_PACKS, COSTS }     from "./lib/pricing";
+import ContactView               from "./components/ContactView";
+import { Img2VideoPanel }        from "./components/Img2VideoPanel";
+import LibraryView               from "./components/LibraryView";
+import AvatarStudioPanel         from "./components/AvatarStudioPanel";
+import MontajeIAPanel            from "./components/MontajeIAPanel";
+import CreatorPanel              from "./components/CreatorPanel";
+import ComercialPanel            from "./components/ComercialPanel";
+import ProductPhotoshoot         from "./components/ProductPhotoshoot";
+import CineAIPanel               from "./components/CineAIPanel";
+import UnifiedTemplatesPanel     from "./components/UnifiedTemplatesPanel";
+import Terms                     from "./components/Terms";
+import Refund                    from "./components/Refund";
+import Privacy                   from "./components/Privacy";
+import TermsAcceptanceModal      from "./components/TermsAcceptanceModal";
+import LandingView               from "./components/LandingView";
+import { BuyJadesModal }         from "./components/BuyJadesModal";
+import AdminPanel                from "./components/AdminPanel";
 
 const ADMIN_EMAIL = "exportalling@gmail.com";
 
@@ -37,11 +36,11 @@ async function getAuthHeaders() {
 
 function AuthModal({ open, onClose }) {
   const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
+  const [mode,    setMode]    = useState("login");
+  const [email,   setEmail]   = useState("");
+  const [pass,    setPass]    = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error,   setError]   = useState("");
   if (!open) return null;
   const submit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
@@ -57,7 +56,7 @@ function AuthModal({ open, onClose }) {
     try { await signInWithGoogle(); onClose(); }
     catch (err) { setError(err.message || String(err)); setLoading(false); }
   };
-  const inp = { width: "100%", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, color: "#fff", padding: "10px 14px", fontSize: 14, outline: "none", fontFamily: "'DM Sans',sans-serif" };
+  const inp = { width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#fff",padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"'DM Sans',sans-serif" };
   return (
     <div style={{ position:"fixed",inset:0,zIndex:600,display:"grid",placeItems:"center",background:"rgba(0,0,0,.8)",backdropFilter:"blur(10px)",padding:16 }}>
       <div style={{ width:"100%",maxWidth:420,background:"#0d1017",border:"1px solid rgba(255,90,0,.2)",borderRadius:24,padding:28 }}>
@@ -93,7 +92,7 @@ function AuthModal({ open, onClose }) {
   );
 }
 
-// ── Modal bienvenida post-registro ────────────────────────────
+// ── Modal bienvenida ──────────────────────────────────────────
 function WelcomeModal({ lang, onGoFree, onGoImage, onClose }) {
   const isEn = lang === "en";
   return (
@@ -103,7 +102,6 @@ function WelcomeModal({ lang, onGoFree, onGoImage, onClose }) {
         <div style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:800,color:"#fff",marginBottom:8 }}>
           {isEn ? "Welcome to IsabelaOS!" : "¡Bienvenido a IsabelaOS!"}
         </div>
-        {/* Badge video gratis */}
         <div style={{ display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,90,0,.12)",border:"1px solid rgba(255,90,0,.35)",borderRadius:100,padding:"8px 20px",marginBottom:20 }}>
           <span style={{ fontSize:18 }}>🎁</span>
           <span style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:14,fontWeight:800,color:"#ff5a00" }}>
@@ -116,11 +114,9 @@ function WelcomeModal({ lang, onGoFree, onGoImage, onClose }) {
             : "Ponté en una escena cinematográfica de IA gratis. Sube tu foto y genera tu video en minutos."}
         </p>
         <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
-          {/* CTA principal — video gratis */}
           <button onClick={onGoFree} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:800,padding:"16px",cursor:"pointer" }}>
             🎬 {isEn ? "Generate my FREE video now" : "Generar mi video GRATIS ahora"}
           </button>
-          {/* CTA secundario — imágenes */}
           <button onClick={onGoImage} style={{ background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"rgba(240,236,228,.6)",fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,padding:"12px",cursor:"pointer" }}>
             🖼️ {isEn ? "Generate AI Images with 10 free Jades" : "Generar Imágenes IA con 10 Jades gratis"}
           </button>
@@ -203,12 +199,16 @@ export default function App() {
   const renderModule = () => {
     const us = { jades, loading: false, plan: null };
     switch (activeModule) {
-      case "free-template": return (
-        <FreeTemplatePanel
-          lang={lang}
-          onUpgrade={() => setActiveModule("templates")}
-        />
-      );
+      // Panel unificado — engloba gratis + épicas
+      case "free-template":
+      case "templates":
+        return (
+          <UnifiedTemplatesPanel
+            lang={lang}
+            userJades={jades}
+            onJadesUpdate={fetchJades}
+          />
+        );
       case "generator":   return <CreatorPanel isDemo={false} />;
       case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
       case "avatars":     return <AvatarStudioPanel userStatus={us} />;
@@ -217,7 +217,6 @@ export default function App() {
       case "comercial":   return <ComercialPanel userStatus={us} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel />;
-      case "templates":   return <TemplatesPanel userJades={jades} onJadesUpdate={(n) => setJades(n)} />;
       default:            return null;
     }
   };
@@ -226,16 +225,12 @@ export default function App() {
 
   return (
     <>
-      {/* Admin Panel — solo para exportalling@gmail.com */}
-      {isAdmin && adminOpen && (
-        <AdminPanel onClose={() => setAdminOpen(false)} />
-      )}
+      {isAdmin && adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
 
-      {/* Modal bienvenida — ahora dirige al video gratis primero */}
       {showWelcome && (
         <WelcomeModal
           lang={lang}
-          onGoFree={() => { setShowWelcome(false); setActiveModule("free-template"); }}
+          onGoFree={() => { setShowWelcome(false); setActiveModule("templates"); }}
           onGoImage={() => { setShowWelcome(false); setActiveModule("generator"); }}
           onClose={() => setShowWelcome(false)}
         />
@@ -253,7 +248,7 @@ export default function App() {
         activeModule={activeModule}
         setActiveModule={setActiveModule}
         onOpenAuth={() => setAuthOpen(true)}
-        onStartDemo={() => user ? setActiveModule("free-template") : setAuthOpen(true)}
+        onStartDemo={() => user ? setActiveModule("templates") : setAuthOpen(true)}
         onOpenContact={() => setLandingPage("contact")}
         onOpenAbout={() => setLandingPage("about")}
         onSignOut={signOut}
