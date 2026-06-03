@@ -1,7 +1,7 @@
-// src/App.jsx — IsabelaOS Studio v7
-// CAMBIOS v7.1:
-//   - Admin Panel integrado (solo exportalling@gmail.com)
-//   - Botón 🛠️ Admin visible solo para admin en el hero card
+// src/App.jsx — IsabelaOS Studio v7.2
+// CAMBIOS v7.2:
+//   - FreeTemplatePanel integrado (video gratis con Seedance 1.5 Pro)
+//   - WelcomeModal actualizado → dirige a free-template primero
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth }          from "./context/AuthContext";
 import { supabase }         from "./lib/supabaseClient";
@@ -16,13 +16,14 @@ import ComercialPanel       from "./components/ComercialPanel";
 import ProductPhotoshoot    from "./components/ProductPhotoshoot";
 import CineAIPanel          from "./components/CineAIPanel";
 import TemplatesPanel       from "./components/TemplatesPanel";
+import FreeTemplatePanel    from "./components/FreeTemplatePanel";
 import Terms                from "./components/Terms";
 import Refund               from "./components/Refund";
+import Privacy              from "./components/Privacy";
 import TermsAcceptanceModal from "./components/TermsAcceptanceModal";
 import LandingView          from "./components/LandingView";
 import { BuyJadesModal }    from "./components/BuyJadesModal";
 import AdminPanel           from "./components/AdminPanel";
-import Privacy              from "./components/Privacy";
 
 const ADMIN_EMAIL = "exportalling@gmail.com";
 
@@ -93,35 +94,38 @@ function AuthModal({ open, onClose }) {
 }
 
 // ── Modal bienvenida post-registro ────────────────────────────
-function WelcomeModal({ lang, onGoImage, onGoAvatar, onClose }) {
+function WelcomeModal({ lang, onGoFree, onGoImage, onClose }) {
   const isEn = lang === "en";
   return (
     <div style={{ position:"fixed",inset:0,zIndex:700,display:"grid",placeItems:"center",background:"rgba(0,0,0,.88)",backdropFilter:"blur(14px)",padding:16 }}>
-      <div style={{ width:"100%",maxWidth:460,background:"linear-gradient(160deg,#0d1017,#0a0c10)",border:"1px solid rgba(255,179,0,.25)",borderRadius:24,padding:32,textAlign:"center",boxShadow:"0 0 80px rgba(255,179,0,.1)" }}>
-        <div style={{ fontSize:52,marginBottom:16 }}>🎉</div>
-        <div style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:24,fontWeight:800,color:"#fff",marginBottom:8 }}>
+      <div style={{ width:"100%",maxWidth:460,background:"linear-gradient(160deg,#0d1017,#0a0c10)",border:"1px solid rgba(255,90,0,.3)",borderRadius:24,padding:32,textAlign:"center",boxShadow:"0 0 80px rgba(255,90,0,.12)" }}>
+        <div style={{ fontSize:52,marginBottom:12 }}>🎬</div>
+        <div style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:800,color:"#fff",marginBottom:8 }}>
           {isEn ? "Welcome to IsabelaOS!" : "¡Bienvenido a IsabelaOS!"}
         </div>
-        <div style={{ display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,179,0,.1)",border:"1px solid rgba(255,179,0,.3)",borderRadius:100,padding:"8px 20px",marginBottom:20 }}>
-          <span style={{ fontSize:20 }}>💎</span>
-          <span style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:16,fontWeight:700,color:"#ffb300" }}>
-            {isEn ? "You have 10 free Jades!" : "¡Tienes 10 Jades gratis!"}
+        {/* Badge video gratis */}
+        <div style={{ display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,90,0,.12)",border:"1px solid rgba(255,90,0,.35)",borderRadius:100,padding:"8px 20px",marginBottom:20 }}>
+          <span style={{ fontSize:18 }}>🎁</span>
+          <span style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:14,fontWeight:800,color:"#ff5a00" }}>
+            {isEn ? "1 FREE VIDEO — No card needed" : "1 VIDEO GRATIS — Sin tarjeta"}
           </span>
         </div>
-        <p style={{ fontSize:14,color:"rgba(240,236,228,.75)",lineHeight:1.7,marginBottom:24 }}>
+        <p style={{ fontSize:13,color:"rgba(240,236,228,.7)",lineHeight:1.7,marginBottom:24 }}>
           {isEn
-            ? "Use them in the Image module to generate AI photos for free, or create your virtual avatar — a custom AI model or influencer with your own face."
-            : "Úsalos en el módulo de Imagen para crear fotos con IA gratis, o crea tu avatar virtual — un modelo o influencer IA con tu propio rostro."}
+            ? "Put your face in a cinematic AI scene for free. Upload your photo and generate your video in minutes."
+            : "Ponté en una escena cinematográfica de IA gratis. Sube tu foto y genera tu video en minutos."}
         </p>
-        <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:20 }}>
-          <button onClick={onGoImage} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:800,padding:"14px",cursor:"pointer" }}>
-            🖼️ {isEn ? "Generate free AI Images" : "Generar Imágenes con IA gratis"}
+        <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+          {/* CTA principal — video gratis */}
+          <button onClick={onGoFree} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:800,padding:"16px",cursor:"pointer" }}>
+            🎬 {isEn ? "Generate my FREE video now" : "Generar mi video GRATIS ahora"}
           </button>
-          <button onClick={onGoAvatar} style={{ background:"rgba(255,90,0,.08)",border:"1px solid rgba(255,90,0,.25)",borderRadius:12,color:"#ffb300",fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:700,padding:"14px",cursor:"pointer" }}>
-            👤 {isEn ? "Create my Virtual Avatar / Influencer" : "Crear mi Avatar Virtual / Influencer"}
+          {/* CTA secundario — imágenes */}
+          <button onClick={onGoImage} style={{ background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"rgba(240,236,228,.6)",fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,padding:"12px",cursor:"pointer" }}>
+            🖼️ {isEn ? "Generate AI Images with 10 free Jades" : "Generar Imágenes IA con 10 Jades gratis"}
           </button>
         </div>
-        <button onClick={onClose} style={{ background:"none",border:"none",color:"rgba(240,236,228,.35)",fontSize:13,cursor:"pointer",fontFamily:"'Space Grotesk',sans-serif" }}>
+        <button onClick={onClose} style={{ background:"none",border:"none",color:"rgba(240,236,228,.3)",fontSize:12,cursor:"pointer",fontFamily:"'Space Grotesk',sans-serif" }}>
           {isEn ? "Explore on my own" : "Explorar por mi cuenta"}
         </button>
       </div>
@@ -150,8 +154,8 @@ export default function App() {
 
   // Rutas estáticas
   const path = window.location.pathname;
-  if (path === "/terms")  return <Terms  lang={lang} />;
-  if (path === "/refund") return <Refund lang={lang} />;
+  if (path === "/terms")   return <Terms   lang={lang} />;
+  if (path === "/refund")  return <Refund  lang={lang} />;
   if (path === "/privacy") return <Privacy lang={lang} />;
 
   const fetchJades = useCallback(async () => {
@@ -199,6 +203,12 @@ export default function App() {
   const renderModule = () => {
     const us = { jades, loading: false, plan: null };
     switch (activeModule) {
+      case "free-template": return (
+        <FreeTemplatePanel
+          lang={lang}
+          onUpgrade={() => setActiveModule("templates")}
+        />
+      );
       case "generator":   return <CreatorPanel isDemo={false} />;
       case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
       case "avatars":     return <AvatarStudioPanel userStatus={us} />;
@@ -221,12 +231,12 @@ export default function App() {
         <AdminPanel onClose={() => setAdminOpen(false)} />
       )}
 
-      {/* Modal bienvenida */}
+      {/* Modal bienvenida — ahora dirige al video gratis primero */}
       {showWelcome && (
         <WelcomeModal
           lang={lang}
+          onGoFree={() => { setShowWelcome(false); setActiveModule("free-template"); }}
           onGoImage={() => { setShowWelcome(false); setActiveModule("generator"); }}
-          onGoAvatar={() => { setShowWelcome(false); setActiveModule("avatars"); }}
           onClose={() => setShowWelcome(false)}
         />
       )}
@@ -243,7 +253,7 @@ export default function App() {
         activeModule={activeModule}
         setActiveModule={setActiveModule}
         onOpenAuth={() => setAuthOpen(true)}
-        onStartDemo={() => user ? setActiveModule("cineai") : setAuthOpen(true)}
+        onStartDemo={() => user ? setActiveModule("free-template") : setAuthOpen(true)}
         onOpenContact={() => setLandingPage("contact")}
         onOpenAbout={() => setLandingPage("about")}
         onSignOut={signOut}
