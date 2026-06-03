@@ -63,7 +63,7 @@ function ModOverlay({ title, onClose, children }) {
     <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "96px 16px 16px", overflowY: "auto", animation: "moIn .3s ease" }}>
       <div style={{ width: "100%", maxWidth: 1200, flexShrink: 0, background: "#0d1017", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 24, overflow: "hidden", animation: "moPIn .3s ease" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,90,0,0.05)", position: "sticky", top: 0, backdropFilter: "blur(20px)", zIndex: 10 }}>
-          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#ff5a00", fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title === "free-template" ? "Video Gratis" : title}</button>
+          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#ff5a00", fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>← {title === "library" ? "Biblioteca" : title === "templates" ? "Plantillas" : title === "templates" ? (isEs ? "Plantillas de Video" : "Video Templates") : title}</button>
           <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "rgba(240,236,228,0.5)", fontSize: 16, padding: "4px 12px", cursor: "pointer" }}>✕</button>
         </div>
         <div>{children}</div>
@@ -181,10 +181,8 @@ export default function LandingView({
   }, [setActiveModule]);
 
   const MODS = [
-    // ── VIDEO GRATIS — primero siempre ──────────────────────────────────────
-    { key: "free-template", icon: "🎁", label: isEs ? "Video Gratis" : "Free Video",       color: "#ff5a00", badge: "🎁 GRATIS", desc: isEs ? "1 video gratis con tu rostro · Marca de agua" : "1 free video with your face · Watermark", vid: "/gallery/free-template-1.mp4" },
-    { key: "cineai",        icon: "🎬", label: "CineAI",                                    color: "#ff5a00", badge: "🔥 NUEVO",  desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
-    { key: "templates",     icon: "⚡", label: isEs ? "Plantillas Épicas" : "Epic Templates", color: "#C8A96E", badge: "✨ NUEVO",  desc: isEs ? "Ponté en escenas cinematográficas virales con tu rostro" : "Place yourself in viral cinematic scenes with your face", vid: "/gallery/divine-light.mp4" },
+    { key: "templates",  icon: "🎬", label: isEs ? "Plantillas de Video" : "Video Templates", color: "#ff5a00", badge: "🎁 FREE+", desc: isEs ? "Videos gratis y épicos con tu rostro" : "Free and epic videos with your face", vid: "/gallery/free-template-1.mp4" },
+    { key: "cineai",     icon: "🎬", label: "CineAI",                                         color: "#ff5a00", badge: "🔥 NUEVO", desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
     { key: "photoshoot",    icon: "📸", label: "Photoshoot",                                  color: "#f59e0b", badge: "📸",        desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds", vid: "/gallery/comercial-product.mp4" },
     { key: "avatars",       icon: "👤", label: isEs ? "Avatares" : "Avatars",                color: "#a855f7", badge: "👤",        desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face", vid: "/gallery/avatar-demo.mp4" },
     { key: "comercial",     icon: "🎙️", label: "Comercial IA",                              color: "#10b981", badge: "🎙️",       desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice", vid: "/gallery/comercial-chef.mp4" },
@@ -258,7 +256,7 @@ export default function LandingView({
           onClose={() => setShowViralPopup(false)}
           onGoFree={() => {
             setShowViralPopup(false);
-            if (user) go("free-template");
+            if (user) go("templates");
             else onOpenAuth();
           }}
         />
@@ -359,7 +357,7 @@ export default function LandingView({
                 </span>
               </div>
               <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 20 }}>
-                <button onClick={user ? () => go("free-template") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
+                <button onClick={user ? () => go("templates") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
                   {isEs ? "🎬 Generar mi video gratis →" : "🎬 Generate my free video →"}
                 </button>
                 <button onClick={() => scrollTo("galeria")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, color: "#fff", fontSize: 15, padding: "16px 26px", cursor: "pointer", fontFamily: V.ffB }}>
@@ -393,9 +391,9 @@ export default function LandingView({
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
                     {MODS.map(m => (
                       <button key={m.key} onClick={() => go(m.key)}
-                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "free-template" ? 700 : 400 }}
+                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: m.key === "templates" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "templates" ? 700 : 400 }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"; e.currentTarget.style.color = m.key === "free-template" ? V.fire : "rgba(240,236,228,.6)"; }}>
+                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"; e.currentTarget.style.color = m.key === "templates" ? V.fire : "rgba(240,236,228,.6)"; }}>
                         <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}
                       </button>
                     ))}
@@ -420,9 +418,9 @@ export default function LandingView({
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
                     {MODS.slice(0, 6).map(m => (
-                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)", transition: "all .15s", fontWeight: m.key === "free-template" ? 700 : 400 }}
+                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: m.key === "templates" ? V.fire : "rgba(240,236,228,.5)", transition: "all .15s", fontWeight: m.key === "templates" ? 700 : 400 }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.08)"; e.currentTarget.style.color = V.gold; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "free-template" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.color = m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)"; }}>
+                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.color = m.key === "templates" ? V.fire : "rgba(240,236,228,.5)"; }}>
                         {m.icon} {m.label}
                       </div>
                     ))}
@@ -515,7 +513,7 @@ export default function LandingView({
         <p style={{ fontSize: 16, color: V.muted, lineHeight: 1.7, maxWidth: 600, marginBottom: 40 }}>{isEs ? "Sin actores. Sin cámaras. Sin estudio. Solo tu visión y nuestra IA." : "No actors. No cameras. No studio. Just your vision and our AI."}</p>
         <div className="lo-gal-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
           {GAL.map((v, i) => (
-            <div key={i} onClick={() => user ? go("cineai") : onStartDemo()} style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${V.border2}`, cursor: "pointer", aspectRatio: v.wide ? "16/9" : "9/16", gridColumn: v.wide ? "span 2" : "auto", transition: "transform .3s,border-color .3s" }}
+            <div key={i} onClick={() => user ? go("templates") : onStartDemo()} style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${V.border2}`, cursor: "pointer", aspectRatio: v.wide ? "16/9" : "9/16", gridColumn: v.wide ? "span 2" : "auto", transition: "transform .3s,border-color .3s" }}
               onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.02)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.4)"; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = V.border2; }}>
               <video src={v.src} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -535,14 +533,14 @@ export default function LandingView({
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 40 }}>{isEs ? "TODO LO QUE NECESITAS" : "EVERYTHING YOU NEED"}</h2>
         <div className="lo-mod-grid-css" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
           {MODS.map(m => (
-            <div key={m.key} onClick={() => user ? go(m.key) : onStartDemo()} style={{ border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.35)" : V.border2}`, borderRadius: 18, background: m.key === "free-template" ? "rgba(255,90,0,.05)" : V.bg2, overflow: "hidden", cursor: "pointer", transition: "all .3s", ...(m.key === "free-template" ? { boxShadow: "0 0 40px rgba(255,90,0,.1)" } : {}) }}
+            <div key={m.key} onClick={() => user ? go(m.key) : onStartDemo()} style={{ border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.35)" : V.border2}`, borderRadius: 18, background: m.key === "templates" ? "rgba(255,90,0,.05)" : V.bg2, overflow: "hidden", cursor: "pointer", transition: "all .3s", ...(m.key === "templates" ? { boxShadow: "0 0 40px rgba(255,90,0,.1)" } : {}) }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = m.color; e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 16px 50px rgba(0,0,0,.4)"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = m.key === "free-template" ? "rgba(255,90,0,.35)" : V.border2; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = m.key === "free-template" ? "0 0 40px rgba(255,90,0,.1)" : "none"; }}>
+              onMouseLeave={e => { e.currentTarget.style.borderColor = m.key === "templates" ? "rgba(255,90,0,.35)" : V.border2; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = m.key === "templates" ? "0 0 40px rgba(255,90,0,.1)" : "none"; }}>
               {m.vid ? (
                 <div style={{ height: 160, overflow: "hidden", position: "relative" }}>
                   <video src={m.vid} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to bottom,transparent 40%,${m.key === "free-template" ? "rgba(20,5,0,.9)" : V.bg2} 100%)` }} />
-                  {m.key === "free-template" && (
+                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to bottom,transparent 40%,${m.key === "templates" ? "rgba(20,5,0,.9)" : V.bg2} 100%)` }} />
+                  {m.key === "templates" && (
                     <div style={{ position: "absolute", top: 10, right: 10, background: V.fire, color: "#000", fontSize: 10, fontWeight: 800, borderRadius: 6, padding: "3px 8px", letterSpacing: 1 }}>GRATIS</div>
                   )}
                 </div>
@@ -552,7 +550,7 @@ export default function LandingView({
                 </div>
               )}
               <div style={{ padding: "16px 18px 20px" }}>
-                <span style={{ display: "inline-block", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", background: m.key === "free-template" ? "rgba(255,90,0,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${m.key === "free-template" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.12)"}`, borderRadius: 5, padding: "2px 7px", color: m.key === "free-template" ? V.fire : "rgba(240,236,228,.5)", marginBottom: 7 }}>{m.badge}</span>
+                <span style={{ display: "inline-block", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", background: m.key === "templates" ? "rgba(255,90,0,.15)" : "rgba(255,255,255,.07)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.12)"}`, borderRadius: 5, padding: "2px 7px", color: m.key === "templates" ? V.fire : "rgba(240,236,228,.5)", marginBottom: 7 }}>{m.badge}</span>
                 <div style={{ fontFamily: V.ffU, fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 5 }}>{m.label}</div>
                 <div style={{ fontSize: 12, color: V.muted, lineHeight: 1.6 }}>{m.desc}</div>
                 <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: m.color, letterSpacing: 0.5 }}>{isEs ? "Ver módulo →" : "See module →"}</div>
@@ -639,7 +637,7 @@ export default function LandingView({
         <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 12 }}>{isEs ? "Empieza hoy" : "Start today"}</div>
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,6vw,70px)", color: "#fff", letterSpacing: 2, lineHeight: 0.95, marginBottom: 12 }}>{isEs ? "TU PRIMERA ESCENA\nEN MENOS DE 3 MIN" : "YOUR FIRST SCENE\nIN UNDER 3 MIN"}</h2>
         <p style={{ fontSize: 16, color: V.muted, maxWidth: 460, margin: "0 auto 28px", lineHeight: 1.7 }}>{isEs ? "Sin tarjeta. 1 video gratis al registrarte." : "No credit card. 1 free video on signup."}</p>
-        <button onClick={user ? () => go("free-template") : onStartDemo} style={{ display: "inline-block", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 15, color: "#000", fontFamily: V.ffU, fontSize: 18, fontWeight: 800, padding: "20px 50px", cursor: "pointer", boxShadow: `0 0 70px rgba(255,90,0,.4),0 8px 30px rgba(0,0,0,.4)`, transition: "all .25s" }}>
+        <button onClick={user ? () => go("templates") : onStartDemo} style={{ display: "inline-block", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 15, color: "#000", fontFamily: V.ffU, fontSize: 18, fontWeight: 800, padding: "20px 50px", cursor: "pointer", boxShadow: `0 0 70px rgba(255,90,0,.4),0 8px 30px rgba(0,0,0,.4)`, transition: "all .25s" }}>
           {isEs ? "🎁 Generar mi video gratis" : "🎁 Generate my free video"}
         </button>
       </div>
