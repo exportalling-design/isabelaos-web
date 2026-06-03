@@ -4,6 +4,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { BuyJadesModal } from "./BuyJadesModal";
+import TemplatePurchaseModal from "./TemplatePurchaseModal";
 
 const ACCENT = "#ff5a00";
 const GOLD   = "#ffb300";
@@ -491,6 +492,8 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
   const [usedFreeId,   setUsedFreeId]   = useState(null);
   const [checkingUsed, setCheckingUsed] = useState(true);
   const [buyOpen,      setBuyOpen]      = useState(false);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseTmpl, setPurchaseTmpl] = useState(null);
 
   const STYLES = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:wght@300;400;500&display=swap');`;
 
@@ -509,7 +512,11 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
 
   const handleSelect = (id) => {
     const t = ALL_TEMPLATES.find(x => x.id === id);
-    if (!t.free && userJades < (t.jadeCost || 30)) { setBuyOpen(true); return; }
+    if (!t.free && userJades < (t.jadeCost || 30)) {
+      setPurchaseTmpl(t);
+      setPurchaseOpen(true);
+      return;
+    }
     setSelectedId(id); setView("generate");
   };
 
@@ -517,7 +524,14 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
     <>
       <style>{RESPONSIVE_CSS}</style>
       <BuyJadesModal open={buyOpen} onClose={() => setBuyOpen(false)} userId={null} onSuccess={() => { setBuyOpen(false); onJadesUpdate?.(); }} lang={lang} />
-      <GenerateView tmpl={tmpl} lang={lang} userJades={userJades} onJadesUpdate={onJadesUpdate} onBack={() => setView("gallery")} setUsedFreeId={setUsedFreeId} onOpenBuy={() => setBuyOpen(true)} />
+      <TemplatePurchaseModal
+        open={purchaseOpen}
+        onClose={() => setPurchaseOpen(false)}
+        onSuccess={async () => { setPurchaseOpen(false); await onJadesUpdate?.(); }}
+        tmplLabel={tmpl?.label?.[lang]}
+        lang={lang}
+      />
+      <GenerateView tmpl={tmpl} lang={lang} userJades={userJades} onJadesUpdate={onJadesUpdate} onBack={() => setView("gallery")} setUsedFreeId={setUsedFreeId} onOpenBuy={() => setPurchaseOpen(true)} />
     </>
   );
 
@@ -525,6 +539,13 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
     <div style={{ fontFamily: "'DM Sans',sans-serif", color: "#fff", paddingBottom: 60 }}>
       <style>{RESPONSIVE_CSS}</style>
       <BuyJadesModal open={buyOpen} onClose={() => setBuyOpen(false)} userId={null} onSuccess={() => { setBuyOpen(false); onJadesUpdate?.(); }} lang={lang} />
+      <TemplatePurchaseModal
+        open={purchaseOpen}
+        onClose={() => setPurchaseOpen(false)}
+        onSuccess={async () => { setPurchaseOpen(false); await onJadesUpdate?.(); if (purchaseTmpl) { setSelectedId(purchaseTmpl.id); setView("generate"); } }}
+        tmplLabel={purchaseTmpl?.label?.[lang]}
+        lang={lang}
+      />
 
       {/* Header */}
       <div className="tmpl-header" style={{ padding: "24px 20px 16px" }}>
