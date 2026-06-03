@@ -73,7 +73,7 @@ export default async function handler(req, res) {
 
     // ── 2. Consultar EvoLink — idéntico a poll-video.js ───────────────────────
     const evolinkRes = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
-      headers: { Authorization: `Bearer ${EVOLINK_API_KEY}` },
+      headers: { "Authorization": `Bearer ${EVOLINK_API_KEY}` },
     });
 
     const data   = await evolinkRes.json();
