@@ -311,8 +311,8 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
             {isEs
-              ? "El reconocimiento facial en la versión gratuita puede no ser 100% preciso. Para mejor resultado y videos de 15 segundos sin marca de agua, elige una plantilla épica ($5) o suscríbete por $13/mes."
-              : "Facial recognition in the free version may not be 100% accurate. For better results and 15-second watermark-free videos, choose an epic template ($5) or subscribe for $13/month."}
+              ? "La calidad visual de la versión gratuita es inferior a las plantillas épicas de pago. El reconocimiento facial puede no ser 100% preciso con Seedance 1.5 Pro. Para mayor calidad, videos de 15 segundos ultra HD sin marca de agua, elige una plantilla épica ($5) o suscríbete por $13/mes."
+              : "Free version visual quality is lower than paid epic templates. Facial recognition may not be 100% accurate with Seedance 1.5 Pro. For higher quality, 15-second ultra HD watermark-free videos, choose an epic template ($5) or subscribe for $13/month."}
           </div>
         </div>
       )}
