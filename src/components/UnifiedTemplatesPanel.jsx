@@ -102,6 +102,15 @@ const EPIC_TEMPLATES = [
     video: "/gallery/victorias-secret.mp4",
     price: 5, jadeCost: 30, duration: "15s", model: "Seedance 2.0", hasDialogLang: false,
   },
+  {
+    id: "luchaTitanes", free: false,
+    emoji: "⚔️",
+    label:       { es: "Lucha de Titanes",    en: "Clash of Titans" },
+    tag:         { es: "ACCIÓN",              en: "ACTION" },
+    description: { es: "Combate épico sobre el océano contra un titán de agua. Efectos blockbuster. 15 segundos.", en: "Epic combat over the ocean against a water titan. Blockbuster effects. 15 seconds." },
+    video: "/gallery/lucha-titanes.mp4",
+    price: 5, jadeCost: 30, duration: "15s", model: "Seedance 2.0", hasDialogLang: false,
+  },
 ];
 
 const ALL_TEMPLATES = [...FREE_TEMPLATES, ...EPIC_TEMPLATES];
