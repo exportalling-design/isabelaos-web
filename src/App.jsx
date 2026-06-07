@@ -107,7 +107,7 @@ function AuthModal({ open, onClose }) {
                 type="text"
                 value={promoCode}
                 onChange={e => setPromoCode(e.target.value.toUpperCase())}
-                placeholder="RYAN-JALALI"
+                placeholder=""
                 style={{ ...inp, letterSpacing:1 }}
               />
               {promoMsg && <p style={{ fontSize:11,color:promoMsg.startsWith("✅") ? "#4ade80" : "#fbbf24",marginTop:4 }}>{promoMsg}</p>}
