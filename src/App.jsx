@@ -213,8 +213,22 @@ export default function App() {
       case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
       case "avatars":     return <AvatarStudioPanel userStatus={us} />;
       case "library":     return <LibraryView />;
-      case "montaje":     return <MontajeIAPanel userStatus={us} />;
-      case "comercial":   return <ComercialPanel userStatus={us} />;
+      case "montaje":
+      case "comercial":
+      case "img2video":
+        return (
+          <div style={{ fontFamily:"'DM Sans',sans-serif", color:"#fff", padding:"60px 24px", textAlign:"center" }}>
+            <div style={{ fontSize:56, marginBottom:16 }}>🚧</div>
+            <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:22, fontWeight:800, marginBottom:10 }}>
+              {lang === "es" ? "En construcción" : "Coming Soon"}
+            </div>
+            <div style={{ fontSize:14, color:"rgba(255,255,255,0.45)", lineHeight:1.7, maxWidth:360, margin:"0 auto" }}>
+              {lang === "es"
+                ? "Este módulo estará disponible muy pronto. Mientras tanto prueba nuestras plantillas de video o CineAI."
+                : "This module will be available very soon. In the meantime try our video templates or CineAI."}
+            </div>
+          </div>
+        );
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel />;
       default:            return null;
