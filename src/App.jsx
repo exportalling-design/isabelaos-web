@@ -1,7 +1,4 @@
 // src/App.jsx — IsabelaOS Studio v7.3
-// CAMBIOS v7.3:
-//   - UnifiedTemplatesPanel reemplaza FreeTemplatePanel + TemplatesPanel
-//   - WelcomeModal → dirige a templates (panel unificado)
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth }               from "./context/AuthContext";
 import { supabase }              from "./lib/supabaseClient";
@@ -36,12 +33,15 @@ async function getAuthHeaders() {
 
 function AuthModal({ open, onClose }) {
   const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
-  const [mode,    setMode]    = useState("login");
-  const [email,   setEmail]   = useState("");
-  const [pass,    setPass]    = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState("");
+  const [mode,      setMode]      = useState("login");
+  const [email,     setEmail]     = useState("");
+  const [pass,      setPass]      = useState("");
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoMsg,  setPromoMsg]  = useState("");
   if (!open) return null;
+
   const submit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
@@ -52,8 +52,7 @@ function AuthModal({ open, onClose }) {
         // Canjear código promo si se ingresó
         if (promoCode.trim()) {
           try {
-            const { supabase: sb } = await import("./lib/supabaseClient");
-            const { data: { session } } = await sb.auth.getSession();
+            const { data: { session } } = await supabase.auth.getSession();
             const token = session?.access_token;
             if (token) {
               const r = await fetch("/api/redeem-promo", {
@@ -73,12 +72,15 @@ function AuthModal({ open, onClose }) {
     } catch (err) { setError(err.message || String(err)); }
     finally { setLoading(false); }
   };
+
   const google = async () => {
     setError(""); setLoading(true);
     try { await signInWithGoogle(); onClose(); }
     catch (err) { setError(err.message || String(err)); setLoading(false); }
   };
+
   const inp = { width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#fff",padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"'DM Sans',sans-serif" };
+
   return (
     <div style={{ position:"fixed",inset:0,zIndex:600,display:"grid",placeItems:"center",background:"rgba(0,0,0,.8)",backdropFilter:"blur(10px)",padding:16 }}>
       <div style={{ width:"100%",maxWidth:420,background:"#0d1017",border:"1px solid rgba(255,90,0,.2)",borderRadius:24,padding:28 }}>
@@ -96,7 +98,6 @@ function AuthModal({ open, onClose }) {
             <input type="password" required value={pass} onChange={e=>setPass(e.target.value)} style={inp} />
           </div>
           {error && <p style={{ fontSize:12,color:"#f87171" }}>{error}</p>}
-          {/* Campo código promo — solo en registro */}
           {mode === "register" && (
             <div>
               <label style={{ fontSize:12,color:"rgba(240,236,228,.6)",display:"block",marginBottom:4 }}>
@@ -106,13 +107,13 @@ function AuthModal({ open, onClose }) {
                 type="text"
                 value={promoCode}
                 onChange={e => setPromoCode(e.target.value.toUpperCase())}
-                placeholder="ISABELAOS-CREATOR1"
+                placeholder="RYAN-JALALI"
                 style={{ ...inp, letterSpacing:1 }}
               />
               {promoMsg && <p style={{ fontSize:11,color:promoMsg.startsWith("✅") ? "#4ade80" : "#fbbf24",marginTop:4 }}>{promoMsg}</p>}
             </div>
           )}
-          <button type="submit" disabled={loading} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontSize:15,fontWeight:700,padding:12,cursor:"pointer",opacity:loading?.6:1,fontFamily:"'Space Grotesk',sans-serif" }}>
+          <button type="submit" disabled={loading} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontSize:15,fontWeight:700,padding:12,cursor:"pointer",opacity:loading?0.6:1,fontFamily:"'Space Grotesk',sans-serif" }}>
             {loading?"Procesando...":mode==="login"?"Entrar":"Registrarme"}
           </button>
         </form>
@@ -130,7 +131,6 @@ function AuthModal({ open, onClose }) {
   );
 }
 
-// ── Modal bienvenida ──────────────────────────────────────────
 function WelcomeModal({ lang, onGoFree, onGoImage, onClose }) {
   const isEn = lang === "en";
   return (
@@ -186,7 +186,6 @@ export default function App() {
 
   const isAdmin = user?.email === ADMIN_EMAIL;
 
-  // Rutas estáticas
   const path = window.location.pathname;
   if (path === "/terms")   return <Terms   lang={lang} />;
   if (path === "/refund")  return <Refund  lang={lang} />;
@@ -237,7 +236,6 @@ export default function App() {
   const renderModule = () => {
     const us = { jades, loading: false, plan: null };
     switch (activeModule) {
-      // Panel unificado — engloba gratis + épicas
       case "free-template":
       case "templates":
         return (
@@ -248,25 +246,24 @@ export default function App() {
           />
         );
       case "generator":   return <CreatorPanel isDemo={false} />;
-      case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
       case "avatars":     return <AvatarStudioPanel userStatus={us} />;
       case "library":     return <LibraryView />;
       case "img2video":
         return (
-          <div style={{ fontFamily:"'DM Sans',sans-serif", color:"#fff", padding:"60px 24px", textAlign:"center" }}>
-            <div style={{ fontSize:56, marginBottom:16 }}>🚧</div>
-            <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:22, fontWeight:800, marginBottom:10 }}>
+          <div style={{ fontFamily:"'DM Sans',sans-serif",color:"#fff",padding:"60px 24px",textAlign:"center" }}>
+            <div style={{ fontSize:56,marginBottom:16 }}>🚧</div>
+            <div style={{ fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:800,marginBottom:10 }}>
               {lang === "es" ? "En construcción" : "Coming Soon"}
             </div>
-            <div style={{ fontSize:14, color:"rgba(255,255,255,0.45)", lineHeight:1.7, maxWidth:360, margin:"0 auto" }}>
+            <div style={{ fontSize:14,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:360,margin:"0 auto" }}>
               {lang === "es"
                 ? "Este módulo estará disponible muy pronto. Mientras tanto prueba nuestras plantillas de video o CineAI."
                 : "This module will be available very soon. In the meantime try our video templates or CineAI."}
             </div>
           </div>
         );
-      case "montaje":   return <MontajeIAPanel userStatus={us} />;
-      case "comercial": return <ComercialPanel userStatus={us} />;
+      case "montaje":     return <MontajeIAPanel userStatus={us} />;
+      case "comercial":   return <ComercialPanel userStatus={us} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel />;
       default:            return null;
