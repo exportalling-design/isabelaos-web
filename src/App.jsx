@@ -45,8 +45,30 @@ function AuthModal({ open, onClose }) {
   const submit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
-      if (mode === "login") await signInWithEmail(email, pass);
-      else { await signUpWithEmail(email, pass); alert("Cuenta creada. Revisa tu correo."); }
+      if (mode === "login") {
+        await signInWithEmail(email, pass);
+      } else {
+        await signUpWithEmail(email, pass);
+        // Canjear código promo si se ingresó
+        if (promoCode.trim()) {
+          try {
+            const { supabase: sb } = await import("./lib/supabaseClient");
+            const { data: { session } } = await sb.auth.getSession();
+            const token = session?.access_token;
+            if (token) {
+              const r = await fetch("/api/redeem-promo", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+                body: JSON.stringify({ code: promoCode.trim() }),
+              });
+              const j = await r.json();
+              if (j.ok) setPromoMsg("✅ " + j.jades + " Jades acreditados");
+              else setPromoMsg("⚠️ " + (j.error || "Código no válido"));
+            }
+          } catch {}
+        }
+        alert("Cuenta creada. Revisa tu correo.");
+      }
       onClose();
     } catch (err) { setError(err.message || String(err)); }
     finally { setLoading(false); }
@@ -74,6 +96,22 @@ function AuthModal({ open, onClose }) {
             <input type="password" required value={pass} onChange={e=>setPass(e.target.value)} style={inp} />
           </div>
           {error && <p style={{ fontSize:12,color:"#f87171" }}>{error}</p>}
+          {/* Campo código promo — solo en registro */}
+          {mode === "register" && (
+            <div>
+              <label style={{ fontSize:12,color:"rgba(240,236,228,.6)",display:"block",marginBottom:4 }}>
+                Promo code <span style={{ color:"rgba(240,236,228,.3)",fontWeight:400 }}>(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={promoCode}
+                onChange={e => setPromoCode(e.target.value.toUpperCase())}
+                placeholder="ISABELAOS-CREATOR1"
+                style={{ ...inp, letterSpacing:1 }}
+              />
+              {promoMsg && <p style={{ fontSize:11,color:promoMsg.startsWith("✅") ? "#4ade80" : "#fbbf24",marginTop:4 }}>{promoMsg}</p>}
+            </div>
+          )}
           <button type="submit" disabled={loading} style={{ background:"linear-gradient(135deg,#ff5a00,#ffb300)",border:"none",borderRadius:12,color:"#000",fontSize:15,fontWeight:700,padding:12,cursor:"pointer",opacity:loading?.6:1,fontFamily:"'Space Grotesk',sans-serif" }}>
             {loading?"Procesando...":mode==="login"?"Entrar":"Registrarme"}
           </button>
