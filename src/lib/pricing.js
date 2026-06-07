@@ -22,15 +22,15 @@ export const COSTS = {
   img_prompt:       1,    // Imagen sin avatar (FLUX texto)
   img_anchor:       2,    // Imagen con avatar/anchor
 
-  // CineAI — Seedance 2.0 Fast 480p (precio justo 5x margen)
-  cineai_480_5s:    2,    // 480p 5s  → $0.12 real → 2 Jades ($0.20)
-  cineai_480_10s:   3,    // 480p 10s → $0.24 real → 3 Jades ($0.30)
-  cineai_480_15s:   4,    // 480p 15s → $0.36 real → 4 Jades ($0.40)
+  // CineAI — Seedance 2.0 Fast 480p ($0.074/s × 3 margen)
+  cineai_480_5s:    11,   // 480p 5s  → $0.37 real → 11 Jades ($1.10)
+  cineai_480_10s:   22,   // 480p 10s → $0.74 real → 22 Jades ($2.20)
+  cineai_480_15s:   33,   // 480p 15s → $1.11 real → 33 Jades ($3.30)
 
-  // CineAI — Seedance 2.0 Fast 720p
-  cineai_720_5s:    5,    // 720p 5s  → $0.26 real → 5 Jades ($0.50)
-  cineai_720_10s:   9,    // 720p 10s → $0.52 real → 9 Jades ($0.90)
-  cineai_720_15s:   13,   // 720p 15s → $0.78 real → 13 Jades ($1.30)
+  // CineAI — Seedance 2.0 Fast 720p ($0.161/s × 3 margen)
+  cineai_720_5s:    25,   // 720p 5s  → $0.81 real → 25 Jades ($2.50)
+  cineai_720_10s:   49,   // 720p 10s → $1.61 real → 49 Jades ($4.90)
+  cineai_720_15s:   73,   // 720p 15s → $2.42 real → 73 Jades ($7.30)
 
   // Plantillas épicas — 480p 10s con referencia de rostro
   template_480:     30,   // ~$0.24 real + overhead → 30 Jades ($3.00)
