@@ -26,13 +26,12 @@ const PRESETS = {
   ],
 };
 
-// ── PRECIOS ACTUALIZADOS — basados en costo real EvoLink con margen 5x ──
-// EvoLink Seedance 2.0 Fast: 480p ~$0.024/s, 720p ~$0.052/s
-// 1 Jade = $0.10 USD
+// ── PRECIOS — costo real EvoLink Seedance 2.0 Fast × 3 (incluye Vercel, Supabase, Pagadito)
+// EvoLink: 480p=$0.074/s · 720p=$0.161/s · 1 Jade=$0.10 USD
 const DURATIONS = [
-  { value: 5,  label: "5s",  jades480: 2,  jades720: 5  },
-  { value: 10, label: "10s", jades480: 3,  jades720: 9  },
-  { value: 15, label: "15s", jades480: 4,  jades720: 13 },
+  { value: 5,  label: "5s",  jades480: 11, jades720: 25 },
+  { value: 10, label: "10s", jades480: 22, jades720: 49 },
+  { value: 15, label: "15s", jades480: 33, jades720: 73 },
 ];
 
 const QUALITIES = [
@@ -126,7 +125,7 @@ const HOW_IT_WORKS = [
   { icon: "🎵", title: "Audio para Lip Sync", desc: "Sube un audio MP3 o WAV para que el personaje haga lip sync de esa canción específica." },
   { icon: "▶", title: "Continuar escena", desc: "Cuando termina un clip, el botón 'Continuar escena' extrae el último frame Y usa el clip completo como referencia de atmósfera." },
   { icon: "🚫", title: "Celebridades bloqueadas", desc: "No puedes generar videos con Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc." },
-  { icon: "💎", title: "Costo en Jades", desc: "480p: 5s=2J · 10s=3J · 15s=4J · 720p: 5s=5J · 10s=9J · 15s=13J. Precios basados en costo real de EvoLink." },
+  { icon: "💎", title: "Costo en Jades", desc: "480p: 5s=11J · 10s=22J · 15s=33J · 720p: 5s=25J · 10s=49J · 15s=73J." },
 ];
 
 export default function CineAIPanel() {
@@ -852,8 +851,8 @@ export default function CineAIPanel() {
       {/* Precio info banner */}
       <div style={{ background: "rgba(200,160,80,0.03)", borderBottom: "1px solid #111", padding: "8px 26px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 10, color: "#555", letterSpacing: 2, textTransform: "uppercase" }}>💎 Precios</span>
-        <span style={{ fontSize: 11, color: "#444" }}>480p: 5s=<strong style={{color:"#c8a050"}}>2J</strong> · 10s=<strong style={{color:"#c8a050"}}>3J</strong> · 15s=<strong style={{color:"#c8a050"}}>4J</strong></span>
-        <span style={{ fontSize: 11, color: "#444" }}>720p: 5s=<strong style={{color:"#c8a050"}}>5J</strong> · 10s=<strong style={{color:"#c8a050"}}>9J</strong> · 15s=<strong style={{color:"#c8a050"}}>13J</strong></span>
+        <span style={{ fontSize: 11, color: "#444" }}>480p: 5s=<strong style={{color:"#c8a050"}}>11J</strong> · 10s=<strong style={{color:"#c8a050"}}>22J</strong> · 15s=<strong style={{color:"#c8a050"}}>33J</strong></span>
+        <span style={{ fontSize: 11, color: "#444" }}>720p: 5s=<strong style={{color:"#c8a050"}}>25J</strong> · 10s=<strong style={{color:"#c8a050"}}>49J</strong> · 15s=<strong style={{color:"#c8a050"}}>73J</strong></span>
       </div>
 
       <div className="mode-selector">
