@@ -5,12 +5,12 @@ import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 const EVOLINK_URL = "https://api.evolink.ai/v1/videos/generations";
 const VALID_RATIOS = ["16:9","9:16","1:1","4:3","3:4","21:9","adaptive"];
 
-// Precios actualizados — margen 5x sobre costo real EvoLink
-// EvoLink Seedance 2.0 Fast: 480p ~$0.024/s, 720p ~$0.052/s
-// 1 Jade = $0.10 USD
+// Precios — costo real EvoLink Seedance 2.0 Fast × 3
+// EvoLink: 480p=$0.074/s · 720p=$0.161/s · 1 Jade=$0.10 USD
+// Incluye margen para Vercel, Supabase y Pagadito
 const JADE_COSTS = {
-  "480p": { 5: 2, 10: 3, 15: 4  },
-  "720p": { 5: 5, 10: 9, 15: 13 },
+  "480p": { 5: 11, 10: 22, 15: 33 },
+  "720p": { 5: 25, 10: 49, 15: 73 },
 };
 
 const BLOCKED_NAMES = [
