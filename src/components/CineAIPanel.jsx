@@ -26,10 +26,13 @@ const PRESETS = {
   ],
 };
 
+// ── PRECIOS ACTUALIZADOS — basados en costo real EvoLink con margen 5x ──
+// EvoLink Seedance 2.0 Fast: 480p ~$0.024/s, 720p ~$0.052/s
+// 1 Jade = $0.10 USD
 const DURATIONS = [
-  { value: 5,  label: "5s",  jades480: 22,  jades720: 40  },
-  { value: 10, label: "10s", jades480: 42,  jades720: 75  },
-  { value: 15, label: "15s", jades480: 63,  jades720: 110 },
+  { value: 5,  label: "5s",  jades480: 2,  jades720: 5  },
+  { value: 10, label: "10s", jades480: 3,  jades720: 9  },
+  { value: 15, label: "15s", jades480: 4,  jades720: 13 },
 ];
 
 const QUALITIES = [
@@ -123,7 +126,7 @@ const HOW_IT_WORKS = [
   { icon: "🎵", title: "Audio para Lip Sync", desc: "Sube un audio MP3 o WAV para que el personaje haga lip sync de esa canción específica." },
   { icon: "▶", title: "Continuar escena", desc: "Cuando termina un clip, el botón 'Continuar escena' extrae el último frame Y usa el clip completo como referencia de atmósfera." },
   { icon: "🚫", title: "Celebridades bloqueadas", desc: "No puedes generar videos con Tom Cruise, Bad Bunny, Messi, Spider-Man, Batman, etc." },
-  { icon: "💎", title: "Costo en Jades", desc: "5 segundos = 40 Jades · 10 segundos = 75 Jades · 15 segundos = 110 Jades." },
+  { icon: "💎", title: "Costo en Jades", desc: "480p: 5s=2J · 10s=3J · 15s=4J · 720p: 5s=5J · 10s=9J · 15s=13J. Precios basados en costo real de EvoLink." },
 ];
 
 export default function CineAIPanel() {
@@ -188,7 +191,7 @@ export default function CineAIPanel() {
   const currentPresets = PRESETS[activeMode];
   const preset   = currentPresets.find((p) => p.id === selectedPreset) || currentPresets[0];
   const durObj   = DURATIONS.find((d) => d.value === duration);
-  const jadeCost = quality === "480p" ? (durObj?.jades480 || 42) : (durObj?.jades720 || 75);
+  const jadeCost = quality === "480p" ? (durObj?.jades480 || 3) : (durObj?.jades720 || 9);
 
   const getFinalPrompt = () => {
     if (selectedPreset === "custom") return customPrompt;
@@ -241,34 +244,28 @@ export default function CineAIPanel() {
     }
   };
 
-  // ── POLLING — FIX: timeout 6 min + detección "Service busy" ──
   const startPolling = useCallback((taskId) => {
     clearInterval(pollRef.current);
     let attempts = 0;
-    const MAX_ATTEMPTS = 150; // 150 × 4s = 10 minutos
+    const MAX_ATTEMPTS = 150;
 
     pollRef.current = setInterval(async () => {
       attempts++;
       if (attempts > MAX_ATTEMPTS) {
         clearInterval(pollRef.current);
-        setError("⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo. Si no, tus Jades serán reembolsados.");
+        setError("⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo.");
         setGenerating(false);
         return;
       }
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        // POST igual que Templates/poll-video.js — que sí funciona
         const res = await fetch("/api/cineai/poll-status", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ taskId }),
         });
         const data = await res.json();
-        console.log("[CineAI] poll:", data.status, data.videoUrl || "");
         setJobStatus(data.status);
         if (data.status === "completed" && data.videoUrl) {
           setVideoUrl(data.videoUrl);
@@ -852,6 +849,13 @@ export default function CineAIPanel() {
         </button>
       </div>
 
+      {/* Precio info banner */}
+      <div style={{ background: "rgba(200,160,80,0.03)", borderBottom: "1px solid #111", padding: "8px 26px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: "#555", letterSpacing: 2, textTransform: "uppercase" }}>💎 Precios</span>
+        <span style={{ fontSize: 11, color: "#444" }}>480p: 5s=<strong style={{color:"#c8a050"}}>2J</strong> · 10s=<strong style={{color:"#c8a050"}}>3J</strong> · 15s=<strong style={{color:"#c8a050"}}>4J</strong></span>
+        <span style={{ fontSize: 11, color: "#444" }}>720p: 5s=<strong style={{color:"#c8a050"}}>5J</strong> · 10s=<strong style={{color:"#c8a050"}}>9J</strong> · 15s=<strong style={{color:"#c8a050"}}>13J</strong></span>
+      </div>
+
       <div className="mode-selector">
         {MODES.map((m) => (
           <button key={m.id} className={`mode-btn ${activeMode === m.id ? "active" : ""}`}
@@ -865,7 +869,6 @@ export default function CineAIPanel() {
 
       <div className="cp-grid">
 
-        {/* Resultado */}
         {(generating || videoUrl || (error && currentTaskId)) && (
           <div className="result-cell">
             {generating && !videoUrl && (
@@ -889,8 +892,7 @@ export default function CineAIPanel() {
                       ✅ Frame extraído — preparando continuación perfecta...
                     </div>
                   )}
-                  <button className="ra-btn green" onClick={handleContinueScene}
-                    disabled={extractingFrame || frameExtracted}>
+                  <button className="ra-btn green" onClick={handleContinueScene} disabled={extractingFrame || frameExtracted}>
                     {extractingFrame ? "⏳ Extrayendo frame..." : frameExtracted ? "✅ Listo" : "▶ Continuar escena →"}
                   </button>
                   <button className="ra-btn" onClick={handleReset}>✦ Nueva escena</button>
@@ -907,7 +909,6 @@ export default function CineAIPanel() {
           </div>
         )}
 
-        {/* Presets */}
         <div className="cp-cell">
           <p className="sec-label">{activeMode === "tiktok" ? "Tipo de trend" : "Tipo de escena"}</p>
           <div className="preset-grid">
@@ -921,7 +922,6 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* Fotos + Audio */}
         <div className="cp-cell">
           <p className="sec-label">Imágenes de referencia — hasta 6 ({refImages.length}/6)</p>
           {isContinuation && lastFrameUrl ? (
@@ -1048,7 +1048,6 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* Video de referencia */}
         {!isContinuation && (
           <div className="cp-cell cp-cell-full">
             <p className="sec-label">Video de referencia — MP4 o URL (opcional)</p>
@@ -1102,7 +1101,6 @@ export default function CineAIPanel() {
           </div>
         )}
 
-        {/* Describe la escena */}
         <div className="cp-cell cp-cell-full">
           <p className="sec-label">Describe la escena</p>
           {selectedPreset !== "custom" ? (
@@ -1121,7 +1119,6 @@ export default function CineAIPanel() {
           {blockedWarning && !liveBlocked && <div className="blocked-banner"><span>⚠️</span><span>{blockedWarning}</span></div>}
         </div>
 
-        {/* Duración */}
         <div className="cp-cell">
           <p className="sec-label">Duración</p>
           <div className="toggle-row">
@@ -1129,7 +1126,7 @@ export default function CineAIPanel() {
               <button key={d.value} className={`toggle-btn ${duration === d.value ? "active" : ""}`}
                 onClick={() => setDuration(d.value)} disabled={generating}>
                 <span className="tm">{d.label}</span>
-                <span className="ts">{quality === "480p" ? d.jades480 : d.jades720} Jades</span>
+                <span className="ts">{quality === "480p" ? d.jades480 : d.jades720}J · {quality}</span>
               </button>
             ))}
           </div>
@@ -1145,7 +1142,6 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* Formato */}
         <div className="cp-cell">
           <p className="sec-label">Formato de video</p>
           <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
@@ -1159,10 +1155,14 @@ export default function CineAIPanel() {
           </div>
         </div>
 
-        {/* CTA */}
         <div className="cta-cell">
           <div className="jade-row">
-            <span className="jade-left">Costo de esta escena</span>
+            <div>
+              <span className="jade-left">Costo de esta escena</span>
+              <div style={{ fontSize: 10, color: "#333", marginTop: 3, letterSpacing: 1 }}>
+                480p: {durObj?.jades480}J · 720p: {durObj?.jades720}J
+              </div>
+            </div>
             <div className="jade-right">
               <span className="jade-num">{jadeCost}</span>
               <span className="jade-unit">Jades</span>
