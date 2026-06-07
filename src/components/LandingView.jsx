@@ -185,10 +185,10 @@ export default function LandingView({
     { key: "cineai",     icon: "🎬", label: "CineAI",                                         color: "#ff5a00", badge: "🔥 NUEVO", desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
     { key: "photoshoot",    icon: "📸", label: "Photoshoot",                                  color: "#f59e0b", badge: "📸",        desc: isEs ? "Fotos de producto profesionales en segundos" : "Professional product photos in seconds", vid: "/gallery/comercial-product.mp4" },
     { key: "avatars",       icon: "👤", label: isEs ? "Avatares" : "Avatars",                color: "#a855f7", badge: "👤",        desc: isEs ? "Tu modelo virtual con tu rostro" : "Your virtual model with your face", vid: "/gallery/avatar-demo.mp4" },
-    { key: "comercial",     icon: "🎙️", label: "Comercial IA",                              color: "#10b981", badge: "🎙️",       desc: isEs ? "Comerciales profesionales con voz IA" : "Professional commercials with AI voice", vid: "/gallery/comercial-chef.mp4" },
-    { key: "montaje",       icon: "✨", label: "Montaje IA",                                  color: "#f43f5e", badge: "✨",        desc: isEs ? "Personas y productos en cualquier escenario" : "People and products in any scenario", vid: "/gallery/montaje-demo.mp4" },
+    { key: "comercial",     icon: "🎙️", label: "Comercial IA",                              color: "#10b981", badge: "🚧 SOON",    desc: isEs ? "Comerciales profesionales con voz IA — Próximamente" : "Professional AI commercials — Coming soon", vid: "/gallery/comercial-chef.mp4", comingSoon: true },
+    { key: "montaje",       icon: "✨", label: "Montaje IA",                                  color: "#f43f5e", badge: "🚧 SOON",    desc: isEs ? "Personas y productos en cualquier escenario — Próximamente" : "People and products in any scenario — Coming soon", vid: "/gallery/montaje-demo.mp4", comingSoon: true },
     { key: "generator",     icon: "🖼️", label: isEs ? "Imagen IA" : "AI Image",             color: "#06b6d4", badge: "🖼️",       desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX", vid: null },
-    { key: "img2video",     icon: "🎥", label: "Imagen → Video",                              color: "#8b5cf6", badge: "🎥",        desc: isEs ? "Convierte tus fotos en videos" : "Convert your photos to videos", vid: null },
+    { key: "img2video",     icon: "🎥", label: "Imagen → Video",                              color: "#8b5cf6", badge: "🚧 SOON",    desc: isEs ? "Convierte tus fotos en videos — Próximamente" : "Convert your photos to videos — Coming soon", vid: null, comingSoon: true },
     { key: "library",       icon: "📂", label: isEs ? "Biblioteca" : "Library",              color: "#64748b", badge: "📂",        desc: isEs ? "Tus creaciones guardadas" : "Your saved creations", vid: null },
   ];
 
@@ -390,11 +390,11 @@ export default function LandingView({
                   <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: V.muted, marginBottom: 8 }}>{isEs ? "Mis módulos" : "My modules"}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
                     {MODS.map(m => (
-                      <button key={m.key} onClick={() => go(m.key)}
-                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: m.key === "templates" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "templates" ? 700 : 400 }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; }}
+                      <button key={m.key} onClick={() => !m.comingSoon && go(m.key)}
+                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: m.comingSoon ? "default" : "pointer", color: m.key === "templates" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "templates" ? 700 : 400, opacity: m.comingSoon ? 0.5 : 1 }}
+                        onMouseEnter={e => { if (!m.comingSoon) { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; } }}
                         onMouseLeave={e => { e.currentTarget.style.background = m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"; e.currentTarget.style.color = m.key === "templates" ? V.fire : "rgba(240,236,228,.6)"; }}>
-                        <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}
+                        <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}{m.comingSoon ? " 🚧" : ""}
                       </button>
                     ))}
                   </div>
@@ -533,8 +533,9 @@ export default function LandingView({
         <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(36px,5.5vw,70px)", lineHeight: 0.95, letterSpacing: 2, color: "#fff", marginBottom: 40 }}>{isEs ? "TODO LO QUE NECESITAS" : "EVERYTHING YOU NEED"}</h2>
         <div className="lo-mod-grid-css" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
           {MODS.map(m => (
-            <div key={m.key} onClick={() => user ? go(m.key) : onStartDemo()} style={{ border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.35)" : V.border2}`, borderRadius: 18, background: m.key === "templates" ? "rgba(255,90,0,.05)" : V.bg2, overflow: "hidden", cursor: "pointer", transition: "all .3s", ...(m.key === "templates" ? { boxShadow: "0 0 40px rgba(255,90,0,.1)" } : {}) }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = m.color; e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 16px 50px rgba(0,0,0,.4)"; }}
+            <div key={m.key} onClick={() => !m.comingSoon && (user ? go(m.key) : onStartDemo())}
+              style={{ border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.35)" : V.border2}`, borderRadius: 18, background: m.key === "templates" ? "rgba(255,90,0,.05)" : V.bg2, overflow: "hidden", cursor: m.comingSoon ? "default" : "pointer", transition: "all .3s", opacity: m.comingSoon ? 0.6 : 1, ...(m.key === "templates" ? { boxShadow: "0 0 40px rgba(255,90,0,.1)" } : {}) }}
+              onMouseEnter={e => { if (!m.comingSoon) { e.currentTarget.style.borderColor = m.color; e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 16px 50px rgba(0,0,0,.4)"; } }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = m.key === "templates" ? "rgba(255,90,0,.35)" : V.border2; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = m.key === "templates" ? "0 0 40px rgba(255,90,0,.1)" : "none"; }}>
               {m.vid ? (
                 <div style={{ height: 160, overflow: "hidden", position: "relative" }}>
