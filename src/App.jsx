@@ -251,8 +251,6 @@ export default function App() {
       case "img2video":   return <Img2VideoPanel userStatus={us} spendJades={spendJades} />;
       case "avatars":     return <AvatarStudioPanel userStatus={us} />;
       case "library":     return <LibraryView />;
-      case "montaje":
-      case "comercial":
       case "img2video":
         return (
           <div style={{ fontFamily:"'DM Sans',sans-serif", color:"#fff", padding:"60px 24px", textAlign:"center" }}>
@@ -267,6 +265,8 @@ export default function App() {
             </div>
           </div>
         );
+      case "montaje":   return <MontajeIAPanel userStatus={us} />;
+      case "comercial": return <ComercialPanel userStatus={us} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel />;
       default:            return null;
