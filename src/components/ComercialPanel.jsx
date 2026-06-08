@@ -1,36 +1,21 @@
 // src/components/ComercialPanel.jsx
-// ─────────────────────────────────────────────────────────────
-// Panel principal de Comercial IA.
-// Se conecta DIRECTAMENTE a /api/comercial-generate para todas
-// las plantillas. No usa plantillas-generate ni plantillas-status.
-//
-// Plantillas:
-//   transicion_moda   → Gemini genera foto por prenda → Seedance anima
-//   producto_estelar  → Gemini genera escena épica → BytePlus anima
-//   explosion_sabor   → Gemini genera explosión → BytePlus anima
-//   chef_ia           → Gemini genera chef → PiAPI o BytePlus
-//   comercial_completo → Storyboard + N escenas
-//
-// Lógica de rostro humano:
-//   hasHumanFace=true  → backend usa PiAPI (preserva identidad)
-//   hasHumanFace=false → backend usa BytePlus (más rápido, sin rostros)
-// ─────────────────────────────────────────────────────────────
+// Precios dinámicos por plantilla (solo EvoLink):
+//   producto_estelar  → 15 Jades (5s)
+//   explosion_sabor   → 15 Jades (5s)
+//   chef_ia           → 45 Jades (15s)
+//   transicion_moda   → EN CONSTRUCCIÓN
+//   comercial_completo→ EN CONSTRUCCIÓN
 import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const COMERCIAL_COST = 120;
+// Costo por plantilla
+const PLANTILLA_COST = {
+  producto_estelar: 15,
+  explosion_sabor:  15,
+  chef_ia:          45,
+};
 
 const PLANTILLAS = [
-  {
-    id:          "transicion_moda",
-    nombre:      "Transición de Moda",
-    emoji:       "👗",
-    descripcion: "Sube tus prendas y la IA genera un video fashion con transiciones. Con modelo real o IA, fondo real o inventado.",
-    colores:     "from-pink-500/20 via-rose-500/10 to-purple-500/20",
-    borde:       "border-pink-500/30",
-    acento:      "text-pink-300",
-    tieneRostro: true,
-  },
   {
     id:          "producto_estelar",
     nombre:      "Producto Estelar",
@@ -40,6 +25,8 @@ const PLANTILLAS = [
     borde:       "border-cyan-500/30",
     acento:      "text-cyan-300",
     tieneRostro: false,
+    costo:       15,
+    duracion:    "5s",
   },
   {
     id:          "explosion_sabor",
@@ -50,26 +37,42 @@ const PLANTILLAS = [
     borde:       "border-orange-500/30",
     acento:      "text-orange-300",
     tieneRostro: false,
+    costo:       15,
+    duracion:    "5s",
   },
   {
     id:          "chef_ia",
     nombre:      "Chef IA",
     emoji:       "👨‍🍳",
-    descripcion: "Video cinematográfico de un chef preparando tu plato. Usa tu foto o elige un avatar chef.",
+    descripcion: "Video cinematográfico de 15s de un chef preparando tu plato. Usa tu foto o elige un avatar chef.",
     colores:     "from-slate-500/20 via-zinc-500/10 to-neutral-500/20",
     borde:       "border-slate-500/30",
     acento:      "text-slate-300",
     tieneRostro: true,
+    costo:       45,
+    duracion:    "15s",
+  },
+  {
+    id:          "transicion_moda",
+    nombre:      "Transición de Moda",
+    emoji:       "👗",
+    descripcion: "Sube tus prendas y la IA genera un video fashion con transiciones.",
+    colores:     "from-pink-500/20 via-rose-500/10 to-purple-500/20",
+    borde:       "border-pink-500/30",
+    acento:      "text-pink-300",
+    tieneRostro: true,
+    enConstruccion: true,
   },
   {
     id:          "comercial_completo",
     nombre:      "Comercial Completo",
     emoji:       "🎬",
-    descripcion: "Storyboard de 4-7 escenas con narración en off. Para cualquier producto, servicio o marca.",
+    descripcion: "Storyboard de varias escenas con narración en off.",
     colores:     "from-violet-500/20 via-purple-500/10 to-fuchsia-500/20",
     borde:       "border-violet-500/30",
     acento:      "text-violet-300",
     tieneRostro: true,
+    enConstruccion: true,
   },
 ];
 
@@ -99,7 +102,6 @@ const ACCENTS = [
   { value: "ingles",       label: "🇺🇸 English (US)" },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────
 async function getAuthHeaders() {
   try {
     const { data } = await supabase.auth.getSession();
@@ -139,15 +141,12 @@ async function prepareImage(file) {
   return { base64: b64, mimeType: "image/jpeg" };
 }
 
-// ── Subcomponentes ────────────────────────────────────────────
 function HumanFaceCheckbox({ checked, onChange }) {
   return (
     <div
       onClick={() => onChange(!checked)}
       className={`flex items-start gap-3 rounded-2xl border p-3 cursor-pointer transition-all ${
-        checked
-          ? "border-amber-400/40 bg-amber-500/10"
-          : "border-white/10 bg-white/5 hover:border-white/20"
+        checked ? "border-amber-400/40 bg-amber-500/10" : "border-white/10 bg-white/5 hover:border-white/20"
       }`}
     >
       <div className={`mt-0.5 flex-shrink-0 h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all ${
@@ -159,7 +158,6 @@ function HumanFaceCheckbox({ checked, onChange }) {
         <p className="text-xs font-semibold text-white">👤 Contiene rostro humano real</p>
         <p className="text-[10px] text-neutral-400 mt-0.5">
           Activa esto si estás subiendo una foto con una persona real.
-          La IA usará un motor especializado que preserva la identidad facial correctamente.
         </p>
       </div>
     </div>
@@ -210,21 +208,9 @@ function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, on
 
 function SceneResult({ scene, idx }) {
   if (!scene.ok) {
-    const isFaceError = scene.error === "FACE_DETECTED";
     return (
-      <div className={`rounded-xl border p-3 ${
-        isFaceError ? "border-amber-500/30 bg-amber-500/10" : "border-red-500/20 bg-red-500/5"
-      }`}>
-        {isFaceError ? (
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-amber-300">⚠️ Rostro detectado</p>
-            <p className="text-[10px] text-amber-200/70">
-              Esta escena contiene un rostro real. Activa el checkbox "Contiene rostro humano real" y genera de nuevo.
-            </p>
-          </div>
-        ) : (
-          <p className="text-xs text-red-400">Escena {scene.scene_number || idx + 1} — Error: {scene.error}</p>
-        )}
+      <div className="rounded-xl border p-3 border-red-500/20 bg-red-500/5">
+        <p className="text-xs text-red-400">Escena {scene.scene_number || idx + 1} — Error: {scene.error}</p>
       </div>
     );
   }
@@ -232,9 +218,6 @@ function SceneResult({ scene, idx }) {
     <div className="rounded-xl border border-white/10 bg-black/30 overflow-hidden">
       <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
         <span className="text-[10px] text-neutral-500">Escena {scene.scene_number}</span>
-        {scene.narrative_role && (
-          <span className="text-[9px] text-neutral-600 uppercase">{scene.narrative_role}</span>
-        )}
       </div>
       {scene.video_url && (
         <video src={scene.video_url} controls className="w-full aspect-[9/16] max-h-[320px] object-contain bg-black" />
@@ -257,7 +240,6 @@ function SceneResult({ scene, idx }) {
   );
 }
 
-// ── Panel principal ───────────────────────────────────────────
 export default function ComercialPanel({ userStatus }) {
   const [plantilla,    setPlantilla]    = useState(null);
   const [loading,      setLoading]      = useState(false);
@@ -266,33 +248,23 @@ export default function ComercialPanel({ userStatus }) {
   const [resultado,    setResultado]    = useState(null);
   const [hasHumanFace, setHasHumanFace] = useState(false);
 
-  // Imágenes y previews
-  const [imgModelo,    setImgModelo]    = useState([]);
-  const [imgPrendas,   setImgPrendas]   = useState([]);
-  const [imgFondo,     setImgFondo]     = useState([]);
   const [imgProducto,  setImgProducto]  = useState([]);
   const [imgPlato,     setImgPlato]     = useState([]);
   const [imgChef,      setImgChef]      = useState([]);
-  const [prevModelo,   setPrevModelo]   = useState([]);
-  const [prevPrendas,  setPrevPrendas]  = useState([]);
-  const [prevFondo,    setPrevFondo]    = useState([]);
   const [prevProducto, setPrevProducto] = useState([]);
   const [prevPlato,    setPrevPlato]    = useState([]);
   const [prevChef,     setPrevChef]     = useState([]);
 
-  // Textos y configuración
-  const [descripcion,       setDescripcion]       = useState("");
-  const [narracion,         setNarracion]         = useState("");
-  const [nombreNegocio,     setNombreNegocio]     = useState("");
-  const [efecto,            setEfecto]            = useState("golden_particles");
-  const [avatarChef,        setAvatarChef]        = useState("chef_hombre_latino");
-  const [duracionComercial, setDuracionComercial] = useState(30);
-  const [accent,            setAccent]            = useState("neutro");
-  const [gender,            setGender]            = useState("mujer");
+  const [narracion,     setNarracion]     = useState("");
+  const [nombreNegocio, setNombreNegocio] = useState("");
+  const [efecto,        setEfecto]        = useState("golden_particles");
+  const [avatarChef,    setAvatarChef]    = useState("chef_hombre_latino");
+  const [accent,        setAccent]        = useState("neutro");
+  const [gender,        setGender]        = useState("mujer");
 
   const currentJades = userStatus?.jades ?? 0;
+  const costoActual  = plantilla ? (PLANTILLA_COST[plantilla.id] || 0) : 0;
 
-  // ── Helpers de archivos ───────────────────────────────────
   function handleFiles(setter, prevSetter, files, max = 1) {
     const nuevos = files.slice(0, max);
     setter(nuevos);
@@ -305,20 +277,23 @@ export default function ComercialPanel({ userStatus }) {
   }
 
   function seleccionar(p) {
+    if (p.enConstruccion) {
+      setError("");
+      setPlantilla(p);
+      setResultado(null);
+      return;
+    }
     setPlantilla(p);
     setError(""); setResultado(null); setHasHumanFace(false);
-    setImgModelo([]); setImgPrendas([]); setImgFondo([]);
     setImgProducto([]); setImgPlato([]); setImgChef([]);
-    setPrevModelo([]); setPrevPrendas([]); setPrevFondo([]);
     setPrevProducto([]); setPrevPlato([]); setPrevChef([]);
-    setDescripcion(""); setNarracion(""); setNombreNegocio("");
+    setNarracion(""); setNombreNegocio("");
   }
 
-  // ── Generar ───────────────────────────────────────────────
   async function handleGenerar() {
-    if (!plantilla) return;
-    if (currentJades < COMERCIAL_COST) {
-      setError(`Necesitas ${COMERCIAL_COST} Jades. Tienes ${currentJades}.`);
+    if (!plantilla || plantilla.enConstruccion) return;
+    if (currentJades < costoActual) {
+      setError(`Necesitas ${costoActual} Jades. Tienes ${currentJades}.`);
       return;
     }
     setError(""); setLoading(true); setResultado(null);
@@ -326,38 +301,8 @@ export default function ComercialPanel({ userStatus }) {
     try {
       const auth = await getAuthHeaders();
 
-      // ── TRANSICIÓN DE MODA ──────────────────────────────
-      if (plantilla.id === "transicion_moda") {
-        if (!imgPrendas.length) {
-          setError("Sube al menos una foto de prenda."); setLoading(false); return;
-        }
-        setStatusText("Preparando imágenes...");
-        const prendasPrep = await Promise.all(imgPrendas.map(prepareImage));
-        const modeloPrep  = imgModelo.length ? [await prepareImage(imgModelo[0])] : [];
-        const fondoPrep   = imgFondo.length  ? [await prepareImage(imgFondo[0])]  : [];
-        setStatusText(`Generando ${prendasPrep.length} video(s) de moda...`);
-        const r = await fetch("/api/comercial-generate", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json", ...auth },
-          body: JSON.stringify({
-            plantilla_id: "transicion_moda",
-            imagenes:     { prendas: prendasPrep, modelo: modeloPrep, fondo: fondoPrep },
-            textos:       { narracion },
-            hasHumanFace: hasHumanFace && imgModelo.length > 0,
-            accent, gender,
-          }),
-        });
-        const j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.error || j.detail || "Error generando");
-        setResultado(j);
-        return;
-      }
-
-      // ── PRODUCTO ESTELAR ────────────────────────────────
       if (plantilla.id === "producto_estelar") {
-        if (!imgProducto.length) {
-          setError("Sube la foto de tu producto."); setLoading(false); return;
-        }
+        if (!imgProducto.length) { setError("Sube la foto de tu producto."); setLoading(false); return; }
         setStatusText("Generando video del producto...");
         const productoPrep = await prepareImage(imgProducto[0]);
         const r = await fetch("/api/comercial-generate", {
@@ -378,14 +323,9 @@ export default function ComercialPanel({ userStatus }) {
         return;
       }
 
-      // ── EXPLOSIÓN DE SABOR ──────────────────────────────
       if (plantilla.id === "explosion_sabor") {
-        if (!imgPlato.length) {
-          setError("Sube la foto de tu platillo."); setLoading(false); return;
-        }
-        if (!nombreNegocio.trim()) {
-          setError("Escribe el nombre de tu negocio."); setLoading(false); return;
-        }
+        if (!imgPlato.length) { setError("Sube la foto de tu platillo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
         setStatusText("Generando explosión de sabor...");
         const platoPrep = await prepareImage(imgPlato[0]);
         const r = await fetch("/api/comercial-generate", {
@@ -405,15 +345,10 @@ export default function ComercialPanel({ userStatus }) {
         return;
       }
 
-      // ── CHEF IA ─────────────────────────────────────────
       if (plantilla.id === "chef_ia") {
-        if (!imgPlato.length) {
-          setError("Sube la foto del platillo."); setLoading(false); return;
-        }
-        if (!nombreNegocio.trim()) {
-          setError("Escribe el nombre de tu negocio."); setLoading(false); return;
-        }
-        setStatusText("Generando video del chef...");
+        if (!imgPlato.length) { setError("Sube la foto del platillo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
+        setStatusText("Generando video del chef (15s)...");
         const platoPrep = await prepareImage(imgPlato[0]);
         const chefPrep  = imgChef.length ? [await prepareImage(imgChef[0])] : [];
         const r = await fetch("/api/comercial-generate", {
@@ -434,45 +369,6 @@ export default function ComercialPanel({ userStatus }) {
         return;
       }
 
-      // ── COMERCIAL COMPLETO ──────────────────────────────
-      if (plantilla.id === "comercial_completo") {
-        if (!descripcion.trim()) {
-          setError("Describe tu producto o servicio."); setLoading(false); return;
-        }
-        const refImgs = [];
-        for (const f of [...imgProducto, ...imgPlato].slice(0, 3))
-          refImgs.push(await prepareImage(f));
-
-        setStatusText("Creando storyboard con Gemini...");
-        const sr = await fetch("/api/comercial-storyboard", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json", ...auth },
-          body: JSON.stringify({
-            description:     descripcion,
-            duration:        duracionComercial,
-            referenceImages: refImgs,
-            accent, gender,
-          }),
-        });
-        const sj = await sr.json();
-        if (!sr.ok || !sj.ok) throw new Error(sj.error || "Error en storyboard");
-
-        setStatusText(`Generando ${sj.sceneCount} escenas...`);
-        const gr = await fetch("/api/comercial-generate", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json", ...auth },
-          body: JSON.stringify({
-            storyboard:      sj.storyboard,
-            referenceImages: refImgs,
-            hasHumanFace,
-            accent, gender,
-          }),
-        });
-        const gj = await gr.json();
-        if (!gr.ok || !gj.ok) throw new Error(gj.error || "Error generando escenas");
-        setResultado(gj);
-      }
-
     } catch (e) {
       setError(e.message || "Error generando. Intenta de nuevo.");
     } finally {
@@ -481,11 +377,9 @@ export default function ComercialPanel({ userStatus }) {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
 
-      {/* Encabezado */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold text-white">Comercial IA</h2>
@@ -495,18 +389,19 @@ export default function ComercialPanel({ userStatus }) {
         </div>
         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-2 text-right">
           <div className="text-xs text-neutral-400">Costo</div>
-          <div className="text-lg font-bold text-cyan-300">{COMERCIAL_COST} Jades</div>
+          <div className="text-lg font-bold text-cyan-300">{costoActual > 0 ? `${costoActual} Jades` : "—"}</div>
           <div className="text-[10px] text-neutral-500">Tus Jades: {currentJades}</div>
         </div>
       </div>
 
-      {/* Grid de plantillas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {PLANTILLAS.map(p => (
           <button
             key={p.id}
             onClick={() => seleccionar(p)}
+            disabled={p.enConstruccion}
             className={`relative text-left rounded-2xl border p-4 transition-all bg-gradient-to-br ${p.colores} ${
+              p.enConstruccion ? "opacity-60 cursor-not-allowed" :
               plantilla?.id === p.id ? `${p.borde} ring-1 ring-white/20` : "border-white/10 hover:border-white/20"
             }`}
           >
@@ -515,7 +410,17 @@ export default function ComercialPanel({ userStatus }) {
               {p.nombre}
             </div>
             <div className="text-[10px] text-neutral-400 leading-relaxed">{p.descripcion}</div>
-            {plantilla?.id === p.id && (
+            {!p.enConstruccion && (
+              <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-white/80 bg-black/30 rounded-full px-2 py-0.5">
+                {p.costo} Jades · {p.duracion}
+              </div>
+            )}
+            {p.enConstruccion && (
+              <div className="absolute top-3 right-3 text-[9px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 rounded-full px-2 py-0.5">
+                🚧 EN CONSTRUCCIÓN
+              </div>
+            )}
+            {plantilla?.id === p.id && !p.enConstruccion && (
               <div className={`absolute top-3 right-3 text-[9px] font-bold ${p.acento} bg-black/40 rounded-full px-2 py-0.5`}>
                 ✓ Activa
               </div>
@@ -524,8 +429,17 @@ export default function ComercialPanel({ userStatus }) {
         ))}
       </div>
 
-      {/* Formulario de plantilla seleccionada */}
-      {plantilla && (
+      {plantilla && plantilla.enConstruccion && (
+        <div className="rounded-3xl border border-amber-500/30 bg-amber-500/5 p-8 text-center">
+          <div className="text-5xl mb-3">🚧</div>
+          <h3 className="text-lg font-bold text-amber-300 mb-2">En construcción</h3>
+          <p className="text-sm text-neutral-400 max-w-sm mx-auto">
+            Esta plantilla está temporalmente en mantenimiento mientras mejoramos su calidad. Mientras tanto prueba Producto Estelar, Explosión de Sabor o Chef IA.
+          </p>
+        </div>
+      )}
+
+      {plantilla && !plantilla.enConstruccion && (
         <div className={`rounded-3xl border bg-gradient-to-br ${plantilla.colores} ${plantilla.borde} p-5 space-y-5`}>
           <div className="flex items-center gap-3">
             <span className="text-3xl">{plantilla.emoji}</span>
@@ -535,57 +449,6 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           </div>
 
-          {/* ── TRANSICIÓN DE MODA ── */}
-          {plantilla.id === "transicion_moda" && (
-            <div className="space-y-4">
-              {/* Indicador de caso activo */}
-              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                <p className="text-[10px] font-semibold text-neutral-400 mb-1">Modo activo:</p>
-                <p className={`text-xs font-bold ${plantilla.acento}`}>
-                  {imgModelo.length > 0 && imgFondo.length > 0
-                    ? "✦ CASO 4 — Tu modelo + Tu fondo"
-                    : imgModelo.length > 0
-                    ? "✦ CASO 2 — Tu modelo + Fondo IA"
-                    : imgFondo.length > 0
-                    ? "✦ CASO 3 — Modelo IA + Tu fondo"
-                    : "✦ CASO 1 — La IA inventa modelo y fondo"}
-                </p>
-                <p className="text-[10px] text-neutral-500 mt-1">
-                  La IA genera una foto realista de la modelo vistiendo cada prenda, luego Seedance anima cada foto.
-                </p>
-              </div>
-
-              <UploadZone
-                label="👚 Fotos de prendas (obligatorio, 1-4)"
-                hint="Sube cada prenda por separado. La IA generará un video por prenda."
-                multiple max={4}
-                previews={prevPrendas}
-                onFiles={f => handleFiles(setImgPrendas, setPrevPrendas, f, 4)}
-                onRemove={i => removeFile(setImgPrendas, setPrevPrendas, i, imgPrendas)}
-                disabled={loading}
-              />
-              <UploadZone
-                label="👤 Foto del modelo (opcional)"
-                hint="Si no subes, la IA generará una modelo aspiracional."
-                multiple={false}
-                previews={prevModelo}
-                onFiles={f => handleFiles(setImgModelo, setPrevModelo, f, 1)}
-                onRemove={i => removeFile(setImgModelo, setPrevModelo, i, imgModelo)}
-                disabled={loading}
-              />
-              <UploadZone
-                label="🏖️ Foto del fondo (opcional)"
-                hint="Si no subes, la IA inventará un fondo espectacular por escena."
-                multiple={false}
-                previews={prevFondo}
-                onFiles={f => handleFiles(setImgFondo, setPrevFondo, f, 1)}
-                onRemove={i => removeFile(setImgFondo, setPrevFondo, i, imgFondo)}
-                disabled={loading}
-              />
-            </div>
-          )}
-
-          {/* ── PRODUCTO ESTELAR ── */}
           {plantilla.id === "producto_estelar" && (
             <div className="space-y-4">
               <UploadZone
@@ -618,7 +481,6 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           )}
 
-          {/* ── EXPLOSIÓN DE SABOR ── */}
           {plantilla.id === "explosion_sabor" && (
             <div className="space-y-4">
               <UploadZone
@@ -641,12 +503,11 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           )}
 
-          {/* ── CHEF IA ── */}
           {plantilla.id === "chef_ia" && (
             <div className="space-y-4">
               <UploadZone
                 label="🍽️ Foto del platillo terminado"
-                hint="El plato que el chef va a preparar en el video."
+                hint="El plato que el chef va a preparar en el video de 15 segundos."
                 multiple={false}
                 previews={prevPlato}
                 onFiles={f => handleFiles(setImgPlato, setPrevPlato, f, 1)}
@@ -693,62 +554,18 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           )}
 
-          {/* ── COMERCIAL COMPLETO ── */}
-          {plantilla.id === "comercial_completo" && (
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-300">📝 Describe tu producto / servicio / marca</label>
-                <textarea
-                  value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={3}
-                  placeholder="Ej: Restaurante de mariscos en Guatemala Ciudad, especialidad en ceviches y mariscos frescos..."
-                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none"
-                />
-              </div>
-              <UploadZone
-                label="📸 Fotos de referencia (opcional, máx 3)"
-                hint="Si subes personas reales, activa el checkbox de rostro humano abajo."
-                multiple max={3}
-                previews={prevProducto}
-                onFiles={f => handleFiles(setImgProducto, setPrevProducto, f, 3)}
-                onRemove={i => removeFile(setImgProducto, setPrevProducto, i, imgProducto)}
-                disabled={loading}
-              />
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-neutral-300">⏱️ Duración</label>
-                <div className="flex gap-2">
-                  {[30, 60].map(d => (
-                    <button
-                      key={d} onClick={() => setDuracionComercial(d)}
-                      className={`flex-1 rounded-xl border py-2 text-xs transition-all ${
-                        duracionComercial === d
-                          ? "border-white/40 bg-white/15 text-white"
-                          : "border-white/10 bg-white/5 text-neutral-400 hover:border-white/25"
-                      }`}
-                    >
-                      {d}s — {d === 30 ? "4 escenas" : "7 escenas"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-neutral-300">🎙️ Narración en off (opcional)</label>
+            <p className="text-[10px] text-neutral-500">
+              Texto que quieres que se escuche en el video. Si lo dejas vacío, el video será mudo.
+            </p>
+            <textarea
+              value={narracion} onChange={e => setNarracion(e.target.value)} rows={2}
+              placeholder="Ej: Descubre el sabor que te conquistará. Solo en Burger Bros."
+              className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none"
+            />
+          </div>
 
-          {/* Narración (todas excepto comercial completo que la maneja por escena) */}
-          {plantilla.id !== "comercial_completo" && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-neutral-300">🎙️ Narración en off (opcional)</label>
-              <p className="text-[10px] text-neutral-500">
-                Texto que quieres que se escuche en el video. Si lo dejas vacío, el video será mudo.
-              </p>
-              <textarea
-                value={narracion} onChange={e => setNarracion(e.target.value)} rows={2}
-                placeholder="Ej: Descubre el sabor que te conquistará. Solo en Burger Bros."
-                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none"
-              />
-            </div>
-          )}
-
-          {/* Configuración de voz */}
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
             <p className="text-[11px] font-semibold text-neutral-300">🎙️ Voz de narración</p>
             <div className="grid grid-cols-2 gap-3">
@@ -774,24 +591,21 @@ export default function ComercialPanel({ userStatus }) {
             </div>
           </div>
 
-          {/* Checkbox rostro humano — solo en plantillas que pueden tenerlo */}
           {plantilla.tieneRostro && (
             <HumanFaceCheckbox checked={hasHumanFace} onChange={setHasHumanFace} />
           )}
 
-          {/* Error */}
           {error && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
               <p className="text-xs text-red-300">{error}</p>
             </div>
           )}
 
-          {/* Botón generar */}
           <button
             onClick={handleGenerar}
-            disabled={loading || currentJades < COMERCIAL_COST}
+            disabled={loading || currentJades < costoActual}
             className={`w-full rounded-2xl border py-3.5 text-sm font-semibold transition-all ${plantilla.borde} ${
-              loading || currentJades < COMERCIAL_COST
+              loading || currentJades < costoActual
                 ? "opacity-40 cursor-not-allowed text-neutral-500"
                 : "bg-white/10 hover:bg-white/15 text-white cursor-pointer"
             }`}
@@ -802,13 +616,12 @@ export default function ComercialPanel({ userStatus }) {
                 {statusText || "Generando..."}
               </span>
             ) : (
-              `${plantilla.emoji} Generar — ${COMERCIAL_COST} Jades`
+              `${plantilla.emoji} Generar — ${costoActual} Jades`
             )}
           </button>
         </div>
       )}
 
-      {/* Resultados */}
       {resultado && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -826,7 +639,6 @@ export default function ComercialPanel({ userStatus }) {
         </div>
       )}
 
-      {/* Estado vacío */}
       {!plantilla && (
         <div className="rounded-2xl border border-white/5 bg-black/20 py-10 text-center">
           <p className="text-neutral-600 text-sm">← Selecciona una plantilla para empezar</p>
