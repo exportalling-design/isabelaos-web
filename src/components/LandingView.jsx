@@ -1,6 +1,5 @@
 // src/components/LandingView.jsx — IsabelaOS Studio v7.1
 // PATCHES:
-//   ✅ Popup viral → apunta a free-template (video gratis)
 //   ✅ free-template agregado como primer módulo en MODS
 //   ✅ Globo 🌐 visible en mobile
 //   ✅ Toast de bienvenida 10 Jades
@@ -72,41 +71,6 @@ function ModOverlay({ title, onClose, children }) {
   );
 }
 
-// ── POPUP VIRAL ─────────────────────────────────────────────────────────────
-function ViralPopup({ onClose, onGoFree, isEs }) {
-  useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
-  return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.9)", backdropFilter: "blur(16px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", animation: "moIn .35s ease" }}>
-      <div style={{ width: "100%", maxWidth: 500, background: "#0a0c12", border: "1px solid rgba(255,90,0,0.4)", borderRadius: 24, overflow: "hidden", animation: "moPIn .4s ease", boxShadow: "0 0 100px rgba(255,90,0,0.2), 0 40px 80px rgba(0,0,0,0.8)" }}>
-        <div style={{ position: "relative", aspectRatio: "21/9", overflow: "hidden" }}>
-          <video src="/gallery/divine-light.mp4" autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, #0a0c12 100%)" }} />
-          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 34, height: 34, cursor: "pointer", color: "#fff", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>✕</button>
-          <div style={{ position: "absolute", top: 12, left: 12, background: "#ff5a00", color: "#000", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase" }}>🎁 GRATIS</div>
-        </div>
-        <div style={{ padding: "22px 26px 26px" }}>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 10 }}>
-            {isEs ? "¿Quieres aparecer en este video?" : "Want to appear in this video?"}
-          </div>
-          <p style={{ fontSize: 13, color: "rgba(240,236,228,0.6)", lineHeight: 1.7, marginBottom: 18 }}>
-            {isEs
-              ? "¡Tenemos plantillas gratis disponibles para ti! Sube tu foto y genera tu video cinematográfico gratis en minutos — sin tarjeta. Ve directamente a las plantillas."
-              : "We have free templates available for you! Upload your photo and generate your cinematic AI video for free in minutes — no card needed. Go directly to the templates."}
-          </p>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={onGoFree} style={{ flex: 1, background: "linear-gradient(135deg,#ff5a00,#ffb300)", border: "none", borderRadius: 12, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 14, padding: "14px", cursor: "pointer" }}>
-              🎁 {isEs ? "Generar mi video GRATIS →" : "Generate my FREE video →"}
-            </button>
-            <button onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "14px", cursor: "pointer" }}>
-              {isEs ? "Quizás después" : "Maybe later"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── WELCOME TOAST ────────────────────────────────────────────────────────────
 function WelcomeToast({ isEs, onDismiss, onGoGenerator }) {
   useEffect(() => {
@@ -145,20 +109,8 @@ export default function LandingView({
   const isEs = lang === "es";
   const [scrolled, setScrolled] = useState(false);
   const [demoText, setDemoText] = useState("");
-  const [showViralPopup, setShowViralPopup] = useState(false);
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
   const prevUser = useRef(null);
-
-  useEffect(() => {
-    const shown = sessionStorage.getItem("viralPopupShown");
-    if (!shown) {
-      const t = setTimeout(() => {
-        setShowViralPopup(true);
-        sessionStorage.setItem("viralPopupShown", "1");
-      }, 1500);
-      return () => clearTimeout(t);
-    }
-  }, []);
 
   useEffect(() => {
     if (user && !prevUser.current) {
@@ -249,18 +201,6 @@ export default function LandingView({
   return (
     <div style={{ fontFamily: V.ffB, background: V.bg, color: V.text, overflowX: "hidden", minHeight: "100vh" }}>
       <style>{CSS}</style>
-
-      {showViralPopup && (
-        <ViralPopup
-          isEs={isEs}
-          onClose={() => setShowViralPopup(false)}
-          onGoFree={() => {
-            setShowViralPopup(false);
-            if (user) go("templates");
-            else onOpenAuth();
-          }}
-        />
-      )}
 
       {showWelcomeToast && (
         <WelcomeToast

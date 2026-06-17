@@ -5,7 +5,7 @@
 //   chef_ia           → 45 Jades (15s)
 //   transicion_moda   → EN CONSTRUCCIÓN
 //   comercial_completo→ EN CONSTRUCCIÓN
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 // Costo por plantilla
@@ -262,8 +262,55 @@ export default function ComercialPanel({ userStatus }) {
   const [accent,        setAccent]        = useState("neutro");
   const [gender,        setGender]        = useState("mujer");
 
+  const pollRef = useRef(null);
+
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
   const currentJades = userStatus?.jades ?? 0;
   const costoActual  = plantilla ? (PLANTILLA_COST[plantilla.id] || 0) : 0;
+
+  const startPolling = useCallback((taskId, plantilla_id, audioB64, ref, jadeCost) => {
+    clearInterval(pollRef.current);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 150; // ~10 min @ 4s
+
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      if (attempts > MAX_ATTEMPTS) {
+        clearInterval(pollRef.current);
+        setError("⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo.");
+        setLoading(false);
+        setStatusText("");
+        return;
+      }
+      try {
+        const auth = await getAuthHeaders();
+        const r = await fetch("/api/comercial-poll-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...auth },
+          body: JSON.stringify({ taskId }),
+        });
+        const data = await r.json();
+        if (data.status === "completed" && data.videoUrl) {
+          clearInterval(pollRef.current);
+          setResultado({
+            ok: true, ref, plantilla_id,
+            scenes: [{ scene_number: 1, ok: true, video_url: data.videoUrl, audio_b64: audioB64 || null }],
+            success_count: 1, total_scenes: 1, jade_cost: jadeCost,
+          });
+          setLoading(false);
+          setStatusText("");
+        } else if (data.status === "failed") {
+          clearInterval(pollRef.current);
+          setError(data.error || "La generación falló.");
+          setLoading(false);
+          setStatusText("");
+        }
+      } catch (e) {
+        console.error("[ComercialPanel] poll error:", e.message);
+      }
+    }, 4000);
+  }, []);
 
   function handleFiles(setter, prevSetter, files, max = 1) {
     const nuevos = files.slice(0, max);
@@ -300,6 +347,7 @@ export default function ComercialPanel({ userStatus }) {
 
     try {
       const auth = await getAuthHeaders();
+      let j = null;
 
       if (plantilla.id === "producto_estelar") {
         if (!imgProducto.length) { setError("Sube la foto de tu producto."); setLoading(false); return; }
@@ -317,13 +365,11 @@ export default function ComercialPanel({ userStatus }) {
             accent, gender,
           }),
         });
-        const j = await r.json();
+        j = await r.json();
         if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
-        setResultado(j);
-        return;
       }
 
-      if (plantilla.id === "explosion_sabor") {
+      else if (plantilla.id === "explosion_sabor") {
         if (!imgPlato.length) { setError("Sube la foto de tu platillo."); setLoading(false); return; }
         if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
         setStatusText("Generando explosión de sabor...");
@@ -339,13 +385,11 @@ export default function ComercialPanel({ userStatus }) {
             accent, gender,
           }),
         });
-        const j = await r.json();
+        j = await r.json();
         if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
-        setResultado(j);
-        return;
       }
 
-      if (plantilla.id === "chef_ia") {
+      else if (plantilla.id === "chef_ia") {
         if (!imgPlato.length) { setError("Sube la foto del platillo."); setLoading(false); return; }
         if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
         setStatusText("Generando video del chef (15s)...");
@@ -363,15 +407,17 @@ export default function ComercialPanel({ userStatus }) {
             accent, gender,
           }),
         });
-        const j = await r.json();
+        j = await r.json();
         if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
-        setResultado(j);
-        return;
+      }
+
+      if (j) {
+        setStatusText("Renderizando video... esto puede tardar unos minutos");
+        startPolling(j.taskId, j.plantilla_id, j.audio_b64, j.ref, j.jade_cost);
       }
 
     } catch (e) {
       setError(e.message || "Error generando. Intenta de nuevo.");
-    } finally {
       setLoading(false);
       setStatusText("");
     }

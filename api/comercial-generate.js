@@ -65,8 +65,10 @@ async function generateSceneImage(prompt, referenceImages = []) {
   return { base64: pd.data, mimeType: pd.mimeType || pd.mime_type || "image/jpeg" };
 }
 
-// ── Animación SOLO con EvoLink ──────────────────────────────
-async function imageToVideoEvolink(imageUrl, videoPrompt, aspectRatio, duration) {
+// ── Solo lanza el job a EvoLink — NO espera el resultado ────
+// (el polling vive en api/comercial-poll-status.js; esperar aquí
+//  hacía que Vercel matara la función antes de responder en videos de 15s)
+async function submitVideoToEvolink(imageUrl, videoPrompt, aspectRatio, duration) {
   const r = await fetch(EVOLINK_URL, {
     method: "POST",
     headers: {
@@ -88,37 +90,7 @@ async function imageToVideoEvolink(imageUrl, videoPrompt, aspectRatio, duration)
   if (!r.ok || data.error) throw new Error(data.error?.message || data.message || `EvoLink error ${r.status}`);
   const taskId = data.id;
   if (!taskId) throw new Error("EvoLink no devolvió task id");
-  const deadline = Date.now() + 10 * 60 * 1000;
-  while (Date.now() < deadline) {
-    await new Promise(res => setTimeout(res, 8000));
-    const sr = await fetch(`https://api.evolink.ai/v1/tasks/${taskId}`, {
-      headers: { "Authorization": `Bearer ${process.env.EVOLINK_API_KEY}` },
-    });
-    const sd = await sr.json();
-    console.log("[comercial] EvoLink poll:", { status: sd.status, id: taskId });
-    if (sd.status === "completed" || sd.status === "succeeded") {
-      const videoUrl =
-        (Array.isArray(sd.results) && sd.results[0] && (typeof sd.results[0] === "string" ? sd.results[0] : sd.results[0].url)) ||
-        sd.video_url || sd.output?.video_url || sd.output?.videos?.[0]?.url || sd.output?.url || null;
-      if (!videoUrl) throw new Error("EvoLink completó pero sin video_url");
-      return videoUrl;
-    }
-    if (sd.status === "failed") throw new Error(sd.error?.message || "EvoLink failed");
-  }
-  throw new Error("Timeout EvoLink");
-}
-
-async function saveVideoToLibrary(userId, videoUrl) {
-  try {
-    const res    = await fetch(videoUrl);
-    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-    const buffer = Buffer.from(await res.arrayBuffer());
-    const path   = `${userId}/comercial_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`;
-    const { error } = await supabaseAdmin.storage.from("videos").upload(path, buffer, { contentType: "video/mp4", upsert: false });
-    if (error) throw new Error(error.message);
-    const { data } = supabaseAdmin.storage.from("videos").getPublicUrl(path);
-    return data?.publicUrl || videoUrl;
-  } catch (err) { console.error("[comercial] saveVideo failed:", err.message); return videoUrl; }
+  return taskId;
 }
 
 async function generateNarration(text, accent, gender) {
@@ -181,11 +153,11 @@ export default async function handler(req, res) {
       const efecto = body.selectores?.efecto || "golden_particles";
       const videoPrompt = (efectoMap[efecto] || efectoMap.golden_particles) + " ABSOLUTELY NO text, NO subtitles, NO watermarks, NO logos.";
       const { url: imageUrl, path: imagePath } = await uploadImageTemp(producto[0].base64, producto[0].mimeType, userId);
-      const videoUrl   = await imageToVideoEvolink(imageUrl, videoPrompt, "9:16", 5);
-      const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
+      const taskId = await submitVideoToEvolink(imageUrl, videoPrompt, "9:16", 5);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
       const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: cost });
+      const jobId = await createComercialJob(userId, taskId, plantilla_id, ref, cost);
+      return res.status(200).json({ ok: true, ref, jobId, taskId, plantilla_id, audio_b64: narration?.base64 || null, jade_cost: cost });
     }
 
     // ── EXPLOSIÓN DE SABOR (5s) ───────────────────────────────
@@ -194,11 +166,11 @@ export default async function handler(req, res) {
       if (!plato.length) { await refund(userId, cost, ref); return res.status(400).json({ ok: false, error: "Sube la foto del platillo" }); }
       const videoPrompt = "The dish dramatically explodes outward, each individual ingredient flies through the air in slow motion, components separating and floating in different directions revealing every detail, dark moody background, dramatic studio lighting, epic cinematic food commercial, ingredients suspended mid-air. ABSOLUTELY NO text, NO subtitles, NO watermarks.";
       const { url: imageUrl, path: imagePath } = await uploadImageTemp(plato[0].base64, plato[0].mimeType, userId);
-      const videoUrl   = await imageToVideoEvolink(imageUrl, videoPrompt, "9:16", 5);
-      const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
+      const taskId = await submitVideoToEvolink(imageUrl, videoPrompt, "9:16", 5);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
       const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: cost });
+      const jobId = await createComercialJob(userId, taskId, plantilla_id, ref, cost);
+      return res.status(200).json({ ok: true, ref, jobId, taskId, plantilla_id, audio_b64: narration?.base64 || null, jade_cost: cost });
     }
 
     // ── CHEF IA (15s) ─────────────────────────────────────────
@@ -216,11 +188,11 @@ export default async function handler(req, res) {
       const refs       = chef.length ? [chef[0], plato[0]] : [plato[0]];
       const sceneImage = await generateSceneImage(`World-class food photographer. ${chefDesc} [Image ${chef.length ? 2 : 1}] finished dish. Chef plating in professional kitchen, cinematic lighting, photorealistic, 9:16, NO text.`, refs);
       const { url: imageUrl, path: imagePath } = await uploadImageTemp(sceneImage.base64, sceneImage.mimeType, userId);
-      const videoUrl   = await imageToVideoEvolink(imageUrl, "Chef cinematic 15-second sequence: chef elegantly prepares, plates and presents the dish with professional flair, smooth cinematic camera movements, warm kitchen lighting, multiple angles, appetizing final reveal. NO text.", "9:16", 15);
-      const libraryUrl = await saveVideoToLibrary(userId, videoUrl);
+      const taskId = await submitVideoToEvolink(imageUrl, "Chef cinematic 15-second sequence: chef elegantly prepares, plates and presents the dish with professional flair, smooth cinematic camera movements, warm kitchen lighting, multiple angles, appetizing final reveal. NO text.", "9:16", 15);
       await supabaseAdmin.storage.from("user-uploads").remove([imagePath]).catch(() => {});
       const narration = textos?.narracion ? await generateNarration(textos.narracion, accent, gender) : null;
-      return res.status(200).json({ ok: true, ref, plantilla_id, scenes: [{ scene_number: 1, ok: true, video_url: libraryUrl, audio_b64: narration?.base64 || null }], success_count: 1, total_scenes: 1, jade_cost: cost });
+      const jobId = await createComercialJob(userId, taskId, plantilla_id, ref, cost);
+      return res.status(200).json({ ok: true, ref, jobId, taskId, plantilla_id, audio_b64: narration?.base64 || null, jade_cost: cost });
     }
 
     await refund(userId, cost, ref);
@@ -235,6 +207,18 @@ export default async function handler(req, res) {
 
 async function refund(userId, cost, ref) {
   try { await supabaseAdmin.rpc("spend_jades", { p_user_id: userId, p_amount: -cost, p_reason: "comercial_refund_error", p_ref: ref }); } catch {}
+}
+
+async function createComercialJob(userId, taskId, plantilla_id, ref, cost) {
+  const jobId = globalThis.crypto?.randomUUID?.() || (Date.now() + "-" + Math.random());
+  const { error } = await supabaseAdmin.from("video_jobs").insert({
+    id: jobId, user_id: userId, status: "IN_PROGRESS", mode: "comercial",
+    provider: "evolink_seedance", provider_request_id: taskId,
+    provider_status: "pending", started_at: new Date().toISOString(),
+    payload: { task_id: taskId, plantilla_id, jade_cost: cost, ref },
+  });
+  if (error) console.error("[comercial-generate] insert job failed:", error.message);
+  return jobId;
 }
 
 export const config = { runtime: "nodejs" };
