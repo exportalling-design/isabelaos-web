@@ -134,6 +134,11 @@ export default function CineAIPanel() {
   const [subjectDesc,    setSubjectDesc]    = useState("");
   const [customPrompt,   setCustomPrompt]   = useState("");
 
+  const [magicIdea,    setMagicIdea]    = useState("");
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicPrompts, setMagicPrompts] = useState(null);
+  const [magicError,   setMagicError]   = useState(null);
+
   const [refImages,       setRefImages]       = useState([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const faceImageUrl = refImages[0]?.url || null;
@@ -461,6 +466,40 @@ export default function CineAIPanel() {
     } finally {
       setIsabelaLoading(false);
     }
+  };
+
+  const handleMagicPrompt = async () => {
+    if (!magicIdea.trim() || magicIdea.trim().length < 3) {
+      setMagicError("Escribe tu idea primero");
+      return;
+    }
+    setMagicLoading(true);
+    setMagicError(null);
+    setMagicPrompts(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/cineai/magic-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ idea: magicIdea.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Error generando prompts");
+      setMagicPrompts(data.prompts || []);
+    } catch (e) {
+      setMagicError(e.message || "Error generando prompts mágicos");
+    } finally {
+      setMagicLoading(false);
+    }
+  };
+
+  const useMagicPrompt = (promptText) => {
+    setCustomPrompt(promptText);
+    setSelectedPreset("custom");
   };
 
   const resetIsabela = () => {
@@ -907,6 +946,60 @@ export default function CineAIPanel() {
             )}
           </div>
         )}
+
+        <div className="cp-cell cp-cell-full">
+          <p className="sec-label">✨ Magic Prompt Generator</p>
+          <p style={{ fontSize: 11, color: "#666", marginTop: -6, marginBottom: 10 }}>
+            Escribe tu idea en español y te genero 3 prompts cinematográficos listos para Seedance 2.0.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              className="cp-input"
+              style={{ flex: 1, minWidth: 200 }}
+              placeholder="ej: un guerrero vikingo en una tormenta de nieve..."
+              value={magicIdea}
+              onChange={(e) => { setMagicIdea(e.target.value); setMagicError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !magicLoading) handleMagicPrompt(); }}
+              disabled={magicLoading || generating}
+            />
+            <button
+              className="how-btn"
+              onClick={handleMagicPrompt}
+              disabled={magicLoading || generating}
+              style={{ whiteSpace: "nowrap", opacity: magicLoading ? 0.6 : 1 }}
+            >
+              {magicLoading ? "⏳ Generando..." : "✨ Generar prompts mágicos"}
+            </button>
+          </div>
+          {magicError && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#e07070" }}>{magicError}</div>
+          )}
+          {magicPrompts && magicPrompts.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginTop: 12 }}>
+              {magicPrompts.map((p, idx) => (
+                <button
+                  key={p.style || idx}
+                  onClick={() => useMagicPrompt(p.prompt)}
+                  style={{
+                    textAlign: "left", cursor: "pointer", background: "rgba(200,160,80,0.06)",
+                    border: "1px solid rgba(200,160,80,0.25)", borderRadius: 12, padding: "12px 14px",
+                    display: "flex", flexDirection: "column", gap: 6, transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#c8a050"; e.currentTarget.style.background = "rgba(200,160,80,0.12)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(200,160,80,0.25)"; e.currentTarget.style.background = "rgba(200,160,80,0.06)"; }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#c8a050", textTransform: "uppercase" }}>
+                    {p.label || p.style}
+                  </span>
+                  <span style={{ fontSize: 12, color: "#bbb", lineHeight: 1.5 }}>
+                    {p.prompt}
+                  </span>
+                  <span style={{ fontSize: 10, color: "#666", marginTop: 2 }}>👆 Usar este prompt</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="cp-cell">
           <p className="sec-label">{activeMode === "tiktok" ? "Tipo de trend" : "Tipo de escena"}</p>
