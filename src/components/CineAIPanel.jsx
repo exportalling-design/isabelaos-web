@@ -169,6 +169,11 @@ export default function CineAIPanel() {
   const [isContinuation,   setIsContinuation]   = useState(false);
   const [frameExtracted,   setFrameExtracted]   = useState(false);
 
+  const [captions,        setCaptions]        = useState(null);
+  const [captionsLoading, setCaptionsLoading] = useState(false);
+  const [captionsError,   setCaptionsError]   = useState(null);
+  const [copiedIdx,       setCopiedIdx]       = useState(null);
+
   const [showHowItWorks,  setShowHowItWorks]  = useState(false);
   const [videoFullscreen, setVideoFullscreen] = useState(false);
   const [showExtUrlInput, setShowExtUrlInput] = useState(false);
@@ -248,7 +253,32 @@ export default function CineAIPanel() {
     }
   };
 
-  const startPolling = useCallback((taskId) => {
+  const fetchViralCaptions = useCallback(async (prompt) => {
+    setCaptionsLoading(true);
+    setCaptionsError(null);
+    setCaptions(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/cineai/viral-captions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Error generando captions");
+      setCaptions(data.captions || []);
+    } catch (e) {
+      setCaptionsError(e.message || "Error generando captions virales");
+    } finally {
+      setCaptionsLoading(false);
+    }
+  }, []);
+
+  const startPolling = useCallback((taskId, promptForCaptions) => {
     clearInterval(pollRef.current);
     let attempts = 0;
     const MAX_ATTEMPTS = 150;
@@ -275,6 +305,7 @@ export default function CineAIPanel() {
           setVideoUrl(data.videoUrl);
           setGenerating(false);
           clearInterval(pollRef.current);
+          if (promptForCaptions) fetchViralCaptions(promptForCaptions);
         } else if (data.status === "failed") {
           const errMsg = data.error || "";
           if (errMsg.toLowerCase().includes("service busy") || errMsg.toLowerCase().includes("allocating")) {
@@ -289,7 +320,7 @@ export default function CineAIPanel() {
         console.error("[CineAI] poll error:", e.message);
       }
     }, 4000);
-  }, []);
+  }, [fetchViralCaptions]);
 
   const handleGenerate = async () => {
     const prompt = getFinalPrompt();
@@ -305,6 +336,8 @@ export default function CineAIPanel() {
     setVideoUrl(null);
     setJobStatus(null);
     setLastFrameUrl(null);
+    setCaptions(null);
+    setCaptionsError(null);
     setGenerating(true);
 
     try {
@@ -359,10 +392,11 @@ export default function CineAIPanel() {
       if (data.videoUrl) {
         setVideoUrl(data.videoUrl);
         setGenerating(false);
+        fetchViralCaptions(prompt);
         return;
       }
 
-      startPolling(pollId);
+      startPolling(pollId, prompt);
     } catch (e) {
       setError(e.message);
       setGenerating(false);
@@ -411,6 +445,8 @@ export default function CineAIPanel() {
     setLastFrameUrl(null);
     setPreviousVideoUrl(null);
     setFrameExtracted(false);
+    setCaptions(null);
+    setCaptionsError(null);
     clearInterval(pollRef.current);
   };
 
@@ -630,6 +666,19 @@ export default function CineAIPanel() {
         .ra-btn.green{background:rgba(80,180,100,0.1);border-color:rgba(80,180,100,0.3);color:#60c870;}
         .ra-btn.green:hover{background:rgba(80,180,100,0.18);}
         .ra-btn:disabled{opacity:0.4;cursor:not-allowed;}
+        .publish-section{margin-top:20px;padding-top:18px;border-top:1px solid #0e0e0e;text-align:left;}
+        .publish-header{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px;}
+        .publish-icon{font-size:16px;}
+        .publish-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:3px;color:#c8a050;}
+        .publish-loading{text-align:center;padding:6px 0 14px;}
+        .publish-error{background:rgba(200,60,60,0.06);border:1px solid rgba(200,60,60,0.15);border-radius:8px;padding:10px 14px;font-size:12px;color:#e07070;text-align:center;margin-bottom:12px;}
+        .caption-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px;}
+        .caption-card{background:#0a0a0c;border:1px solid #1e1e1e;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;}
+        .caption-label{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:2px;color:#c8a050;text-transform:uppercase;}
+        .caption-text{font-size:13px;color:#ddd8cc;line-height:1.6;white-space:pre-wrap;}
+        .caption-text-en{font-size:12px;color:#777;line-height:1.5;white-space:pre-wrap;font-style:italic;}
+        .caption-hashtags{font-size:11px;color:#7aa8c8;line-height:1.6;word-break:break-word;}
+        .caption-copy-btn{align-self:flex-start;}
         .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;overflow-y:auto;}
         .modal-box{background:#0a0a0c;border:1px solid #1e1e1e;border-radius:16px;width:100%;max-width:480px;padding:24px;position:relative;max-height:90vh;overflow-y:auto;}
         .modal-title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:4px;color:#f0e8d0;margin-bottom:20px;}
@@ -934,6 +983,60 @@ export default function CineAIPanel() {
                     {extractingFrame ? "⏳ Extrayendo frame..." : frameExtracted ? "✅ Listo" : "▶ Continuar escena →"}
                   </button>
                   <button className="ra-btn" onClick={handleReset}>✦ Nueva escena</button>
+                </div>
+
+                <div className="publish-section">
+                  <div className="publish-header">
+                    <span className="publish-icon">📲</span>
+                    <span className="publish-title">Publicar</span>
+                  </div>
+
+                  {captionsLoading && (
+                    <div className="publish-loading">
+                      <div className="dots"><span /><span /><span /></div>
+                      <p className="result-sub" style={{ marginTop: 8 }}>Generando captions virales...</p>
+                    </div>
+                  )}
+
+                  {captionsError && <div className="publish-error">{captionsError}</div>}
+
+                  {captions && captions.length > 0 && (
+                    <div className="caption-grid">
+                      {captions.map((c, idx) => {
+                        const hashtags = Array.isArray(c.hashtags)
+                          ? c.hashtags.map(h => (h.startsWith("#") ? h : `#${h}`)).join(" ")
+                          : "";
+                        const fullText = [c.caption_es || c.caption, c.caption_en, hashtags].filter(Boolean).join("\n\n");
+                        return (
+                          <div key={c.style || idx} className="caption-card">
+                            <span className="caption-label">{c.label || c.style}</span>
+                            {(c.caption_es || c.caption) && <p className="caption-text">{c.caption_es || c.caption}</p>}
+                            {c.caption_en && <p className="caption-text-en">{c.caption_en}</p>}
+                            {hashtags && <p className="caption-hashtags">{hashtags}</p>}
+                            <button
+                              className="ra-btn caption-copy-btn"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(fullText);
+                                setCopiedIdx(idx);
+                                setTimeout(() => setCopiedIdx(c => (c === idx ? null : c)), 2000);
+                              }}
+                            >
+                              {copiedIdx === idx ? "✅ Copiado" : "📋 Copiar"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="result-actions">
+                    <button
+                      className="ra-btn gold"
+                      onClick={() => window.open("https://instagram.com", "_blank", "noopener,noreferrer")}
+                    >
+                      📸 Abrir Instagram
+                    </button>
+                  </div>
                 </div>
               </>
             )}
