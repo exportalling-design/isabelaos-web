@@ -57,21 +57,36 @@ function HoverMenu({ modules, onSelect, isEs }) {
     </div>
   );
 }
-function UserNavMenu({ user, jades, onBuyJades, onSignOut, onOpenAdmin, isEs }) {
+function UserNavMenu({ user, jades, modules, onSelectModule, onBuyJades, onSignOut, onOpenAdmin, isEs }) {
   const [open, setOpen] = useState(false);
   const item = { display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", color: "rgba(240,236,228,0.8)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "9px 10px", cursor: "pointer", borderRadius: 8, transition: "all .15s", textAlign: "left" };
+  const sectionLabel = { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "rgba(240,236,228,0.35)", padding: "8px 10px 4px" };
+  const initials = (user?.email || "U").slice(0, 2).toUpperCase();
   return (
     <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "7px 13px", cursor: "pointer", color: "#ffb300", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
-        💎 {jades} <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+      <button style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "6px 12px 6px 6px", cursor: "pointer", color: "#fff", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
+        <span style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#ff5a00,#ffb300)", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, color: "#000", flexShrink: 0 }}>{initials}</span>
+        <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
       </button>
-      <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 220, backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
+      <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 240, maxHeight: "70vh", overflowY: "auto", backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
         <div style={{ fontSize: 11, color: "rgba(240,236,228,0.45)", padding: "4px 10px 8px", wordBreak: "break-all" }}>{user?.email}</div>
+
+        <div style={sectionLabel}>{isEs ? "Mis Jades" : "My Jades"}</div>
         <button onClick={onBuyJades} style={item}
           onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; }}
           onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.8)"; }}>
-          💎 {isEs ? "Comprar Jades" : "Buy Jades"}
+          💎 {jades} {isEs ? "Jades — Comprar más" : "Jades — Buy more"}
         </button>
+
+        <div style={sectionLabel}>{isEs ? "Módulos" : "Modules"}</div>
+        {modules.map(m => (
+          <button key={m.key} onClick={() => !m.comingSoon && onSelectModule(m.key)} disabled={m.comingSoon} style={{ ...item, opacity: m.comingSoon ? 0.4 : 1, cursor: m.comingSoon ? "default" : "pointer" }}
+            onMouseEnter={e => { if (!m.comingSoon) { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; } }}
+            onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.8)"; }}>
+            {m.icon} {m.label}
+          </button>
+        ))}
+
         {onOpenAdmin && (
           <button onClick={onOpenAdmin} style={item}
             onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; }}
@@ -113,7 +128,6 @@ export default function LandingView({
   const [scrolled, setScrolled] = useState(false);
   const [demoText, setDemoText] = useState("");
   const [heroIdea, setHeroIdea] = useState("");
-  const [showAdvancedTeaser, setShowAdvancedTeaser] = useState(false);
   const [magicLoading, setMagicLoading] = useState(false);
   const [magicPrompts, setMagicPrompts] = useState(null);
   const [magicError,   setMagicError]   = useState(null);
@@ -203,8 +217,8 @@ export default function LandingView({
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
     @keyframes floatUp{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     .lo-shimmer{background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:shine 3s linear infinite;filter:drop-shadow(0 0 20px rgba(255,90,0,.3));}
-    .lo-epic-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px;}
-    .lo-epic-card{position:relative;overflow:hidden;border-radius:14px;min-height:220px;}
+    .lo-epic-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px;height:60vh;max-height:520px;}
+    .lo-epic-card{position:relative;overflow:hidden;border-radius:14px;}
     .lo-epic-video{width:100%;height:100%;object-fit:cover;display:block;}
     @media(max-width:900px){
       .lo-hero-h1{font-size:clamp(36px,9vw,60px)!important;}
@@ -218,8 +232,8 @@ export default function LandingView({
       .lo-footer-grid{grid-template-columns:1fr 1fr!important;}
       .lo-final-box{margin:0 16px 60px!important;padding:48px 24px!important;}
       .lo-musical-grid{grid-template-columns:1fr!important;}
-      .lo-epic-grid{grid-auto-flow:column;grid-template-columns:repeat(4,86vw)!important;grid-template-rows:1fr!important;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;}
-      .lo-epic-card{scroll-snap-align:center;min-height:62vh;}
+      .lo-epic-grid{grid-auto-flow:column;grid-template-columns:repeat(4,86vw)!important;grid-template-rows:1fr!important;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:45vh!important;max-height:380px!important;}
+      .lo-epic-card{scroll-snap-align:center;}
       .lo-quickgen-row{flex-direction:column!important;}
     }
     @media(max-width:600px){
@@ -267,16 +281,20 @@ export default function LandingView({
         </div>
 
         <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-          {user && <HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>}
           {user
-            ? <UserNavMenu user={user} jades={jades} onBuyJades={onBuyJades} onSignOut={onSignOut} onOpenAdmin={onOpenAdmin} isEs={isEs} />
-            : <button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)",whiteSpace:"nowrap" }}>{isEs?"Entrar":"Sign in"}</button>
+            ? <UserNavMenu user={user} jades={jades} modules={MODS} onSelectModule={go} onBuyJades={onBuyJades} onSignOut={onSignOut} onOpenAdmin={onOpenAdmin} isEs={isEs} />
+            : (
+              <>
+                <button onClick={onOpenAuth} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.15)",borderRadius:10,color:"#fff",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 16px",cursor:"pointer",whiteSpace:"nowrap" }}>{isEs?"Entrar":"Sign in"}</button>
+                <button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)",whiteSpace:"nowrap" }}>{isEs?"Registrarse":"Sign up"}</button>
+              </>
+            )
           }
         </div>
       </nav>
 
       {/* HERO — 4 plantillas épicas en video, full screen */}
-      <section id="hero" style={{ position: "relative", minHeight: "100vh", paddingTop: 104, paddingBottom: 20, display: "flex", flexDirection: "column" }}>
+      <section id="hero" style={{ position: "relative", paddingTop: 104, paddingBottom: 28 }}>
         <div style={{ textAlign: "center", padding: "16px 20px 18px" }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 14 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
@@ -287,7 +305,7 @@ export default function LandingView({
           </h1>
         </div>
 
-        <div className="lo-epic-grid" style={{ flex: 1, padding: "0 3px 3px", minHeight: 420 }}>
+        <div className="lo-epic-grid" style={{ padding: "0 3px 3px" }}>
           {HERO_TEMPLATES.map(t => (
             <div key={t.id} className="lo-epic-card">
               <video src={t.video} autoPlay muted loop playsInline className="lo-epic-video" />
@@ -323,7 +341,7 @@ export default function LandingView({
         <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 8, display: "block" }}>
           ✨ Magic Prompt Generator
         </span>
-        <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(26px,4.5vw,44px)", letterSpacing: 1.5, color: "#fff", marginBottom: 10, lineHeight: 1 }}>
+        <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(20px,3vw,28px)", letterSpacing: 1.5, color: "#fff", marginBottom: 10, lineHeight: 1.1 }}>
           {isEs ? "ESCRIBE TU IDEA Y GENERA" : "WRITE YOUR IDEA AND GENERATE"}
         </h2>
         <p style={{ fontSize: 14, color: V.muted, marginBottom: 22, lineHeight: 1.6 }}>
@@ -334,7 +352,7 @@ export default function LandingView({
             value={heroIdea}
             onChange={e => setHeroIdea(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") handleQuickGenerate(); }}
-            placeholder={isEs ? "ej: un guerrero vikingo en una tormenta de nieve..." : "e.g: a viking warrior in a snowstorm..."}
+            placeholder={isEs ? "Describe tu escena, ej: un guerrero vikingo en una tormenta de nieve" : "Describe your scene, e.g: a viking warrior in a snowstorm"}
             disabled={magicLoading}
             style={{ flex: 1, background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, color: "#fff", padding: "14px 18px", fontSize: 14, outline: "none", fontFamily: V.ffB }}
           />
@@ -370,24 +388,6 @@ export default function LandingView({
           </div>
         )}
 
-        <button onClick={() => setShowAdvancedTeaser(v => !v)} style={{ background: "none", border: "none", color: V.muted, fontSize: 12, cursor: "pointer", fontFamily: V.ffB, textDecoration: "underline" }}>
-          {showAdvancedTeaser ? (isEs ? "▲ Ocultar opciones avanzadas" : "▲ Hide advanced options") : (isEs ? "▼ Opciones avanzadas" : "▼ Advanced options")}
-        </button>
-
-        {showAdvancedTeaser && (
-          <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-            {[
-              { icon: "🥊", l: isEs ? "Pelea" : "Fight", idea: isEs ? "una pelea callejera intensa bajo la lluvia" : "an intense street fight in the rain" },
-              { icon: "🎭", l: "Drama", idea: isEs ? "una despedida emotiva en una estación de tren" : "an emotional goodbye at a train station" },
-              { icon: "🌅", l: isEs ? "Épico" : "Epic", idea: isEs ? "un guerrero parado en un acantilado al atardecer" : "a warrior standing on a cliff at sunset" },
-              { icon: "🕺", l: "TikTok Trend", idea: isEs ? "un baile viral de TikTok con luces de neón" : "a viral TikTok dance with neon lights" },
-            ].map((p, i) => (
-              <button key={i} onClick={() => handleQuickGenerate(p.idea)} disabled={magicLoading} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, color: "rgba(240,236,228,.7)", fontSize: 12, padding: "8px 14px", cursor: magicLoading ? "not-allowed" : "pointer", fontFamily: V.ffB }}>
-                {p.icon} {p.l}
-              </button>
-            ))}
-          </div>
-        )}
       </section>
 
       {/* PLANTILLAS ÉPICAS */}
