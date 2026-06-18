@@ -6,6 +6,7 @@
 //   ✅ Welcome toast eliminado
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
+import { supabase } from "../lib/supabaseClient";
 
 function scrollTo(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -113,6 +114,10 @@ export default function LandingView({
   const [demoText, setDemoText] = useState("");
   const [heroIdea, setHeroIdea] = useState("");
   const [showAdvancedTeaser, setShowAdvancedTeaser] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicPrompts, setMagicPrompts] = useState(null);
+  const [magicError,   setMagicError]   = useState(null);
+  const [copiedIdx,    setCopiedIdx]    = useState(null);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 50);
@@ -125,8 +130,36 @@ export default function LandingView({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [setActiveModule]);
 
-  const handleQuickGenerate = () => {
-    user ? go("cineai") : onOpenAuth();
+  const handleQuickGenerate = async (ideaOverride) => {
+    if (!user) { onOpenAuth(); return; }
+    const idea = (ideaOverride ?? heroIdea).trim();
+    if (!idea || idea.length < 3) {
+      setMagicError(isEs ? "Escribe tu idea primero" : "Write your idea first");
+      return;
+    }
+    if (ideaOverride) setHeroIdea(ideaOverride);
+    setMagicLoading(true);
+    setMagicError(null);
+    setMagicPrompts(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/cineai/magic-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ idea }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || (isEs ? "Error generando prompts" : "Error generating prompts"));
+      setMagicPrompts(data.prompts || []);
+    } catch (e) {
+      setMagicError(e.message || (isEs ? "Error generando prompts" : "Error generating prompts"));
+    } finally {
+      setMagicLoading(false);
+    }
   };
 
   const MODS = [
@@ -302,12 +335,40 @@ export default function LandingView({
             onChange={e => setHeroIdea(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") handleQuickGenerate(); }}
             placeholder={isEs ? "ej: un guerrero vikingo en una tormenta de nieve..." : "e.g: a viking warrior in a snowstorm..."}
+            disabled={magicLoading}
             style={{ flex: 1, background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, color: "#fff", padding: "14px 18px", fontSize: 14, outline: "none", fontFamily: V.ffB }}
           />
-          <button onClick={handleQuickGenerate} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 12, color: "#000", fontFamily: V.ffU, fontSize: 14, fontWeight: 800, padding: "14px 26px", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 0 24px rgba(255,90,0,.3)" }}>
-            ✨ {isEs ? "Generar" : "Generate"}
+          <button onClick={() => handleQuickGenerate()} disabled={magicLoading} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 12, color: "#000", fontFamily: V.ffU, fontSize: 14, fontWeight: 800, padding: "14px 26px", cursor: magicLoading ? "not-allowed" : "pointer", whiteSpace: "nowrap", boxShadow: "0 0 24px rgba(255,90,0,.3)", opacity: magicLoading ? 0.7 : 1 }}>
+            {magicLoading ? `⏳ ${isEs ? "Generando..." : "Generating..."}` : `✨ ${isEs ? "Generar" : "Generate"}`}
           </button>
         </div>
+
+        {magicError && (
+          <div style={{ background: "rgba(200,60,60,.08)", border: "1px solid rgba(200,60,60,.25)", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#ff8080", marginBottom: 14, textAlign: "left" }}>
+            ⚠️ {magicError}
+          </div>
+        )}
+
+        {magicPrompts && magicPrompts.length > 0 && (
+          <div style={{ display: "grid", gap: 10, marginBottom: 16, textAlign: "left" }}>
+            {magicPrompts.map((p, idx) => (
+              <div key={p.style || idx} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, padding: 16 }}>
+                <div style={{ fontFamily: V.ffU, fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: V.gold, textTransform: "uppercase", marginBottom: 8 }}>{p.label || p.style}</div>
+                <p style={{ fontSize: 13, color: "rgba(240,236,228,.75)", lineHeight: 1.6, marginBottom: 12 }}>{p.prompt}</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={() => { navigator.clipboard?.writeText(p.prompt); setCopiedIdx(idx); setTimeout(() => setCopiedIdx(c => c === idx ? null : c), 2000); }}
+                    style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, color: "#fff", fontSize: 12, padding: "8px 14px", cursor: "pointer", fontFamily: V.ffB }}>
+                    {copiedIdx === idx ? `✅ ${isEs ? "Copiado" : "Copied"}` : `📋 ${isEs ? "Copiar" : "Copy"}`}
+                  </button>
+                  <button onClick={() => go("cineai")}
+                    style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 8, color: "#000", fontSize: 12, fontWeight: 700, padding: "8px 14px", cursor: "pointer", fontFamily: V.ffU }}>
+                    🎬 {isEs ? "Generar este video →" : "Generate this video →"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <button onClick={() => setShowAdvancedTeaser(v => !v)} style={{ background: "none", border: "none", color: V.muted, fontSize: 12, cursor: "pointer", fontFamily: V.ffB, textDecoration: "underline" }}>
           {showAdvancedTeaser ? (isEs ? "▲ Ocultar opciones avanzadas" : "▲ Hide advanced options") : (isEs ? "▼ Opciones avanzadas" : "▼ Advanced options")}
@@ -316,12 +377,12 @@ export default function LandingView({
         {showAdvancedTeaser && (
           <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
             {[
-              { icon: "🥊", l: isEs ? "Pelea" : "Fight" },
-              { icon: "🎭", l: "Drama" },
-              { icon: "🌅", l: isEs ? "Épico" : "Epic" },
-              { icon: "🕺", l: "TikTok Trend" },
+              { icon: "🥊", l: isEs ? "Pelea" : "Fight", idea: isEs ? "una pelea callejera intensa bajo la lluvia" : "an intense street fight in the rain" },
+              { icon: "🎭", l: "Drama", idea: isEs ? "una despedida emotiva en una estación de tren" : "an emotional goodbye at a train station" },
+              { icon: "🌅", l: isEs ? "Épico" : "Epic", idea: isEs ? "un guerrero parado en un acantilado al atardecer" : "a warrior standing on a cliff at sunset" },
+              { icon: "🕺", l: "TikTok Trend", idea: isEs ? "un baile viral de TikTok con luces de neón" : "a viral TikTok dance with neon lights" },
             ].map((p, i) => (
-              <button key={i} onClick={handleQuickGenerate} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, color: "rgba(240,236,228,.7)", fontSize: 12, padding: "8px 14px", cursor: "pointer", fontFamily: V.ffB }}>
+              <button key={i} onClick={() => handleQuickGenerate(p.idea)} disabled={magicLoading} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, color: "rgba(240,236,228,.7)", fontSize: 12, padding: "8px 14px", cursor: magicLoading ? "not-allowed" : "pointer", fontFamily: V.ffB }}>
                 {p.icon} {p.l}
               </button>
             ))}

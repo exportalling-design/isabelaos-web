@@ -289,6 +289,16 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
           if (isFree) setUsedFreeId(tmpl.id);
           setStep("done"); clearInterval(iv);
         } else if (json.status === "failed" || json.status === "error") {
+          if (isFree) {
+            try {
+              const resetToken = await getToken();
+              await fetch("/api/free-template/reset-on-error", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${resetToken}` },
+                body: JSON.stringify({ taskId }),
+              });
+            } catch {}
+          }
           throw new Error(json.error || "Generation failed");
         }
       } catch (e) { setErrorMsg(e.message); setStep("error"); clearInterval(iv); }
@@ -321,8 +331,8 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
             {isEs
-              ? "La calidad visual de la versión gratuita es inferior a las plantillas épicas de pago. El reconocimiento facial puede no ser 100% preciso con Seedance 1.5 Pro. Para mayor calidad, videos de 15 segundos ultra HD sin marca de agua, elige una plantilla épica ($5) o suscríbete por $13/mes."
-              : "Free version visual quality is lower than paid epic templates. Facial recognition may not be 100% accurate with Seedance 1.5 Pro. For higher quality, 15-second ultra HD watermark-free videos, choose an epic template ($5) or subscribe for $13/month."}
+              ? "La calidad visual de la versión gratuita es inferior a las plantillas épicas de pago. El reconocimiento facial puede no ser 100% preciso con Seedance 2.0 Fast. Para mayor calidad, videos de 15 segundos ultra HD sin marca de agua, elige una plantilla épica ($5) o suscríbete por $13/mes."
+              : "Free version visual quality is lower than paid epic templates. Facial recognition may not be 100% accurate with Seedance 2.0 Fast. For higher quality, 15-second ultra HD watermark-free videos, choose an epic template ($5) or subscribe for $13/month."}
           </div>
         </div>
       )}
