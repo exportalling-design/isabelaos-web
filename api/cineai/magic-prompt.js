@@ -5,7 +5,7 @@
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_MODEL    = "gemini-2.0-flash";
+const GEMINI_MODEL    = "gemini-3.1-flash-image-preview";
 
 const SYSTEM_PROMPT = `You are IsabelaOS Studio's expert prompt engineer for Seedance 2.0 (served via EvoLink), specialized in writing cinematic AI video prompts that consistently produce high-quality, blockbuster-grade results for ANY idea a user throws at you — romantic, action, comedic, horror, slow and intimate, fashion, dance, everyday life, surreal, etc. You are not limited to a fixed catalog of styles.
 
@@ -116,24 +116,30 @@ export default async function handler(req, res) {
   if (idea.length < 3) return res.status(400).json({ ok: false, error: "Escribe tu idea primero" });
 
   try {
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nIdea del usuario (en español): "${idea}"`;
+
     const response = await fetch(`${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: "user", parts: [{ text: `Idea del usuario (en español): "${idea}"` }] }],
-        generationConfig: { temperature: 0.85 },
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        generationConfig: {
+          responseModalities: ["TEXT"],
+          temperature:        0.85,
+          topP:               0.9,
+        },
       }),
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      console.error("[magic-prompt] Gemini error:", err);
-      return res.status(502).json({ ok: false, error: err.error?.message || "Gemini API error" });
+      const errText = await response.text().catch(() => "");
+      console.error("[magic-prompt] Gemini error:", errText);
+      return res.status(502).json({ ok: false, error: `Gemini API error ${response.status}` });
     }
 
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.filter((p) => p?.text).map((p) => p.text).join("\n").trim();
     const parsed = safeParseJSON(text);
     const prompts = Array.isArray(parsed?.prompts) ? parsed.prompts.slice(0, 3) : null;
 
