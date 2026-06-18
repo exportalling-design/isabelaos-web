@@ -1,9 +1,9 @@
-// src/components/LandingView.jsx — IsabelaOS Studio v7.1
+// src/components/LandingView.jsx — IsabelaOS Studio v8.0
 // PATCHES:
-//   ✅ free-template agregado como primer módulo en MODS
-//   ✅ Globo 🌐 visible en mobile
-//   ✅ Toast de bienvenida 10 Jades
-//   ✅ Botón Admin 🛠️ en hero card (solo admin)
+//   ✅ Hero rediseñado: 4 plantillas épicas en video full-screen
+//   ✅ Social proof compacto + Magic Prompt Generator visible sin scroll profundo
+//   ✅ Nav simplificado: logo, módulos, Jades, login
+//   ✅ Welcome toast eliminado
 import { useState, useEffect, useRef, useCallback } from "react";
 import { JADE_PACKS, COSTS } from "../lib/pricing";
 
@@ -56,6 +56,37 @@ function HoverMenu({ modules, onSelect, isEs }) {
     </div>
   );
 }
+function UserNavMenu({ user, jades, onBuyJades, onSignOut, onOpenAdmin, isEs }) {
+  const [open, setOpen] = useState(false);
+  const item = { display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", color: "rgba(240,236,228,0.8)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "9px 10px", cursor: "pointer", borderRadius: 8, transition: "all .15s", textAlign: "left" };
+  return (
+    <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "7px 13px", cursor: "pointer", color: "#ffb300", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
+        💎 {jades} <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+      </button>
+      <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 220, backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
+        <div style={{ fontSize: 11, color: "rgba(240,236,228,0.45)", padding: "4px 10px 8px", wordBreak: "break-all" }}>{user?.email}</div>
+        <button onClick={onBuyJades} style={item}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.8)"; }}>
+          💎 {isEs ? "Comprar Jades" : "Buy Jades"}
+        </button>
+        {onOpenAdmin && (
+          <button onClick={onOpenAdmin} style={item}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.8)"; }}>
+            🛠️ Admin Panel
+          </button>
+        )}
+        <button onClick={onSignOut} style={{ ...item, color: "#e07070" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(200,60,60,0.08)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+          ↩ {isEs ? "Cerrar sesión" : "Sign out"}
+        </button>
+      </div>
+    </div>
+  );
+}
 function ModOverlay({ title, onClose, children }) {
   useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
   return (
@@ -71,35 +102,6 @@ function ModOverlay({ title, onClose, children }) {
   );
 }
 
-// ── WELCOME TOAST ────────────────────────────────────────────────────────────
-function WelcomeToast({ isEs, onDismiss, onGoGenerator }) {
-  useEffect(() => {
-    const t = setTimeout(onDismiss, 8000);
-    return () => clearTimeout(t);
-  }, []);
-  return (
-    <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 8000, width: "calc(100% - 32px)", maxWidth: 460, background: "linear-gradient(135deg,rgba(13,16,23,0.98),rgba(13,16,23,0.95))", border: "1px solid rgba(200,169,110,0.4)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 20px 60px rgba(0,0,0,0.7)", display: "flex", alignItems: "center", gap: 14, animation: "moPIn .4s ease" }}>
-      <div style={{ fontSize: 28, flexShrink: 0 }}>🎉</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
-          {isEs ? "¡Bienvenido! Tienes 10 Jades gratis" : "Welcome! You have 10 free Jades"}
-        </div>
-        <div style={{ fontSize: 12, color: "rgba(240,236,228,0.55)", lineHeight: 1.5 }}>
-          {isEs ? "Úsalos para generar imágenes IA — sin tarjeta." : "Use them now to generate AI images — no credit card needed."}
-        </div>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-        <button onClick={onGoGenerator} style={{ background: "#ff5a00", border: "none", borderRadius: 8, color: "#000", fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 11, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-          🖼️ {isEs ? "Crear imagen" : "Create image"}
-        </button>
-        <button onClick={onDismiss} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>
-          {isEs ? "Cerrar" : "Dismiss"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function LandingView({
   user, jades, onOpenAuth, onStartDemo, onOpenContact,
   onOpenAbout, onSignOut, onBuyJades, lang, setLang,
@@ -109,17 +111,8 @@ export default function LandingView({
   const isEs = lang === "es";
   const [scrolled, setScrolled] = useState(false);
   const [demoText, setDemoText] = useState("");
-  const [showWelcomeToast, setShowWelcomeToast] = useState(false);
-  const prevUser = useRef(null);
-
-  useEffect(() => {
-    if (user && !prevUser.current) {
-      const createdAt = user.created_at ? new Date(user.created_at).getTime() : 0;
-      const isNewUser = Date.now() - createdAt < 2 * 60 * 1000;
-      if (isNewUser) setShowWelcomeToast(true);
-    }
-    prevUser.current = user;
-  }, [user]);
+  const [heroIdea, setHeroIdea] = useState("");
+  const [showAdvancedTeaser, setShowAdvancedTeaser] = useState(false);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 50);
@@ -132,6 +125,10 @@ export default function LandingView({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [setActiveModule]);
 
+  const handleQuickGenerate = () => {
+    user ? go("cineai") : onOpenAuth();
+  };
+
   const MODS = [
     { key: "templates",  icon: "🎬", label: isEs ? "Plantillas de Video" : "Video Templates", color: "#ff5a00", badge: "🎁 FREE+", desc: isEs ? "Videos gratis y épicos con tu rostro" : "Free and epic videos with your face", vid: "/gallery/free-template-1.mp4" },
     { key: "cineai",     icon: "🎬", label: "CineAI",                                         color: "#ff5a00", badge: "🔥 NUEVO", desc: isEs ? "Escenas Hollywood con tu cara" : "Hollywood scenes with your face", vid: "/gallery/cineai-fight.mp4" },
@@ -142,6 +139,13 @@ export default function LandingView({
     { key: "generator",     icon: "🖼️", label: isEs ? "Imagen IA" : "AI Image",             color: "#06b6d4", badge: "🖼️",       desc: isEs ? "Imágenes cinematográficas con FLUX" : "Cinematic images with FLUX", vid: null },
     { key: "img2video",     icon: "🎥", label: "Imagen → Video",                              color: "#8b5cf6", badge: "🚧 SOON",    desc: isEs ? "Convierte tus fotos en videos — Próximamente" : "Convert your photos to videos — Coming soon", vid: null, comingSoon: true },
     { key: "library",       icon: "📂", label: isEs ? "Biblioteca" : "Library",              color: "#64748b", badge: "📂",        desc: isEs ? "Tus creaciones guardadas" : "Your saved creations", vid: null },
+  ];
+
+  const HERO_TEMPLATES = [
+    { id: "divineLight",     label: isEs ? "Confrontación Divina" : "Divine Confrontation", video: "/gallery/divine-light.mp4" },
+    { id: "coupleDisaster",  label: isEs ? "La Última Pelea" : "The Last Fight",             video: "/gallery/couple-disaster.mp4" },
+    { id: "luchaTitanes",    label: isEs ? "Lucha de Titanes" : "Clash of Titans",           video: "/gallery/lucha-titanes.mp4" },
+    { id: "victoriasSecret", label: "Victoria's Secret",                                     video: "/gallery/victorias-secret.mp4" },
   ];
 
   const GAL = [
@@ -166,15 +170,12 @@ export default function LandingView({
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
     @keyframes floatUp{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     .lo-shimmer{background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:shine 3s linear infinite;filter:drop-shadow(0 0 20px rgba(255,90,0,.3));}
+    .lo-epic-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px;}
+    .lo-epic-card{position:relative;overflow:hidden;border-radius:14px;min-height:220px;}
+    .lo-epic-video{width:100%;height:100%;object-fit:cover;display:block;}
     @media(max-width:900px){
-      .lo-hero-grid{grid-template-columns:1fr!important;min-height:auto!important;}
-      .lo-hero-left{min-height:60vh;}
-      .lo-hero-right{padding:32px 20px!important;min-height:auto;}
-      .lo-hero-copy{padding:40px 24px!important;}
-      .lo-hero-h1{font-size:clamp(42px,10vw,72px)!important;}
+      .lo-hero-h1{font-size:clamp(36px,9vw,60px)!important;}
       .lo-seedbar-text{font-size:10px!important;letter-spacing:1px!important;gap:6px!important;}
-      .lo-trust-grid{grid-template-columns:1fr 1fr!important;}
-      .lo-trust-grid>div:nth-child(2){border-right:none!important;}
       .lo-gal-grid{grid-template-columns:1fr 1fr!important;}
       .lo-gal-wide{grid-column:span 2!important;aspect-ratio:16/9!important;}
       .lo-mod-grid-css{grid-template-columns:1fr!important;}
@@ -184,12 +185,12 @@ export default function LandingView({
       .lo-footer-grid{grid-template-columns:1fr 1fr!important;}
       .lo-final-box{margin:0 16px 60px!important;padding:48px 24px!important;}
       .lo-musical-grid{grid-template-columns:1fr!important;}
+      .lo-epic-grid{grid-auto-flow:column;grid-template-columns:repeat(4,86vw)!important;grid-template-rows:1fr!important;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;}
+      .lo-epic-card{scroll-snap-align:center;min-height:62vh;}
+      .lo-quickgen-row{flex-direction:column!important;}
     }
     @media(max-width:600px){
       .lo-price-grid{grid-template-columns:1fr!important;}
-      .lo-hero-ctas{flex-direction:column!important;}
-      .lo-hero-h1{font-size:clamp(36px,11vw,60px)!important;}
-      .lo-demo-box{padding:20px!important;}
       .lo-demo-grid{grid-template-columns:1fr 1fr!important;}
       .lo-nav-links-desktop{display:none!important;}
     }
@@ -201,14 +202,6 @@ export default function LandingView({
   return (
     <div style={{ fontFamily: V.ffB, background: V.bg, color: V.text, overflowX: "hidden", minHeight: "100vh" }}>
       <style>{CSS}</style>
-
-      {showWelcomeToast && (
-        <WelcomeToast
-          isEs={isEs}
-          onDismiss={() => setShowWelcomeToast(false)}
-          onGoGenerator={() => { setShowWelcomeToast(false); go("generator"); }}
-        />
-      )}
 
       {activeModule && children && (
         <ModOverlay title={activeModule} onClose={() => setActiveModule(null)}>
@@ -227,7 +220,7 @@ export default function LandingView({
         </div>
       </div>
 
-      {/* NAV */}
+      {/* NAV — simplificado: logo, módulos, Jades, login */}
       <nav style={{ position:"fixed",top:36,left:0,right:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",height:60,transition:"all .3s",...(scrolled?{background:"rgba(8,10,14,.94)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(255,255,255,.07)"}:{}) }}>
         <div style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer",flexShrink:0 }} onClick={() => scrollTo("hero")}>
           <div style={{ width:36,height:36,borderRadius:9,overflow:"hidden",background:`linear-gradient(135deg,${V.fire},${V.gold})`,display:"grid",placeItems:"center",position:"relative",boxShadow:`0 0 20px rgba(255,90,0,.4)`,flexShrink:0 }}>
@@ -240,156 +233,101 @@ export default function LandingView({
           </div>
         </div>
 
-        <div className="lo-nav-links-desktop" style={{ display:"flex",alignItems:"center",gap:8 }}>
-          {["galeria","planes"].map(id=>(
-            <button key={id} onClick={()=>scrollTo(id)} style={{ background:"none",border:"none",color:"rgba(240,236,228,.6)",fontFamily:V.ffU,fontSize:13,padding:"7px 13px",cursor:"pointer",borderRadius:8,transition:"all .2s" }}>
-              {id==="galeria"?(isEs?"Galería":"Gallery"):(isEs?"Planes":"Plans")}
-            </button>
-          ))}
-          <button onClick={onOpenContact} style={{ background:"none",border:"none",color:"rgba(240,236,228,.6)",fontFamily:V.ffU,fontSize:13,padding:"7px 13px",cursor:"pointer",borderRadius:8 }}>{isEs?"Contacto":"Contact"}</button>
-          <button onClick={()=>setLang(isEs?"en":"es")} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#fff",fontSize:12,fontWeight:700,padding:"7px 12px",cursor:"pointer",fontFamily:V.ffU }}>
-            {isEs?"🌐 EN":"🌐 ES"}
-          </button>
-          {user?<HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>:<button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)" }}>{isEs?"Entrar":"Sign in"}</button>}
-        </div>
-
         <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-          <button onClick={()=>setLang(isEs?"en":"es")} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,padding:"7px 12px",cursor:"pointer",fontFamily:V.ffU,flexShrink:0 }}>
-            {isEs?"🌐 EN":"🌐 ES"}
-          </button>
-          {user?<HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>:<button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:12,fontWeight:700,padding:"8px 14px",cursor:"pointer",whiteSpace:"nowrap" }}>{isEs?"Entrar":"Sign in"}</button>}
+          {user && <HoverMenu modules={MODS} onSelect={go} isEs={isEs}/>}
+          {user
+            ? <UserNavMenu user={user} jades={jades} onBuyJades={onBuyJades} onSignOut={onSignOut} onOpenAdmin={onOpenAdmin} isEs={isEs} />
+            : <button onClick={onOpenAuth} style={{ background:`linear-gradient(135deg,${V.fire},${V.gold})`,border:"none",borderRadius:10,color:"#000",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 20px",cursor:"pointer",boxShadow:"0 0 24px rgba(255,90,0,.3)",whiteSpace:"nowrap" }}>{isEs?"Entrar":"Sign in"}</button>
+          }
         </div>
       </nav>
 
-      {/* HERO */}
-      <section id="hero" style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", padding: "132px 32px 60px", overflow: "hidden" }}>
-        <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,rgba(8,10,14,.88) 0%,rgba(8,10,14,.35) 55%,rgba(8,10,14,.92) 100%)" }} />
-          <video src="/gallery/hero-bg.mp4" autoPlay muted loop playsInline
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.6, filter: "saturate(1.2) contrast(1.05)" }} />
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg,rgba(8,10,14,.88) 0%,rgba(8,10,14,.35) 55%,rgba(8,10,14,.92) 100%)" }} />
-          <div style={{ position: "absolute", width: 700, height: 700, borderRadius: "50%", filter: "blur(140px)", background: "rgba(255,90,0,.1)", top: -200, left: -150 }} />
-          <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", filter: "blur(130px)", background: "rgba(255,179,0,.07)", bottom: -100, right: -100 }} />
+      {/* HERO — 4 plantillas épicas en video, full screen */}
+      <section id="hero" style={{ position: "relative", minHeight: "100vh", paddingTop: 104, paddingBottom: 20, display: "flex", flexDirection: "column" }}>
+        <div style={{ textAlign: "center", padding: "16px 20px 18px" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 14 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
+            🎁 {isEs ? "1 video gratis al registrarte — sin tarjeta" : "1 free video on signup — no card needed"}
+          </div>
+          <h1 className="lo-hero-h1" style={{ fontFamily: V.ffD, fontSize: "clamp(34px,6vw,64px)", letterSpacing: 2, lineHeight: 0.95, color: "#fff" }}>
+            {isEs ? "CONVIÉRTETE EN EL " : "BECOME THE "}<span className="lo-shimmer">{isEs ? "PROTAGONISTA" : "PROTAGONIST"}</span>
+          </h1>
         </div>
-        <div className="lo-hero-grid" style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "1fr 480px", gap: 0, maxWidth: "100%", margin: "0 auto", width: "100%", alignItems: "stretch", minHeight: "calc(100vh - 96px)" }}>
-          <div className="lo-hero-left" style={{ position: "relative", overflow: "hidden" }}>
-            <video src="/gallery/free-template-1.mp4" autoPlay muted loop playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(8,10,14,.2) 0%, rgba(8,10,14,.85) 100%)" }} />
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(8,10,14,.5) 0%, transparent 30%, rgba(8,10,14,.6) 100%)" }} />
-            <div className="lo-hero-copy" style={{ position: "relative", zIndex: 2, padding: "60px 48px", display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.3)", borderRadius: 100, padding: "6px 16px", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 18 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: V.fire, animation: "blink 1.5s infinite" }} />
-                {isEs ? "La plataforma visual IA de LATAM" : "LATAM's AI visual production platform"}
-              </div>
-              <h1 className="lo-hero-h1" style={{ fontFamily: V.ffD, fontSize: "clamp(52px,8vw,104px)", lineHeight: 0.92, letterSpacing: 2, color: "#fff" }}>
-                <span style={{ display: "block" }}>{isEs ? "CONVIÉRTETE EN EL" : "BECOME THE"}</span>
-                <span className="lo-shimmer" style={{ display: "block" }}>{isEs ? "PROTAGONISTA" : "PROTAGONIST"}</span>
-                <span style={{ display: "block" }}>{isEs ? "DE TU PELÍCULA" : "OF YOUR MOVIE"}</span>
-              </h1>
-              <p style={{ marginTop: 16, fontSize: 17, lineHeight: 1.7, color: "rgba(240,236,228,.75)", maxWidth: 500 }}>
-                {isEs ? "Genera escenas de Hollywood, videos musicales, comerciales y contenido viral con IA — con tu cara, tu historia, tu marca." : "Generate Hollywood scenes, music videos, commercials and viral content with AI — your face, your story, your brand."}
-              </p>
-              {/* Badge video gratis */}
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,90,0,.12)", border: "1px solid rgba(255,90,0,.35)", borderRadius: 100, padding: "8px 18px", marginTop: 20, alignSelf: "flex-start" }}>
-                <span style={{ fontSize: 16 }}>🎁</span>
-                <span style={{ fontFamily: V.ffU, fontSize: 13, fontWeight: 800, color: V.fire }}>
-                  {isEs ? "1 VIDEO GRATIS al registrarte — sin tarjeta" : "1 FREE VIDEO on signup — no card needed"}
-                </span>
-              </div>
-              <div className="lo-hero-ctas" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 20 }}>
-                <button onClick={user ? () => go("templates") : onStartDemo} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 14, color: "#000", fontFamily: V.ffU, fontSize: 16, fontWeight: 800, padding: "16px 36px", cursor: "pointer", boxShadow: `0 0 50px rgba(255,90,0,.35)`, transition: "all .25s" }}>
-                  {isEs ? "🎬 Generar mi video gratis →" : "🎬 Generate my free video →"}
-                </button>
-                <button onClick={() => scrollTo("galeria")} style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 14, color: "#fff", fontSize: 15, padding: "16px 26px", cursor: "pointer", fontFamily: V.ffB }}>
-                  {isEs ? "Ver ejemplos reales ↓" : "See real examples ↓"}
+
+        <div className="lo-epic-grid" style={{ flex: 1, padding: "0 3px 3px", minHeight: 420 }}>
+          {HERO_TEMPLATES.map(t => (
+            <div key={t.id} className="lo-epic-card">
+              <video src={t.video} autoPlay muted loop playsInline className="lo-epic-video" />
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(8,10,14,.92) 0%,rgba(8,10,14,.1) 45%,rgba(8,10,14,.5) 100%)" }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "18px 18px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: V.ffU, fontSize: 15, fontWeight: 800, color: "#fff", textShadow: "0 2px 10px rgba(0,0,0,.7)" }}>{t.label}</span>
+                <button onClick={() => user ? go("templates") : onStartDemo()} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 10, color: "#000", fontFamily: V.ffU, fontSize: 12, fontWeight: 800, padding: "9px 16px", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 0 20px rgba(255,90,0,.35)" }}>
+                  {isEs ? "Crear con mi cara →" : "Create with my face →"}
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* HERO RIGHT — card usuario */}
-          <div className="lo-hero-right" style={{ background: "rgba(6,7,12,.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 32px", position: "relative" }}>
-            <div style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", filter: "blur(80px)", background: "rgba(255,90,0,.08)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
-            <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
-              {user ? (
-                <div style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.2)", borderRadius: 20, padding: 24, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                    <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${V.fire},${V.gold})`, display: "grid", placeItems: "center", fontFamily: V.ffU, fontSize: 15, fontWeight: 700, color: "#000", flexShrink: 0 }}>{(user?.email?.[0] || "U").toUpperCase()}</div>
-                    <div>
-                      <div style={{ fontSize: 12, color: "#fff", fontWeight: 600, wordBreak: "break-all" }}>{user?.email}</div>
-                      <div style={{ fontSize: 10, color: V.fire, letterSpacing: 1 }}>{isEs ? "Creador activo" : "Active creator"}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,179,0,.06)", border: "1px solid rgba(255,179,0,.15)", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontFamily: V.ffD, fontSize: 28, color: V.gold, letterSpacing: 2, lineHeight: 1 }}>{jades}</div>
-                      <div style={{ fontSize: 11, color: V.muted }}>Jades</div>
-                    </div>
-                    <button onClick={onBuyJades} style={{ marginLeft: "auto", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 8, color: "#000", fontFamily: V.ffU, fontSize: 12, fontWeight: 700, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>+ {isEs ? "Comprar" : "Buy"}</button>
-                  </div>
-                  <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: V.muted, marginBottom: 8 }}>{isEs ? "Mis módulos" : "My modules"}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
-                    {MODS.map(m => (
-                      <button key={m.key} onClick={() => !m.comingSoon && go(m.key)}
-                        style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 8, padding: "8px 10px", cursor: m.comingSoon ? "default" : "pointer", color: m.key === "templates" ? V.fire : "rgba(240,236,228,.6)", fontFamily: V.ffU, fontSize: 11, transition: "all .15s", textAlign: "left", fontWeight: m.key === "templates" ? 700 : 400, opacity: m.comingSoon ? 0.5 : 1 }}
-                        onMouseEnter={e => { if (!m.comingSoon) { e.currentTarget.style.background = "rgba(255,90,0,.1)"; e.currentTarget.style.borderColor = "rgba(255,90,0,.2)"; e.currentTarget.style.color = V.gold; } }}
-                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.borderColor = m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"; e.currentTarget.style.color = m.key === "templates" ? V.fire : "rgba(240,236,228,.6)"; }}>
-                        <span style={{ fontSize: 14 }}>{m.icon}</span>{m.label}{m.comingSoon ? " 🚧" : ""}
-                      </button>
-                    ))}
-                  </div>
-
-                  {onOpenAdmin && (
-                    <button onClick={onOpenAdmin} style={{ width:"100%",marginBottom:8,background:"rgba(255,90,0,.08)",border:"1px solid rgba(255,90,0,.25)",borderRadius:8,color:"#ff5a00",fontFamily:V.ffU,fontSize:12,fontWeight:700,padding:"9px",cursor:"pointer",transition:"all .2s" }}
-                      onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,90,0,.15)"; e.currentTarget.style.borderColor="rgba(255,90,0,.5)"; }}
-                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,90,0,.08)"; e.currentTarget.style.borderColor="rgba(255,90,0,.25)"; }}>
-                      🛠️ Admin Panel
-                    </button>
-                  )}
-
-                  <button onClick={onSignOut} style={{ width: "100%", background: "none", border: "1px solid rgba(255,255,255,.08)", borderRadius: 8, color: V.muted, fontFamily: V.ffU, fontSize: 12, padding: 9, cursor: "pointer" }}>{isEs ? "Cerrar sesión" : "Sign out"}</button>
-                </div>
-              ) : (
-                <div className="lo-demo-box" style={{ background: "rgba(12,14,22,.98)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 20, padding: 28, backdropFilter: "blur(40px)", boxShadow: "0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04), 0 0 80px rgba(255,90,0,.08)", animation: "floatUp .8s .2s cubic-bezier(.22,1,.36,1) both" }}>
-                  <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 4 }}>{isEs ? "Inicio rápido" : "Quick start"}</div>
-                  <div style={{ fontFamily: V.ffU, fontSize: 18, fontWeight: 700, color: "#fff", marginBottom: 10, lineHeight: 1.3 }}>{isEs ? "1 video gratis al registrarte" : "1 free video on signup"}</div>
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,90,0,.1)", border: "1px solid rgba(255,90,0,.25)", borderRadius: 100, padding: "4px 12px", fontSize: 11, color: V.fire, fontWeight: 700, marginBottom: 14 }}>
-                    🎁 {isEs ? "Sin tarjeta · 5 segundos · Tu rostro" : "No card · 5 seconds · Your face"}
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 12 }}>
-                    {MODS.slice(0, 6).map(m => (
-                      <div key={m.key} onClick={onStartDemo} style={{ display: "flex", alignItems: "center", gap: 6, background: m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)", border: `1px solid ${m.key === "templates" ? "rgba(255,90,0,.3)" : "rgba(255,255,255,.07)"}`, borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontSize: 11, color: m.key === "templates" ? V.fire : "rgba(240,236,228,.5)", transition: "all .15s", fontWeight: m.key === "templates" ? 700 : 400 }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,90,0,.08)"; e.currentTarget.style.color = V.gold; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = m.key === "templates" ? "rgba(255,90,0,.1)" : "rgba(255,255,255,.04)"; e.currentTarget.style.color = m.key === "templates" ? V.fire : "rgba(240,236,228,.5)"; }}>
-                        {m.icon} {m.label}
-                      </div>
-                    ))}
-                  </div>
-                  <button onClick={onStartDemo} style={{ width: "100%", background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 11, color: "#000", fontFamily: V.ffU, fontSize: 15, fontWeight: 800, padding: 14, cursor: "pointer", boxShadow: "0 0 30px rgba(255,90,0,.3)" }}>
-                    {isEs ? "🎁 Registrarme — 1 video gratis →" : "🎁 Sign up — 1 free video →"}
-                  </button>
-                  <div style={{ fontSize: 11, color: V.muted, textAlign: "center", marginTop: 8 }}>{isEs ? "Sin tarjeta · Sin suscripción" : "No card · No subscription"}</div>
-                </div>
-              )}
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* TRUST BAR */}
-      <div className="lo-trust-grid" style={{ borderTop: `1px solid ${V.border2}`, borderBottom: `1px solid ${V.border2}`, background: V.bg2, display: "grid", gridTemplateColumns: "repeat(4,1fr)" }}>
+      {/* SOCIAL PROOF COMPACTO */}
+      <div style={{ borderTop: `1px solid ${V.border2}`, borderBottom: `1px solid ${V.border2}`, background: V.bg2, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "center", gap: 28, flexWrap: "wrap" }}>
         {[
-          { n: <Ctr end={4127} suffix="+" />, l: isEs ? "Cuentas alcanzadas" : "Accounts reached" },
-          { n: "< 3s",  l: isEs ? "Tiempo de generación" : "Generation time" },
-          { n: "9+",    l: isEs ? "Módulos de producción" : "Production modules" },
-          { n: "100%",  l: isEs ? "Hecho en Guatemala 🇬🇹" : "Made in Guatemala 🇬🇹" },
-        ].map((item, i) => (
-          <div key={i} style={{ padding: "32px 24px", textAlign: "center", borderRight: i < 3 ? `1px solid ${V.border2}` : "none" }}>
-            <span style={{ fontFamily: V.ffD, fontSize: 48, letterSpacing: 2, display: "block", background: `linear-gradient(135deg,${V.fire},${V.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", lineHeight: 1, marginBottom: 6 }}>{item.n}</span>
-            <div style={{ fontSize: 11, color: V.muted, letterSpacing: 1.5 }}>{item.l}</div>
+          { icon: "👁️", t: "2.1M", l: isEs ? "vistas generadas" : "views generated" },
+          { icon: "🇬🇹", t: isEs ? "Guatemala" : "Guatemala", l: isEs ? "Hecho en LATAM" : "Made in LATAM" },
+          { icon: "⚡", t: "Seedance 2.0", l: isEs ? "Motor de IA" : "AI engine" },
+        ].map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{it.icon}</span>
+            <span style={{ fontFamily: V.ffU, fontSize: 14, fontWeight: 800, color: "#fff" }}>{it.t}</span>
+            <span style={{ fontSize: 11, color: V.muted }}>{it.l}</span>
           </div>
         ))}
       </div>
+
+      {/* MAGIC PROMPT GENERATOR — simplificado, visible sin scroll profundo */}
+      <section style={{ padding: "40px 24px", maxWidth: 760, margin: "0 auto", textAlign: "center" }}>
+        <span style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: V.fire, fontWeight: 700, marginBottom: 8, display: "block" }}>
+          ✨ Magic Prompt Generator
+        </span>
+        <h2 style={{ fontFamily: V.ffD, fontSize: "clamp(26px,4.5vw,44px)", letterSpacing: 1.5, color: "#fff", marginBottom: 10, lineHeight: 1 }}>
+          {isEs ? "ESCRIBE TU IDEA Y GENERA" : "WRITE YOUR IDEA AND GENERATE"}
+        </h2>
+        <p style={{ fontSize: 14, color: V.muted, marginBottom: 22, lineHeight: 1.6 }}>
+          {isEs ? "La IA convierte tu idea en una escena cinematográfica lista para generar." : "AI turns your idea into a ready-to-generate cinematic scene."}
+        </p>
+        <div className="lo-quickgen-row" style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <input
+            value={heroIdea}
+            onChange={e => setHeroIdea(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleQuickGenerate(); }}
+            placeholder={isEs ? "ej: un guerrero vikingo en una tormenta de nieve..." : "e.g: a viking warrior in a snowstorm..."}
+            style={{ flex: 1, background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, color: "#fff", padding: "14px 18px", fontSize: 14, outline: "none", fontFamily: V.ffB }}
+          />
+          <button onClick={handleQuickGenerate} style={{ background: `linear-gradient(135deg,${V.fire},${V.gold})`, border: "none", borderRadius: 12, color: "#000", fontFamily: V.ffU, fontSize: 14, fontWeight: 800, padding: "14px 26px", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 0 24px rgba(255,90,0,.3)" }}>
+            ✨ {isEs ? "Generar" : "Generate"}
+          </button>
+        </div>
+
+        <button onClick={() => setShowAdvancedTeaser(v => !v)} style={{ background: "none", border: "none", color: V.muted, fontSize: 12, cursor: "pointer", fontFamily: V.ffB, textDecoration: "underline" }}>
+          {showAdvancedTeaser ? (isEs ? "▲ Ocultar opciones avanzadas" : "▲ Hide advanced options") : (isEs ? "▼ Opciones avanzadas" : "▼ Advanced options")}
+        </button>
+
+        {showAdvancedTeaser && (
+          <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            {[
+              { icon: "🥊", l: isEs ? "Pelea" : "Fight" },
+              { icon: "🎭", l: "Drama" },
+              { icon: "🌅", l: isEs ? "Épico" : "Epic" },
+              { icon: "🕺", l: "TikTok Trend" },
+            ].map((p, i) => (
+              <button key={i} onClick={handleQuickGenerate} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, color: "rgba(240,236,228,.7)", fontSize: 12, padding: "8px 14px", cursor: "pointer", fontFamily: V.ffB }}>
+                {p.icon} {p.l}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* PLANTILLAS ÉPICAS */}
       <section style={{ padding: "60px 32px 0", maxWidth: 1280, margin: "0 auto" }}>
