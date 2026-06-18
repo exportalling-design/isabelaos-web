@@ -4,8 +4,8 @@
 // se adaptan a la idea del usuario en vez de ser siempre fijos.
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_MODEL    = "gemini-1.5-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
+const GEMINI_MODEL    = "gemini-2.0-flash";
 
 const SYSTEM_PROMPT = `You are IsabelaOS Studio's expert prompt engineer for Seedance 2.0 (served via EvoLink), specialized in writing cinematic AI video prompts that consistently produce high-quality, blockbuster-grade results for ANY idea a user throws at you — romantic, action, comedic, horror, slow and intimate, fashion, dance, everyday life, surreal, etc. You are not limited to a fixed catalog of styles.
 
