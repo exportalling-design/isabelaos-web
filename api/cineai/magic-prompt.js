@@ -4,7 +4,7 @@
 // se adaptan a la idea del usuario en vez de ser siempre fijos.
 import { getUserIdFromAuthHeader } from "../../src/lib/getUserIdFromAuth.js";
 
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_MODEL    = "gemini-2.0-flash";
 
 const SYSTEM_PROMPT = `You are IsabelaOS Studio's expert prompt engineer for Seedance 2.0 (served via EvoLink), specialized in writing cinematic AI video prompts that consistently produce high-quality, blockbuster-grade results for ANY idea a user throws at you — romantic, action, comedic, horror, slow and intimate, fashion, dance, everyday life, surreal, etc. You are not limited to a fixed catalog of styles.
@@ -79,7 +79,7 @@ RULES FOR EACH PROMPT:
 - NEVER include celebrity names, brand names, or copyrighted characters.
 - Stay faithful to the user's original idea — adapt the STYLE, mood, intensity, camera and lighting language to fit; never twist or replace the core concept the user asked for.
 
-OUTPUT FORMAT — return STRICT JSON only. No markdown, no code fences, no explanation, nothing before or after the JSON. "style" is a short lowercase English slug derived from the chosen style (e.g. "romantic", "epic_action", "noir_mystery"), "label" is the human-readable name shown to the user (in Spanish or bilingual, e.g. "Romántico", "Épico Acción"):
+OUTPUT FORMAT — respond with VALID JSON ONLY. No markdown, no code fences, no backticks, no explanation, nothing before or after the JSON — your entire response must be parseable directly by JSON.parse(). "style" is a short lowercase English slug derived from the chosen style (e.g. "romantic", "epic_action", "noir_mystery"), "label" is the human-readable name shown to the user (in Spanish or bilingual, e.g. "Romántico", "Épico Acción"):
 {
   "prompts": [
     { "style": "...", "label": "...", "prompt": "..." },
@@ -88,14 +88,12 @@ OUTPUT FORMAT — return STRICT JSON only. No markdown, no code fences, no expla
   ]
 }`;
 
-function extractJsonObject(text) {
-  const raw = String(text || "").trim();
+function safeParseJSON(text) {
+  const raw = String(text || "").replace(/```json|```/g, "").trim();
+  if (!raw) return null;
   try { return JSON.parse(raw); } catch {}
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(raw.slice(start, end + 1)); } catch {}
-  }
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch {} }
   return null;
 }
 
@@ -124,7 +122,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [{ role: "user", parts: [{ text: `Idea del usuario (en español): "${idea}"` }] }],
-        generationConfig: { temperature: 0.85, responseMimeType: "application/json" },
+        generationConfig: { temperature: 0.85 },
       }),
     });
 
@@ -136,7 +134,7 @@ export default async function handler(req, res) {
 
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const parsed = extractJsonObject(text);
+    const parsed = safeParseJSON(text);
     const prompts = Array.isArray(parsed?.prompts) ? parsed.prompts.slice(0, 3) : null;
 
     if (!prompts || prompts.length !== 3) {
