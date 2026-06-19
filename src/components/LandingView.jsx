@@ -61,11 +61,10 @@ function UserNavMenu({ user, jades, modules, onSelectModule, onBuyJades, onSignO
   const [open, setOpen] = useState(false);
   const item = { display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", color: "rgba(240,236,228,0.8)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "9px 10px", cursor: "pointer", borderRadius: 8, transition: "all .15s", textAlign: "left" };
   const sectionLabel = { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "rgba(240,236,228,0.35)", padding: "8px 10px 4px" };
-  const initials = (user?.email || "U").slice(0, 2).toUpperCase();
   return (
     <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "6px 12px 6px 6px", cursor: "pointer", color: "#fff", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
-        <span style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#ff5a00,#ffb300)", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, color: "#000", flexShrink: 0 }}>{initials}</span>
+        <span style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#ff5a00,#ffb300)", display: "grid", placeItems: "center", fontSize: 13, flexShrink: 0 }}>👤</span>
         <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
       </button>
       <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 240, maxHeight: "70vh", overflowY: "auto", backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
@@ -217,8 +216,8 @@ export default function LandingView({
     @keyframes seedSlide{from{left:-100%}to{left:200%}}
     @keyframes floatUp{from{opacity:0;transform:translateY(40px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     .lo-shimmer{background:linear-gradient(90deg,#ff5a00 0%,#ffb300 35%,#fff 50%,#ffb300 65%,#ff5a00 100%);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:shine 3s linear infinite;filter:drop-shadow(0 0 20px rgba(255,90,0,.3));}
-    .lo-epic-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:3px;height:60vh;max-height:520px;}
-    .lo-epic-card{position:relative;overflow:hidden;border-radius:14px;}
+    .lo-epic-grid{display:grid;grid-auto-flow:column;grid-auto-columns:220px;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding-bottom:6px;}
+    .lo-epic-card{position:relative;overflow:hidden;border-radius:14px;aspect-ratio:9/16;scroll-snap-align:start;flex-shrink:0;}
     .lo-epic-video{width:100%;height:100%;object-fit:cover;display:block;}
     @media(max-width:900px){
       .lo-hero-h1{font-size:clamp(36px,9vw,60px)!important;}
@@ -232,8 +231,7 @@ export default function LandingView({
       .lo-footer-grid{grid-template-columns:1fr 1fr!important;}
       .lo-final-box{margin:0 16px 60px!important;padding:48px 24px!important;}
       .lo-musical-grid{grid-template-columns:1fr!important;}
-      .lo-epic-grid{grid-auto-flow:column;grid-template-columns:repeat(4,86vw)!important;grid-template-rows:1fr!important;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:45vh!important;max-height:380px!important;}
-      .lo-epic-card{scroll-snap-align:center;}
+      .lo-epic-grid{grid-auto-columns:58vw!important;}
       .lo-quickgen-row{flex-direction:column!important;}
     }
     @media(max-width:600px){
