@@ -126,6 +126,17 @@ export default async function handler(req, res) {
     created_at:  new Date().toISOString(),
   });
 
+  // ── También registrar en video_jobs — para que la biblioteca y el
+  //    tracker global de jobs sepan que hay un video en curso, igual
+  //    que CineAI (api/cineai/generate.js) ─────────────────────────────────
+  const jobId = globalThis.crypto?.randomUUID?.() || (Date.now() + "-" + Math.random());
+  await supabaseAdmin.from("video_jobs").insert({
+    id: jobId, user_id: userId, status: "IN_PROGRESS", mode: "free-template",
+    provider: "evolink_seedance", provider_request_id: taskId,
+    provider_status: "pending", started_at: new Date().toISOString(),
+    payload: { template_id: templateId },
+  }).then(({ error }) => { if (error) console.error("[free-template/submit] video_jobs insert failed:", error.message); });
+
   return res.status(200).json({ ok: true, taskId });
 }
 

@@ -226,7 +226,7 @@ function TemplateCard({ tmpl, lang, onClick, usedFree }) {
 }
 
 // ── Generate View ─────────────────────────────────────────────────────────────
-function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFreeId, onOpenBuy }) {
+function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFreeId, onOpenBuy, onJobSubmitted }) {
   const isEs    = lang === "es";
   const isFree  = tmpl.free;
   const jadeCost = tmpl.jadeCost || 30;
@@ -260,6 +260,7 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || (isEs ? "Error al enviar" : "Error submitting"));
         setTaskId(json.taskId);
+        onJobSubmitted?.(json.taskId, "free-template");
       } else {
         // Subir imagen primero
         const upRes  = await fetch("/api/templates/upload-image", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ imageBase64: faceB64, mimeType: faceFile.type, label: "face1" }) });
@@ -504,7 +505,7 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
 }
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
-export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJadesUpdate }) {
+export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJadesUpdate, onJobSubmitted }) {
   const isEs = lang === "es";
   const [view,         setView]         = useState("gallery");
   const [selectedId,   setSelectedId]   = useState(null);
@@ -550,7 +551,7 @@ export default function UnifiedTemplatesPanel({ lang = "es", userJades = 0, onJa
         tmplLabel={tmpl?.label?.[lang]}
         lang={lang}
       />
-      <GenerateView tmpl={tmpl} lang={lang} userJades={userJades} onJadesUpdate={onJadesUpdate} onBack={() => setView("gallery")} setUsedFreeId={setUsedFreeId} onOpenBuy={() => setPurchaseOpen(true)} />
+      <GenerateView tmpl={tmpl} lang={lang} userJades={userJades} onJadesUpdate={onJadesUpdate} onBack={() => setView("gallery")} setUsedFreeId={setUsedFreeId} onOpenBuy={() => setPurchaseOpen(true)} onJobSubmitted={onJobSubmitted} />
     </>
   );
 

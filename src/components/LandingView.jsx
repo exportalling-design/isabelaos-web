@@ -57,15 +57,20 @@ function HoverMenu({ modules, onSelect, isEs }) {
     </div>
   );
 }
-function UserNavMenu({ user, jades, modules, onSelectModule, onBuyJades, onSignOut, onOpenAdmin, t }) {
+function UserNavMenu({ user, jades, modules, onSelectModule, onBuyJades, onSignOut, onOpenAdmin, t, newVideosCount = 0 }) {
   const [open, setOpen] = useState(false);
   const item = { display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", color: "rgba(240,236,228,0.8)", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, padding: "9px 10px", cursor: "pointer", borderRadius: 8, transition: "all .15s", textAlign: "left" };
   const sectionLabel = { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "rgba(240,236,228,0.35)", padding: "8px 10px 4px" };
   return (
     <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "6px 12px 6px 6px", cursor: "pointer", color: "#fff", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
+      <button style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, background: "rgba(255,179,0,0.08)", border: "1px solid rgba(255,179,0,0.25)", borderRadius: 9, padding: "6px 12px 6px 6px", cursor: "pointer", color: "#fff", fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 700 }}>
         <span style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#ff5a00,#ffb300)", display: "grid", placeItems: "center", fontSize: 13, flexShrink: 0 }}>👤</span>
         <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+        {newVideosCount > 0 && (
+          <span style={{ position: "absolute", top: -5, right: -5, width: 16, height: 16, borderRadius: "50%", background: "#ff3b30", color: "#fff", fontSize: 9, fontWeight: 800, display: "grid", placeItems: "center", border: "2px solid #0a0c10" }}>
+            {newVideosCount > 9 ? "9+" : newVideosCount}
+          </span>
+        )}
       </button>
       <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(10,12,18,0.98)", border: "1px solid rgba(255,90,0,0.15)", borderRadius: 14, padding: 8, minWidth: 240, maxHeight: "70vh", overflowY: "auto", backdropFilter: "blur(30px)", opacity: open ? 1 : 0, transform: open ? "none" : "translateY(-10px) scale(0.97)", pointerEvents: open ? "all" : "none", transition: "all .2s", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", zIndex: 100 }}>
         <div style={{ fontSize: 11, color: "rgba(240,236,228,0.45)", padding: "4px 10px 8px", wordBreak: "break-all" }}>{user?.email}</div>
@@ -79,10 +84,15 @@ function UserNavMenu({ user, jades, modules, onSelectModule, onBuyJades, onSignO
 
         <div style={sectionLabel}>{t.modules}</div>
         {modules.map(m => (
-          <button key={m.key} onClick={() => !m.comingSoon && onSelectModule(m.key)} disabled={m.comingSoon} style={{ ...item, opacity: m.comingSoon ? 0.4 : 1, cursor: m.comingSoon ? "default" : "pointer" }}
+          <button key={m.key} onClick={() => !m.comingSoon && onSelectModule(m.key)} disabled={m.comingSoon} style={{ ...item, opacity: m.comingSoon ? 0.4 : 1, cursor: m.comingSoon ? "default" : "pointer", justifyContent: "space-between" }}
             onMouseEnter={e => { if (!m.comingSoon) { e.currentTarget.style.background = "rgba(255,90,0,0.1)"; e.currentTarget.style.color = "#ffb300"; } }}
             onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "rgba(240,236,228,0.8)"; }}>
-            {m.icon} {m.label}
+            <span>{m.icon} {m.label}</span>
+            {m.key === "library" && newVideosCount > 0 && (
+              <span style={{ background: "#ff3b30", color: "#fff", fontSize: 10, fontWeight: 800, borderRadius: 100, padding: "1px 7px", flexShrink: 0 }}>
+                {newVideosCount > 9 ? "9+" : newVideosCount}
+              </span>
+            )}
           </button>
         ))}
 
@@ -330,7 +340,7 @@ export default function LandingView({
   user, jades, onOpenAuth, onStartDemo, onOpenContact,
   onOpenAbout, onSignOut, onBuyJades, lang, setLang,
   activeModule, setActiveModule, children,
-  onOpenAdmin,
+  onOpenAdmin, newVideosCount = 0,
 }) {
   const isEs = lang === "es";
   const t = STRINGS[isEs ? "es" : "en"];
@@ -496,7 +506,7 @@ export default function LandingView({
             {isEs ? "ES" : "EN"}
           </button>
           {user
-            ? <UserNavMenu user={user} jades={jades} modules={MODS} onSelectModule={go} onBuyJades={onBuyJades} onSignOut={onSignOut} onOpenAdmin={onOpenAdmin} t={t.nav} />
+            ? <UserNavMenu user={user} jades={jades} modules={MODS} onSelectModule={go} onBuyJades={onBuyJades} onSignOut={onSignOut} onOpenAdmin={onOpenAdmin} t={t.nav} newVideosCount={newVideosCount} />
             : (
               <>
                 <button onClick={onOpenAuth} style={{ background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.15)",borderRadius:10,color:"#fff",fontFamily:V.ffU,fontSize:13,fontWeight:700,padding:"9px 16px",cursor:"pointer",whiteSpace:"nowrap" }}>{t.nav.signIn}</button>

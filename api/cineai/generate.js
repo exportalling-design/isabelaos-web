@@ -111,10 +111,16 @@ export default async function handler(req, res) {
 
       if (isContinuation && videoList.length > 0) {
         mode = "continuation";
-        finalPrompt = "Use image 1 as the exact first frame. Use video 1 as full reference to maintain atmosphere, lighting, camera movement and style. Continue the scene as an uninterrupted extension. " + finalPrompt;
+        const extraRefs = imageList.length > 1
+          ? " Reference " + imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ") + " to maintain exact character identity, face and body consistency throughout the continuation."
+          : "";
+        finalPrompt = "Use image 1 as the exact first frame. Use video 1 as full reference to maintain atmosphere, lighting, camera movement and style." + extraRefs + " Continue the scene as an uninterrupted extension. " + finalPrompt;
       } else if (isContinuation) {
         mode = "continuation_frame";
-        finalPrompt = "Continue this scene seamlessly from image 1 as the first frame. Same atmosphere, lighting and visual style. " + finalPrompt;
+        const extraRefs = imageList.length > 1
+          ? " Reference " + imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ") + " to maintain exact character identity, face and body consistency."
+          : "";
+        finalPrompt = "Continue this scene seamlessly from image 1 as the first frame." + extraRefs + " Same atmosphere, lighting and visual style. " + finalPrompt;
       } else if (animateExact) {
         mode = "animate";
         finalPrompt = "Animate image 1 with subtle realistic motion. STRICTLY preserve the original background, environment and all characters. Only add natural movement to existing subjects. " + finalPrompt;

@@ -184,6 +184,70 @@ export default function App() {
   const [showWelcome,  setShowWelcome]  = useState(false);
   const prevJades = useRef(0);
 
+  // ── Tracker global de jobs en curso (CineAI / free template) ──────────────
+  // Vive en App.jsx (que nunca se desmonta al navegar entre módulos) para que
+  // el polling siga corriendo aunque el usuario salga del panel donde empezó
+  // la generación — así el video no se pierde y siempre llega a la biblioteca.
+  const [pendingJobs,    setPendingJobs]    = useState([]);
+  const [newVideosCount, setNewVideosCount] = useState(0);
+
+  const pendingKey = user?.id ? `isabelaos_pending_jobs_${user.id}` : null;
+  const newVidKey  = user?.id ? `isabelaos_new_videos_${user.id}`   : null;
+
+  useEffect(() => {
+    if (!pendingKey) { setPendingJobs([]); setNewVideosCount(0); return; }
+    try { setPendingJobs(JSON.parse(localStorage.getItem(pendingKey) || "[]")); } catch { setPendingJobs([]); }
+    try { setNewVideosCount(Number(localStorage.getItem(newVidKey)) || 0); } catch { setNewVideosCount(0); }
+  }, [pendingKey, newVidKey]);
+
+  useEffect(() => {
+    if (!pendingKey) return;
+    try { localStorage.setItem(pendingKey, JSON.stringify(pendingJobs)); } catch {}
+  }, [pendingJobs, pendingKey]);
+
+  useEffect(() => {
+    if (!newVidKey) return;
+    try { localStorage.setItem(newVidKey, String(newVideosCount)); } catch {}
+  }, [newVideosCount, newVidKey]);
+
+  const registerPendingJob = useCallback((taskId, kind) => {
+    if (!taskId) return;
+    setPendingJobs(prev => prev.some(j => j.taskId === taskId) ? prev : [...prev, { taskId, kind, addedAt: Date.now() }]);
+  }, []);
+
+  const clearNewVideosBadge = useCallback(() => setNewVideosCount(0), []);
+
+  useEffect(() => {
+    if (!pendingJobs.length || !user?.id) return;
+    let cancelled = false;
+    const iv = setInterval(async () => {
+      const auth = await getAuthHeaders();
+      for (const job of pendingJobs) {
+        if (cancelled) return;
+        try {
+          const endpoint = job.kind === "cineai" ? "/api/cineai/poll-status" : "/api/free-template/poll";
+          const r = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...auth },
+            body: JSON.stringify({ taskId: job.taskId }),
+          });
+          const data = await r.json().catch(() => null);
+          if (data?.status === "completed" || data?.status === "succeed") {
+            setPendingJobs(prev => prev.filter(j => j.taskId !== job.taskId));
+            setNewVideosCount(c => c + 1);
+          } else if (data?.status === "failed" || data?.status === "error") {
+            setPendingJobs(prev => prev.filter(j => j.taskId !== job.taskId));
+          }
+        } catch {}
+      }
+    }, 8000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [pendingJobs, user?.id]);
+
+  useEffect(() => {
+    if (activeModule === "library") clearNewVideosBadge();
+  }, [activeModule, clearNewVideosBadge]);
+
   const isAdmin = user?.email === ADMIN_EMAIL;
 
   const path = window.location.pathname;
@@ -243,6 +307,7 @@ export default function App() {
             lang={lang}
             userJades={jades}
             onJadesUpdate={fetchJades}
+            onJobSubmitted={registerPendingJob}
           />
         );
       case "generator":   return <CreatorPanel isDemo={false} />;
@@ -265,7 +330,7 @@ export default function App() {
       case "montaje":     return <MontajeIAPanel userStatus={us} lang={lang} />;
       case "comercial":   return <ComercialPanel userStatus={us} lang={lang} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} lang={lang} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
-      case "cineai":      return <CineAIPanel lang={lang} />;
+      case "cineai":      return <CineAIPanel lang={lang} onJobSubmitted={registerPendingJob} />;
       default:            return null;
     }
   };
@@ -296,6 +361,7 @@ export default function App() {
         setLang={setLang}
         activeModule={activeModule}
         setActiveModule={setActiveModule}
+        newVideosCount={newVideosCount}
         onOpenAuth={() => setAuthOpen(true)}
         onStartDemo={() => user ? setActiveModule("templates") : setAuthOpen(true)}
         onOpenContact={() => setLandingPage("contact")}

@@ -64,6 +64,13 @@ REFERENCE EXAMPLES FROM ISABELAOS' BEST-PERFORMING PROMPTS (study the density, s
 - Épico: "Medium close-up shot of person standing heroically at cliff edge, city visible behind them at sunset, camera slowly pulls back revealing the epic landscape, golden hour light hitting their face, cinematic epic atmosphere"
 - Trend/Viral (TikTok): "Person doing a viral TikTok dance trend, high energy, professional studio lighting, smooth camera orbit, beat-synced fluid movement, vertical format"
 
+MULTI-CLIP SEQUENCES (only when the request explicitly says the user has reference photos AND wants a long/multi-clip scene):
+IsabelaOS Studio's CineAI "Continuar escena" feature lets a user chain several clips: the last frame of clip N becomes "image 1" of clip N+1, the full clip N becomes "video 1" of clip N+1 (for atmosphere/movement continuity), and the user's ORIGINAL reference photos (face/body) stay attached as "image 2", "image 3"... on every clip so identity never drifts.
+When the request tells you the user has reference photos and wants a long scene, write each of the 3 prompt variations as a NUMBERED CLIP SEQUENCE (2-3 clips per variation) instead of a single one-shot prompt. Format each clip clearly, e.g.:
+"Clip 1 (image 1 = reference photo): [subject+action+environment+camera+style for the opening beat]. Clip 2 (continues from Clip 1's final frame as image 1, image 2 = reference photo for identity): [next beat, same character and environment, logical continuation]. Clip 3 (continues from Clip 2's final frame as image 1, image 2 = reference photo for identity): [closing beat]."
+Each clip must still individually follow the Sujeto → Acción → Ambiente → Cámara → Estilo formula and stay internally coherent with the clips before and after it (same character appearance, same location unless a "Cut to" is narratively justified, consistent time of day/lighting progression). This gives the user a ready-made shot list to feed one clip at a time into "Continuar escena".
+If the request does NOT mention reference photos + long scene, ignore this section entirely and just write normal single prompts as usual.
+
 YOUR TASK:
 The user will give you an idea in SPANISH — it may be short, vague, romantic, funny, scary, intimate, action-packed, or just a few words about anything. Read the GENRE and EMOTIONAL TONE the idea already implies, then generate EXACTLY 3 ready-to-use Seedance 2.0 prompts that explore 3 distinct, well-fitting cinematic treatments of that SAME idea.
 
@@ -115,8 +122,15 @@ export default async function handler(req, res) {
   const idea = String(body.idea || "").trim().slice(0, 600);
   if (idea.length < 3) return res.status(400).json({ ok: false, error: "Escribe tu idea primero" });
 
+  const hasReferenceImages = !!body.hasReferenceImages;
+  const duration = Number(body.duration) || 0;
+  const wantsLongScene = hasReferenceImages && duration >= 15;
+
   try {
-    const fullPrompt = `${SYSTEM_PROMPT}\n\nIdea del usuario (en español): "${idea}"`;
+    const sequenceNote = wantsLongScene
+      ? `\n\nContext: the user has uploaded reference photos (face/body) and selected a ${duration}s duration, which signals they want a long, multi-clip scene to chain with "Continuar escena". Write each of the 3 prompts as a numbered clip sequence per the MULTI-CLIP SEQUENCES instructions above.`
+      : "";
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nIdea del usuario (en español): "${idea}"${sequenceNote}`;
 
     const response = await fetch(`${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
       method: "POST",

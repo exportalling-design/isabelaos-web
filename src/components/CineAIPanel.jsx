@@ -136,7 +136,7 @@ function getHowItWorks(isEs) { return [
   { icon: "💎", title: isEs ? "Costo en Jades" : "Jade cost", desc: "480p: 5s=11J · 10s=22J · 15s=33J · 720p: 5s=25J · 10s=49J · 15s=73J." },
 ]; }
 
-export default function CineAIPanel({ lang = "es" }) {
+export default function CineAIPanel({ lang = "es", onJobSubmitted }) {
   const isEs = lang !== "en";
   const MODES      = getModes(isEs);
   const PRESETS    = getPresets(isEs);
@@ -363,6 +363,8 @@ export default function CineAIPanel({ lang = "es" }) {
         bodyPayload = {
           prompt,
           imageUrl:       lastFrameUrl,
+          // image 1 = último frame (continuidad) · image 2, 3... = refs originales (rostro/cuerpo)
+          refImages:      refImages.filter(i => i.url).map(i => i.url),
           refVideoUrl:    previousVideoUrl,
           isContinuation: true,
           duration,
@@ -411,6 +413,7 @@ export default function CineAIPanel({ lang = "es" }) {
       }
 
       startPolling(pollId, prompt);
+      onJobSubmitted?.(pollId, "cineai");
     } catch (e) {
       setError(e.message);
       setGenerating(false);
@@ -535,7 +538,11 @@ export default function CineAIPanel({ lang = "es" }) {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ idea: magicIdea.trim() }),
+        body: JSON.stringify({
+          idea: magicIdea.trim(),
+          hasReferenceImages: refImages.length > 0,
+          duration,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || (isEs ? "Error generando prompts" : "Error generating prompts"));

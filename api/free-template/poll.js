@@ -93,6 +93,10 @@ export default async function handler(req, res) {
         .from("free_video_uses")
         .update({ status: "failed" })
         .eq("task_id", taskId);
+      await supabaseAdmin
+        .from("video_jobs")
+        .update({ status: "FAILED", provider_status: "failed", provider_error: errMsg })
+        .eq("provider_request_id", taskId);
       return res.status(200).json({ ok: true, status: "failed", error: errMsg });
     }
 
@@ -121,6 +125,15 @@ export default async function handler(req, res) {
       .from("free_video_uses")
       .update({ status: "completed", video_url: permanentUrl })
       .eq("task_id", taskId);
+
+    // ── 7b. Actualizar video_jobs — mismo patrón que cineai/poll-status.js ────
+    await supabaseAdmin
+      .from("video_jobs")
+      .update({
+        status: "COMPLETED", provider_status: "completed",
+        result_url: permanentUrl, video_url: permanentUrl, output_url: permanentUrl,
+      })
+      .eq("provider_request_id", taskId);
 
     return res.status(200).json({ ok: true, status: "completed", videoUrl: permanentUrl });
 
