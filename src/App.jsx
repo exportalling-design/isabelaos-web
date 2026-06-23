@@ -246,7 +246,7 @@ export default function App() {
           />
         );
       case "generator":   return <CreatorPanel isDemo={false} />;
-      case "avatars":     return <AvatarStudioPanel userStatus={us} />;
+      case "avatars":     return <AvatarStudioPanel userStatus={us} lang={lang} />;
       case "library":     return <LibraryView />;
       case "img2video":
         return (
@@ -262,10 +262,10 @@ export default function App() {
             </div>
           </div>
         );
-      case "montaje":     return <MontajeIAPanel userStatus={us} />;
-      case "comercial":   return <ComercialPanel userStatus={us} />;
-      case "photoshoot":  return <ProductPhotoshoot userJades={jades} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
-      case "cineai":      return <CineAIPanel />;
+      case "montaje":     return <MontajeIAPanel userStatus={us} lang={lang} />;
+      case "comercial":   return <ComercialPanel userStatus={us} lang={lang} />;
+      case "photoshoot":  return <ProductPhotoshoot userJades={jades} lang={lang} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
+      case "cineai":      return <CineAIPanel lang={lang} />;
       default:            return null;
     }
   };

@@ -27,7 +27,7 @@ function bytesLabel(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FaceGuideExample() {
+function FaceGuideExample({ isEs }) {
   return (
     <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/10 via-white/5 to-fuchsia-500/10 p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -36,10 +36,10 @@ function FaceGuideExample() {
         </div>
         <div>
           <div className="text-sm font-semibold text-white">
-            Ejemplo visual recomendado
+            {isEs ? "Ejemplo visual recomendado" : "Recommended visual example"}
           </div>
           <div className="text-[11px] text-neutral-300">
-            Usa una foto similar a esta para mejores resultados con el anchor
+            {isEs ? "Usa una foto similar a esta para mejores resultados con el anchor" : "Use a photo similar to this one for better results with the anchor"}
           </div>
         </div>
       </div>
@@ -49,12 +49,12 @@ function FaceGuideExample() {
           <div className="overflow-hidden rounded-2xl border border-cyan-300/25 bg-black/30 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
             <img
               src="/gallery/img17.png"
-              alt="Ejemplo foto anchor"
+              alt={isEs ? "Ejemplo foto anchor" : "Anchor photo example"}
               className="h-[260px] w-full object-cover"
             />
           </div>
           <div className="mt-2 text-center text-[11px] text-cyan-200">
-            Ejemplo correcto
+            {isEs ? "Ejemplo correcto" : "Correct example"}
           </div>
         </div>
 
@@ -62,63 +62,80 @@ function FaceGuideExample() {
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
-                Sí funciona mejor
+                {isEs ? "Sí funciona mejor" : "Works better"}
               </div>
               <ul className="mt-2 space-y-1.5 text-[12px] text-emerald-100">
-                <li>• Cara de frente</li>
-                <li>• Fondo blanco o neutro</li>
-                <li>• Buena luz sin sombras duras</li>
-                <li>• Rostro grande y centrado</li>
-                <li>• Expresión natural o ligera sonrisa</li>
+                {(isEs ? [
+                  "Cara de frente",
+                  "Fondo blanco o neutro",
+                  "Buena luz sin sombras duras",
+                  "Rostro grande y centrado",
+                  "Expresión natural o ligera sonrisa",
+                ] : [
+                  "Front-facing",
+                  "White or neutral background",
+                  "Good light without hard shadows",
+                  "Large, centered face",
+                  "Natural expression or light smile",
+                ]).map((t) => <li key={t}>• {t}</li>)}
               </ul>
             </div>
 
             <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-300">
-                Evítalo
+                {isEs ? "Evítalo" : "Avoid it"}
               </div>
               <ul className="mt-2 space-y-1.5 text-[12px] text-rose-100">
-                <li>• Selfies lejanas</li>
-                <li>• Fotos de cuerpo completo</li>
-                <li>• Lentes o manos tapando la cara</li>
-                <li>• Cabello cubriendo ojos o mejillas</li>
-                <li>• Fondos cargados o muy oscuros</li>
+                {(isEs ? [
+                  "Selfies lejanas",
+                  "Fotos de cuerpo completo",
+                  "Lentes o manos tapando la cara",
+                  "Cabello cubriendo ojos o mejillas",
+                  "Fondos cargados o muy oscuros",
+                ] : [
+                  "Distant selfies",
+                  "Full-body photos",
+                  "Glasses or hands covering the face",
+                  "Hair covering eyes or cheeks",
+                  "Busy or very dark backgrounds",
+                ]).map((t) => <li key={t}>• {t}</li>)}
               </ul>
             </div>
           </div>
 
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-300">
-              Tamaño ideal del archivo
+              {isEs ? "Tamaño ideal del archivo" : "Ideal file size"}
             </div>
 
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-center">
                 <div className="text-sm font-semibold text-white">512 × 512</div>
-                <div className="text-[11px] text-neutral-400">mínimo</div>
+                <div className="text-[11px] text-neutral-400">{isEs ? "mínimo" : "minimum"}</div>
               </div>
 
               <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/10 p-2 text-center">
                 <div className="text-sm font-semibold text-cyan-200">
                   768 × 768
                 </div>
-                <div className="text-[11px] text-cyan-100">recomendado</div>
+                <div className="text-[11px] text-cyan-100">{isEs ? "recomendado" : "recommended"}</div>
               </div>
 
               <div className="rounded-lg border border-white/10 bg-white/5 p-2 text-center">
                 <div className="text-sm font-semibold text-white">JPG / PNG</div>
                 <div className="text-[11px] text-neutral-400">
-                  formatos válidos
+                  {isEs ? "formatos válidos" : "valid formats"}
                 </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/10 p-3 text-[12px] text-yellow-100">
-            <span className="font-semibold text-yellow-200">Tip pro:</span> si
-            subes 2 o 3 fotos, intenta que todas tengan el mismo estilo:
-            encuadre parecido, luz parecida y fondo limpio. Eso ayuda a que
-            Instaface y FaceSwap respeten mejor la identidad.
+            {isEs ? (
+              <><span className="font-semibold text-yellow-200">Tip pro:</span> si subes 2 o 3 fotos, intenta que todas tengan el mismo estilo: encuadre parecido, luz parecida y fondo limpio. Eso ayuda a que Instaface y FaceSwap respeten mejor la identidad.</>
+            ) : (
+              <><span className="font-semibold text-yellow-200">Pro tip:</span> if you upload 2 or 3 photos, try to keep the same style across all of them: similar framing, similar light and a clean background. That helps Instaface and FaceSwap respect identity better.</>
+            )}
           </div>
         </div>
       </div>
@@ -126,7 +143,8 @@ function FaceGuideExample() {
   );
 }
 
-export default function AvatarStudioPanel() {
+export default function AvatarStudioPanel({ lang = "es" }) {
+  const isEs = lang !== "en";
   const { session } = useAuth();
   const token = session?.access_token || null;
   const userId = session?.user?.id || null;
@@ -283,13 +301,13 @@ export default function AvatarStudioPanel() {
     if (!f) return;
 
     if ((pending?.length || 0) >= 3) {
-      setErr("Solo puedes agregar hasta 3 fotos.");
+      setErr(isEs ? "Solo puedes agregar hasta 3 fotos." : "You can only add up to 3 photos.");
       e.target.value = "";
       return;
     }
 
     if (uploadedCount + pendingCount >= 3) {
-      setErr("Solo puedes tener hasta 3 fotos anchor.");
+      setErr(isEs ? "Solo puedes tener hasta 3 fotos anchor." : "You can only have up to 3 anchor photos.");
       e.target.value = "";
       return;
     }
@@ -348,33 +366,33 @@ export default function AvatarStudioPanel() {
     setErr("");
     setInfo("");
 
-    if (!canUse) return setErr("Debes iniciar sesión.");
-    if (!name.trim()) return setErr("Falta nombre del anchor.");
+    if (!canUse) return setErr(isEs ? "Debes iniciar sesión." : "You must sign in.");
+    if (!name.trim()) return setErr(isEs ? "Falta nombre del anchor." : "Anchor name is missing.");
 
     if (!avatar?.id && pendingCount < 1) {
-      return setErr("Agrega mínimo 1 foto. Puedes subir hasta 3.");
+      return setErr(isEs ? "Agrega mínimo 1 foto. Puedes subir hasta 3." : "Add at least 1 photo. You can upload up to 3.");
     }
 
     setLoading(true);
 
     try {
-      setBusyLabel(avatar?.id ? "Guardando..." : "Creando anchor...");
+      setBusyLabel(avatar?.id ? (isEs ? "Guardando..." : "Saving...") : (isEs ? "Creando anchor..." : "Creating anchor..."));
       const av = avatar?.id ? avatar : await createAvatarOnly();
 
       if (pendingCount > 0) {
-        setBusyLabel(`Subiendo ${pendingCount} foto(s)...`);
+        setBusyLabel(isEs ? `Subiendo ${pendingCount} foto(s)...` : `Uploading ${pendingCount} photo(s)...`);
         await uploadPendingForAvatar(av.id, pending);
         setPending([]);
       }
 
-      setBusyLabel("Actualizando miniatura...");
+      setBusyLabel(isEs ? "Actualizando miniatura..." : "Updating thumbnail...");
       await refreshThumbnail(av.id);
 
-      setBusyLabel("Actualizando fotos anchor...");
+      setBusyLabel(isEs ? "Actualizando fotos anchor..." : "Updating anchor photos...");
       await refreshAnchorUrls(av.id);
 
       setBusyLabel("");
-      setInfo("Listo ✅ Anchor guardado.");
+      setInfo(isEs ? "Listo ✅ Anchor guardado." : "Done ✅ Anchor saved.");
       persist();
     } catch (e) {
       setBusyLabel("");
@@ -388,16 +406,16 @@ export default function AvatarStudioPanel() {
     if (loading && busyLabel) return busyLabel;
 
     if (!avatar?.id) {
-      if (pendingCount >= 1) return "Listo para crear ✅";
-      return `Agrega de 1 a 3 fotos (pendientes: ${pendingCount}/3)`;
+      if (pendingCount >= 1) return isEs ? "Listo para crear ✅" : "Ready to create ✅";
+      return isEs ? `Agrega de 1 a 3 fotos (pendientes: ${pendingCount}/3)` : `Add 1 to 3 photos (pending: ${pendingCount}/3)`;
     }
 
     if (uploadedCount >= 1) {
-      return `Anchor listo ✅ (${uploadedCount}/3 fotos guardadas)`;
+      return isEs ? `Anchor listo ✅ (${uploadedCount}/3 fotos guardadas)` : `Anchor ready ✅ (${uploadedCount}/3 photos saved)`;
     }
 
-    return "Anchor creado. Sube de 1 a 3 fotos.";
-  }, [loading, busyLabel, avatar?.id, pendingCount, uploadedCount]);
+    return isEs ? "Anchor creado. Sube de 1 a 3 fotos." : "Anchor created. Upload 1 to 3 photos.";
+  }, [loading, busyLabel, avatar?.id, pendingCount, uploadedCount, isEs]);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/60 p-4">
@@ -405,10 +423,10 @@ export default function AvatarStudioPanel() {
         <div>
           <h2 className="text-lg font-semibold">Anchor Studio</h2>
           <p className="mt-1 text-xs text-neutral-400">
-            Guarda 1 a 3 fotos de rostro para usar como referencia facial.
+            {isEs ? "Guarda 1 a 3 fotos de rostro para usar como referencia facial." : "Save 1 to 3 face photos to use as facial reference."}
           </p>
           <div className="mt-2 text-[11px] text-neutral-300">
-            Estado: <span className="text-white">{headerStatus}</span>
+            {isEs ? "Estado" : "Status"}: <span className="text-white">{headerStatus}</span>
           </div>
         </div>
 
@@ -427,13 +445,13 @@ export default function AvatarStudioPanel() {
           }}
           className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10"
         >
-          Reiniciar
+          {isEs ? "Reiniciar" : "Reset"}
         </button>
       </div>
 
       {!canUse && (
         <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
-          Inicia sesión para crear anchors.
+          {isEs ? "Inicia sesión para crear anchors." : "Sign in to create anchors."}
         </div>
       )}
 
@@ -452,44 +470,54 @@ export default function AvatarStudioPanel() {
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="rounded-2xl border border-yellow-400/20 bg-yellow-400/10 p-4">
           <div className="text-sm font-semibold text-yellow-200">
-            Requisitos de las fotos
+            {isEs ? "Requisitos de las fotos" : "Photo requirements"}
           </div>
 
           <div className="mt-2 text-[12px] text-yellow-50/90">
-            Para que Instaface y FaceSwap detecten bien el rostro y lo respeten
-            mejor al generar imágenes, sube fotos con estas características:
+            {isEs ? "Para que Instaface y FaceSwap detecten bien el rostro y lo respeten mejor al generar imágenes, sube fotos con estas características:" : "For Instaface and FaceSwap to detect the face well and respect it better when generating images, upload photos with these characteristics:"}
           </div>
 
           <ul className="mt-3 grid gap-1.5 text-[12px] text-yellow-50/95 sm:grid-cols-2">
-            <li>• Rostro centrado</li>
-            <li>• Fondo limpio o blanco</li>
-            <li>• Sin lentes ni manos tapando</li>
-            <li>• Sin cabello cubriendo la cara</li>
-            <li>• Buena iluminación</li>
-            <li>• Expresión neutra o ligera sonrisa</li>
-            <li>• Rostro ocupando ~70% de la imagen</li>
-            <li>• Evita fotos lejanas o de cuerpo completo</li>
+            {(isEs ? [
+              "Rostro centrado",
+              "Fondo limpio o blanco",
+              "Sin lentes ni manos tapando",
+              "Sin cabello cubriendo la cara",
+              "Buena iluminación",
+              "Expresión neutra o ligera sonrisa",
+              "Rostro ocupando ~70% de la imagen",
+              "Evita fotos lejanas o de cuerpo completo",
+            ] : [
+              "Centered face",
+              "Clean or white background",
+              "No glasses or hands covering",
+              "No hair covering the face",
+              "Good lighting",
+              "Neutral expression or light smile",
+              "Face taking up ~70% of the image",
+              "Avoid distant or full-body photos",
+            ]).map((t) => <li key={t}>• {t}</li>)}
           </ul>
 
-          <FaceGuideExample />
+          <FaceGuideExample isEs={isEs} />
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
           <div className="text-sm font-semibold text-white">
-            Crear y guardar anchor
+            {isEs ? "Crear y guardar anchor" : "Create and save anchor"}
           </div>
           <div className="mt-1 text-xs text-neutral-400">
-            Aquí colocas el nombre, subes las fotos y guardas el anchor.
+            {isEs ? "Aquí colocas el nombre, subes las fotos y guardas el anchor." : "Here you set the name, upload the photos and save the anchor."}
           </div>
 
           <div className="mt-4">
             <label className="mb-2 block text-xs font-medium text-neutral-300">
-              Nombre del anchor
+              {isEs ? "Nombre del anchor" : "Anchor name"}
             </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Isabela rostro 1"
+              placeholder={isEs ? "Ej. Isabela rostro 1" : "E.g. Isabela face 1"}
               disabled={!canUse || loading}
               className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
             />
@@ -498,7 +526,7 @@ export default function AvatarStudioPanel() {
           {avatar?.id && (
             <div className="mt-4 flex items-center gap-3 flex-wrap rounded-xl border border-white/10 bg-black/30 p-3">
               <div className="text-xs text-neutral-300">
-                Anchor:
+                {isEs ? "Anchor" : "Anchor"}:
                 {" "}
                 <span className="font-semibold text-white">
                   {avatar?.name || name}
@@ -523,18 +551,18 @@ export default function AvatarStudioPanel() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="text-sm font-semibold text-white">
-                  Fotos anchor
+                  {isEs ? "Fotos anchor" : "Anchor photos"}
                 </div>
                 <div className="mt-1 text-xs text-neutral-400">
-                  Sube de 1 a 3 fotos. La primera puede usarse como miniatura.
+                  {isEs ? "Sube de 1 a 3 fotos. La primera puede usarse como miniatura." : "Upload 1 to 3 photos. The first one can be used as thumbnail."}
                 </div>
               </div>
 
               <div className="text-xs text-neutral-300">
-                Guardadas:{" "}
+                {isEs ? "Guardadas" : "Saved"}:{" "}
                 <span className="font-semibold text-white">{uploadedCount}</span>
                 {" · "}
-                Pendientes:{" "}
+                {isEs ? "Pendientes" : "Pending"}:{" "}
                 <span className="font-semibold text-white">{pendingCount}</span>
               </div>
             </div>
@@ -555,7 +583,7 @@ export default function AvatarStudioPanel() {
                   disabled={!canUse || loading || totalCount >= 3}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
                 >
-                  Agregar 1 foto
+                  {isEs ? "Agregar 1 foto" : "Add 1 photo"}
                 </button>
 
                 {pendingCount > 0 && (
@@ -565,27 +593,27 @@ export default function AvatarStudioPanel() {
                     disabled={!canUse || loading}
                     className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
                   >
-                    Limpiar pendientes
+                    {isEs ? "Limpiar pendientes" : "Clear pending"}
                   </button>
                 )}
               </div>
 
               <div className="mt-3 text-xs text-neutral-400">
-                Total (guardadas + pendientes):{" "}
+                {isEs ? "Total (guardadas + pendientes)" : "Total (saved + pending)"}:{" "}
                 <span className="font-semibold text-neutral-200">
                   {totalCount}
                 </span>
               </div>
 
               <div className="mt-1 text-[11px] text-neutral-500">
-                Formatos recomendados: JPG o PNG
+                {isEs ? "Formatos recomendados: JPG o PNG" : "Recommended formats: JPG or PNG"}
               </div>
             </div>
 
             {pendingCount > 0 && (
               <div className="mt-4">
                 <div className="mb-2 text-xs font-medium text-neutral-300">
-                  Pendientes por subir
+                  {isEs ? "Pendientes por subir" : "Pending to upload"}
                 </div>
 
                 <div className="grid gap-2">
@@ -609,7 +637,7 @@ export default function AvatarStudioPanel() {
                         disabled={!canUse || loading}
                         className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-neutral-200 hover:bg-white/10 disabled:opacity-40"
                       >
-                        Quitar
+                        {isEs ? "Quitar" : "Remove"}
                       </button>
                     </div>
                   ))}
@@ -620,7 +648,7 @@ export default function AvatarStudioPanel() {
             {uploadedCount > 0 && (
               <div className="mt-4">
                 <div className="mb-2 text-xs font-medium text-neutral-300">
-                  Fotos guardadas
+                  {isEs ? "Fotos guardadas" : "Saved photos"}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -639,13 +667,13 @@ export default function AvatarStudioPanel() {
                           />
                         ) : (
                           <div className="grid h-28 place-items-center text-xs text-neutral-500">
-                            Sin preview
+                            {isEs ? "Sin preview" : "No preview"}
                           </div>
                         )}
 
                         <div className="p-2 text-[10px] text-neutral-400">
                           {idx === 0
-                            ? "anchor 1 / miniatura"
+                            ? (isEs ? "anchor 1 / miniatura" : "anchor 1 / thumbnail")
                             : `anchor ${idx + 1}`}
                         </div>
                       </div>
@@ -665,8 +693,8 @@ export default function AvatarStudioPanel() {
                 {loading && busyLabel
                   ? busyLabel
                   : avatar?.id
-                  ? "Guardar cambios"
-                  : "Crear anchor"}
+                  ? (isEs ? "Guardar cambios" : "Save changes")
+                  : (isEs ? "Crear anchor" : "Create anchor")}
               </button>
             </div>
           </div>

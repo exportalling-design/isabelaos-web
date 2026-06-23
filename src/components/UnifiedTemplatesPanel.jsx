@@ -258,16 +258,16 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
       if (isFree) {
         const res  = await fetch("/api/free-template/submit", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ templateId: tmpl.id, faceBase64: faceB64, gender }) });
         const json = await res.json();
-        if (!json.ok) throw new Error(json.error || "Error al enviar");
+        if (!json.ok) throw new Error(json.error || (isEs ? "Error al enviar" : "Error submitting"));
         setTaskId(json.taskId);
       } else {
         // Subir imagen primero
         const upRes  = await fetch("/api/templates/upload-image", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ imageBase64: faceB64, mimeType: faceFile.type, label: "face1" }) });
         const upJson = await upRes.json();
-        if (!upJson.ok) throw new Error(upJson.error || "Error subiendo imagen");
+        if (!upJson.ok) throw new Error(upJson.error || (isEs ? "Error subiendo imagen" : "Error uploading image"));
         const res  = await fetch("/api/templates/submit-video", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ templateId: tmpl.id, lang: dialogLang, quality: "480", genderVariant: gender, faceUrl: upJson.url }) });
         const json = await res.json();
-        if (!json.ok) throw new Error(json.error || "Error al enviar");
+        if (!json.ok) throw new Error(json.error || (isEs ? "Error al enviar" : "Error submitting"));
         setTaskId(json.taskId);
         if (json.jadeCost) onJadesUpdate?.(userJades - json.jadeCost);
       }
@@ -299,7 +299,7 @@ function GenerateView({ tmpl, lang, userJades, onJadesUpdate, onBack, setUsedFre
               });
             } catch {}
           }
-          throw new Error(json.error || "Generation failed");
+          throw new Error(json.error || (isEs ? "La generación falló" : "Generation failed"));
         }
       } catch (e) { setErrorMsg(e.message); setStep("error"); clearInterval(iv); }
     }, 6000);

@@ -15,12 +15,12 @@ const PLANTILLA_COST = {
   chef_ia:          45,
 };
 
-const PLANTILLAS = [
+function getPlantillas(isEs) { return [
   {
     id:          "producto_estelar",
-    nombre:      "Producto Estelar",
+    nombre:      isEs ? "Producto Estelar" : "Star Product",
     emoji:       "✨",
-    descripcion: "Tu producto lanzado con efectos épicos — fuego, partículas doradas, splash, cristales. El producto nunca cambia.",
+    descripcion: isEs ? "Tu producto lanzado con efectos épicos — fuego, partículas doradas, splash, cristales. El producto nunca cambia." : "Your product launched with epic effects — fire, golden particles, splash, crystals. The product never changes.",
     colores:     "from-cyan-500/20 via-blue-500/10 to-indigo-500/20",
     borde:       "border-cyan-500/30",
     acento:      "text-cyan-300",
@@ -30,9 +30,9 @@ const PLANTILLAS = [
   },
   {
     id:          "explosion_sabor",
-    nombre:      "Explosión de Sabor",
+    nombre:      isEs ? "Explosión de Sabor" : "Flavor Explosion",
     emoji:       "💥",
-    descripcion: "Tu platillo se desintegra en capas mostrando cada ingrediente en slow motion épico.",
+    descripcion: isEs ? "Tu platillo se desintegra en capas mostrando cada ingrediente en slow motion épico." : "Your dish disintegrates in layers showing every ingredient in epic slow motion.",
     colores:     "from-orange-500/20 via-amber-500/10 to-red-500/20",
     borde:       "border-orange-500/30",
     acento:      "text-orange-300",
@@ -42,9 +42,9 @@ const PLANTILLAS = [
   },
   {
     id:          "chef_ia",
-    nombre:      "Chef IA",
+    nombre:      isEs ? "Chef IA" : "AI Chef",
     emoji:       "👨‍🍳",
-    descripcion: "Video cinematográfico de 15s de un chef preparando tu plato. Usa tu foto o elige un avatar chef.",
+    descripcion: isEs ? "Video cinematográfico de 15s de un chef preparando tu plato. Usa tu foto o elige un avatar chef." : "15s cinematic video of a chef preparing your dish. Use your photo or pick a chef avatar.",
     colores:     "from-slate-500/20 via-zinc-500/10 to-neutral-500/20",
     borde:       "border-slate-500/30",
     acento:      "text-slate-300",
@@ -54,9 +54,9 @@ const PLANTILLAS = [
   },
   {
     id:          "transicion_moda",
-    nombre:      "Transición de Moda",
+    nombre:      isEs ? "Transición de Moda" : "Fashion Transition",
     emoji:       "👗",
-    descripcion: "Sube tus prendas y la IA genera un video fashion con transiciones.",
+    descripcion: isEs ? "Sube tus prendas y la IA genera un video fashion con transiciones." : "Upload your garments and AI generates a fashion video with transitions.",
     colores:     "from-pink-500/20 via-rose-500/10 to-purple-500/20",
     borde:       "border-pink-500/30",
     acento:      "text-pink-300",
@@ -65,42 +65,42 @@ const PLANTILLAS = [
   },
   {
     id:          "comercial_completo",
-    nombre:      "Comercial Completo",
+    nombre:      isEs ? "Comercial Completo" : "Full Commercial",
     emoji:       "🎬",
-    descripcion: "Storyboard de varias escenas con narración en off.",
+    descripcion: isEs ? "Storyboard de varias escenas con narración en off." : "Multi-scene storyboard with voiceover narration.",
     colores:     "from-violet-500/20 via-purple-500/10 to-fuchsia-500/20",
     borde:       "border-violet-500/30",
     acento:      "text-violet-300",
     tieneRostro: true,
     enConstruccion: true,
   },
-];
+]; }
 
-const EFECTOS_PRODUCTO = [
-  { value: "golden_particles", label: "💎 Partículas doradas — lujo y elegancia" },
-  { value: "fire_energy",      label: "🔥 Fuego y energía — potencia y fuerza" },
-  { value: "liquid_splash",    label: "💧 Splash de líquido — frescura y pureza" },
-  { value: "crystal_smoke",    label: "🌫️ Humo y cristales — misterio sofisticado" },
-  { value: "flower_petals",    label: "🌸 Pétalos y flores — naturaleza y suavidad" },
-  { value: "electric_storm",   label: "⚡ Tormenta eléctrica — tecnología e innovación" },
-];
+function getEfectosProducto(isEs) { return [
+  { value: "golden_particles", label: isEs ? "💎 Partículas doradas — lujo y elegancia" : "💎 Golden particles — luxury and elegance" },
+  { value: "fire_energy",      label: isEs ? "🔥 Fuego y energía — potencia y fuerza" : "🔥 Fire and energy — power and force" },
+  { value: "liquid_splash",    label: isEs ? "💧 Splash de líquido — frescura y pureza" : "💧 Liquid splash — freshness and purity" },
+  { value: "crystal_smoke",    label: isEs ? "🌫️ Humo y cristales — misterio sofisticado" : "🌫️ Smoke and crystals — sophisticated mystery" },
+  { value: "flower_petals",    label: isEs ? "🌸 Pétalos y flores — naturaleza y suavidad" : "🌸 Petals and flowers — nature and softness" },
+  { value: "electric_storm",   label: isEs ? "⚡ Tormenta eléctrica — tecnología e innovación" : "⚡ Electric storm — technology and innovation" },
+]; }
 
-const AVATARES_CHEF = [
-  { value: "chef_hombre_latino",  label: "👨 Chef hombre latino profesional" },
-  { value: "chef_mujer_latina",   label: "👩 Chef mujer latina elegante" },
-  { value: "chef_barbudo",        label: "🧔 Chef barbudo tatuado urbano" },
-  { value: "chef_mujer_moderna",  label: "💁‍♀️ Chef mujer moderna y joven" },
-];
+function getAvataresChef(isEs) { return [
+  { value: "chef_hombre_latino",  label: isEs ? "👨 Chef hombre latino profesional" : "👨 Professional Latin male chef" },
+  { value: "chef_mujer_latina",   label: isEs ? "👩 Chef mujer latina elegante" : "👩 Elegant Latin female chef" },
+  { value: "chef_barbudo",        label: isEs ? "🧔 Chef barbudo tatuado urbano" : "🧔 Tattooed bearded urban chef" },
+  { value: "chef_mujer_moderna",  label: isEs ? "💁‍♀️ Chef mujer moderna y joven" : "💁‍♀️ Young modern female chef" },
+]; }
 
-const ACCENTS = [
-  { value: "neutro",       label: "🌎 Neutro latino" },
-  { value: "guatemalteco", label: "🇬🇹 Guatemalteco" },
-  { value: "colombiano",   label: "🇨🇴 Colombiano" },
-  { value: "mexicano",     label: "🇲🇽 Mexicano" },
-  { value: "argentino",    label: "🇦🇷 Argentino" },
-  { value: "español",      label: "🇪🇸 Español" },
+function getAccents(isEs) { return [
+  { value: "neutro",       label: isEs ? "🌎 Neutro latino" : "🌎 Neutral Latin" },
+  { value: "guatemalteco", label: isEs ? "🇬🇹 Guatemalteco" : "🇬🇹 Guatemalan" },
+  { value: "colombiano",   label: isEs ? "🇨🇴 Colombiano" : "🇨🇴 Colombian" },
+  { value: "mexicano",     label: isEs ? "🇲🇽 Mexicano" : "🇲🇽 Mexican" },
+  { value: "argentino",    label: isEs ? "🇦🇷 Argentino" : "🇦🇷 Argentinian" },
+  { value: "español",      label: isEs ? "🇪🇸 Español" : "🇪🇸 Spanish" },
   { value: "ingles",       label: "🇺🇸 English (US)" },
-];
+]; }
 
 async function getAuthHeaders() {
   try {
@@ -141,7 +141,7 @@ async function prepareImage(file) {
   return { base64: b64, mimeType: "image/jpeg" };
 }
 
-function HumanFaceCheckbox({ checked, onChange }) {
+function HumanFaceCheckbox({ checked, onChange, isEs }) {
   return (
     <div
       onClick={() => onChange(!checked)}
@@ -155,16 +155,16 @@ function HumanFaceCheckbox({ checked, onChange }) {
         {checked && <span className="text-black text-xs font-bold">✓</span>}
       </div>
       <div>
-        <p className="text-xs font-semibold text-white">👤 Contiene rostro humano real</p>
+        <p className="text-xs font-semibold text-white">👤 {isEs ? "Contiene rostro humano real" : "Contains a real human face"}</p>
         <p className="text-[10px] text-neutral-400 mt-0.5">
-          Activa esto si estás subiendo una foto con una persona real.
+          {isEs ? "Activa esto si estás subiendo una foto con una persona real." : "Turn this on if you're uploading a photo with a real person."}
         </p>
       </div>
     </div>
   );
 }
 
-function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, onRemove, disabled }) {
+function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, onRemove, disabled, isEs }) {
   const ref = useRef(null);
   return (
     <div className="space-y-2">
@@ -186,7 +186,7 @@ function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, on
         />
         <span className="text-2xl">📷</span>
         <span className="text-[11px] text-neutral-400">
-          {multiple ? `Subir imágenes (máx ${max})` : "Subir imagen"}
+          {multiple ? (isEs ? `Subir imágenes (máx ${max})` : `Upload images (max ${max})`) : (isEs ? "Subir imagen" : "Upload image")}
         </span>
       </div>
       {previews.length > 0 && (
@@ -206,18 +206,18 @@ function UploadZone({ label, hint, multiple, max = 1, previews = [], onFiles, on
   );
 }
 
-function SceneResult({ scene, idx }) {
+function SceneResult({ scene, idx, isEs }) {
   if (!scene.ok) {
     return (
       <div className="rounded-xl border p-3 border-red-500/20 bg-red-500/5">
-        <p className="text-xs text-red-400">Escena {scene.scene_number || idx + 1} — Error: {scene.error}</p>
+        <p className="text-xs text-red-400">{isEs ? "Escena" : "Scene"} {scene.scene_number || idx + 1} — Error: {scene.error}</p>
       </div>
     );
   }
   return (
     <div className="rounded-xl border border-white/10 bg-black/30 overflow-hidden">
       <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
-        <span className="text-[10px] text-neutral-500">Escena {scene.scene_number}</span>
+        <span className="text-[10px] text-neutral-500">{isEs ? "Escena" : "Scene"} {scene.scene_number}</span>
       </div>
       {scene.video_url && (
         <video src={scene.video_url} controls className="w-full aspect-[9/16] max-h-[320px] object-contain bg-black" />
@@ -232,7 +232,7 @@ function SceneResult({ scene, idx }) {
             download={`escena-${scene.scene_number}.mp4`}
             className="block text-center rounded-xl border border-white/15 py-1.5 text-[10px] text-neutral-400 hover:bg-white/10 transition-all"
           >
-            ↓ Descargar
+            ↓ {isEs ? "Descargar" : "Download"}
           </a>
         )}
       </div>
@@ -240,7 +240,12 @@ function SceneResult({ scene, idx }) {
   );
 }
 
-export default function ComercialPanel({ userStatus }) {
+export default function ComercialPanel({ userStatus, lang = "es" }) {
+  const isEs = lang !== "en";
+  const PLANTILLAS = getPlantillas(isEs);
+  const EFECTOS_PRODUCTO = getEfectosProducto(isEs);
+  const AVATARES_CHEF = getAvataresChef(isEs);
+  const ACCENTS = getAccents(isEs);
   const [plantilla,    setPlantilla]    = useState(null);
   const [loading,      setLoading]      = useState(false);
   const [statusText,   setStatusText]   = useState("");
@@ -278,7 +283,7 @@ export default function ComercialPanel({ userStatus }) {
       attempts++;
       if (attempts > MAX_ATTEMPTS) {
         clearInterval(pollRef.current);
-        setError("⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo.");
+        setError(isEs ? "⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo." : "⏳ The video took more than 10 minutes. Check your Library — it might already be ready.");
         setLoading(false);
         setStatusText("");
         return;
@@ -302,7 +307,7 @@ export default function ComercialPanel({ userStatus }) {
           setStatusText("");
         } else if (data.status === "failed") {
           clearInterval(pollRef.current);
-          setError(data.error || "La generación falló.");
+          setError(data.error || (isEs ? "La generación falló." : "Generation failed."));
           setLoading(false);
           setStatusText("");
         }
@@ -310,7 +315,7 @@ export default function ComercialPanel({ userStatus }) {
         console.error("[ComercialPanel] poll error:", e.message);
       }
     }, 4000);
-  }, []);
+  }, [isEs]);
 
   function handleFiles(setter, prevSetter, files, max = 1) {
     const nuevos = files.slice(0, max);
@@ -340,7 +345,7 @@ export default function ComercialPanel({ userStatus }) {
   async function handleGenerar() {
     if (!plantilla || plantilla.enConstruccion) return;
     if (currentJades < costoActual) {
-      setError(`Necesitas ${costoActual} Jades. Tienes ${currentJades}.`);
+      setError(isEs ? `Necesitas ${costoActual} Jades. Tienes ${currentJades}.` : `You need ${costoActual} Jades. You have ${currentJades}.`);
       return;
     }
     setError(""); setLoading(true); setResultado(null);
@@ -350,8 +355,8 @@ export default function ComercialPanel({ userStatus }) {
       let j = null;
 
       if (plantilla.id === "producto_estelar") {
-        if (!imgProducto.length) { setError("Sube la foto de tu producto."); setLoading(false); return; }
-        setStatusText("Generando video del producto...");
+        if (!imgProducto.length) { setError(isEs ? "Sube la foto de tu producto." : "Upload your product photo."); setLoading(false); return; }
+        setStatusText(isEs ? "Generando video del producto..." : "Generating product video...");
         const productoPrep = await prepareImage(imgProducto[0]);
         const r = await fetch("/api/comercial-generate", {
           method:  "POST",
@@ -366,13 +371,13 @@ export default function ComercialPanel({ userStatus }) {
           }),
         });
         j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
+        if (!r.ok || !j.ok) throw new Error(j.error || (isEs ? "Error generando" : "Error generating"));
       }
 
       else if (plantilla.id === "explosion_sabor") {
-        if (!imgPlato.length) { setError("Sube la foto de tu platillo."); setLoading(false); return; }
-        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
-        setStatusText("Generando explosión de sabor...");
+        if (!imgPlato.length) { setError(isEs ? "Sube la foto de tu platillo." : "Upload your dish photo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError(isEs ? "Escribe el nombre de tu negocio." : "Write your business name."); setLoading(false); return; }
+        setStatusText(isEs ? "Generando explosión de sabor..." : "Generating flavor explosion...");
         const platoPrep = await prepareImage(imgPlato[0]);
         const r = await fetch("/api/comercial-generate", {
           method:  "POST",
@@ -390,9 +395,9 @@ export default function ComercialPanel({ userStatus }) {
       }
 
       else if (plantilla.id === "chef_ia") {
-        if (!imgPlato.length) { setError("Sube la foto del platillo."); setLoading(false); return; }
-        if (!nombreNegocio.trim()) { setError("Escribe el nombre de tu negocio."); setLoading(false); return; }
-        setStatusText("Generando video del chef (15s)...");
+        if (!imgPlato.length) { setError(isEs ? "Sube la foto del platillo." : "Upload the dish photo."); setLoading(false); return; }
+        if (!nombreNegocio.trim()) { setError(isEs ? "Escribe el nombre de tu negocio." : "Write your business name."); setLoading(false); return; }
+        setStatusText(isEs ? "Generando video del chef (15s)..." : "Generating chef video (15s)...");
         const platoPrep = await prepareImage(imgPlato[0]);
         const chefPrep  = imgChef.length ? [await prepareImage(imgChef[0])] : [];
         const r = await fetch("/api/comercial-generate", {
@@ -408,16 +413,16 @@ export default function ComercialPanel({ userStatus }) {
           }),
         });
         j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.error || "Error generando");
+        if (!r.ok || !j.ok) throw new Error(j.error || (isEs ? "Error generando" : "Error generating"));
       }
 
       if (j) {
-        setStatusText("Renderizando video... esto puede tardar unos minutos");
+        setStatusText(isEs ? "Renderizando video... esto puede tardar unos minutos" : "Rendering video... this can take a few minutes");
         startPolling(j.taskId, j.plantilla_id, j.audio_b64, j.ref, j.jade_cost);
       }
 
     } catch (e) {
-      setError(e.message || "Error generando. Intenta de nuevo.");
+      setError(e.message || (isEs ? "Error generando. Intenta de nuevo." : "Error generating. Try again."));
       setLoading(false);
       setStatusText("");
     }
@@ -428,15 +433,15 @@ export default function ComercialPanel({ userStatus }) {
 
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-white">Comercial IA</h2>
+          <h2 className="text-lg font-semibold text-white">{isEs ? "Comercial IA" : "AI Commercial"}</h2>
           <p className="mt-1 text-sm text-neutral-400">
-            Videos publicitarios profesionales con Seedance 2.0
+            {isEs ? "Videos publicitarios profesionales con Seedance 2.0" : "Professional advertising videos with Seedance 2.0"}
           </p>
         </div>
         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-2 text-right">
-          <div className="text-xs text-neutral-400">Costo</div>
+          <div className="text-xs text-neutral-400">{isEs ? "Costo" : "Cost"}</div>
           <div className="text-lg font-bold text-cyan-300">{costoActual > 0 ? `${costoActual} Jades` : "—"}</div>
-          <div className="text-[10px] text-neutral-500">Tus Jades: {currentJades}</div>
+          <div className="text-[10px] text-neutral-500">{isEs ? "Tus Jades" : "Your Jades"}: {currentJades}</div>
         </div>
       </div>
 
@@ -463,12 +468,12 @@ export default function ComercialPanel({ userStatus }) {
             )}
             {p.enConstruccion && (
               <div className="absolute top-3 right-3 text-[9px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 rounded-full px-2 py-0.5">
-                🚧 EN CONSTRUCCIÓN
+                🚧 {isEs ? "EN CONSTRUCCIÓN" : "COMING SOON"}
               </div>
             )}
             {plantilla?.id === p.id && !p.enConstruccion && (
               <div className={`absolute top-3 right-3 text-[9px] font-bold ${p.acento} bg-black/40 rounded-full px-2 py-0.5`}>
-                ✓ Activa
+                ✓ {isEs ? "Activa" : "Active"}
               </div>
             )}
           </button>
@@ -478,9 +483,9 @@ export default function ComercialPanel({ userStatus }) {
       {plantilla && plantilla.enConstruccion && (
         <div className="rounded-3xl border border-amber-500/30 bg-amber-500/5 p-8 text-center">
           <div className="text-5xl mb-3">🚧</div>
-          <h3 className="text-lg font-bold text-amber-300 mb-2">En construcción</h3>
+          <h3 className="text-lg font-bold text-amber-300 mb-2">{isEs ? "En construcción" : "Coming soon"}</h3>
           <p className="text-sm text-neutral-400 max-w-sm mx-auto">
-            Esta plantilla está temporalmente en mantenimiento mientras mejoramos su calidad. Mientras tanto prueba Producto Estelar, Explosión de Sabor o Chef IA.
+            {isEs ? "Esta plantilla está temporalmente en mantenimiento mientras mejoramos su calidad. Mientras tanto prueba Producto Estelar, Explosión de Sabor o Chef IA." : "This template is temporarily under maintenance while we improve its quality. In the meantime try Star Product, Flavor Explosion or AI Chef."}
           </p>
         </div>
       )}
@@ -498,16 +503,17 @@ export default function ComercialPanel({ userStatus }) {
           {plantilla.id === "producto_estelar" && (
             <div className="space-y-4">
               <UploadZone
-                label="📦 Foto de tu producto"
-                hint="Perfume, crema, ropa, accesorio, electrónico... El producto siempre se preserva exactamente."
+                label={isEs ? "📦 Foto de tu producto" : "📦 Your product photo"}
+                hint={isEs ? "Perfume, crema, ropa, accesorio, electrónico... El producto siempre se preserva exactamente." : "Perfume, cream, clothing, accessory, electronics... The product is always preserved exactly."}
                 multiple={false}
                 previews={prevProducto}
                 onFiles={f => handleFiles(setImgProducto, setPrevProducto, f, 1)}
                 onRemove={i => removeFile(setImgProducto, setPrevProducto, i, imgProducto)}
                 disabled={loading}
+                isEs={isEs}
               />
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-neutral-300">✨ Efecto visual</label>
+                <label className="text-xs font-semibold text-neutral-300">✨ {isEs ? "Efecto visual" : "Visual effect"}</label>
                 <div className="grid grid-cols-1 gap-1.5">
                   {EFECTOS_PRODUCTO.map(op => (
                     <button
@@ -530,19 +536,20 @@ export default function ComercialPanel({ userStatus }) {
           {plantilla.id === "explosion_sabor" && (
             <div className="space-y-4">
               <UploadZone
-                label="🍔 Foto de tu platillo"
-                hint="Burger, taco, pizza, sushi, comida china, lo que sea."
+                label={isEs ? "🍔 Foto de tu platillo" : "🍔 Your dish photo"}
+                hint={isEs ? "Burger, taco, pizza, sushi, comida china, lo que sea." : "Burger, taco, pizza, sushi, Chinese food, anything."}
                 multiple={false}
                 previews={prevPlato}
                 onFiles={f => handleFiles(setImgPlato, setPrevPlato, f, 1)}
                 onRemove={i => removeFile(setImgPlato, setPrevPlato, i, imgPlato)}
                 disabled={loading}
+                isEs={isEs}
               />
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-300">🏪 Nombre de tu negocio</label>
+                <label className="text-xs font-semibold text-neutral-300">🏪 {isEs ? "Nombre de tu negocio" : "Your business name"}</label>
                 <input
                   type="text" value={nombreNegocio} onChange={e => setNombreNegocio(e.target.value)}
-                  placeholder="Ej: Burger Bros, Tacos El Rey, Sushi Palace..."
+                  placeholder={isEs ? "Ej: Burger Bros, Tacos El Rey, Sushi Palace..." : "E.g: Burger Bros, Taco King, Sushi Palace..."}
                   className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none"
                 />
               </div>
@@ -552,26 +559,28 @@ export default function ComercialPanel({ userStatus }) {
           {plantilla.id === "chef_ia" && (
             <div className="space-y-4">
               <UploadZone
-                label="🍽️ Foto del platillo terminado"
-                hint="El plato que el chef va a preparar en el video de 15 segundos."
+                label={isEs ? "🍽️ Foto del platillo terminado" : "🍽️ Photo of the finished dish"}
+                hint={isEs ? "El plato que el chef va a preparar en el video de 15 segundos." : "The dish the chef will prepare in the 15-second video."}
                 multiple={false}
                 previews={prevPlato}
                 onFiles={f => handleFiles(setImgPlato, setPrevPlato, f, 1)}
                 onRemove={i => removeFile(setImgPlato, setPrevPlato, i, imgPlato)}
                 disabled={loading}
+                isEs={isEs}
               />
               <UploadZone
-                label="👤 Tu foto como chef (opcional)"
-                hint="Si subes tu foto, activa el checkbox de rostro humano abajo."
+                label={isEs ? "👤 Tu foto como chef (opcional)" : "👤 Your photo as chef (optional)"}
+                hint={isEs ? "Si subes tu foto, activa el checkbox de rostro humano abajo." : "If you upload your photo, check the human face box below."}
                 multiple={false}
                 previews={prevChef}
                 onFiles={f => handleFiles(setImgChef, setPrevChef, f, 1)}
                 onRemove={i => removeFile(setImgChef, setPrevChef, i, imgChef)}
                 disabled={loading}
+                isEs={isEs}
               />
               {!imgChef.length && (
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-neutral-300">🤖 Avatar chef IA</label>
+                  <label className="text-xs font-semibold text-neutral-300">🤖 {isEs ? "Avatar chef IA" : "AI chef avatar"}</label>
                   <div className="grid grid-cols-1 gap-1.5">
                     {AVATARES_CHEF.map(av => (
                       <button
@@ -590,10 +599,10 @@ export default function ComercialPanel({ userStatus }) {
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-300">🏪 Nombre de tu negocio</label>
+                <label className="text-xs font-semibold text-neutral-300">🏪 {isEs ? "Nombre de tu negocio" : "Your business name"}</label>
                 <input
                   type="text" value={nombreNegocio} onChange={e => setNombreNegocio(e.target.value)}
-                  placeholder="Ej: La Parrilla de Don Pedro"
+                  placeholder={isEs ? "Ej: La Parrilla de Don Pedro" : "E.g: Don Pedro's Grill"}
                   className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none"
                 />
               </div>
@@ -601,22 +610,22 @@ export default function ComercialPanel({ userStatus }) {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-neutral-300">🎙️ Narración en off (opcional)</label>
+            <label className="text-xs font-semibold text-neutral-300">🎙️ {isEs ? "Narración en off (opcional)" : "Voiceover narration (optional)"}</label>
             <p className="text-[10px] text-neutral-500">
-              Texto que quieres que se escuche en el video. Si lo dejas vacío, el video será mudo.
+              {isEs ? "Texto que quieres que se escuche en el video. Si lo dejas vacío, el video será mudo." : "Text you want to hear in the video. If left empty, the video will be silent."}
             </p>
             <textarea
               value={narracion} onChange={e => setNarracion(e.target.value)} rows={2}
-              placeholder="Ej: Descubre el sabor que te conquistará. Solo en Burger Bros."
+              placeholder={isEs ? "Ej: Descubre el sabor que te conquistará. Solo en Burger Bros." : "E.g: Discover the flavor that will win you over. Only at Burger Bros."}
               className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/30 focus:outline-none resize-none"
             />
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-            <p className="text-[11px] font-semibold text-neutral-300">🎙️ Voz de narración</p>
+            <p className="text-[11px] font-semibold text-neutral-300">🎙️ {isEs ? "Voz de narración" : "Narration voice"}</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] text-neutral-400">Acento</label>
+                <label className="text-[10px] text-neutral-400">{isEs ? "Acento" : "Accent"}</label>
                 <select
                   value={accent} onChange={e => setAccent(e.target.value)}
                   className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none"
@@ -625,20 +634,20 @@ export default function ComercialPanel({ userStatus }) {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-neutral-400">Voz</label>
+                <label className="text-[10px] text-neutral-400">{isEs ? "Voz" : "Voice"}</label>
                 <select
                   value={gender} onChange={e => setGender(e.target.value)}
                   className="w-full rounded-xl border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white focus:outline-none"
                 >
-                  <option value="mujer">👩 Voz femenina</option>
-                  <option value="hombre">👨 Voz masculina</option>
+                  <option value="mujer">👩 {isEs ? "Voz femenina" : "Female voice"}</option>
+                  <option value="hombre">👨 {isEs ? "Voz masculina" : "Male voice"}</option>
                 </select>
               </div>
             </div>
           </div>
 
           {plantilla.tieneRostro && (
-            <HumanFaceCheckbox checked={hasHumanFace} onChange={setHasHumanFace} />
+            <HumanFaceCheckbox checked={hasHumanFace} onChange={setHasHumanFace} isEs={isEs} />
           )}
 
           {error && (
@@ -659,10 +668,10 @@ export default function ComercialPanel({ userStatus }) {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                {statusText || "Generando..."}
+                {statusText || (isEs ? "Generando..." : "Generating...")}
               </span>
             ) : (
-              `${plantilla.emoji} Generar — ${costoActual} Jades`
+              `${plantilla.emoji} ${isEs ? "Generar" : "Generate"} — ${costoActual} Jades`
             )}
           </button>
         </div>
@@ -673,13 +682,13 @@ export default function ComercialPanel({ userStatus }) {
           <div className="flex items-center gap-2">
             <div className="h-px flex-1 bg-white/10" />
             <span className="text-xs text-neutral-500">
-              {resultado.success_count}/{resultado.total_scenes} escenas generadas
+              {resultado.success_count}/{resultado.total_scenes} {isEs ? "escenas generadas" : "scenes generated"}
             </span>
             <div className="h-px flex-1 bg-white/10" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {(resultado.scenes || []).map((scene, idx) => (
-              <SceneResult key={idx} scene={scene} idx={idx} />
+              <SceneResult key={idx} scene={scene} idx={idx} isEs={isEs} />
             ))}
           </div>
         </div>
@@ -687,7 +696,7 @@ export default function ComercialPanel({ userStatus }) {
 
       {!plantilla && (
         <div className="rounded-2xl border border-white/5 bg-black/20 py-10 text-center">
-          <p className="text-neutral-600 text-sm">← Selecciona una plantilla para empezar</p>
+          <p className="text-neutral-600 text-sm">← {isEs ? "Selecciona una plantilla para empezar" : "Select a template to get started"}</p>
         </div>
       )}
     </div>
