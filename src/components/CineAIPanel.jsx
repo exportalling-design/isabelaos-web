@@ -295,13 +295,13 @@ export default function CineAIPanel({ lang = "es", onJobSubmitted }) {
   const startPolling = useCallback((taskId, promptForCaptions) => {
     clearInterval(pollRef.current);
     let attempts = 0;
-    const MAX_ATTEMPTS = 150;
+    const MAX_ATTEMPTS = 300;
 
     pollRef.current = setInterval(async () => {
       attempts++;
       if (attempts > MAX_ATTEMPTS) {
         clearInterval(pollRef.current);
-        setError(isEs ? "⏳ El video tardó más de 10 minutos. Ve a tu Biblioteca — puede que ya esté listo." : "⏳ The video took more than 10 minutes. Check your Library — it might already be ready.");
+        setError(isEs ? "Tu video sigue generándose. Aparecerá en tu Biblioteca cuando esté listo." : "Your video is still being generated. It will appear in your Library when ready.");
         setGenerating(false);
         return;
       }
