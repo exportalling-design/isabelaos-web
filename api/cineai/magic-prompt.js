@@ -124,11 +124,13 @@ export default async function handler(req, res) {
 
   const hasReferenceImages = !!body.hasReferenceImages;
   const duration = Number(body.duration) || 0;
-  const wantsLongScene = hasReferenceImages && duration >= 15;
 
   try {
-    const sequenceNote = wantsLongScene
-      ? `\n\nContext: the user has uploaded reference photos (face/body) and selected a ${duration}s duration, which signals they want a long, multi-clip scene to chain with "Continuar escena". Write each of the 3 prompts as a numbered clip sequence per the MULTI-CLIP SEQUENCES instructions above.`
+    // If user has reference photos, always include continuity/coherence guidance.
+    // In CineAI's "Continuar escena" system: image1 = last frame of previous clip,
+    // image2/image3/... = original user photos (identity references, constant across clips).
+    const sequenceNote = hasReferenceImages
+      ? `\n\nContext: the user has uploaded reference photos (face/body, attached as image2, image3, etc.) and is using CineAI's "Continuar escena" multi-clip chaining system. In this system, image1 is ALWAYS the last frame extracted from the previous clip — it becomes the exact first frame of the next clip. The user's original reference photos stay attached on every continuation clip as image2, image3, etc., so character identity never drifts between clips. Write each of the 3 prompts as a numbered clip sequence per the MULTI-CLIP SEQUENCES instructions above, explicitly noting which image is the start frame and which are the character/identity references. Each clip sequence should include 2-3 clips with clear "Clip N (image 1 = last frame of Clip N-1, image 2 = face/body reference)" notation so the user can feed them one at a time into "Continuar escena".`
       : "";
     const fullPrompt = `${SYSTEM_PROMPT}\n\nIdea del usuario (en español): "${idea}"${sequenceNote}`;
 

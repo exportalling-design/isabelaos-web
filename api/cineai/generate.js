@@ -111,16 +111,24 @@ export default async function handler(req, res) {
 
       if (isContinuation && videoList.length > 0) {
         mode = "continuation";
-        const extraRefs = imageList.length > 1
-          ? " Reference " + imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ") + " to maintain exact character identity, face and body consistency throughout the continuation."
-          : "";
-        finalPrompt = "Use image 1 as the exact first frame. Use video 1 as full reference to maintain atmosphere, lighting, camera movement and style." + extraRefs + " Continue the scene as an uninterrupted extension. " + finalPrompt;
+        // image 1 = last frame (first frame of new clip)
+        // video 1 = full previous clip (atmosphere/movement reference)
+        // image 2, 3... = original user photos (identity/character references)
+        let charRefs = "";
+        if (imageList.length > 1) {
+          const refLabels = imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ");
+          charRefs = " Use " + refLabels + " as character references to maintain identity, face and body consistency throughout.";
+        }
+        finalPrompt = "Use image 1 as the exact first frame. Use video 1 as full reference." + charRefs + " Continue the scene as an uninterrupted extension with the same atmosphere, lighting, camera style and character appearance. " + finalPrompt;
       } else if (isContinuation) {
+        // fallback: continuation without previous video (frame-only)
         mode = "continuation_frame";
-        const extraRefs = imageList.length > 1
-          ? " Reference " + imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ") + " to maintain exact character identity, face and body consistency."
-          : "";
-        finalPrompt = "Continue this scene seamlessly from image 1 as the first frame." + extraRefs + " Same atmosphere, lighting and visual style. " + finalPrompt;
+        let charRefs = "";
+        if (imageList.length > 1) {
+          const refLabels = imageList.slice(1).map((_, i) => "image " + (i + 2)).join(", ");
+          charRefs = " Use " + refLabels + " as character references to maintain identity and body consistency.";
+        }
+        finalPrompt = "Use image 1 as the exact first frame of this new clip." + charRefs + " Continue seamlessly with the same atmosphere, lighting and visual style. " + finalPrompt;
       } else if (animateExact) {
         mode = "animate";
         finalPrompt = "Animate image 1 with subtle realistic motion. STRICTLY preserve the original background, environment and all characters. Only add natural movement to existing subjects. " + finalPrompt;
