@@ -193,6 +193,7 @@ const STRINGS = {
         montaje:    { label: "Montaje IA",           desc: "Personas y productos en cualquier escenario" },
         generator:  { label: "Imagen IA",            desc: "Imágenes cinematográficas con FLUX" },
         img2video:  { label: "Imagen → Video",       desc: "Convierte tus fotos en videos — Próximamente" },
+        liveAvatar: { label: "Live Avatar",          desc: "Avatar IA que responde tu chat de TikTok en vivo" },
         library:    { label: "Biblioteca",           desc: "Tus creaciones guardadas" },
       },
     },
@@ -296,6 +297,7 @@ const STRINGS = {
         montaje:    { label: "Montaje IA",       desc: "People and products in any scenario" },
         generator:  { label: "AI Image",         desc: "Cinematic images with FLUX" },
         img2video:  { label: "Image → Video",    desc: "Convert your photos to videos — Coming soon" },
+        liveAvatar: { label: "Live Avatar",      desc: "AI avatar that responds your TikTok live chat" },
         library:    { label: "Library",          desc: "Your saved creations" },
       },
     },
@@ -402,9 +404,10 @@ export default function LandingView({
     { key: "avatars",    icon: "👤", ...t.mods.items.avatars,    color: "#a855f7", badge: "👤",        vid: "/gallery/avatar-demo.mp4" },
     { key: "comercial",  icon: "🎙️", ...t.mods.items.comercial, color: "#10b981", badge: "🎙️",       vid: "/gallery/comercial-chef.mp4" },
     { key: "montaje",    icon: "✨", ...t.mods.items.montaje,    color: "#f43f5e", badge: "✨",        vid: "/gallery/montaje-demo.mp4" },
-    { key: "generator",  icon: "🖼️", ...t.mods.items.generator, color: "#06b6d4", badge: "🖼️",       vid: null },
-    { key: "img2video",  icon: "🎥", ...t.mods.items.img2video,  color: "#8b5cf6", badge: "🚧 SOON",    vid: null, comingSoon: true },
-    { key: "library",    icon: "📂", ...t.mods.items.library,    color: "#64748b", badge: "📂",        vid: null },
+    { key: "generator",   icon: "🖼️", ...t.mods.items.generator,  color: "#06b6d4", badge: "🖼️",        vid: null },
+    { key: "img2video",   icon: "🎥", ...t.mods.items.img2video,   color: "#8b5cf6", badge: "🚧 SOON",    vid: null, comingSoon: true },
+    { key: "live-avatar", icon: "🔴", ...t.mods.items.liveAvatar,  color: "#ef4444", badge: "🔴 LIVE",   vid: null },
+    { key: "library",     icon: "📂", ...t.mods.items.library,     color: "#64748b", badge: "📂",         vid: null },
   ];
 
   const HERO_TEMPLATES = [
