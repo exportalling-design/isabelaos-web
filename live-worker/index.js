@@ -11,8 +11,8 @@ const WORKER_SECRET = process.env.WORKER_SECRET;
 const PORT = process.env.PORT || 3100;
 
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
+  process.env.VITE_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Active sessions: Map<sessionId, SessionState>
