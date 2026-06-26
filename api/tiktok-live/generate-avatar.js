@@ -131,6 +131,7 @@ export default async function handler(req, res) {
     voice_id,
     tiktok_username,
     product_link = "",
+    youtube_url  = null,
   } = body;
 
   if (!face_image_url || !body_image_url)
@@ -164,6 +165,7 @@ export default async function handler(req, res) {
       language,
       behaviors,
       product_link:      product_link || null,
+      youtube_url:       youtube_url  || null,
       generation_status: "generating",
     })
     .select()

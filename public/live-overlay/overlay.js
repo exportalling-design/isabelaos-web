@@ -203,6 +203,46 @@
     };
   }
 
+  // ── YouTube background music ────────────────────────────────────────────────
+
+  function extractYouTubeId(url) {
+    if (!url) return null;
+    const m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  const ytUrl = cfg.youtube_url || "";
+  const ytVideoId = extractYouTubeId(ytUrl);
+
+  if (ytVideoId) {
+    // Load IFrame Player API asynchronously
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+
+    window.onYouTubeIframeAPIReady = function () {
+      new YT.Player("yt-player", {
+        videoId: ytVideoId,
+        playerVars: {
+          autoplay:       1,
+          loop:           1,
+          playlist:       ytVideoId, // required for loop
+          controls:       0,
+          disablekb:      1,
+          fs:             0,
+          modestbranding: 1,
+          rel:            0,
+        },
+        events: {
+          onReady: (e) => {
+            e.target.setVolume(30);
+            e.target.playVideo();
+          },
+        },
+      });
+    };
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────────
 
   setState("idle");

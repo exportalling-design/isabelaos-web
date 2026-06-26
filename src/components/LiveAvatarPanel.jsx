@@ -48,6 +48,7 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const [description,  setDescription]  = useState("");
   const [behaviors,    setBehaviors]     = useState(["chat", "dance", "lipsync", "follows"]);
   const [productLink,  setProductLink]   = useState("");
+  const [youtubeUrl,   setYoutubeUrl]    = useState("");
 
   // Step 3 — generation state
   const [genStatus,  setGenStatus]  = useState("idle"); // idle | generating | ready
@@ -156,6 +157,7 @@ export default function LiveAvatarPanel({ lang = "es" }) {
           voice_id:         lang_obj.voice_id,
           tiktok_username:  tiktokUser.trim(),
           product_link:     productLink.trim(),
+          youtube_url:      youtubeUrl.trim() || null,
         }),
       });
       const json = await res.json();
@@ -497,6 +499,21 @@ export default function LiveAvatarPanel({ lang = "es" }) {
                 value={productLink}
                 onChange={e => setProductLink(e.target.value)}
               />
+            </div>
+
+            <div style={S.field}>
+              <p style={S.fieldLabel}>🎵 {isEs ? "Música de fondo (opcional)" : "Background music (optional)"}</p>
+              <input
+                style={S.input}
+                placeholder={isEs ? "https://youtube.com/watch?v=... — déjalo vacío si no quieres música" : "https://youtube.com/watch?v=... — leave empty for no music"}
+                value={youtubeUrl}
+                onChange={e => setYoutubeUrl(e.target.value)}
+              />
+              <p style={{ fontSize: 11, color: "#555", marginTop: 6, lineHeight: 1.5 }}>
+                {isEs
+                  ? "La música sonará de fondo en tu live mientras tu avatar baila o hace lip-sync"
+                  : "Music will play in the background of your live while your avatar dances or lip-syncs"}
+              </p>
             </div>
 
             {genError && <div style={S.errorBox}>{genError}</div>}

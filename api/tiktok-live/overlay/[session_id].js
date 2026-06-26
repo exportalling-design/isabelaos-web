@@ -11,7 +11,7 @@ export default async function handler(req, res) {
 
   const { data: session, error } = await supabaseAdmin
     .from("tiktok_live_sessions")
-    .select("id, tiktok_username, avatar_type, avatar_idle_url, avatar_talking_url, avatar_reaction_url, video_idle_url, video_talking_url, video_dancing_url, video_lipsync_url, status")
+    .select("id, tiktok_username, avatar_type, avatar_idle_url, avatar_talking_url, avatar_reaction_url, video_idle_url, video_talking_url, video_dancing_url, video_lipsync_url, youtube_url, status")
     .eq("id", sessionId)
     .single();
 
@@ -46,6 +46,7 @@ export default async function handler(req, res) {
       video_talking_url:  session.video_talking_url || session.avatar_talking_url || "",
       video_dancing_url:  session.video_dancing_url || session.avatar_reaction_url|| "",
       video_lipsync_url:  session.video_lipsync_url || session.avatar_idle_url    || "",
+      youtube_url:        session.youtube_url || "",
       status:             session.status,
       events_url:         `${appOrigin}/api/tiktok-live/events?session_id=${session.id}`,
     })};
@@ -64,6 +65,7 @@ export default async function handler(req, res) {
     </div>
     <div id="chat-feed"></div>
   </div>
+  <div id="yt-player" style="position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;"></div>
   <script src="${appOrigin}/live-overlay/overlay.js"></script>
 </body>
 </html>`;
