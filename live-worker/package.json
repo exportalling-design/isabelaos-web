@@ -1,0 +1,18 @@
+{
+  "name": "isabelaos-live-worker",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@tik.tools/node-client": "^1.0.0",
+    "@supabase/supabase-js": "^2.86.0",
+    "@google/generative-ai": "^0.24.0"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  }
+}

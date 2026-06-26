@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>IsabelaOS Live Overlay</title>
+  <link rel="stylesheet" href="overlay.css"/>
+  <!--
+    OBS Browser Source setup:
+      URL: https://yourapp.com/api/tiktok-live/overlay/SESSION_ID
+         OR: https://yourapp.com/live-overlay/?session_id=SESSION_ID
+      Width: 1920  Height: 1080
+      CSS:  body { background-color: rgba(0,0,0,0); }
+  -->
+</head>
+<body>
+  <div id="overlay-root">
+    <div id="avatar-container">
+      <video id="avatar-video" autoplay loop muted playsinline></video>
+      <img  id="avatar-img"   alt="avatar" style="display:none"/>
+      <div  id="lipsync-bar"></div>
+    </div>
+    <div id="response-bubble" class="hidden">
+      <span id="response-username"></span>
+      <p   id="response-text"></p>
+    </div>
+    <div id="chat-feed"></div>
+  </div>
+  <script src="overlay.js"></script>
+</body>
+</html>

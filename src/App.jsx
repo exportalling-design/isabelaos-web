@@ -12,6 +12,7 @@ import CreatorPanel              from "./components/CreatorPanel";
 import ComercialPanel            from "./components/ComercialPanel";
 import ProductPhotoshoot         from "./components/ProductPhotoshoot";
 import CineAIPanel               from "./components/CineAIPanel";
+import LiveAvatarPanel           from "./components/LiveAvatarPanel";
 import UnifiedTemplatesPanel     from "./components/UnifiedTemplatesPanel";
 import Terms                     from "./components/Terms";
 import Refund                    from "./components/Refund";
@@ -331,6 +332,7 @@ export default function App() {
       case "comercial":   return <ComercialPanel userStatus={us} lang={lang} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} lang={lang} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel lang={lang} onJobSubmitted={registerPendingJob} />;
+      case "live-avatar": return <LiveAvatarPanel lang={lang} />;
       default:            return null;
     }
   };
