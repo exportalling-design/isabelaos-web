@@ -1,9 +1,16 @@
+// Debug: log all env vars related to supabase
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'MISSING');
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING');
+
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+let supabase = null;
+function getSupabase() {
+  if (!supabase) {
+    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  }
+  return supabase;
+}
 
 const EL_BASE = "https://api.elevenlabs.io/v1";
 
@@ -33,7 +40,7 @@ export async function synthesizeAndUpload(text, voiceId, sessionId) {
 
   // 2. Upload to Supabase Storage
   const filename = `${sessionId}/${Date.now()}.mp3`;
-  const { error: upErr } = await supabase.storage
+  const { error: upErr } = await getSupabase().storage
     .from("live-audio")
     .upload(filename, Buffer.from(audioBuffer), {
       contentType: "audio/mpeg",
@@ -42,6 +49,6 @@ export async function synthesizeAndUpload(text, voiceId, sessionId) {
 
   if (upErr) throw new Error("Supabase upload: " + upErr.message);
 
-  const { data } = supabase.storage.from("live-audio").getPublicUrl(filename);
+  const { data } = getSupabase().storage.from("live-audio").getPublicUrl(filename);
   return data.publicUrl;
 }
