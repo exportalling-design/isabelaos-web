@@ -17,41 +17,79 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   const {
+    session_id: existingSessionId,
     tiktok_username, avatar_type = "video", avatar_idle_url, avatar_talking_url,
     avatar_reaction_url, voice_id, persona_prompt,
   } = body;
 
-  if (!tiktok_username || !voice_id || !persona_prompt) {
-    return res.status(400).json({ ok: false, error: "Missing required fields: tiktok_username, voice_id, persona_prompt" });
-  }
+  let session;
 
-  // Stop any existing active session for this user
-  await supabaseAdmin
-    .from("tiktok_live_sessions")
-    .update({ status: "stopped" })
-    .eq("user_id", userId)
-    .eq("status", "active");
+  if (existingSessionId) {
+    // Activate a session already created by generate-avatar
+    const { data: existing, error: fetchErr } = await supabaseAdmin
+      .from("tiktok_live_sessions")
+      .select("*")
+      .eq("id", existingSessionId)
+      .eq("user_id", userId)
+      .single();
 
-  // Create new session
-  const { data: session, error: insertErr } = await supabaseAdmin
-    .from("tiktok_live_sessions")
-    .insert({
-      user_id: userId,
-      tiktok_username: tiktok_username.replace(/^@/, ""),
-      avatar_type,
-      avatar_idle_url:     avatar_idle_url     || null,
-      avatar_talking_url:  avatar_talking_url  || null,
-      avatar_reaction_url: avatar_reaction_url || null,
-      voice_id,
-      persona_prompt,
-      status: "active",
-    })
-    .select()
-    .single();
+    if (fetchErr || !existing) {
+      return res.status(404).json({ ok: false, error: "Session not found" });
+    }
 
-  if (insertErr) {
-    console.error("[start] insert error:", insertErr.message);
-    return res.status(500).json({ ok: false, error: insertErr.message });
+    // Stop any other active sessions for this user
+    await supabaseAdmin
+      .from("tiktok_live_sessions")
+      .update({ status: "stopped" })
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .neq("id", existingSessionId);
+
+    const { data: updated, error: updateErr } = await supabaseAdmin
+      .from("tiktok_live_sessions")
+      .update({ status: "active" })
+      .eq("id", existingSessionId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      return res.status(500).json({ ok: false, error: updateErr.message });
+    }
+    session = updated;
+
+  } else {
+    // Legacy path: create new session from scratch
+    if (!tiktok_username || !voice_id || !persona_prompt) {
+      return res.status(400).json({ ok: false, error: "Missing required fields: tiktok_username, voice_id, persona_prompt" });
+    }
+
+    await supabaseAdmin
+      .from("tiktok_live_sessions")
+      .update({ status: "stopped" })
+      .eq("user_id", userId)
+      .eq("status", "active");
+
+    const { data: created, error: insertErr } = await supabaseAdmin
+      .from("tiktok_live_sessions")
+      .insert({
+        user_id: userId,
+        tiktok_username: tiktok_username.replace(/^@/, ""),
+        avatar_type,
+        avatar_idle_url:     avatar_idle_url     || null,
+        avatar_talking_url:  avatar_talking_url  || null,
+        avatar_reaction_url: avatar_reaction_url || null,
+        voice_id,
+        persona_prompt,
+        status: "active",
+      })
+      .select()
+      .single();
+
+    if (insertErr) {
+      console.error("[start] insert error:", insertErr.message);
+      return res.status(500).json({ ok: false, error: insertErr.message });
+    }
+    session = created;
   }
 
   // Signal Railway worker

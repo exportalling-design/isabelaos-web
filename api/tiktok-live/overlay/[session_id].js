@@ -11,7 +11,7 @@ export default async function handler(req, res) {
 
   const { data: session, error } = await supabaseAdmin
     .from("tiktok_live_sessions")
-    .select("id, tiktok_username, avatar_type, avatar_idle_url, avatar_talking_url, avatar_reaction_url, status")
+    .select("id, tiktok_username, avatar_type, avatar_idle_url, avatar_talking_url, avatar_reaction_url, video_idle_url, video_talking_url, video_dancing_url, video_lipsync_url, status")
     .eq("id", sessionId)
     .single();
 
@@ -34,14 +34,20 @@ export default async function handler(req, res) {
   <link rel="stylesheet" href="${appOrigin}/live-overlay/overlay.css"/>
   <script>
     window.LIVE_SESSION = ${JSON.stringify({
-      session_id:          session.id,
-      tiktok_username:     session.tiktok_username,
-      avatar_type:         session.avatar_type,
-      avatar_idle_url:     session.avatar_idle_url     || "",
-      avatar_talking_url:  session.avatar_talking_url  || "",
-      avatar_reaction_url: session.avatar_reaction_url || "",
-      status:              session.status,
-      events_url:          `${appOrigin}/api/tiktok-live/events?session_id=${session.id}`,
+      session_id:         session.id,
+      tiktok_username:    session.tiktok_username,
+      avatar_type:        session.avatar_type,
+      // Legacy manual-upload URLs
+      avatar_idle_url:    session.avatar_idle_url     || "",
+      avatar_talking_url: session.avatar_talking_url  || "",
+      avatar_reaction_url:session.avatar_reaction_url || "",
+      // AI-generated 4-state video URLs (preferred when present)
+      video_idle_url:     session.video_idle_url    || session.avatar_idle_url    || "",
+      video_talking_url:  session.video_talking_url || session.avatar_talking_url || "",
+      video_dancing_url:  session.video_dancing_url || session.avatar_reaction_url|| "",
+      video_lipsync_url:  session.video_lipsync_url || session.avatar_idle_url    || "",
+      status:             session.status,
+      events_url:         `${appOrigin}/api/tiktok-live/events?session_id=${session.id}`,
     })};
   </script>
 </head>
