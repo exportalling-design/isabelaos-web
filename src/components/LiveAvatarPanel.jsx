@@ -63,6 +63,9 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const [stopping,     setStopping]     = useState(false);
   const [copied,       setCopied]       = useState(false);
   const [liveError,    setLiveError]    = useState(null);
+  const [copiedSetup,  setCopiedSetup]  = useState(false);
+  const [openSteps,    setOpenSteps]    = useState(new Set([1, 2, 3, 4]));
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   const faceRef = useRef();
   const bodyRef = useRef();
@@ -274,6 +277,22 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   };
 
   const completedCount = VIDEO_TYPES.filter(v => videoUrls[v.key]).length;
+
+  const pendingOverlayUrl = sessionId
+    ? `${window.location.origin}/api/tiktok-live/overlay/${sessionId}`
+    : "";
+
+  const toggleStep = (n) => setOpenSteps(prev => {
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
+
+  const copySetupUrl = () => {
+    navigator.clipboard?.writeText(pendingOverlayUrl);
+    setCopiedSetup(true);
+    setTimeout(() => setCopiedSetup(false), 2000);
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────────
   if (liveLoading) {
@@ -570,6 +589,136 @@ export default function LiveAvatarPanel({ lang = "es" }) {
                   ))}
                 </div>
 
+                {/* ── CÓMO TRANSMITIR TU AVATAR ── */}
+                <div style={{ margin: "24px 0 6px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                    <p style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#c8a050", fontWeight: 700, margin: 0 }}>
+                      📡 {isEs ? "Cómo transmitir tu avatar" : "How to stream your avatar"}
+                    </p>
+                    <button
+                      onClick={() => setTutorialOpen(true)}
+                      style={{ background: "rgba(200,160,80,0.08)", border: "1px solid rgba(200,160,80,0.25)", borderRadius: 6, color: "#c8a050", fontSize: 11, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      ▶ {isEs ? "Ver tutorial en video" : "Watch video tutorial"}
+                    </button>
+                  </div>
+
+                  {/* PASO 1 — URL del Overlay */}
+                  {[
+                    {
+                      n: 1, icon: "🔗",
+                      title: isEs ? "Copia tu URL de Overlay" : "Copy your Overlay URL",
+                      content: (
+                        <>
+                          <p style={S.guideText}>{isEs ? "Esta es la pantalla de tu avatar para OBS. Cópiala y guárdala." : "This is your avatar screen for OBS. Copy and save it."}</p>
+                          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                            <input readOnly value={pendingOverlayUrl} style={{ ...S.urlInput, fontSize: 11 }} />
+                            <button onClick={copySetupUrl} style={S.copyBtn}>
+                              {copiedSetup ? "✅" : "📋"} {copiedSetup ? (isEs ? "Copiado" : "Copied") : (isEs ? "Copiar" : "Copy")}
+                            </button>
+                          </div>
+                        </>
+                      ),
+                    },
+                    {
+                      n: 2, icon: "🎬",
+                      title: isEs ? "Configura OBS" : "Set up OBS",
+                      content: (
+                        <ol style={{ margin: "8px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 7 }}>
+                          {[
+                            isEs ? <>Descarga OBS gratis en <a href="https://obsproject.com" target="_blank" rel="noreferrer" style={{ color: "#c8a050" }}>obsproject.com</a></> : <>Download OBS free at <a href="https://obsproject.com" target="_blank" rel="noreferrer" style={{ color: "#c8a050" }}>obsproject.com</a></>,
+                            isEs ? 'Abre OBS → clic en "+" en Sources (Fuentes)' : 'Open OBS → click "+" in Sources',
+                            isEs ? 'Selecciona "Browser" (Navegador)' : 'Select "Browser"',
+                            isEs ? "Pega tu URL de overlay en el campo URL" : "Paste your overlay URL in the URL field",
+                            isEs ? "Ancho: 1080 / Alto: 1920 (vertical para TikTok)" : "Width: 1080 / Height: 1920 (vertical for TikTok)",
+                            isEs ? 'Clic en "OK" y listo' : 'Click "OK" and done',
+                          ].map((step, i) => (
+                            <li key={i} style={S.guideText}>{step}</li>
+                          ))}
+                        </ol>
+                      ),
+                    },
+                    {
+                      n: 3, icon: "📱",
+                      title: isEs ? "Configura TikTok Live Studio" : "Set up TikTok Live Studio",
+                      content: (
+                        <ol style={{ margin: "8px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 7 }}>
+                          {[
+                            isEs ? <>Descarga TikTok Live Studio en <a href="https://www.tiktok.com/live-studio" target="_blank" rel="noreferrer" style={{ color: "#c8a050" }}>tiktok.com/live-studio</a></> : <>Download TikTok Live Studio at <a href="https://www.tiktok.com/live-studio" target="_blank" rel="noreferrer" style={{ color: "#c8a050" }}>tiktok.com/live-studio</a></>,
+                            isEs ? "Inicia sesión con tu cuenta TikTok" : "Sign in with your TikTok account",
+                            isEs ? 'En "Source" selecciona OBS Virtual Camera' : 'In "Source" select OBS Virtual Camera',
+                            isEs ? 'Presiona "GO LIVE" en TikTok' : 'Press "GO LIVE" in TikTok',
+                          ].map((step, i) => (
+                            <li key={i} style={S.guideText}>{step}</li>
+                          ))}
+                        </ol>
+                      ),
+                    },
+                    {
+                      n: 4, icon: "🤖",
+                      title: isEs ? "Activa tu avatar" : "Activate your avatar",
+                      content: (
+                        <>
+                          <p style={{ ...S.guideText, marginTop: 8 }}>
+                            {isEs
+                              ? "Vuelve a IsabelaOS y presiona el botón 🔴 INICIAR LIVE aquí abajo. Tu avatar comenzará a responder el chat de TikTok automáticamente."
+                              : "Come back to IsabelaOS and press the 🔴 START LIVE button below. Your avatar will start responding to TikTok chat automatically."}
+                          </p>
+                        </>
+                      ),
+                    },
+                  ].map(({ n, icon, title, content }) => {
+                    const isOpen = openSteps.has(n);
+                    return (
+                      <div key={n} style={{ marginBottom: 8, border: "1px solid rgba(200,160,80,0.14)", borderRadius: 10, overflow: "hidden" }}>
+                        <button
+                          onClick={() => toggleStep(n)}
+                          style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: isOpen ? "rgba(200,160,80,0.05)" : "#0a0a0c", border: "none", cursor: "pointer", textAlign: "left" }}
+                        >
+                          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "50%", background: "rgba(200,160,80,0.15)", border: "1px solid rgba(200,160,80,0.35)", fontSize: 11, fontWeight: 700, color: "#c8a050", flexShrink: 0 }}>
+                            {n}
+                          </span>
+                          <span style={{ fontSize: 16, flexShrink: 0 }}>{icon}</span>
+                          <span style={{ fontSize: 13, color: "#ddd8cc", fontFamily: "inherit", fontWeight: 600, flex: 1 }}>{title}</span>
+                          <span style={{ fontSize: 11, color: "#555", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+                        </button>
+                        {isOpen && (
+                          <div style={{ padding: "4px 14px 14px 54px", background: "#080808" }}>
+                            {content}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Tutorial modal */}
+                {tutorialOpen && (
+                  <div
+                    onClick={() => setTutorialOpen(false)}
+                    style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+                  >
+                    <div
+                      onClick={e => e.stopPropagation()}
+                      style={{ background: "#0e0e10", border: "2px solid rgba(200,160,80,0.25)", borderRadius: 16, padding: "32px 28px", maxWidth: 420, width: "100%", textAlign: "center" }}
+                    >
+                      <div style={{ fontSize: 48, marginBottom: 16 }}>🎬</div>
+                      <h2 style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 4, color: "#f0e8d0", margin: "0 0 10px" }}>
+                        {isEs ? "TUTORIAL EN VIDEO" : "VIDEO TUTORIAL"}
+                      </h2>
+                      <p style={{ fontSize: 13, color: "#888", lineHeight: 1.7, marginBottom: 24 }}>
+                        {isEs ? "Tutorial disponible próximamente. Por ahora sigue los pasos de la guía visual arriba." : "Tutorial coming soon. For now follow the visual guide steps above."}
+                      </p>
+                      <button
+                        onClick={() => setTutorialOpen(false)}
+                        style={{ background: "rgba(200,160,80,0.12)", border: "2px solid rgba(200,160,80,0.3)", borderRadius: 8, color: "#c8a050", fontSize: 13, padding: "10px 28px", cursor: "pointer", fontFamily: "inherit" }}
+                      >
+                        {isEs ? "Cerrar" : "Close"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {liveError && <div style={S.errorBox}>{liveError}</div>}
 
                 <button onClick={handleStart} disabled={starting} style={{ ...S.startLiveBtn, opacity: starting ? 0.6 : 1 }}>
@@ -744,6 +893,9 @@ const S = {
     background: "rgba(200,160,80,0.1)", border: "2px solid rgba(200,160,80,0.25)",
     borderRadius: 8, color: V.gold, fontFamily: V.ff, fontSize: 12,
     padding: "10px 14px", cursor: "pointer", whiteSpace: "nowrap",
+  },
+  guideText: {
+    fontSize: 12, color: "#888", lineHeight: 1.65, margin: 0,
   },
   errorBox: {
     background: "rgba(200,60,60,0.06)", border: "2px solid rgba(200,60,60,0.2)",
