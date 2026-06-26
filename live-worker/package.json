@@ -8,7 +8,7 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "@tik.tools/node-client": "^1.0.0",
+    "ws": "^8.0.0",
     "@supabase/supabase-js": "^2.86.0",
     "@google/generative-ai": "^0.24.0"
   },
