@@ -1,5 +1,10 @@
 // IsabelaOS TikTok Live Worker — runs on Railway
 // HTTP server: Railway health check + /start + /stop commands
+
+// Debug: log all env vars related to supabase
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'MISSING');
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING');
+
 import http from "http";
 import { createClient } from "@supabase/supabase-js";
 import { PriorityQueue } from "./queue.js";
@@ -10,10 +15,13 @@ import { createConnection } from "./tiktools.js";
 const WORKER_SECRET = process.env.WORKER_SECRET;
 const PORT = process.env.PORT || 3100;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+let _supabase = null;
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  }
+  return _supabase;
+}
 
 // Active sessions: Map<sessionId, SessionState>
 const sessions = new Map();
@@ -21,7 +29,7 @@ const sessions = new Map();
 // ── Session lifecycle ────────────────────────────────────────────────────────
 
 async function loadSession(sessionId) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("tiktok_live_sessions")
     .select("*")
     .eq("id", sessionId)
@@ -32,7 +40,7 @@ async function loadSession(sessionId) {
 }
 
 async function emitEvent(sessionId, eventPayload) {
-  const { error } = await supabase.from("tiktok_live_events").insert({
+  const { error } = await getSupabase().from("tiktok_live_events").insert({
     session_id: sessionId,
     event_type:    eventPayload.event_type,
     username:      eventPayload.username,
@@ -140,7 +148,7 @@ async function stopSession(sessionId) {
 
   sessions.delete(sessionId);
 
-  await supabase
+  await getSupabase()
     .from("tiktok_live_sessions")
     .update({ status: "stopped" })
     .eq("id", sessionId);
