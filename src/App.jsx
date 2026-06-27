@@ -332,7 +332,7 @@ export default function App() {
       case "comercial":   return <ComercialPanel userStatus={us} lang={lang} />;
       case "photoshoot":  return <ProductPhotoshoot userJades={jades} lang={lang} onJadesDeducted={async(a)=>{ try{await spendJades({amount:a,reason:"product_photoshoot"});}catch{} }} />;
       case "cineai":      return <CineAIPanel lang={lang} onJobSubmitted={registerPendingJob} />;
-      case "live-avatar": return <LiveAvatarPanel lang={lang} />;
+      case "live-avatar": return <LiveAvatarPanel lang={lang} onBuyJades={() => setBuyOpen(true)} />;
       default:            return null;
     }
   };

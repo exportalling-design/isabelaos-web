@@ -31,7 +31,7 @@ async function getToken() {
   return session?.access_token || null;
 }
 
-export default function LiveAvatarPanel({ lang = "es" }) {
+export default function LiveAvatarPanel({ lang = "es", onBuyJades }) {
   const isEs = lang !== "en";
 
   // Wizard step
@@ -56,6 +56,7 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const [taskIds,    setTaskIds]    = useState(null);   // {idle, talking, dancing, lipsync}
   const [videoUrls,  setVideoUrls]  = useState({});     // filled as each video completes
   const [genError,   setGenError]   = useState(null);
+  const [jadeError,  setJadeError]  = useState(null); // 402 insufficient jades
 
   // Live session
   const [liveSession,  setLiveSession]  = useState(null);
@@ -168,6 +169,7 @@ export default function LiveAvatarPanel({ lang = "es" }) {
     const lang_obj = LANGUAGES.find(l => l.code === language) || LANGUAGES[0];
 
     setGenError(null);
+    setJadeError(null);
     setGenStatus("generating");
     setVideoUrls({});
 
@@ -189,6 +191,11 @@ export default function LiveAvatarPanel({ lang = "es" }) {
         }),
       });
       const json = await res.json();
+      if (res.status === 402) {
+        setJadeError(json.detail || (isEs ? "Jades insuficientes" : "Insufficient Jades"));
+        setGenStatus("idle");
+        return;
+      }
       if (!res.ok || !json.ok) throw new Error(json.error || "Error generando avatar");
       setSessionId(json.session_id);
       setTaskIds(json.task_ids);
@@ -260,6 +267,7 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const handleStart = async () => {
     setStarting(true);
     setLiveError(null);
+    setJadeError(null);
     try {
       const token = await getToken();
       const langObj   = LANGUAGES.find(l => l.code === language) || LANGUAGES[0];
@@ -280,6 +288,10 @@ export default function LiveAvatarPanel({ lang = "es" }) {
         body: JSON.stringify(startBody),
       });
       const json = await res.json();
+      if (res.status === 402) {
+        setJadeError(json.detail || (isEs ? "Jades insuficientes para iniciar el live" : "Insufficient Jades to start live"));
+        return;
+      }
       if (!res.ok || !json.ok) throw new Error(json.error || "Error iniciando live");
       setLiveSession({
         id:               json.session_id,
@@ -687,6 +699,15 @@ export default function LiveAvatarPanel({ lang = "es" }) {
                       : "On click, Gemini will automatically create 4 videos based on your photos and description: Idle, Talking, Dancing, and Lip-Sync. Process takes 2-5 minutes."}
                   </p>
                 </div>
+                {/* Jade cost badge */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontSize: 10, color: "#666", letterSpacing: 1 }}>
+                    {isEs ? "Costo:" : "Cost:"}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#c8a050", letterSpacing: 1 }}>
+                    💎 30 Jades
+                  </span>
+                </div>
                 <button onClick={handleGenerate} style={S.generateBtn}>
                   ✨ {isEs ? "GENERAR AVATAR (4 videos automáticos)" : "GENERATE AVATAR (4 automatic videos)"}
                 </button>
@@ -926,10 +947,32 @@ export default function LiveAvatarPanel({ lang = "es" }) {
 
                 {liveError && <div style={S.errorBox}>{liveError}</div>}
 
+                {/* Jade cost + start button */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, marginTop: 8 }}>
+                  <span style={{ fontSize: 10, color: "#666", letterSpacing: 1 }}>
+                    {isEs ? "Costo:" : "Cost:"}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#c8a050", letterSpacing: 1 }}>
+                    💎 10 Jades/{isEs ? "hora" : "hour"}
+                  </span>
+                </div>
                 <button onClick={handleStart} disabled={starting} style={{ ...S.startLiveBtn, opacity: starting ? 0.6 : 1 }}>
                   {starting ? "⏳ " + (isEs ? "Iniciando..." : "Starting...") : "🔴 " + (isEs ? "INICIAR LIVE" : "START LIVE")}
                 </button>
               </>
+            )}
+
+            {/* Jade insufficient error (402) */}
+            {jadeError && (
+              <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(200,160,80,0.07)", border: "2px solid rgba(200,160,80,0.3)", borderRadius: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                <p style={{ fontSize: 13, color: "#c8a050", margin: 0, fontWeight: 600 }}>💎 {jadeError}</p>
+                <button
+                  onClick={() => { setJadeError(null); if (onBuyJades) onBuyJades(); }}
+                  style={{ alignSelf: "flex-start", background: "#c8a050", border: "none", borderRadius: 8, color: "#060608", fontFamily: "inherit", fontSize: 12, fontWeight: 700, letterSpacing: 1, padding: "9px 20px", cursor: "pointer" }}
+                >
+                  {isEs ? "Recargar Jades →" : "Buy Jades →"}
+                </button>
+              </div>
             )}
 
             {genError && <div style={{ ...S.errorBox, marginTop: 14 }}>{genError}</div>}

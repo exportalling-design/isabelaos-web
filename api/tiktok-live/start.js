@@ -23,6 +23,27 @@ export default async function handler(req, res) {
     video_idle_url, video_talking_url, video_dancing_url, video_lipsync_url,
   } = body;
 
+  // ── Jade check & deduct (10 Jades per live hour) ───────────────────────────
+  const JADE_COST_LIVE = 10;
+  const username       = (tiktok_username || "").replace(/^@/, "") || existingSessionId || "user";
+  const jadeRef        = `live-avatar-start-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+    p_user_id: userId,
+    p_amount:  JADE_COST_LIVE,
+    p_reason:  `live_avatar_start_@${username}`,
+    p_ref:     jadeRef,
+  });
+
+  if (spendErr) {
+    if ((spendErr.message || "").includes("INSUFFICIENT_JADES"))
+      return res.status(402).json({
+        ok: false, error: "INSUFFICIENT_JADES", required: JADE_COST_LIVE,
+        detail: "Necesitas 10 Jades por hora de live. Recarga tu cuenta.",
+      });
+    return res.status(400).json({ ok: false, error: spendErr.message });
+  }
+
   let session;
 
   if (existingSessionId) {

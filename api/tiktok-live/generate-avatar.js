@@ -143,6 +143,26 @@ export default async function handler(req, res) {
   if (!voice_id)
     return res.status(400).json({ ok: false, error: "Selecciona un idioma/voz" });
 
+  // ── Jade check & deduct (30 Jades) ─────────────────────────────────────────
+  const JADE_COST = 30;
+  const jadeRef   = `live-avatar-gen-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const { error: spendErr } = await supabaseAdmin.rpc("spend_jades", {
+    p_user_id: userId,
+    p_amount:  JADE_COST,
+    p_reason:  "live_avatar_generate",
+    p_ref:     jadeRef,
+  });
+
+  if (spendErr) {
+    if ((spendErr.message || "").includes("INSUFFICIENT_JADES"))
+      return res.status(402).json({
+        ok: false, error: "INSUFFICIENT_JADES", required: JADE_COST,
+        detail: `Necesitas ${JADE_COST} Jades para generar tu avatar live`,
+      });
+    return res.status(400).json({ ok: false, error: spendErr.message });
+  }
+
   // Stop any existing active session for this user
   await supabaseAdmin
     .from("tiktok_live_sessions")
@@ -224,6 +244,15 @@ export default async function handler(req, res) {
       .from("tiktok_live_sessions")
       .update({ generation_status: "failed" })
       .eq("id", sessionId);
+    // Refund jades if generation crashed after deduction
+    try {
+      await supabaseAdmin.rpc("spend_jades", {
+        p_user_id: userId,
+        p_amount:  -JADE_COST,
+        p_reason:  "live_avatar_generate_refund",
+        p_ref:     jadeRef,
+      });
+    } catch {}
     return res.status(500).json({ ok: false, error: err.message });
   }
 }
