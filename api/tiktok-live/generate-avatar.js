@@ -21,7 +21,7 @@ const LANG_LABEL = {
 
 async function callGeminiText(prompt) {
   const r = await fetch(
-    `${GEMINI_BASE}/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    `${GEMINI_BASE}/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
