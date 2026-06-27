@@ -72,10 +72,15 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const [recovering,       setRecovering]       = useState(false);
   const [recoverError,     setRecoverError]     = useState(null);
   const [recoverPartial,   setRecoverPartial]   = useState(null);
+  const [uploadingManual,  setUploadingManual]  = useState({});
 
-  const faceRef = useRef();
-  const bodyRef = useRef();
-  const pollRef = useRef(null);
+  const faceRef          = useRef();
+  const bodyRef          = useRef();
+  const pollRef          = useRef(null);
+  const manualIdleRef    = useRef();
+  const manualTalkingRef = useRef();
+  const manualDancingRef = useRef();
+  const manualLipsyncRef = useRef();
 
   // ── Load active session on mount ───────────────────────────────────────────
   useEffect(() => {
@@ -127,6 +132,24 @@ export default function LiveAvatarPanel({ lang = "es" }) {
       setUploading(u => ({ ...u, [slot]: false }));
     }
   }, [isEs]);
+
+  // ── Manual video upload ────────────────────────────────────────────────────
+  const uploadManualVideo = async (file, type) => {
+    setUploadingManual(u => ({ ...u, [type]: true }));
+    setGenError(null);
+    try {
+      const ext  = file.name.split(".").pop() || "mp4";
+      const path = `manual/${Date.now()}_${type}.${ext}`;
+      const { error } = await supabase.storage.from("live-avatars").upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from("live-avatars").getPublicUrl(path);
+      setVideoUrls(u => ({ ...u, [type]: data.publicUrl }));
+    } catch (e) {
+      setGenError((isEs ? "Error subiendo video: " : "Upload error: ") + e.message);
+    } finally {
+      setUploadingManual(u => ({ ...u, [type]: false }));
+    }
+  };
 
   // ── Behavior toggle ────────────────────────────────────────────────────────
   const toggleBehavior = (key) => {
@@ -223,16 +246,38 @@ export default function LiveAvatarPanel({ lang = "es" }) {
     return () => { active = false; };
   }, [taskIds, genStatus, sessionId]);
 
+  // ── Auto-ready when all 4 manual videos are uploaded ──────────────────────
+  useEffect(() => {
+    if (
+      genStatus !== "generating" &&
+      videoUrls.idle && videoUrls.talking && videoUrls.dancing && videoUrls.lipsync
+    ) {
+      setGenStatus("ready");
+    }
+  }, [videoUrls, genStatus]);
+
   // ── Start live ─────────────────────────────────────────────────────────────
   const handleStart = async () => {
     setStarting(true);
     setLiveError(null);
     try {
       const token = await getToken();
+      const langObj   = LANGUAGES.find(l => l.code === language) || LANGUAGES[0];
+      const startBody = sessionId
+        ? { session_id: sessionId }
+        : {
+            tiktok_username:  tiktokUser.trim() || "live",
+            voice_id:         langObj.voice_id,
+            persona_prompt:   description.trim() || "",
+            video_idle_url:   videoUrls.idle    || null,
+            video_talking_url: videoUrls.talking || null,
+            video_dancing_url: videoUrls.dancing || null,
+            video_lipsync_url: videoUrls.lipsync || null,
+          };
       const res = await fetch("/api/tiktok-live/start", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId }),
+        body: JSON.stringify(startBody),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Error iniciando live");
@@ -645,6 +690,57 @@ export default function LiveAvatarPanel({ lang = "es" }) {
                 <button onClick={handleGenerate} style={S.generateBtn}>
                   ✨ {isEs ? "GENERAR AVATAR (4 videos automáticos)" : "GENERATE AVATAR (4 automatic videos)"}
                 </button>
+
+                {/* Manual upload separator */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 16px" }}>
+                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                  <span style={{ fontSize: 10, color: "#444", letterSpacing: 1.5, whiteSpace: "nowrap", textTransform: "uppercase" }}>
+                    {isEs ? "— o si ya tienes los videos —" : "— or if you already have the videos —"}
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {[
+                    { key: "idle",    ref: manualIdleRef,    icon: "😌", label: isEs ? "Video IDLE (en reposo)"  : "IDLE video (at rest)" },
+                    { key: "talking", ref: manualTalkingRef, icon: "💬", label: isEs ? "Video HABLANDO"          : "TALKING video" },
+                    { key: "dancing", ref: manualDancingRef, icon: "💃", label: isEs ? "Video BAILANDO"          : "DANCING video" },
+                    { key: "lipsync", ref: manualLipsyncRef, icon: "🎵", label: isEs ? "Video LIP-SYNC"          : "LIP-SYNC video" },
+                  ].map(({ key, ref, icon, label }) => (
+                    <div key={key}>
+                      <input
+                        ref={ref}
+                        type="file"
+                        accept="video/*"
+                        style={{ display: "none" }}
+                        onChange={e => { if (e.target.files?.[0]) uploadManualVideo(e.target.files[0], key); }}
+                      />
+                      <button
+                        onClick={() => ref.current?.click()}
+                        disabled={uploadingManual[key]}
+                        style={{
+                          width: "100%", display: "flex", alignItems: "center", gap: 10,
+                          background: videoUrls[key] ? "rgba(80,200,100,0.06)" : "rgba(255,255,255,0.02)",
+                          border: `1px solid ${videoUrls[key] ? "rgba(80,200,100,0.35)" : "rgba(255,255,255,0.08)"}`,
+                          borderRadius: 8, padding: "10px 14px",
+                          color: "#aaa", fontFamily: "inherit", fontSize: 12, cursor: "pointer",
+                          letterSpacing: 0.5, opacity: uploadingManual[key] ? 0.6 : 1,
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        <span style={{ fontSize: 16 }}>{icon}</span>
+                        <span>📁 {label}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 11, color: videoUrls[key] ? "#60c870" : "#555" }}>
+                          {uploadingManual[key]
+                            ? "⏳"
+                            : videoUrls[key]
+                              ? (isEs ? "✅ Subido" : "✅ Uploaded")
+                              : (isEs ? "Seleccionar" : "Select")}
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
 

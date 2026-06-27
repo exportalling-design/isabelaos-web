@@ -19,7 +19,8 @@ export default async function handler(req, res) {
   const {
     session_id: existingSessionId,
     tiktok_username, avatar_type = "video", avatar_idle_url, avatar_talking_url,
-    avatar_reaction_url, voice_id, persona_prompt,
+    avatar_reaction_url, voice_id, persona_prompt = "",
+    video_idle_url, video_talking_url, video_dancing_url, video_lipsync_url,
   } = body;
 
   let session;
@@ -59,8 +60,8 @@ export default async function handler(req, res) {
 
   } else {
     // Legacy path: create new session from scratch
-    if (!tiktok_username || !voice_id || !persona_prompt) {
-      return res.status(400).json({ ok: false, error: "Missing required fields: tiktok_username, voice_id, persona_prompt" });
+    if (!tiktok_username || !voice_id) {
+      return res.status(400).json({ ok: false, error: "Missing required fields: tiktok_username, voice_id" });
     }
 
     await supabaseAdmin
@@ -81,6 +82,12 @@ export default async function handler(req, res) {
         voice_id,
         persona_prompt,
         status: "active",
+        video_idle_url:    video_idle_url    || null,
+        video_talking_url: video_talking_url || null,
+        video_dancing_url: video_dancing_url || null,
+        video_lipsync_url: video_lipsync_url || null,
+        generation_status: (video_idle_url && video_talking_url && video_dancing_url && video_lipsync_url)
+          ? "completed" : null,
       })
       .select()
       .single();
