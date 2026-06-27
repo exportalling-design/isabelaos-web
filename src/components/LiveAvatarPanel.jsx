@@ -690,80 +690,106 @@ export default function LiveAvatarPanel({ lang = "es", onBuyJades }) {
               </div>
             )}
 
-            {genStatus === "idle" && (
-              <>
-                <div style={{ ...S.card, marginBottom: 20 }}>
-                  <p style={{ fontSize: 12, color: "#888", lineHeight: 1.7, marginBottom: 0 }}>
-                    {isEs
-                      ? "Al hacer clic, Gemini creará 4 videos automáticamente basados en tus fotos y descripción: Idle, Hablando, Bailando y Lip-Sync. El proceso toma 2-5 minutos."
-                      : "On click, Gemini will automatically create 4 videos based on your photos and description: Idle, Talking, Dancing, and Lip-Sync. Process takes 2-5 minutes."}
-                  </p>
-                </div>
-                {/* Jade cost badge */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ fontSize: 10, color: "#666", letterSpacing: 1 }}>
-                    {isEs ? "Costo:" : "Cost:"}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#c8a050", letterSpacing: 1 }}>
-                    💎 30 Jades
-                  </span>
-                </div>
-                <button onClick={handleGenerate} style={S.generateBtn}>
-                  ✨ {isEs ? "GENERAR AVATAR (4 videos automáticos)" : "GENERATE AVATAR (4 automatic videos)"}
-                </button>
+            {genStatus === "idle" && (() => {
+              const manualCount = ["idle", "talking", "dancing", "lipsync"].filter(t => videoUrls[t]).length;
+              const MANUAL_SLOTS = [
+                { key: "idle",    ref: manualIdleRef,    icon: "😌", label: isEs ? "Video IDLE (en reposo)" : "IDLE video (at rest)" },
+                { key: "talking", ref: manualTalkingRef, icon: "💬", label: isEs ? "Video HABLANDO"         : "TALKING video" },
+                { key: "dancing", ref: manualDancingRef, icon: "💃", label: isEs ? "Video BAILANDO"         : "DANCING video" },
+                { key: "lipsync", ref: manualLipsyncRef, icon: "🎵", label: isEs ? "Video LIP-SYNC"         : "LIP-SYNC video" },
+              ];
+              return (
+                <>
+                  {/* ── Auto-generate section (hidden when all 4 manual uploaded) ── */}
+                  {manualCount < 4 && (
+                    <>
+                      <div style={{ ...S.card, marginBottom: 20 }}>
+                        <p style={{ fontSize: 12, color: "#888", lineHeight: 1.7, marginBottom: 0 }}>
+                          {isEs
+                            ? "Al hacer clic, Gemini creará 4 videos automáticamente basados en tus fotos y descripción: Idle, Hablando, Bailando y Lip-Sync. El proceso toma 2-5 minutos."
+                            : "On click, Gemini will automatically create 4 videos based on your photos and description: Idle, Talking, Dancing, and Lip-Sync. Process takes 2-5 minutes."}
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <span style={{ fontSize: 10, color: "#666", letterSpacing: 1 }}>{isEs ? "Costo:" : "Cost:"}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#c8a050", letterSpacing: 1 }}>💎 30 Jades</span>
+                      </div>
+                      <button onClick={handleGenerate} style={S.generateBtn}>
+                        ✨ {isEs ? "GENERAR AVATAR (4 videos automáticos)" : "GENERATE AVATAR (4 automatic videos)"}
+                      </button>
+                    </>
+                  )}
 
-                {/* Manual upload separator */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 16px" }}>
-                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
-                  <span style={{ fontSize: 10, color: "#444", letterSpacing: 1.5, whiteSpace: "nowrap", textTransform: "uppercase" }}>
-                    {isEs ? "— o si ya tienes los videos —" : "— or if you already have the videos —"}
-                  </span>
-                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
-                </div>
+                  {/* ── Manual upload separator ── */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 14px" }}>
+                    <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                    <span style={{ fontSize: 10, color: "#444", letterSpacing: 1.5, whiteSpace: "nowrap", textTransform: "uppercase" }}>
+                      {isEs ? "— o sube tus propios videos —" : "— or upload your own videos —"}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                  </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[
-                    { key: "idle",    ref: manualIdleRef,    icon: "😌", label: isEs ? "Video IDLE (en reposo)"  : "IDLE video (at rest)" },
-                    { key: "talking", ref: manualTalkingRef, icon: "💬", label: isEs ? "Video HABLANDO"          : "TALKING video" },
-                    { key: "dancing", ref: manualDancingRef, icon: "💃", label: isEs ? "Video BAILANDO"          : "DANCING video" },
-                    { key: "lipsync", ref: manualLipsyncRef, icon: "🎵", label: isEs ? "Video LIP-SYNC"          : "LIP-SYNC video" },
-                  ].map(({ key, ref, icon, label }) => (
-                    <div key={key}>
-                      <input
-                        ref={ref}
-                        type="file"
-                        accept="video/*"
-                        style={{ display: "none" }}
-                        onChange={e => { if (e.target.files?.[0]) uploadManualVideo(e.target.files[0], key); }}
-                      />
+                  {manualCount > 0 && manualCount < 4 && (
+                    <p style={{ fontSize: 11, color: "#666", marginBottom: 10, letterSpacing: 0.5 }}>
+                      {manualCount}/4 {isEs ? "videos subidos — sube los restantes para iniciar" : "videos uploaded — upload the rest to start"}
+                    </p>
+                  )}
+
+                  {/* ── 4 independent upload buttons ── */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {MANUAL_SLOTS.map(({ key, ref, icon, label }) => (
+                      <div key={key}>
+                        <input
+                          ref={ref}
+                          type="file"
+                          accept="video/*"
+                          style={{ display: "none" }}
+                          onChange={e => { if (e.target.files?.[0]) uploadManualVideo(e.target.files[0], key); e.target.value = ""; }}
+                        />
+                        <button
+                          onClick={() => ref.current?.click()}
+                          style={{
+                            width: "100%", display: "flex", alignItems: "center", gap: 10,
+                            background: videoUrls[key] ? "rgba(80,200,100,0.06)" : "rgba(255,255,255,0.02)",
+                            border: `1px solid ${videoUrls[key] ? "rgba(80,200,100,0.35)" : uploadingManual[key] ? "rgba(200,160,80,0.3)" : "rgba(255,255,255,0.08)"}`,
+                            borderRadius: 8, padding: "10px 14px",
+                            color: "#aaa", fontFamily: "inherit", fontSize: 12, cursor: "pointer",
+                            letterSpacing: 0.5, transition: "all 0.15s",
+                          }}
+                        >
+                          <span style={{ fontSize: 16 }}>{icon}</span>
+                          <span>📁 {label}</span>
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: videoUrls[key] ? "#60c870" : uploadingManual[key] ? "#c8a050" : "#555" }}>
+                            {uploadingManual[key]
+                              ? (isEs ? "⏳ Subiendo..." : "⏳ Uploading...")
+                              : videoUrls[key]
+                                ? (isEs ? "✅ Subido" : "✅ Uploaded")
+                                : (isEs ? "Seleccionar" : "Select")}
+                          </span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── All 4 uploaded: show INICIAR LIVE directly ── */}
+                  {manualCount === 4 && (
+                    <div style={{ marginTop: 20 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <span style={{ fontSize: 10, color: "#666", letterSpacing: 1 }}>{isEs ? "Costo:" : "Cost:"}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#c8a050", letterSpacing: 1 }}>💎 10 Jades/{isEs ? "hora" : "hour"}</span>
+                      </div>
                       <button
-                        onClick={() => ref.current?.click()}
-                        disabled={uploadingManual[key]}
-                        style={{
-                          width: "100%", display: "flex", alignItems: "center", gap: 10,
-                          background: videoUrls[key] ? "rgba(80,200,100,0.06)" : "rgba(255,255,255,0.02)",
-                          border: `1px solid ${videoUrls[key] ? "rgba(80,200,100,0.35)" : "rgba(255,255,255,0.08)"}`,
-                          borderRadius: 8, padding: "10px 14px",
-                          color: "#aaa", fontFamily: "inherit", fontSize: 12, cursor: "pointer",
-                          letterSpacing: 0.5, opacity: uploadingManual[key] ? 0.6 : 1,
-                          transition: "all 0.15s",
-                        }}
+                        onClick={handleStart}
+                        disabled={starting}
+                        style={{ ...S.startLiveBtn, opacity: starting ? 0.6 : 1 }}
                       >
-                        <span style={{ fontSize: 16 }}>{icon}</span>
-                        <span>📁 {label}</span>
-                        <span style={{ marginLeft: "auto", fontSize: 11, color: videoUrls[key] ? "#60c870" : "#555" }}>
-                          {uploadingManual[key]
-                            ? "⏳"
-                            : videoUrls[key]
-                              ? (isEs ? "✅ Subido" : "✅ Uploaded")
-                              : (isEs ? "Seleccionar" : "Select")}
-                        </span>
+                        {starting ? "⏳ " + (isEs ? "Iniciando..." : "Starting...") : "🔴 " + (isEs ? "INICIAR LIVE" : "START LIVE")}
                       </button>
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
+                  )}
+                </>
+              );
+            })()}
 
             {genStatus === "generating" && (
               <>
