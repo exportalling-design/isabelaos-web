@@ -64,9 +64,14 @@ export default function LiveAvatarPanel({ lang = "es" }) {
   const [stopping,     setStopping]     = useState(false);
   const [copied,       setCopied]       = useState(false);
   const [liveError,    setLiveError]    = useState(null);
-  const [copiedSetup,  setCopiedSetup]  = useState(false);
-  const [openSteps,    setOpenSteps]    = useState(new Set([1, 2, 3, 4]));
-  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [copiedSetup,      setCopiedSetup]      = useState(false);
+  const [openSteps,        setOpenSteps]        = useState(new Set([1, 2, 3, 4]));
+  const [tutorialOpen,     setTutorialOpen]     = useState(false);
+  const [showRecover,      setShowRecover]      = useState(false);
+  const [recoverInput,     setRecoverInput]     = useState("");
+  const [recovering,       setRecovering]       = useState(false);
+  const [recoverError,     setRecoverError]     = useState(null);
+  const [recoverPartial,   setRecoverPartial]   = useState(null);
 
   const faceRef = useRef();
   const bodyRef = useRef();
@@ -284,6 +289,52 @@ export default function LiveAvatarPanel({ lang = "es" }) {
     ? `${window.location.origin}/api/tiktok-live/overlay/${sessionId}`
     : "";
 
+  const handleRecover = async () => {
+    const sid = recoverInput.trim();
+    if (!sid) return;
+    setRecovering(true);
+    setRecoverError(null);
+    setRecoverPartial(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/tiktok-live/recover-avatar?session_id=${encodeURIComponent(sid)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || (isEs ? "Error recuperando sesión" : "Recovery error"));
+
+      // Extract URLs from results
+      const urls = {};
+      for (const [type, result] of Object.entries(json.results || {})) {
+        if ((result.status === "completed" || result.status === "already_done") && result.video_url) {
+          urls[type] = result.video_url;
+        }
+      }
+
+      if (json.completed === 0) {
+        throw new Error(isEs
+          ? "Los videos aún no están listos. Intenta en unos minutos."
+          : "Videos not ready yet. Try again in a few minutes.");
+      }
+
+      setSessionId(json.session_id);
+      setVideoUrls(urls);
+      setGenStatus("ready");
+      setStep(3);
+      setShowRecover(false);
+
+      if (json.completed < 4) {
+        setRecoverPartial(isEs
+          ? `${json.completed}/4 videos recuperados. Los demás siguen procesándose — vuelve a intentarlo en unos minutos.`
+          : `${json.completed}/4 videos recovered. Others are still processing — try again in a few minutes.`);
+      }
+    } catch (e) {
+      setRecoverError(e.message);
+    } finally {
+      setRecovering(false);
+    }
+  };
+
   const toggleStep = (n) => setOpenSteps(prev => {
     const next = new Set(prev);
     next.has(n) ? next.delete(n) : next.add(n);
@@ -358,6 +409,41 @@ export default function LiveAvatarPanel({ lang = "es" }) {
             {isEs ? "Avatar IA que responde tu chat de TikTok en vivo" : "AI avatar that responds to your TikTok live chat"}
           </p>
         </div>
+      </div>
+
+      {/* Recover previous session */}
+      <div style={{ padding: "0 24px 4px", borderBottom: showRecover ? "none" : "1px solid #0e0e10" }}>
+        <button
+          onClick={() => { setShowRecover(s => !s); setRecoverError(null); }}
+          style={{ background: "none", border: "none", color: "#555", fontSize: 11, cursor: "pointer", fontFamily: "inherit", letterSpacing: 0.5, padding: "8px 0", textDecoration: "underline" }}
+        >
+          🔁 {isEs ? "¿Tienes una sesión anterior? Recupérala" : "Have a previous session? Recover it"}
+        </button>
+
+        {showRecover && (
+          <div style={{ padding: "10px 0 14px" }}>
+            <p style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
+              {isEs ? "Pega el ID de tu sesión anterior para recuperar los videos generados:" : "Paste your previous session ID to recover generated videos:"}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                style={{ ...S.input, fontSize: 12, fontFamily: "monospace" }}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                value={recoverInput}
+                onChange={e => setRecoverInput(e.target.value)}
+              />
+              <button
+                onClick={handleRecover}
+                disabled={recovering || !recoverInput.trim()}
+                style={{ ...S.copyBtn, whiteSpace: "nowrap", opacity: recovering || !recoverInput.trim() ? 0.5 : 1 }}
+              >
+                {recovering ? "⏳" : (isEs ? "Recuperar" : "Recover")}
+              </button>
+            </div>
+            {recoverError  && <p style={{ fontSize: 11, color: "#e07070", marginTop: 6 }}>⚠️ {recoverError}</p>}
+            {recoverPartial && <p style={{ fontSize: 11, color: "#c8a050", marginTop: 6 }}>⚠️ {recoverPartial}</p>}
+          </div>
+        )}
       </div>
 
       {/* Step tabs */}
@@ -540,6 +626,12 @@ export default function LiveAvatarPanel({ lang = "es" }) {
         {step === 3 && (
           <>
             <div style={S.stepTitle}>{isEs ? "✨ Genera tu Avatar Live" : "✨ Generate your Live Avatar"}</div>
+
+            {recoverPartial && (
+              <div style={{ ...S.errorBox, borderColor: "rgba(200,160,80,0.3)", color: "#c8a050", background: "rgba(200,160,80,0.06)", marginBottom: 14 }}>
+                ⚠️ {recoverPartial}
+              </div>
+            )}
 
             {genStatus === "idle" && (
               <>

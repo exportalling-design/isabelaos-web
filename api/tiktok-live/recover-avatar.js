@@ -168,7 +168,7 @@ export default async function handler(req, res) {
   if (allReady) {
     await supabaseAdmin
       .from("tiktok_live_sessions")
-      .update({ generation_status: "ready" })
+      .update({ generation_status: "completed" })
       .eq("id", sessionId);
   }
 
