@@ -19,7 +19,11 @@ export default async function handler(req, res) {
     return res.status(404).send("Session not found");
   }
 
-  const appOrigin = process.env.VITE_APP_URL || "";
+  // Derive origin from the request so assets always load from the same host.
+  // VITE_APP_URL is used as fallback only when headers are unavailable.
+  const reqProto  = (req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
+  const reqHost   = req.headers["x-forwarded-host"] || req.headers["host"] || "";
+  const appOrigin = reqHost ? `${reqProto}://${reqHost}` : (process.env.VITE_APP_URL || "");
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
