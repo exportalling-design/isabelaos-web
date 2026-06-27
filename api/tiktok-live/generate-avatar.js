@@ -206,7 +206,7 @@ export default async function handler(req, res) {
 
     await supabaseAdmin
       .from("tiktok_live_sessions")
-      .update({ persona_prompt, generation_task_ids: task_ids })
+      .update({ persona_prompt: personaPrompt, generation_task_ids: task_ids })
       .eq("id", sessionId);
 
     return res.status(200).json({ ok: true, session_id: sessionId, task_ids });
