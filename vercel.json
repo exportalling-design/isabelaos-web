@@ -5,8 +5,6 @@
     "api/cineai/status/[taskId].js": { "maxDuration": 30 }
   },
   "rewrites": [
-    { "source": "/api/tiktok-live/overlay/:path*", "destination": "/api/tiktok-live/overlay/:path*" },
-    { "source": "/api/live-overlay/:path*", "destination": "/api/live-overlay/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
