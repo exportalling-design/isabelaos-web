@@ -38,6 +38,28 @@ export default async function handler(req, res) {
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>IsabelaOS Live — @${session.tiktok_username}</title>
   <link rel="stylesheet" href="${appOrigin}/live-overlay/overlay.css"/>
+  <style>
+    /* Full-screen rectangular avatar, overrides overlay.css's circular preview */
+    #avatar-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0);
+      transform: none;
+      bottom: auto;
+    }
+    #avatar-video,
+    #avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+    }
+  </style>
   <script>
     window.LIVE_SESSION = ${JSON.stringify({
       session_id:         session.id,
