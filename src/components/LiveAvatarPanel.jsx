@@ -331,7 +331,7 @@ export default function LiveAvatarPanel({ lang = "es", onBuyJades }) {
   };
 
   const overlayUrl = liveSession
-    ? `${window.location.origin}/api/tiktok-live/overlay/${liveSession.id}`
+    ? `${window.location.origin}/api/live-overlay/${liveSession.id}`
     : "";
 
   const copyOverlay = () => {
@@ -343,7 +343,7 @@ export default function LiveAvatarPanel({ lang = "es", onBuyJades }) {
   const completedCount = VIDEO_TYPES.filter(v => videoUrls[v.key]).length;
 
   const pendingOverlayUrl = sessionId
-    ? `${window.location.origin}/api/tiktok-live/overlay/${sessionId}`
+    ? `${window.location.origin}/api/live-overlay/${sessionId}`
     : "";
 
   const handleRecover = async () => {
